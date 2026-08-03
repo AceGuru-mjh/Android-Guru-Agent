@@ -77,7 +77,28 @@ Pure-JVM agent loop with dual execution modes. Key types:
 - `ExecutionPlan` / `PlanStep` / `RiskLevel` — Plan-mode artifacts parsed from the LLM's JSON response (with `fallbackPlan()` for unparseable responses)
 
 ### `core:tool-registry`
-Pure-JVM tool registry + executor + built-in tools. Currently ships `ShellExecuteTool` (parses `{"command": "..."}` JSON and delegates to the injected executor lambda).
+Pure-JVM tool registry + executor + 14 built-in tools (all `AgentTool` implementations, registered in `ToolModule`):
+
+| # | Tool ID | Source File | Purpose |
+|---|---------|-------------|---------|
+| 1 | `shell_execute` | `ShellExecuteTool.kt` | Run device shell commands (Root/Shizuku/normal) |
+| 2 | `read_file` | `FileTools.kt` | Read text files with max_lines / offset_lines windowing |
+| 3 | `write_file` | `FileTools.kt` | Write or append to files (creates parent dirs) |
+| 4 | `list_files` | `FileTools.kt` | List directory contents with size + mtime |
+| 5 | `delete_file` | `FileTools.kt` | Delete a file or empty directory |
+| 6 | `web_fetch` | `WebTools.kt` | Fetch URL, auto-extract readable text from HTML |
+| 7 | `web_search` | `WebTools.kt` | DuckDuckGo HTML search (no API key needed) |
+| 8 | `http_request` | `WebTools.kt` | Generic GET/POST/PUT/DELETE/PATCH with custom headers/body |
+| 9 | `memorize` | `MemoryTools.kt` | Save info to long-term `FileMemoryStore` (by category) |
+| 10 | `recall` | `MemoryTools.kt` | Search memories by keyword, key, or list_all |
+| 11 | `forget` | `MemoryTools.kt` | Delete a memory by key or clear an entire category |
+| 12 | `get_device_info` | `SystemTools.kt` | model / battery / storage / memory / network / display |
+| 13 | `app_list` | `SystemTools.kt` | List user/system/all apps via `pm list packages` |
+| 14 | `app_launch` | `SystemTools.kt` | Launch app by package (via `monkey` or `am start`) |
+
+The `ToolModule` DI module also provides a dedicated `OkHttpClient` (15s connect / 30s read timeouts, follows redirects) for the web tools — separate from the LLM streaming client. `FileMemoryStore` is backed by `context.filesDir/agent_memory/<category>/<key>.json` and persists across app restarts.
+
+This is distinct from the `ConversationMemory` (in `core:agent-engine`) which persists the conversation history — the tools above let the agent explicitly save and recall structured facts/preferences.
 
 ### `core:llm-adapter`
 Pure-JVM OpenAI-compatible client surface:

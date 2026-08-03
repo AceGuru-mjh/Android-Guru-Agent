@@ -339,8 +339,8 @@ class ApexAgentEngine(
     private fun buildSystemPrompt(): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
-            appendLine("You are Apex Agent, an AI assistant on Android.")
-            appendLine("You can execute shell commands and automate tasks via tools.")
+            appendLine("You are Apex Agent, an AI assistant running on an Android device.")
+            appendLine("You have access to tools for: shell commands, file operations, web browsing, memory, and device control.")
             appendLine()
             when (config.mode) {
                 AgentMode.PLAN -> {
@@ -360,9 +360,19 @@ class ApexAgentEngine(
                 appendLine(thinking)
             }
             appendLine()
+            appendLine("## Available Tool Categories")
+            appendLine("- shell_execute: Run device commands (ls, pm, am, dumpsys, getprop, etc.)")
+            appendLine("- read_file / write_file / list_files / delete_file: File operations")
+            appendLine("- web_fetch / web_search / http_request: Web access")
+            appendLine("- memorize / recall / forget: Long-term memory across sessions")
+            appendLine("- get_device_info / app_list / app_launch: Device control")
+            appendLine()
             appendLine("## Rules")
+            appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
             appendLine("- Always verify command output before proceeding.")
             appendLine("- If a command fails, analyze the error and try an alternative approach.")
+            appendLine("- Use memorize to save important information (user prefs, project facts) for future use.")
+            appendLine("- Use recall to check if you already know something before asking the user.")
             appendLine("- Keep prose concise; let tool output speak for itself.")
         }
     }

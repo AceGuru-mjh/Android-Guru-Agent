@@ -77,7 +77,7 @@ Pure-JVM agent loop with dual execution modes. Key types:
 - `ExecutionPlan` / `PlanStep` / `RiskLevel` — Plan-mode artifacts parsed from the LLM's JSON response (with `fallbackPlan()` for unparseable responses)
 
 ### `core:tool-registry`
-Pure-JVM tool registry + executor + 14 built-in tools (all `AgentTool` implementations, registered in `ToolModule`):
+Pure-JVM tool registry + executor + **35 built-in tools** (all `AgentTool` implementations, registered in `ToolModule`) across 9 categories:
 
 | # | Tool ID | Source File | Purpose |
 |---|---------|-------------|---------|
@@ -86,15 +86,36 @@ Pure-JVM tool registry + executor + 14 built-in tools (all `AgentTool` implement
 | 3 | `write_file` | `FileTools.kt` | Write or append to files (creates parent dirs) |
 | 4 | `list_files` | `FileTools.kt` | List directory contents with size + mtime |
 | 5 | `delete_file` | `FileTools.kt` | Delete a file or empty directory |
-| 6 | `web_fetch` | `WebTools.kt` | Fetch URL, auto-extract readable text from HTML |
-| 7 | `web_search` | `WebTools.kt` | DuckDuckGo HTML search (no API key needed) |
-| 8 | `http_request` | `WebTools.kt` | Generic GET/POST/PUT/DELETE/PATCH with custom headers/body |
-| 9 | `memorize` | `MemoryTools.kt` | Save info to long-term `FileMemoryStore` (by category) |
-| 10 | `recall` | `MemoryTools.kt` | Search memories by keyword, key, or list_all |
-| 11 | `forget` | `MemoryTools.kt` | Delete a memory by key or clear an entire category |
-| 12 | `get_device_info` | `SystemTools.kt` | model / battery / storage / memory / network / display |
-| 13 | `app_list` | `SystemTools.kt` | List user/system/all apps via `pm list packages` |
-| 14 | `app_launch` | `SystemTools.kt` | Launch app by package (via `monkey` or `am start`) |
+| 6 | `search_files` | `FileToolsExtra.kt` | grep-like content search with regex + glob filter |
+| 7 | `copy_move_file` | `FileToolsExtra.kt` | Copy or move file/directory (renameTo → copy+delete fallback) |
+| 8 | `web_fetch` | `WebTools.kt` | Fetch URL, auto-extract readable text from HTML |
+| 9 | `web_search` | `WebTools.kt` | DuckDuckGo HTML search (no API key needed) |
+| 10 | `http_request` | `WebTools.kt` | Generic GET/POST/PUT/DELETE/PATCH with custom headers/body |
+| 11 | `download_file` | `WebToolsExtra.kt` | Download a file from URL to device storage |
+| 12 | `memorize` | `MemoryTools.kt` | Save info to long-term `FileMemoryStore` (by category) |
+| 13 | `recall` | `MemoryTools.kt` | Search memories by keyword, key, or list_all |
+| 14 | `forget` | `MemoryTools.kt` | Delete a memory by key or clear an entire category |
+| 15 | `app_list` | `SystemTools.kt` | List user/system/all apps via `pm list packages` |
+| 16 | `app_launch` | `SystemTools.kt` | Launch app by package (via `monkey` or `am start`) |
+| 17 | `app_install` | `AppToolsExtra.kt` | Install APK via `pm install -r` |
+| 18 | `app_uninstall` | `AppToolsExtra.kt` | Uninstall by package (`pm uninstall`, optional `-k` keep_data) |
+| 19 | `app_force_stop` | `AppToolsExtra.kt` | `am force-stop` a running app |
+| 20 | `app_info` | `AppToolsExtra.kt` | `dumpsys package` for version / permissions / storage / activities |
+| 21 | `get_device_info` | `SystemTools.kt` | model / battery / storage / memory / network / display |
+| 22 | `get_set_settings` | `SystemControlTools.kt` | `settings get/put` for system / secure / global namespaces |
+| 23 | `control_media` | `SystemControlTools.kt` | volume / brightness / media_play / media_pause / media_next |
+| 24 | `clipboard` | `SystemControlTools.kt` | Read/write clipboard via `service call clipboard` / `am broadcast` |
+| 25 | `get_time` | `SystemControlTools.kt` | Current date, time, timezone, timestamp, day of week |
+| 26 | `logcat` | `SystemControlTools.kt` | `logcat -d -t N` with optional filter / level / clear |
+| 27 | `ui_tap` | `UiTools.kt` | `input tap` (or long-press via `input swipe`) |
+| 28 | `ui_swipe` | `UiTools.kt` | `input swipe` or direction-based simplified scroll |
+| 29 | `ui_dump` | `UiTools.kt` | `uiautomator dump` — XML view tree of current screen |
+| 30 | `screenshot` | `UiTools.kt` | `screencap -p <path>` |
+| 31 | `input_text` | `UiTools.kt` | `input text` (with char escaping) or `input keyevent <code>` |
+| 32 | `calculate` | `UtilityTools.kt` | Evaluate math expression via `bc -l` |
+| 33 | `text_transform` | `UtilityTools.kt` | base64/url encode-decode, md5/sha256, case, reverse, json_format |
+| 34 | `get_location` | `SensorTools.kt` | `dumpsys location` for last known GPS/network fix |
+| 35 | `notification_read` | `SensorTools.kt` | `dumpsys notification` for active notifications |
 
 The `ToolModule` DI module also provides a dedicated `OkHttpClient` (15s connect / 30s read timeouts, follows redirects) for the web tools — separate from the LLM streaming client. `FileMemoryStore` is backed by `context.filesDir/agent_memory/<category>/<key>.json` and persists across app restarts.
 
@@ -137,6 +158,31 @@ The agent persists its `conversationHistory` across app restarts via `SharedPref
 The chat top bar shows a **"记忆 N"** badge with the current persisted message count, and a **"+"** (new chat) button that calls `ChatViewModel.newChat()` → `ApexAgentEngine.clearHistory()` → wipes both in-memory and persisted state.
 
 Serialization uses a small `StoredMessage` DTO (role + content + optional toolCallId + toolCalls list) serialized via `kotlinx.serialization`'s `ListSerializer`. Schema evolution is handled gracefully — a decode failure clears the store and starts fresh rather than crashing.
+
+## Context Compression (P7)
+
+When `TokenEstimator.estimateHistory(conversationHistory)` exceeds `maxContextTokens × compressionThreshold` (default 80% of 128k), the engine calls `HybridCompressor.compress(history, preserveRecent=5)`. The hybrid compressor runs three layers in order, stopping as soon as the threshold is met:
+
+1. **Layer 1 — Tool output truncation** (zero-cost, always runs). `ToolOutputTruncator.smartTruncate(output, toolName)` picks a strategy based on content type:
+   - JSON → keep head + last 200 chars (closing braces)
+   - List output (>20 short lines) → keep first 15 + last 10 lines
+   - `read_file` / `project_read_file` → head-only (code usually has key info up top)
+   - Default → head 1200 + tail 600 chars with `[... N chars omitted ...]` marker
+   - This layer also runs inline on every tool result *before* it enters history (via `toolTruncator.smartTruncate` in `executeBuildLoop`), so it's the first defense regardless of whether `maybeCompressContext` fires.
+
+2. **Layer 2 — Sliding window** (zero-cost). `SlidingWindowCompressor` keeps the system prompt + last `preserveRecentTurns` messages, replaces the middle with a single `[CONTEXT COMPRESSED]` system message containing a rule-based summary (user requests, tool names used, key tool results, last assistant response).
+
+3. **Layer 3 — LLM summary** (one extra LLM call). `LlmSummaryCompressor` sends the to-be-compressed slice to the LLM with a structured prompt (`## Task / ## Progress / ## State / ## Key Data`, ≤400 words), replaces it with the LLM-generated summary. Falls back to a rule-based summary if the LLM call fails.
+
+After compression, the engine emits `AgentEvent.ContextCompressed(beforeTokens, afterTokens, strategy, summary, messagesRemoved, messagesTruncated)`. The ChatViewModel renders this as a system message: `📦 Context compressed: 105000→80000 tokens (HYBRID, removed 20 msgs, truncated 3)`.
+
+The compressed history is also synced back to `ConversationMemory` via `memory.save(conversationHistory)` so the next app restart loads the already-compressed state.
+
+**Protection rules** (never compressed):
+- System prompt (always index 0)
+- User's original task description (when it's the most recent user message)
+- Last `preserveRecentTurns` messages (default 5)
+- Currently-executing tool call (mid-iteration)
 
 ## Native Thinking Intensity
 

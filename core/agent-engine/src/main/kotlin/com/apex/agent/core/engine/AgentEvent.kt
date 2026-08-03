@@ -84,12 +84,15 @@ sealed interface AgentEvent {
     ) : AgentEvent
     
     // ═══ 压缩事件 ═══
-    
+
     /** 上下文被压缩了 */
     data class ContextCompressed(
         val beforeTokens: Int,
         val afterTokens: Int,
-        val summary: String
+        val strategy: String,         // CompressionStrategy.name (NONE/TOOL_TRUNCATION/SLIDING_WINDOW/LLM_SUMMARY/HYBRID)
+        val summary: String,
+        val messagesRemoved: Int,
+        val messagesTruncated: Int = 0
     ) : AgentEvent
     
     // ═══ 状态事件 ═══

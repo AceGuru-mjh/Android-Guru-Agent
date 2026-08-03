@@ -1,135 +1,125 @@
 # Apex Agent
 
-> Android-side autonomous AI agent with on-device LLM, tool registry, plugin SDK, and persistent background execution.
+> Android-side autonomous AI agent with on-device LLM, shell tool execution, Plan/Build dual-mode engine, and a plugin SDK.
 
-Apex Agent is a modular Android application that brings an autonomous agent runtime to the device. It integrates an LLM adapter (OpenAI-compatible), a tool registry with built-in shell/project tools, a memory store, a privilege manager (Shizuku + Accessibility), a persistence engine with watchdog, a proot-based Linux runtime, a workspace manager, and a plugin SDK that allows external plugins to extend the agent's capabilities.
+Apex Agent is a modular Android application that brings an autonomous agent runtime to the device. The current build target is `./gradlew :app:assembleDebug` green. It integrates:
+
+- An OpenAI-compatible LLM adapter (configurable at runtime via the in-app Settings screen) with true SSE streaming
+- A tool registry with a built-in `shell_execute` tool backed by `PrivilegeDetector` (auto-selects Root → Shizuku → normal shell)
+- A Plan/Build dual-mode agent engine with 5-level thinking depth and streaming event output
+- A privilege manager (Shizuku + Accessibility)
+- A persistence engine with WorkManager watchdog
+- A plugin SDK (AIDL + plugin-host) with a sample `plugin-workflow` APK
 
 ## Architecture
 
-The project is organized as a multi-module Gradle build:
-
 ```
 apex-agent/
-├── app/                       # Application entry, UI, services, DI
-├── build-logic/               # Convention plugins (AGP / Compose / Hilt)
+├── app/                            # Application entry, Compose UI, Hilt DI
 ├── core/
-│   ├── agent-engine/          # Agent loop, events, memory contract
-│   ├── tool-registry/         # Tool registry + built-in tools
-│   ├── llm-adapter/           # OpenAI-compatible LLM client
-│   └── memory/                # Memory store abstraction
+│   ├── agent-engine/               # Pure-JVM agent loop (Plan/Build, streaming, events)
+│   ├── tool-registry/              # Pure-JVM tool registry + ShellExecuteTool
+│   └── llm-adapter/                # Pure-JVM OpenAI-compatible LLM client (streaming)
 ├── platform/
-│   ├── privilege/             # Shizuku + Accessibility privilege manager
-│   ├── persistence/           # Foreground persistence + watchdog
-│   ├── linux-runtime/         # proot-based Linux runtime
-│   └── workspace/             # Project/workspace manager
+│   ├── privilege/                  # Shizuku + Accessibility + PrivilegeDetector
+│   └── persistence/                 # Foreground service + WorkManager watchdog
 ├── plugin-sdk/
-│   ├── plugin-api/            # AIDL + plugin contract
-│   └── plugin-host/          # Plugin manager (loads external plugins)
+│   ├── plugin-api/                 # AIDL IApexPlugin + PluginContract
+│   └── plugin-host/               # Plugin discovery/binding
 └── plugins/
-    └── plugin-workflow/       # Workflow automation plugin (sample)
+    └── plugin-workflow/            # Reference plugin APK
 ```
+
+> Removed in this iteration: `build-logic/` (convention plugins — replaced with direct plugin aliases), `core/memory/`, `platform/linux-runtime/`, `platform/workspace/`, `plugins/plugin-automation/`. They will be re-introduced as separate PRs once their consumers are ready.
 
 ## Tech Stack
 
-- **Kotlin** 2.1.0 / **AGP** 8.7.3 / **compileSdk** 36 / **minSdk** 26
-- **Jetpack Compose** (BOM 2025.01.01) + Material 3
+- **Kotlin** 2.0.21 / **AGP** 8.7.3 / **compileSdk** 35 / **minSdk** 26
+- **Jetpack Compose** (BOM 2024.12.01) + Material 3, via the new `org.jetbrains.kotlin.plugin.compose` plugin
 - **Hilt** for dependency injection (with KSP)
-- **Room** for persistence
 - **Coroutines** for async work
 - **WorkManager** + Hilt-Work for background jobs
 - **Shizuku** for elevated operations without root
 - **Accessibility Service** for UI automation
-- **DataStore** for preferences
-- **Retrofit / OkHttp** (with SSE) for LLM API calls
+- **OkHttp** 4.12.0 for SSE-based LLM streaming
 - **kotlinx.serialization** for JSON
-- **Coil** for image loading
 - **Navigation Compose** for screen routing
+- **SharedPreferences** for LLM config persistence (settings UI in-app)
 
 ## Build
 
-The project uses Gradle convention plugins defined in `build-logic/`. To build:
-
 ```bash
-./gradlew assembleDebug
+chmod +x gradlew
+./gradlew clean
+./gradlew :app:assembleDebug --stacktrace
 ```
 
-> The project requires JDK 17 and Android SDK 36.
+> Requires JDK 17 and Android SDK 35.
 
 ## Key Modules
 
 ### `core:agent-engine`
-Hosts the agent loop with **Plan / Build dual modes**, **5-level thinking depth**, **streaming output**, and **automatic context compression**.
-
-Key types:
+Pure-JVM agent loop. Key types:
 - `AgentEngine` — interface (`execute(input) -> Flow<AgentEvent>`, `abort()`)
-- `ApexAgentEngine` — production implementation (replaces the old `DefaultAgentEngine`)
-- `AgentConfig` — runtime-tunable config (`mode`, `thinkingLevel`, `maxIterations`, `compressionThreshold`, `streaming`, `temperature`, …) with presets (`QUICK`, `STANDARD`, `CAREFUL`)
-- `AgentMode` — `PLAN` (think → plan → user-confirm → execute steps → reflect) vs `BUILD` (ReAct loop: think → act → observe → repeat)
+- `ApexAgentEngine` — production implementation, streaming-first ReAct loop
+- `AgentConfig` — runtime-tunable config (`mode`, `thinkingLevel`, `maxIterations`, `maxContextTokens`, `streaming`, `temperature`, …) with presets (`QUICK`, `STANDARD`, `CAREFUL`)
+- `AgentMode` — `PLAN` vs `BUILD`
 - `ThinkingLevel` — `NONE` / `LIGHT` / `STANDARD` / `DEEP` / `MAXIMUM`; each maps to a system-prompt instruction and a `thinking_budget`
-- `AgentEvent` — sealed event stream consumed by the UI: `ThinkingStart/Chunk/Complete`, `PlanGenerated/AwaitingConfirmation/Confirmed`, `StepStart`, `ToolCallStart/OutputChunk/Complete`, `ResponseChunk/Complete`, `ContextCompressed`, `IterationStart`, `UserInputRequired`, `Error`, `Complete`, `Aborted`
-- `ExecutionPlan` / `PlanStep` / `RiskLevel` — Plan-mode artifacts
-- `ContextCompressor` — interface with three implementations:
-  - `LlmSummaryCompressor` — uses an LLM call to summarize older turns
-  - `TruncationCompressor` — fast in-process truncation (no extra LLM call)
-  - `HybridCompressor` — truncates oversized tool outputs first, then escalates to LLM summarization when message count exceeds threshold
-- `AgentMemory` — memory contract
+- `AgentEvent` — sealed event stream: `ThinkingStart/Chunk/Complete`, `PlanGenerated/AwaitingConfirmation/Confirmed`, `StepStart`, `ToolCallStart/OutputChunk/Complete`, `ResponseChunk/Complete`, `ContextCompressed`, `IterationStart`, `UserInputRequired`, `Error`, `Complete`, `Aborted`
 
 ### `core:tool-registry`
-Defines `ToolRegistry`, `ToolExecutor`, `AgentTool`, and built-in tools (`ShellTool`, `ProjectTools`) that the agent can invoke.
+Pure-JVM tool registry + executor + built-in tools. Currently ships `ShellExecuteTool` (parses `{"command": "..."}` JSON and delegates to the injected executor lambda).
 
 ### `core:llm-adapter`
-OpenAI-compatible LLM client surface with streaming (SSE) support:
+Pure-JVM OpenAI-compatible client surface:
 - `LlmClient` interface with both `chat()` (blocking) and `chatStream()` (returns `Flow<LlmStreamChunk>`)
-- `OpenAiCompatibleClient` — original blocking+SSE client (used by default in DI)
-- `StreamingOpenAiClient` — alternative streaming-first implementation with proper OkHttp 5.x Kotlin extensions (`toRequestBody`, `await()` suspend wrapper around `Call.enqueue`)
+- `LlmConfig` — typed config with presets (`openai()`, `ollama()`, `openRouter()`, `deepseek()`, `custom()`) and per-call `customHeaders` / `systemPromptPrefix`
+- `LlmClientFactory` — constructs an `OkHttpClient` (with read-timeout from config) and wires it into `StreamingOpenAiClient`
+- `StreamingOpenAiClient` — full SSE streaming implementation with OkHttp 4.x API (`RequestBody.create`, `MediaType.parse`) and a private `Call.await()` suspend extension
+- `NoOpLlmClient` — placeholder used by `LlmModule` until the user configures API settings
+- `LlmException` — typed errors for API failures
 - Supporting types: `LlmMessage` (sealed: `System` / `User` / `Assistant` / `ToolResult`), `LlmResponse`, `LlmStreamChunk`, `ToolCall`, `ToolDefinition`, `Usage`
 
 ### `platform:privilege`
-Wraps Shizuku (sudosu-style elevated operations) and an `AccessibilityService` for UI automation. `DefaultPrivilegeManager` routes operations to the appropriate backend.
+- `PrivilegeDetector` — runtime detection of Root (su binary scan + `su --version` exec) and Shizuku (class-load probe), plus a `executeShell(command)` that auto-selects Root → normal shell. Returns `ShellExecResult(success, output, exitCode, via)`.
+- `PrivilegeManager` / `DefaultPrivilegeManager` — Shizuku-bound privilege facade
+- `ApexAccessibilityService` — UI automation backend
 
-### `platform:linux-runtime`
-proot-based Linux runtime — useful when the agent needs a real Linux userland (e.g., for shell tools that depend on GNU coreutils).
-
-### `platform:workspace`
-Manages isolated work directories per project, including sandboxed file access.
+### `platform:persistence`
+Foreground-service persistence with a WorkManager watchdog (`WatchdogWorker`) that re-launches the core service if it's killed.
 
 ### `plugin-sdk`
-- `plugin-api`: AIDL interface (`IApexPlugin.aidl`) + contract types that plugins implement.
-- `plugin-host`: Discovers, loads, and binds external plugins.
+- `plugin-api`: AIDL `IApexPlugin.aidl` + `PluginContract` constants
+- `plugin-host`: `PluginManager` — discovers installed plugins via `PackageManager`, binds to their `PLUGIN` action services, and bridges their tools into the host's `ToolRegistry`
 
 ### `plugins:plugin-workflow`
-A reference plugin that exposes a workflow automation service to the agent.
+Reference plugin APK that exposes `workflow/save`, `workflow/execute`, `workflow/list` tools to the host agent via AIDL.
 
-## Execution Modes
+## In-App Configuration
 
-### Plan Mode (`AgentMode.PLAN`)
-User describes a task → Agent reasons (depth-controlled) → emits an `ExecutionPlan` → UI shows the plan and asks for confirmation (`PlanAwaitingConfirmation`) → on confirm, executes each `PlanStep` sequentially → emits a final reflection. Best for complex multi-step tasks where the user wants to review the plan first.
+The Settings screen lets the user pick a preset (OpenAI / DeepSeek / OpenRouter / Ollama / Custom), enter Base URL + API Key + Model, tune Temperature, test the connection (sends `Say 'OK' in one word.`), and save the config to `SharedPreferences("apex_settings")`. The `LlmModule` DI provider reads from the same prefs at app start; if invalid, a `NoOpLlmClient` is injected that responds with a friendly "please configure" message instead of crashing.
 
-### Build Mode (`AgentMode.BUILD`)
-User describes a task → Agent enters a ReAct loop (Think → Call Tool → Observe Result → Repeat) → emits `ResponseChunk`s as the final answer streams in. Best for quick tasks where the user trusts the agent to act. Mode switches are available at runtime from the chat screen's top bar.
+## Execution Flow
 
-## Thinking Depth
-
-The `ThinkingLevel` enum exposes 5 levels (`NONE`, `LIGHT`, `STANDARD`, `DEEP`, `MAXIMUM`). Each level injects a different system-prompt instruction and a corresponding `thinking_budget` for models that support it (e.g. Gemini). The chat UI exposes a dropdown to switch levels on the fly; the engine picks up the new config via `ApexAgentEngine.updateConfig()`.
-
-## Streaming Output
-
-Every LLM call routes through `LlmClient.chatStream()`, which yields `Flow<LlmStreamChunk>`. The engine translates chunks into `AgentEvent.ThinkingChunk` / `ResponseChunk` / `ToolOutputChunk` events, which the `ChatViewModel` collects and appends incrementally to `currentThinking` / `currentResponse` strings. The Compose UI renders these as growing bubbles with a typing cursor.
-
-## Context Compression
-
-When `estimateTokens(conversationHistory)` exceeds `maxContextTokens * compressionThreshold` (default 80% of 128k), the engine calls `ContextCompressor.compress(history, preserveRecent=5)`. The default `HybridCompressor` first truncates oversized `ToolResult` content, then — if the message count still exceeds `preserveRecent + 10` — escalates to `LlmSummaryCompressor`, which asks the LLM for a ≤500-word summary and replaces the older half of the history with a single `[CONTEXT SUMMARY]` system message. The UI shows a `📦 Context compressed: N→M tokens` system message.
+```
+User types message in ChatScreen
+  ↓
+ChatViewModel.sendMessage(text)
+  ↓
+ApexAgentEngine.execute(input) -> Flow<AgentEvent>
+  ↓ (Plan or Build mode)
+For each iteration:
+  1. Build messages (system prompt + history)
+  2. llmClient.chatStream(messages, tools) -> Flow<LlmStreamChunk>
+  3. Accumulate content + toolCalls from stream
+  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor, emit ToolCallComplete
+  5. If content only: emit ResponseChunk(s) then ResponseComplete, done
+  ↓
+ChatViewModel collects events -> updates ChatUiState
+  ↓
+ChatScreen re-renders streaming bubbles, tool cards, plan confirmation cards
+```
 
 ## Permissions
 
-The `app` manifest declares a number of elevated permissions (foreground service of `specialUse`, system alert window, package usage stats, manage external storage, query all packages, etc.). End users will need to grant these on-device — Shizuku is required for the privileged operations.
-
-## Repository Layout Conventions
-
-- All Kotlin code lives under `src/main/kotlin/...` (not `src/main/java/...`).
-- Convention plugins live in `build-logic/convention/`.
-- Version catalog: `gradle/libs.versions.toml`.
-
----
-
-This is an initial project skeleton — the engine, streaming LLM client, Plan/Build UI, and context compressor are now in place, but several modules still contain TODOs and stub implementations (e.g. `WorkflowPluginService.handleSaveWorkflow`, `ProotLinuxRuntime` binary path, `DefaultPrivilegeManager` Shizuku validation) that should be filled in as the project evolves.
+The `app` manifest declares elevated permissions (foreground service of `specialUse`, system alert window, package usage stats, manage external storage, query all packages, etc.). End users will need to grant these on-device — Shizuku is required for the privileged shell operations when Root is unavailable.

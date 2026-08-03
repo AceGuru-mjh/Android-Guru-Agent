@@ -7,22 +7,17 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.*
 import okhttp3.*
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * 流式LLM客户端
- * 使用SSE (Server-Sent Events) 实现真正的流式输出 
+ * OpenAI兼容流式客户端
+ * 支持任何 /v1/chat/completions 端点
  */
 class StreamingOpenAiClient(
-    private val baseUrl: String,
-    private val apiKey: String,
-    private val model: String,
+    private val config: LlmConfig,
     private val httpClient: OkHttpClient
 ) : LlmClient {
 
@@ -32,27 +27,19 @@ class StreamingOpenAiClient(
         temperature: Float,
         maxTokens: Int
     ): LlmResponse {
-        // 非流式：直接POST等待完整响应
         val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = false)
         
-        val request = Request.Builder()
-            .url("$baseUrl/chat/completions")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
-        
+        val request = buildRequest(body)
         val response = httpClient.newCall(request).await()
-        val responseBody = response.body?.string() ?: throw Exception("Empty response")
+        val responseBody = response.body?.string() ?: throw LlmException("Empty response")
+        
+        if (!response.isSuccessful) {
+            throw LlmException("API error ${response.code}: $responseBody")
+        }
         
         return parseNonStreamResponse(responseBody)
     }
 
-    /**
-     * 流式调用：逐token返回
-     * 实现原理：SSE (text/event-stream) 
-     * 每个chunk格式：data: {"choices":[{"delta":{"content":"..."}}]}
-     */
     override fun chatStream(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition>,
@@ -60,44 +47,30 @@ class StreamingOpenAiClient(
         maxTokens: Int
     ): Flow<LlmStreamChunk> = flow {
         val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = true)
-        
-        val request = Request.Builder()
-            .url("$baseUrl/chat/completions")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "text/event-stream")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+        val request = buildRequest(body)
         
         val response = httpClient.newCall(request).await()
         
         if (!response.isSuccessful) {
-            throw Exception("LLM API error: ${response.code} ${response.body?.string()}")
+            val errorBody = response.body?.string() ?: "Unknown error"
+            throw LlmException("API error ${response.code}: $errorBody")
         }
         
-        val reader = BufferedReader(InputStreamReader(response.body!!.byteStream()))
-        var line: String?
+        val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), Charsets.UTF_8))
         
         try {
+            var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line ?: break
-                
-                // SSE格式：以"data: "开头
                 if (!currentLine.startsWith("data: ")) continue
                 
                 val data = currentLine.removePrefix("data: ").trim()
-                
-                // 流结束标记
                 if (data == "[DONE]") {
                     emit(LlmStreamChunk(isFinish = true))
                     break
                 }
                 
-                // 解析chunk
-                val chunk = parseStreamChunk(data)
-                if (chunk != null) {
-                    emit(chunk)
-                }
+                parseStreamChunk(data)?.let { emit(it) }
             }
         } finally {
             reader.close()
@@ -107,6 +80,28 @@ class StreamingOpenAiClient(
 
     // ═══ 内部方法 ═══
     
+    private fun buildRequest(body: JsonObject): Request {
+        val builder = Request.Builder()
+            .url("${config.baseUrl.trimEnd('/')}/chat/completions")
+            .addHeader("Content-Type", "application/json")
+            .post(RequestBody.create(
+                MediaType.parse("application/json; charset=utf-8"),
+                body.toString()
+            ))
+        
+        // API Key（某些API用Bearer，某些用自定义header）
+        if (config.apiKey.isNotBlank()) {
+            builder.addHeader("Authorization", "Bearer ${config.apiKey}")
+        }
+        
+        // 自定义headers
+        config.customHeaders.forEach { (key, value) ->
+            builder.addHeader(key, value)
+        }
+        
+        return builder.build()
+    }
+    
     private fun buildRequestBody(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition>,
@@ -115,7 +110,7 @@ class StreamingOpenAiClient(
         stream: Boolean
     ): JsonObject {
         return buildJsonObject {
-            put("model", model)
+            put("model", config.model)
             put("temperature", temperature)
             put("max_tokens", maxTokens)
             put("stream", stream)
@@ -134,8 +129,10 @@ class StreamingOpenAiClient(
                             }
                             is LlmMessage.Assistant -> {
                                 put("role", "assistant")
-                                if (msg.content.isNotEmpty()) {
+                                if (msg.content.isNotBlank()) {
                                     put("content", msg.content)
+                                } else {
+                                    put("content", JsonNull)
                                 }
                                 if (msg.toolCalls.isNotEmpty()) {
                                     putJsonArray("tool_calls") {
@@ -184,22 +181,25 @@ class StreamingOpenAiClient(
         return try {
             val json = Json.parseToJsonElement(data).jsonObject
             val choices = json["choices"]?.jsonArray ?: return null
-            val choice = choices.firstOrNull()?.jsonObject ?: return null
-            val delta = choice["delta"]?.jsonObject ?: return null
+            if (choices.isEmpty()) return null
             
-            val content = delta["content"]?.jsonPrimitive?.contentOrNull
+            val choice = choices[0].jsonObject
+            val delta = choice["delta"]?.jsonObject
             val finishReason = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
             
-            // 处理tool_calls的流式返回
-            val toolCalls = delta["tool_calls"]?.jsonArray?.mapNotNull { tc ->
+            val content = delta?.get("content")?.jsonPrimitive?.contentOrNull
+            
+            // 流式tool_calls
+            val toolCalls = mutableListOf<ToolCall>()
+            delta?.get("tool_calls")?.jsonArray?.forEach { tc ->
                 val tcObj = tc.jsonObject
-                val func = tcObj["function"]?.jsonObject ?: return@mapNotNull null
-                ToolCall(
+                val func = tcObj["function"]?.jsonObject
+                toolCalls.add(ToolCall(
                     id = tcObj["id"]?.jsonPrimitive?.content ?: "",
-                    name = func["name"]?.jsonPrimitive?.content ?: "",
-                    arguments = func["arguments"]?.jsonPrimitive?.content ?: ""
-                )
-            } ?: emptyList()
+                    name = func?.get("name")?.jsonPrimitive?.content ?: "",
+                    arguments = func?.get("arguments")?.jsonPrimitive?.content ?: ""
+                ))
+            }
             
             LlmStreamChunk(
                 content = content,
@@ -213,8 +213,8 @@ class StreamingOpenAiClient(
     
     private fun parseNonStreamResponse(body: String): LlmResponse {
         val json = Json.parseToJsonElement(body).jsonObject
-        val choice = json["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-        val message = choice?.get("message")?.jsonObject
+        val choices = json["choices"]?.jsonArray
+        val message = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
         
         val content = message?.get("content")?.jsonPrimitive?.contentOrNull
         val toolCalls = message?.get("tool_calls")?.jsonArray?.map { tc ->
@@ -226,7 +226,15 @@ class StreamingOpenAiClient(
             )
         } ?: emptyList()
         
-        return LlmResponse(content = content, toolCalls = toolCalls)
+        val usage = json["usage"]?.jsonObject?.let { u ->
+            Usage(
+                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.int ?: 0,
+                completionTokens = u["completion_tokens"]?.jsonPrimitive?.int ?: 0,
+                totalTokens = u["total_tokens"]?.jsonPrimitive?.int ?: 0
+            )
+        }
+        
+        return LlmResponse(content = content, toolCalls = toolCalls, usage = usage)
     }
     
     // OkHttp suspend扩展
@@ -236,9 +244,13 @@ class StreamingOpenAiClient(
                 cont.resume(response)
             }
             override fun onFailure(call: Call, e: java.io.IOException) {
-                cont.resumeWithException(e)
+                if (!cont.isCancelled) {
+                    cont.resumeWithException(e)
+                }
             }
         })
         invokeOnCancellation { cancel() }
     }
 }
+
+class LlmException(message: String) : Exception(message)

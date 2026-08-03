@@ -15,7 +15,7 @@ data class ProjectInfo(
 
 @HiltViewModel
 class ProjectViewModel @Inject constructor(
-    // workspaceManager: WorkspaceManager
+    // TODO: inject WorkspaceManager when the platform:workspace module is re-added
 ) : ViewModel() {
 
     private val _projects = MutableStateFlow<List<ProjectInfo>>(emptyList())

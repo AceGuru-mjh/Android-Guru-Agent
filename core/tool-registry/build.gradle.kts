@@ -1,6 +1,5 @@
 plugins {
-    id("java-library")
-    id("org.jetbrains.kotlin.jvm")
+    alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -9,8 +8,11 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
 dependencies {
-    implementation(project(":core:llm-adapter"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
 }

@@ -40,7 +40,8 @@ class ApexAgentEngine(
     private var config: AgentConfig = AgentConfig.STANDARD,
     private val memory: ConversationMemory? = null,
     private val contextCompressor: ContextCompressor? = null,
-    private val skillRegistry: SkillRegistry? = null
+    private val skillRegistry: SkillRegistry? = null,
+    private val privilegeInfoProvider: PrivilegeInfoProvider? = null
 ) : AgentEngine {
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
@@ -357,10 +358,34 @@ class ApexAgentEngine(
 
     private fun buildSystemPrompt(): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
+        val privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL"
         return buildString {
             appendLine("You are Apex Agent, an AI assistant running on an Android device.")
             appendLine("You have access to tools for: shell commands, file operations, web browsing, memory, and device control.")
             appendLine()
+
+            // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
+            appendLine("## Device Privilege Level: $privilegeLevel")
+            when (privilegeLevel) {
+                "ROOT" -> {
+                    appendLine("You have ROOT access. You can execute any command with su.")
+                    appendLine("Full system access: /system, /data, mount, SELinux, iptables, etc.")
+                }
+                "SHIZUKU" -> {
+                    appendLine("You have SHIZUKU (ADB-level) access — shell user uid=2000.")
+                    appendLine("You CAN: pm install/uninstall, am start/stop, settings put/get, dumpsys,")
+                    appendLine("          input tap/swipe/text/keyevent, screencap, read/write /sdcard/, getprop.")
+                    appendLine("You CANNOT: modify /system, access other apps' /data/data, mount, iptables,")
+                    appendLine("           modify SELinux, or ptrace other processes.")
+                }
+                else -> {
+                    appendLine("You have NORMAL SHELL access only (no Root, no Shizuku).")
+                    appendLine("Limited to: basic file ops in /sdcard and your own sandbox.")
+                    appendLine("Suggest the user install Shizuku (https://shizuku.rikka.app/) for more capabilities.")
+                }
+            }
+            appendLine()
+
             when (config.mode) {
                 AgentMode.PLAN -> {
                     appendLine("## Mode: PLAN")

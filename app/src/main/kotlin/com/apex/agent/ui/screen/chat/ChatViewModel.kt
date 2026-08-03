@@ -218,10 +218,11 @@ class ChatViewModel @Inject constructor(
     
     /**
      * 确认计划
+     * Resumes the suspended Plan-mode execution in [ApexAgentEngine].
      */
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
-        // TODO: 通知引擎
+        (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
     }
     
     /**

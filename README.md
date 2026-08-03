@@ -65,7 +65,8 @@ Pure-JVM agent loop with dual execution modes. Key types:
   - **Build mode** (`AgentMode.BUILD`): streaming ReAct loop — Think → Act → Observe → repeat → Done
   - **Plan mode** (`AgentMode.PLAN`): Think → stream plan as `ThinkingChunk`s → parse JSON → emit `PlanGenerated` + `PlanAwaitingConfirmation` → suspend on `awaitPlanConfirmation()` (resumed by `submitPlanConfirmation()` from the UI) → execute each `PlanStep` via Build loop → emit final reflection
   - Plan-confirmation channel: a `CompletableDeferred<Boolean>` field, reset before each plan; 5-minute timeout; auto-cancel on `abort()`
-  - Public API: `updateConfig(newConfig)`, `submitPlanConfirmation(confirmed)`, `abort()`
+  - Public API: `updateConfig(newConfig)`, `submitPlanConfirmation(confirmed)`, `clearHistory()`, `historyCount()`, `abort()`
+  - **Conversation memory** (`ConversationMemory` interface): every message added to `conversationHistory` is also persisted via `memory.append()`. On engine construction, `memory.load()` rehydrates the full history so the agent remembers past turns across app restarts. `clearHistory()` wipes both in-memory and persisted state (used by the "新会话" button).
 - `AgentConfig` — runtime-tunable config (`mode`, `thinkingLevel`, `maxIterations`, `maxContextTokens`, `streaming`, `temperature`, …) with presets (`QUICK`, `STANDARD`, `CAREFUL`)
 - `AgentMode` — `PLAN` vs `BUILD`
 - `ThinkingLevel` — `NONE` / `LIGHT` / `STANDARD` / `DEEP` / `MAXIMUM`; each maps to:
@@ -81,7 +82,8 @@ Pure-JVM tool registry + executor + built-in tools. Currently ships `ShellExecut
 ### `core:llm-adapter`
 Pure-JVM OpenAI-compatible client surface:
 - `LlmClient` interface with both `chat()` (blocking) and `chatStream()` (returns `Flow<LlmStreamChunk>`)
-- `LlmConfig` — typed config with presets (`openai()`, `ollama()`, `openRouter()`, `deepseek()`, `custom()`) and per-call `customHeaders` / `systemPromptPrefix`
+- `LlmConfig` — typed config with presets (`openai()`, `ollama()`, `openRouter()`, `deepseek()`, `custom()`) and per-call `customHeaders` / `systemPromptPrefix` / `reasoningEffort`
+- `ReasoningEffort` — enum for model-native thinking intensity (`NONE` / `LOW` / `MEDIUM` / `HIGH` / `MAX`). When not `NONE`, `StreamingOpenAiClient` injects `reasoning_effort` into the request body (OpenAI o-series / DeepSeek-R1 / Qwen3-thinking). `MAX` also raises `max_completion_tokens` to ≥8192 to give the thinking chain room.
 - `LlmClientFactory` — constructs an `OkHttpClient` (with read-timeout from config) and wires it into `StreamingOpenAiClient`
 - `StreamingOpenAiClient` — full SSE streaming implementation with OkHttp 4.x API (`RequestBody.create`, `MediaType.parse`) and a private `Call.await()` suspend extension
 - `NoOpLlmClient` — placeholder used by `LlmModule` until the user configures API settings
@@ -106,6 +108,30 @@ Reference plugin APK that exposes `workflow/save`, `workflow/execute`, `workflow
 ## In-App Configuration
 
 The Settings screen lets the user pick a preset (OpenAI / DeepSeek / OpenRouter / Ollama / Custom), enter Base URL + API Key + Model, tune Temperature, test the connection (sends `Say 'OK' in one word.`), and save the config to `SharedPreferences("apex_settings")`. The `LlmModule` DI provider reads from the same prefs at app start; if invalid, a `NoOpLlmClient` is injected that responds with a friendly "please configure" message instead of crashing.
+
+## Conversation Memory
+
+The agent persists its `conversationHistory` across app restarts via `SharedPrefsConversationMemory` (backed by `SharedPreferences("apex_memory")`). Every message — user input, assistant replies, tool calls, tool results, plan-mode step prompts — is appended to storage as it enters the history. On engine construction, `memory.load()` rehydrates the full conversation so the agent picks up where it left off.
+
+The chat top bar shows a **"记忆 N"** badge with the current persisted message count, and a **"+"** (new chat) button that calls `ChatViewModel.newChat()` → `ApexAgentEngine.clearHistory()` → wipes both in-memory and persisted state.
+
+Serialization uses a small `StoredMessage` DTO (role + content + optional toolCallId + toolCalls list) serialized via `kotlinx.serialization`'s `ListSerializer`. Schema evolution is handled gracefully — a decode failure clears the store and starts fresh rather than crashing.
+
+## Native Thinking Intensity
+
+Distinct from `ThinkingLevel` (which only edits the system prompt text), the **ReasoningEffort** enum controls the model's *native* reasoning parameter:
+
+| Level | OpenAI o-series | DeepSeek-R1 / Qwen3-thinking | Effect |
+|-------|-----------------|------------------------------|--------|
+| `NONE` | (field omitted) | (field omitted) | Model default behavior |
+| `LOW` | `reasoning_effort: "low"` | `reasoning_effort: "low"` | Fast, token-efficient |
+| `MEDIUM` | `reasoning_effort: "medium"` | `reasoning_effort: "medium"` | Balanced |
+| `HIGH` | `reasoning_effort: "high"` | `reasoning_effort: "high"` | Deep reasoning |
+| `MAX` | `reasoning_effort: "high"` + `max_completion_tokens: ≥8192` | `reasoning_effort: "high"` + extended budget | Maximum thinking chain |
+
+The level is selected via a horizontal **FilterChip** row above the input box in the chat screen (labeled "原生思考:"). Selecting a chip immediately persists the choice to `SharedPreferences("apex_settings", key="llm_reasoning_effort")`. The `LlmModule` reads this on next `LlmClient` construction and `StreamingOpenAiClient.buildRequestBody()` injects `reasoning_effort` into the JSON body when the value is not `NONE`.
+
+This is orthogonal to `ThinkingLevel` — you can use `ThinkingLevel.NONE` (no system-prompt instruction) + `ReasoningEffort.MAX` (let the model's native thinking do all the work), or `ThinkingLevel.DEEP` + `ReasoningEffort.NONE` (prompt-guided reasoning only), or both together.
 
 ## Execution Flow
 

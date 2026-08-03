@@ -33,10 +33,13 @@ class ApexAgentEngine(
     private val llmClient: LlmClient,
     private val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
-    private var config: AgentConfig = AgentConfig.STANDARD
+    private var config: AgentConfig = AgentConfig.STANDARD,
+    private val memory: ConversationMemory? = null
 ) : AgentEngine {
 
-    private val conversationHistory = mutableListOf<LlmMessage>()
+    private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
+        memory?.load()?.let { addAll(it) }
+    }
     private var isRunning = false
 
     /**
@@ -49,6 +52,27 @@ class ApexAgentEngine(
 
     fun updateConfig(newConfig: AgentConfig) {
         config = newConfig
+    }
+
+    /**
+     * 清空对话历史并清空持久化记忆（开新会话）。
+     */
+    fun clearHistory() {
+        conversationHistory.clear()
+        memory?.clear()
+    }
+
+    /**
+     * 当前持久化的消息条数（用于 UI 显示历史深度）。
+     */
+    fun historyCount(): Int = memory?.count() ?: conversationHistory.size
+
+    /**
+     * 把消息加入内存历史，同时持久化到 [memory]（如果存在）。
+     */
+    private fun addMessage(message: LlmMessage) {
+        conversationHistory.add(message)
+        memory?.append(message)
     }
 
     /**
@@ -66,7 +90,7 @@ class ApexAgentEngine(
         var totalIterations = 0
 
         try {
-            conversationHistory.add(LlmMessage.User(input))
+            addMessage(LlmMessage.User(input))
 
             when (config.mode) {
                 AgentMode.BUILD -> {
@@ -158,7 +182,7 @@ class ApexAgentEngine(
             emit(AgentEvent.StepStart(index, step.description))
 
             val stepPrompt = buildStepExecutionPrompt(plan, step, index)
-            conversationHistory.add(LlmMessage.User(stepPrompt))
+            addMessage(LlmMessage.User(stepPrompt))
 
             val stepIters = executeBuildLoop { event -> emit(event) }
             iterations += stepIters
@@ -238,7 +262,7 @@ class ApexAgentEngine(
 
             when {
                 toolCalls.isNotEmpty() -> {
-                    conversationHistory.add(
+                    addMessage(
                         LlmMessage.Assistant(contentBuilder.toString(), toolCalls)
                     )
 
@@ -271,14 +295,14 @@ class ApexAgentEngine(
                             )
                         )
 
-                        conversationHistory.add(
+                        addMessage(
                             LlmMessage.ToolResult(toolCall.id, result)
                         )
                     }
                 }
 
                 contentBuilder.isNotEmpty() -> {
-                    conversationHistory.add(LlmMessage.Assistant(contentBuilder.toString()))
+                    addMessage(LlmMessage.Assistant(contentBuilder.toString()))
                     emit(AgentEvent.ResponseComplete(contentBuilder.toString()))
                     return iteration
                 }

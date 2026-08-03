@@ -21,7 +21,10 @@ object LlmModule {
             baseUrl = prefs.getString("llm_base_url", "") ?: "",
             apiKey = prefs.getString("llm_api_key", "") ?: "",
             model = prefs.getString("llm_model", "") ?: "",
-            temperature = prefs.getFloat("llm_temperature", 0.7f)
+            temperature = prefs.getFloat("llm_temperature", 0.7f),
+            reasoningEffort = ReasoningEffort.fromName(
+                prefs.getString("llm_reasoning_effort", null)
+            )
         )
     }
 

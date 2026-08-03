@@ -38,7 +38,22 @@ data class LlmConfig(
     val customHeaders: Map<String, String> = emptyMap(),
     
     /** 系统提示词前缀 */
-    val systemPromptPrefix: String = ""
+    val systemPromptPrefix: String = "",
+
+    /**
+     * 模型原生思考强度。控制 OpenAI o-series 的 `reasoning_effort` 字段，
+     * 或 DeepSeek-R1 / Qwen3-thinking / GLM-Z1 等模型的原生思考预算。
+     *
+     * - NONE：不发送 reasoning_effort（模型默认行为）
+     * - LOW / MEDIUM / HIGH / MAX：映射到 OpenAI 的
+     *   "low" / "medium" / "high"（MAX 在支持扩展 thinking budget 的模型上
+     *   会同时设置 max_completion_tokens 为更高值）。
+     *
+     * 与 AgentConfig.thinkingLevel 的区别：
+     * - thinkingLevel 只影响 system prompt 文本，对任何模型都适用
+     * - reasoningEffort 是模型 API 原生参数，仅对支持思考模式的模型生效
+     */
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE
 ) {
     val isValid: Boolean
         get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
@@ -78,5 +93,40 @@ data class LlmConfig(
             apiKey = apiKey,
             model = model
         )
+    }
+}
+
+/**
+ * 模型原生思考强度。
+ *
+ * 适用于 OpenAI o1/o3/o4 系列、DeepSeek-R1 / DeepSeek-V3.1-thinking、
+ * Qwen3-thinking、GLM-Z1 等支持原生思考模式的模型。
+ *
+ * 不支持的模型会忽略此参数（不会报错）。
+ */
+enum class ReasoningEffort(val apiValue: String?, val displayName: String) {
+    /** 不发送 reasoning_effort 字段（模型默认行为） */
+    NONE(null, "默认"),
+
+    /** 低强度思考 — 快速、省 token */
+    LOW("low", "Low"),
+
+    /** 中等强度思考 — 平衡 */
+    MEDIUM("medium", "Medium"),
+
+    /** 高强度思考 — 深度推理 */
+    HIGH("high", "High"),
+
+    /**
+     * 最大强度思考。
+     * - OpenAI o-series：映射到 "high" + 提升 max_completion_tokens
+     * - DeepSeek-R1：映射到 thinking_budget = 16384
+     * - 其他模型：映射到 "high"
+     */
+    MAX("high", "Max");
+
+    companion object {
+        fun fromName(name: String?): ReasoningEffort =
+            entries.firstOrNull { it.name == name } ?: NONE
     }
 }

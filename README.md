@@ -15,10 +15,20 @@ Apex Agent is a modular Android application that brings an autonomous agent runt
 
 ```
 apex-agent/
-├── app/                            # Application entry, Compose UI, Hilt DI
+├── app/                            # Application entry, Compose UI (drawer nav), Hilt DI
+│   └── ui/
+│       ├── ApexRoot.kt             # ModalNavigationDrawer + DrawerDestination
+│       ├── ApexDrawerContent.kt    # Drawer header/nav items/status footer
+│       └── screen/
+│           ├── agent/              # AgentChatScreen + AgentChatViewModel (+ PlusMenuBottomSheet)
+│           ├── skill/              # SkillScreen + SkillViewModel (list/enable/disable)
+│           ├── memory/             # MemoryScreen (FileMemoryStore browser)
+│           ├── model/              # ModelScreen (LLM config + presets)
+│           ├── permissions/        # PermissionsScreen (Root/Shizuku/Accessibility/overlay/notify/storage)
+│           └── settings/           # SettingsScreen (general) + SettingsViewModel
 ├── core/
-│   ├── agent-engine/               # Pure-JVM agent loop (Plan/Build, streaming, events)
-│   ├── tool-registry/              # Pure-JVM tool registry + ShellExecuteTool
+│   ├── agent-engine/               # Pure-JVM agent loop (Plan/Build, streaming, P7 compression)
+│   ├── tool-registry/              # Pure-JVM tool registry + 40 tools + SkillRegistry
 │   └── llm-adapter/                # Pure-JVM OpenAI-compatible LLM client (streaming)
 ├── platform/
 │   ├── privilege/                  # Shizuku + Accessibility + PrivilegeDetector
@@ -30,7 +40,7 @@ apex-agent/
     └── plugin-workflow/            # Reference plugin APK
 ```
 
-> Removed in this iteration: `build-logic/` (convention plugins — replaced with direct plugin aliases), `core/memory/`, `platform/linux-runtime/`, `platform/workspace/`, `plugins/plugin-automation/`. They will be re-introduced as separate PRs once their consumers are ready.
+> Removed in this iteration: `build-logic/`, `core/memory/`, `platform/linux-runtime/`, `platform/workspace/`, `plugins/plugin-automation/`, old bottom-nav `ApexNavHost` + `chat/ChatScreen` + `chat/ChatViewModel` + `project/*` + `status/*` (superseded by the new drawer-based UI). They will be re-introduced as separate PRs once their consumers are ready.
 
 ## Tech Stack
 
@@ -199,6 +209,68 @@ Distinct from `ThinkingLevel` (which only edits the system prompt text), the **R
 The level is selected via a horizontal **FilterChip** row above the input box in the chat screen (labeled "原生思考:"). Selecting a chip immediately persists the choice to `SharedPreferences("apex_settings", key="llm_reasoning_effort")`. The `LlmModule` reads this on next `LlmClient` construction and `StreamingOpenAiClient.buildRequestBody()` injects `reasoning_effort` into the JSON body when the value is not `NONE`.
 
 This is orthogonal to `ThinkingLevel` — you can use `ThinkingLevel.NONE` (no system-prompt instruction) + `ReasoningEffort.MAX` (let the model's native thinking do all the work), or `ThinkingLevel.DEEP` + `ReasoningEffort.NONE` (prompt-guided reasoning only), or both together.
+
+## Drawer Navigation + Plus Menu
+
+The old bottom-navigation `ApexNavHost` has been replaced with a `ModalNavigationDrawer`-based layout (`ApexRoot`). Tap the ☰ icon (top-left) or swipe from the left edge to open the drawer, which contains:
+
+- **Agent** — main chat interface (`AgentChatScreen`)
+- **Skill** — installed skill list + enable/disable (`SkillScreen`)
+- **记忆** — long-term memory browser (`MemoryScreen`)
+- **模型** — LLM config + presets + test connection (`ModelScreen`)
+- **权限** — Root/Shizuku/Accessibility/overlay/notification/storage status (`PermissionsScreen`)
+- **设置** — general app settings (`SettingsScreen`)
+
+The drawer footer shows the current `mode` (BUILD/PLAN), `thinkingLevel`, and `historyDepth` (persisted memory count) pulled live from `AgentChatViewModel`.
+
+In the Agent chat screen, the input bar has a **[+]** button on the left that opens a `ModalBottomSheet` (`PlusMenuBottomSheet`) with 4 items: Skill / MCP / 插件 / 连接器. The Skill item is wired to the Skill screen (via drawer navigation); the other three are placeholders for future MCP/plugin/connector management.
+
+## Skill System
+
+A **Skill** is a composable capability that bundles tools, prompt injections, and auto-setup actions. Skills are stored as JSON manifests (schema `apex-skill-v1`) in `context.filesDir/skills/<id>.json` and managed by `SkillRegistry` (`core/tool-registry/.../skill/SkillRegistry.kt`).
+
+### Skill types
+
+| Type | `implementation.type` | Description |
+|------|----------------------|-------------|
+| **Composite** | `"composite"` | Chains existing tools via `steps[]`. Each step has a `tool` + `args` map with `{{var}}` / `{{prev_output}}` template substitution. Executed by `SkillToolAdapter`. |
+| **Prompt** | `"prompt"` (via `promptInjection` field) | Doesn't add new tools; injects a system prompt into `buildSystemPrompt()` when the skill is enabled. |
+| **Script** | `"script"` | Embeds a Python/Shell script. `SkillToolAdapter` runs it via `shell_execute`. |
+| **Connector** | `"connector"` | Connects to an external service (URL/SSH). Stub for now. |
+
+### Skill management tools (5)
+
+Registered in `ToolModule` as tools #36-#40:
+
+| Tool | Purpose |
+|------|---------|
+| `skill_search` | Search GitHub `apex-skill` repos + built-in templates |
+| `skill_install` | Install from URL / template (web_scraper, file_organizer, code_runner, data_analyzer) / content |
+| `skill_create` | Agent writes a new skill manifest from scratch |
+| `skill_list` | List installed skills + status |
+| `skill_uninstall` | Remove by ID |
+
+### Agent-driven skill download flow
+
+```
+User: "帮我下载一个网页爬虫 skill"
+  ↓
+Agent calls: skill_search({"query": "web scraper"})
+  → returns GitHub repos + builtin templates
+  ↓
+Agent calls: skill_install({"source": "template", "template": "web_scraper"})
+  → downloads/loads manifest JSON
+  → validates schema
+  → persists to filesDir/skills/web_scraper.json
+  → executes auto_setup (create_directory ./scrape_output)
+  ↓
+Agent calls: skill_list({})
+  → confirms installation
+  ↓
+Agent replies: "✅ 已安装'网页数据爬取' skill. 新增工具: web_scrape"
+```
+
+Note: dynamically-registered skill tools (via `SkillToolAdapter`) require an engine restart to appear in the `ToolRegistry` since the registry is built once at app startup. Future PR may add a hot-reload mechanism.
 
 ## Execution Flow
 

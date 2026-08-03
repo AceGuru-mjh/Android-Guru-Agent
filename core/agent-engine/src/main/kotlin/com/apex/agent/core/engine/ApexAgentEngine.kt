@@ -6,6 +6,7 @@ import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
@@ -38,7 +39,8 @@ class ApexAgentEngine(
     private val toolExecutor: ToolExecutor,
     private var config: AgentConfig = AgentConfig.STANDARD,
     private val memory: ConversationMemory? = null,
-    private val contextCompressor: ContextCompressor? = null
+    private val contextCompressor: ContextCompressor? = null,
+    private val skillRegistry: SkillRegistry? = null
 ) : AgentEngine {
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
@@ -377,7 +379,7 @@ class ApexAgentEngine(
                 appendLine(thinking)
             }
             appendLine()
-            appendLine("## Available Tools (35)")
+            appendLine("## Available Tools (${toolRegistry.getAllTools().size})")
             appendLine("- Shell: shell_execute")
             appendLine("- Files: read_file, write_file, list_files, delete_file, search_files, copy_move_file")
             appendLine("- Web: web_fetch, web_search, http_request, download_file")
@@ -387,6 +389,18 @@ class ApexAgentEngine(
             appendLine("- UI: ui_tap, ui_swipe, ui_dump, screenshot, input_text")
             appendLine("- Utility: calculate, text_transform")
             appendLine("- Sensors: get_location, notification_read")
+            appendLine("- Skills: skill_search, skill_install, skill_create, skill_list, skill_uninstall")
+
+            // Skill prompt 注入
+            val skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()
+            if (skillPrompts.isNotEmpty()) {
+                appendLine()
+                appendLine("## Active Skills")
+                skillPrompts.forEach { prompt ->
+                    appendLine(prompt)
+                    appendLine()
+                }
+            }
             appendLine()
             appendLine("## Rules")
             appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")

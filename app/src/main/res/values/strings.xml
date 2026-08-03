@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Apex Agent</string>
+    <string name="accessibility_description">Apex AI Agent需要无障碍权限来读取屏幕内容和执行UI操作。这是Agent"看见"和"操作"设备的核心能力。</string>
+</resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="Apex Workflow Plugin"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- 插件服务：主APK通过此Service连接插件 -->
+        <service
+            android:name=".WorkflowPluginService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.apex.agent.plugin.PLUGIN" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

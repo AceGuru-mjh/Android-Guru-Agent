@@ -15,4 +15,5 @@ kotlin {
 dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
+    implementation(libs.okhttp)  // WebFetchTool / WebSearchTool / HttpRequestTool
 }

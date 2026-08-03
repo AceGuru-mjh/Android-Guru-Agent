@@ -1,34 +1,48 @@
 plugins {
-    id("apex.android.application")
-    id("apex.android.compose")
-    id("apex.android.hilt")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
 }
 
 android {
     namespace = "com.apex.agent"
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.apex.agent"
-        vectorDrawables { useSupportLibrary = true }
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0.0"
+    }
+
+    buildFeatures {
+        compose = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
+        resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }
 }
 
 dependencies {
+    // 内部模块
     implementation(project(":core:agent-engine"))
-    implementation(project(":core:tool-registry"))
     implementation(project(":core:llm-adapter"))
-    implementation(project(":core:memory"))
+    implementation(project(":core:tool-registry"))
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
-    implementation(project(":platform:linux-runtime"))
-    implementation(project(":platform:workspace"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose
@@ -38,7 +52,6 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons)
-    implementation(libs.compose.animation)
     debugImplementation(libs.compose.ui.tooling)
 
     // AndroidX
@@ -50,16 +63,15 @@ dependencies {
     implementation(libs.navigation.compose)
 
     // Hilt
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
-
-    // DataStore
-    implementation(libs.datastore.preferences)
-
-    // WorkManager
-    implementation(libs.work.runtime)
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
 
-    // Coil
-    implementation(libs.coil.compose)
+    // 其他
+    implementation(libs.serialization.json)
+    implementation(libs.coroutines.android)
+    implementation(libs.okhttp)
+    implementation(libs.work.runtime)
 }

@@ -1,6 +1,5 @@
 plugins {
-    id("java-library")
-    id("org.jetbrains.kotlin.jvm")
+    alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -9,9 +8,12 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
 dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.sse)
 }

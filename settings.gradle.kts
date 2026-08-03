@@ -1,5 +1,4 @@
 pluginManagement {
-    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -18,20 +17,21 @@ dependencyResolutionManagement {
 
 rootProject.name = "apex-agent"
 
+// 主APK
 include(":app")
 
+// 核心引擎（纯Kotlin JVM，零Android依赖）
 include(":core:agent-engine")
-include(":core:tool-registry")
 include(":core:llm-adapter")
-include(":core:memory")
+include(":core:tool-registry")
 
+// Android平台层
 include(":platform:privilege")
 include(":platform:persistence")
-include(":platform:linux-runtime")
-include(":platform:workspace")
 
+// 插件SDK
 include(":plugin-sdk:plugin-api")
 include(":plugin-sdk:plugin-host")
 
+// 插件APK
 include(":plugins:plugin-workflow")
-include(":plugins:plugin-automation")

@@ -2,10 +2,13 @@ package com.apex.agent.ui.screen.chat
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -24,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.llm.ReasoningEffort
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,16 +51,16 @@ fun ChatScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         
-        // ═══ 顶部栏：模式切换 + 思考深度 ═══
+        // ═══ 顶部栏：模式切换 + 思考深度 + 新会话 + 历史深度 ═══
         Surface(
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 模式切换
                 SegmentedButtonRow {
@@ -69,12 +73,41 @@ fun ChatScreen(
                         onClick = { viewModel.setMode(AgentMode.BUILD) }
                     ) { Text("Build") }
                 }
-                
-                // 思考深度选择
+
+                // 思考深度选择（system prompt 层面）
                 ThinkingLevelSelector(
                     current = uiState.thinkingLevel,
                     onSelect = { viewModel.setThinkingLevel(it) }
                 )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // 历史深度徽章
+                if (uiState.historyDepth > 0) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "记忆 ${uiState.historyDepth}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // 新会话按钮
+                IconButton(
+                    onClick = { viewModel.newChat() },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "新会话",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
         
@@ -88,7 +121,7 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            items(uiState.messages, key = { it.hashCode() }) { message ->
+            itemsIndexed(uiState.messages, key = { index, _ -> index }) { _, message ->
                 MessageItem(message)
             }
             
@@ -138,51 +171,60 @@ fun ChatScreen(
             tonalElevation = 3.dp,
             shadowElevation = 8.dp
         ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { 
-                        Text(
-                            when (uiState.mode) {
-                                AgentMode.PLAN -> "描述任务，Agent会先制定计划..."
-                                AgentMode.BUILD -> "输入指令..."
-                            }
-                        ) 
-                    },
-                    maxLines = 5,
-                    shape = RoundedCornerShape(24.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                    )
+            Column(modifier = Modifier.padding(12.dp)) {
+                // 模型原生思考强度选择条（DeepSeek MAX / OpenAI o-series reasoning_effort）
+                ReasoningEffortRow(
+                    current = uiState.reasoningEffort,
+                    onSelect = { viewModel.setReasoningEffort(it) }
                 )
-                
-                // 发送/停止按钮
-                if (uiState.isLoading) {
-                    FilledTonalIconButton(
-                        onClick = { viewModel.abort() },
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "停止")
-                    }
-                } else {
-                    FilledIconButton(
-                        onClick = {
-                            if (inputText.isNotBlank()) {
-                                viewModel.sendMessage(inputText.trim())
-                                inputText = ""
-                            }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                when (uiState.mode) {
+                                    AgentMode.PLAN -> "描述任务，Agent会先制定计划..."
+                                    AgentMode.BUILD -> "输入指令..."
+                                }
+                            )
                         },
-                        enabled = inputText.isNotBlank(),
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                        maxLines = 5,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                        )
+                    )
+
+                    // 发送/停止按钮
+                    if (uiState.isLoading) {
+                        FilledTonalIconButton(
+                            onClick = { viewModel.abort() },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = "停止")
+                        }
+                    } else {
+                        FilledIconButton(
+                            onClick = {
+                                if (inputText.isNotBlank()) {
+                                    viewModel.sendMessage(inputText.trim())
+                                    inputText = ""
+                                }
+                            },
+                            enabled = inputText.isNotBlank(),
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                        }
                     }
                 }
             }
@@ -483,5 +525,41 @@ private fun SegmentedButtonRow(content: @Composable () -> Unit) {
     // M3 SegmentedButton
     SingleChoiceSegmentedButtonRow {
         content()
+    }
+}
+
+/**
+ * 模型原生思考强度选择条。
+ * 显示为水平滚动的 FilterChip 行，覆盖 NONE/LOW/MEDIUM/HIGH/MAX 五档。
+ * 选中后立即写入 SharedPreferences，下次 LlmClient 构建时生效。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReasoningEffortRow(
+    current: ReasoningEffort,
+    onSelect: (ReasoningEffort) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = "原生思考:",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.CenterVertically)
+        )
+        ReasoningEffort.entries.forEach { effort ->
+            FilterChip(
+                selected = effort == current,
+                onClick = { onSelect(effort) },
+                label = { Text(effort.displayName, style = MaterialTheme.typography.labelSmall) },
+                leadingIcon = if (effort == current) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                } else null
+            )
+        }
     }
 }

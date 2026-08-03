@@ -1,13 +1,14 @@
 package com.apex.agent.di
 
+import android.content.Context
 import com.apex.agent.core.engine.*
 import com.apex.agent.core.llm.LlmClient
-import com.apex.agent.core.llm.LlmConfig
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
@@ -29,17 +30,27 @@ object AgentModule {
 
     @Provides
     @Singleton
+    fun provideConversationMemory(
+        @ApplicationContext context: Context
+    ): ConversationMemory {
+        return SharedPrefsConversationMemory(context)
+    }
+
+    @Provides
+    @Singleton
     fun provideAgentEngine(
         llmClient: LlmClient,
         toolRegistry: ToolRegistry,
         toolExecutor: ToolExecutor,
-        config: AgentConfig
+        config: AgentConfig,
+        memory: ConversationMemory
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
             toolRegistry = toolRegistry,
             toolExecutor = toolExecutor,
-            config = config
+            config = config,
+            memory = memory
         )
     }
 }

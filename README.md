@@ -59,13 +59,22 @@ chmod +x gradlew
 ## Key Modules
 
 ### `core:agent-engine`
-Pure-JVM agent loop. Key types:
+Pure-JVM agent loop with dual execution modes. Key types:
 - `AgentEngine` — interface (`execute(input) -> Flow<AgentEvent>`, `abort()`)
-- `ApexAgentEngine` — production implementation, streaming-first ReAct loop
+- `ApexAgentEngine` — production implementation
+  - **Build mode** (`AgentMode.BUILD`): streaming ReAct loop — Think → Act → Observe → repeat → Done
+  - **Plan mode** (`AgentMode.PLAN`): Think → stream plan as `ThinkingChunk`s → parse JSON → emit `PlanGenerated` + `PlanAwaitingConfirmation` → suspend on `awaitPlanConfirmation()` (resumed by `submitPlanConfirmation()` from the UI) → execute each `PlanStep` via Build loop → emit final reflection
+  - Plan-confirmation channel: a `CompletableDeferred<Boolean>` field, reset before each plan; 5-minute timeout; auto-cancel on `abort()`
+  - Public API: `updateConfig(newConfig)`, `submitPlanConfirmation(confirmed)`, `clearHistory()`, `historyCount()`, `abort()`
+  - **Conversation memory** (`ConversationMemory` interface): every message added to `conversationHistory` is also persisted via `memory.append()`. On engine construction, `memory.load()` rehydrates the full history so the agent remembers past turns across app restarts. `clearHistory()` wipes both in-memory and persisted state (used by the "新会话" button).
 - `AgentConfig` — runtime-tunable config (`mode`, `thinkingLevel`, `maxIterations`, `maxContextTokens`, `streaming`, `temperature`, …) with presets (`QUICK`, `STANDARD`, `CAREFUL`)
 - `AgentMode` — `PLAN` vs `BUILD`
-- `ThinkingLevel` — `NONE` / `LIGHT` / `STANDARD` / `DEEP` / `MAXIMUM`; each maps to a system-prompt instruction and a `thinking_budget`
+- `ThinkingLevel` — `NONE` / `LIGHT` / `STANDARD` / `DEEP` / `MAXIMUM`; each maps to:
+  - a system-prompt instruction injected by `buildSystemPrompt()` (e.g. STANDARD → `"Think step by step about the task. Analyze what needs to be done, choose the best tool, then execute."`)
+  - a `thinking_budget` integer (0 / 256 / 1024 / 4096 / 16384) for models like Gemini that support it
+  - `NONE` skips emitting `ThinkingStart` events in the Build loop
 - `AgentEvent` — sealed event stream: `ThinkingStart/Chunk/Complete`, `PlanGenerated/AwaitingConfirmation/Confirmed`, `StepStart`, `ToolCallStart/OutputChunk/Complete`, `ResponseChunk/Complete`, `ContextCompressed`, `IterationStart`, `UserInputRequired`, `Error`, `Complete`, `Aborted`
+- `ExecutionPlan` / `PlanStep` / `RiskLevel` — Plan-mode artifacts parsed from the LLM's JSON response (with `fallbackPlan()` for unparseable responses)
 
 ### `core:tool-registry`
 Pure-JVM tool registry + executor + built-in tools. Currently ships `ShellExecuteTool` (parses `{"command": "..."}` JSON and delegates to the injected executor lambda).
@@ -73,7 +82,8 @@ Pure-JVM tool registry + executor + built-in tools. Currently ships `ShellExecut
 ### `core:llm-adapter`
 Pure-JVM OpenAI-compatible client surface:
 - `LlmClient` interface with both `chat()` (blocking) and `chatStream()` (returns `Flow<LlmStreamChunk>`)
-- `LlmConfig` — typed config with presets (`openai()`, `ollama()`, `openRouter()`, `deepseek()`, `custom()`) and per-call `customHeaders` / `systemPromptPrefix`
+- `LlmConfig` — typed config with presets (`openai()`, `ollama()`, `openRouter()`, `deepseek()`, `custom()`) and per-call `customHeaders` / `systemPromptPrefix` / `reasoningEffort`
+- `ReasoningEffort` — enum for model-native thinking intensity (`NONE` / `LOW` / `MEDIUM` / `HIGH` / `MAX`). When not `NONE`, `StreamingOpenAiClient` injects `reasoning_effort` into the request body (OpenAI o-series / DeepSeek-R1 / Qwen3-thinking). `MAX` also raises `max_completion_tokens` to ≥8192 to give the thinking chain room.
 - `LlmClientFactory` — constructs an `OkHttpClient` (with read-timeout from config) and wires it into `StreamingOpenAiClient`
 - `StreamingOpenAiClient` — full SSE streaming implementation with OkHttp 4.x API (`RequestBody.create`, `MediaType.parse`) and a private `Call.await()` suspend extension
 - `NoOpLlmClient` — placeholder used by `LlmModule` until the user configures API settings
@@ -99,26 +109,86 @@ Reference plugin APK that exposes `workflow/save`, `workflow/execute`, `workflow
 
 The Settings screen lets the user pick a preset (OpenAI / DeepSeek / OpenRouter / Ollama / Custom), enter Base URL + API Key + Model, tune Temperature, test the connection (sends `Say 'OK' in one word.`), and save the config to `SharedPreferences("apex_settings")`. The `LlmModule` DI provider reads from the same prefs at app start; if invalid, a `NoOpLlmClient` is injected that responds with a friendly "please configure" message instead of crashing.
 
+## Conversation Memory
+
+The agent persists its `conversationHistory` across app restarts via `SharedPrefsConversationMemory` (backed by `SharedPreferences("apex_memory")`). Every message — user input, assistant replies, tool calls, tool results, plan-mode step prompts — is appended to storage as it enters the history. On engine construction, `memory.load()` rehydrates the full conversation so the agent picks up where it left off.
+
+The chat top bar shows a **"记忆 N"** badge with the current persisted message count, and a **"+"** (new chat) button that calls `ChatViewModel.newChat()` → `ApexAgentEngine.clearHistory()` → wipes both in-memory and persisted state.
+
+Serialization uses a small `StoredMessage` DTO (role + content + optional toolCallId + toolCalls list) serialized via `kotlinx.serialization`'s `ListSerializer`. Schema evolution is handled gracefully — a decode failure clears the store and starts fresh rather than crashing.
+
+## Native Thinking Intensity
+
+Distinct from `ThinkingLevel` (which only edits the system prompt text), the **ReasoningEffort** enum controls the model's *native* reasoning parameter:
+
+| Level | OpenAI o-series | DeepSeek-R1 / Qwen3-thinking | Effect |
+|-------|-----------------|------------------------------|--------|
+| `NONE` | (field omitted) | (field omitted) | Model default behavior |
+| `LOW` | `reasoning_effort: "low"` | `reasoning_effort: "low"` | Fast, token-efficient |
+| `MEDIUM` | `reasoning_effort: "medium"` | `reasoning_effort: "medium"` | Balanced |
+| `HIGH` | `reasoning_effort: "high"` | `reasoning_effort: "high"` | Deep reasoning |
+| `MAX` | `reasoning_effort: "high"` + `max_completion_tokens: ≥8192` | `reasoning_effort: "high"` + extended budget | Maximum thinking chain |
+
+The level is selected via a horizontal **FilterChip** row above the input box in the chat screen (labeled "原生思考:"). Selecting a chip immediately persists the choice to `SharedPreferences("apex_settings", key="llm_reasoning_effort")`. The `LlmModule` reads this on next `LlmClient` construction and `StreamingOpenAiClient.buildRequestBody()` injects `reasoning_effort` into the JSON body when the value is not `NONE`.
+
+This is orthogonal to `ThinkingLevel` — you can use `ThinkingLevel.NONE` (no system-prompt instruction) + `ReasoningEffort.MAX` (let the model's native thinking do all the work), or `ThinkingLevel.DEEP` + `ReasoningEffort.NONE` (prompt-guided reasoning only), or both together.
+
 ## Execution Flow
+
+### Build mode (default)
 
 ```
 User types message in ChatScreen
   ↓
 ChatViewModel.sendMessage(text)
   ↓
-ApexAgentEngine.execute(input) -> Flow<AgentEvent>
-  ↓ (Plan or Build mode)
-For each iteration:
+ApexAgentEngine.execute(input) -> Flow<AgentEvent>  (mode = BUILD)
+  ↓
+For each iteration (up to config.maxIterations):
   1. Build messages (system prompt + history)
   2. llmClient.chatStream(messages, tools) -> Flow<LlmStreamChunk>
-  3. Accumulate content + toolCalls from stream
-  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor, emit ToolCallComplete
+  3. Accumulate content + toolCalls (with ToolCallAccumulator for streamed args)
+  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor, emit ToolCallComplete, loop
   5. If content only: emit ResponseChunk(s) then ResponseComplete, done
   ↓
 ChatViewModel collects events -> updates ChatUiState
   ↓
-ChatScreen re-renders streaming bubbles, tool cards, plan confirmation cards
+ChatScreen re-renders streaming bubbles, tool cards
 ```
+
+### Plan mode
+
+```
+User types message (with mode = PLAN in top bar)
+  ↓
+ApexAgentEngine.executePlanMode(input, emit):
+  1. Emit ThinkingStart(0, thinkingLevel)
+  2. Stream plan-prompt response as ThinkingChunk(s)  (UI shows thinking bubble)
+  3. Emit ThinkingComplete(fullPlanText)
+  4. parseExecutionPlan(response) -> ExecutionPlan (JSON parse, fallback to single-step)
+  5. Emit PlanGenerated(plan)
+  6. Emit PlanAwaitingConfirmation(plan)   <- UI shows PlanConfirmationCard with Execute/Cancel
+  7. awaitPlanConfirmation() suspends on CompletableDeferred<Boolean> (5-min timeout)
+  8. ChatViewModel.confirmPlan(true/false) -> ApexAgentEngine.submitPlanConfirmation()
+  9. On true: Emit PlanConfirmed, loop over plan.steps:
+       - Emit StepStart(index, description)
+       - Inject step prompt as User message
+       - Run one Build-loop iteration (which streams ResponseChunk + executes tools)
+  10. Emit final reflection (ResponseChunk + ResponseComplete)
+  ↓
+ChatViewModel renders thinking bubble, plan card, step indicators, tool cards, final summary
+```
+
+### Thinking depth
+
+The `ThinkingLevel` selected in the top-bar dropdown controls the system prompt injected by `buildSystemPrompt()`:
+- `NONE` — no thinking instruction; no `ThinkingStart` emitted in Build mode
+- `LIGHT` — `"Briefly think about what to do next in 1-2 sentences, then act."`
+- `STANDARD` — `"Think step by step about the task..."`
+- `DEEP` — multi-step instruction (analyze → consider 2-3 approaches → compare → assess risks → choose)
+- `MAXIMUM` — exhaustive 8-step reasoning chain with self-critique
+
+The level is hot-swappable via `ChatViewModel.setThinkingLevel()` which calls `ApexAgentEngine.updateConfig()`. Changes apply on the next iteration / next task.
 
 ## Permissions
 

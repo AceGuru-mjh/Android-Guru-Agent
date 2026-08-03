@@ -1,9 +1,12 @@
 package com.apex.agent.ui.screen.chat
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.engine.*
+import com.apex.agent.core.llm.ReasoningEffort
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -20,8 +23,10 @@ data class ChatUiState(
     val currentToolCall: ToolCallUi? = null, // 当前执行的工具
     val mode: AgentMode = AgentMode.BUILD,
     val thinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD,
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,  // 模型原生思考强度
     val plan: ExecutionPlan? = null,         // Plan模式的计划
-    val awaitingPlanConfirmation: Boolean = false
+    val awaitingPlanConfirmation: Boolean = false,
+    val historyDepth: Int = 0               // 持久化历史条数（跨会话）
 )
 
 sealed interface UiMessage {
@@ -47,10 +52,12 @@ data class ToolCallUi(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val agentEngine: AgentEngine
+    private val agentEngine: AgentEngine,
+    private val memory: ConversationMemory,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState())
+    private val _uiState = MutableStateFlow(ChatUiState(historyDepth = memory.count()))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
     
     private var currentJob: Job? = null
@@ -180,7 +187,12 @@ class ChatViewModel @Inject constructor(
                 }
             }
             is AgentEvent.Complete -> {
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        historyDepth = (agentEngine as? ApexAgentEngine)?.historyCount() ?: it.historyDepth
+                    )
+                }
             }
             is AgentEvent.Aborted -> {
                 _uiState.update { state ->
@@ -218,10 +230,11 @@ class ChatViewModel @Inject constructor(
     
     /**
      * 确认计划
+     * Resumes the suspended Plan-mode execution in [ApexAgentEngine].
      */
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
-        // TODO: 通知引擎
+        (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
     }
     
     /**
@@ -230,5 +243,39 @@ class ChatViewModel @Inject constructor(
     fun abort() {
         currentJob?.cancel()
         viewModelScope.launch { agentEngine.abort() }
+    }
+
+    /**
+     * 开新会话：清空引擎历史 + 持久化记忆 + UI 消息列表。
+     */
+    fun newChat() {
+        currentJob?.cancel()
+        viewModelScope.launch {
+            (agentEngine as? ApexAgentEngine)?.clearHistory()
+            _uiState.update {
+                it.copy(
+                    messages = emptyList(),
+                    currentThinking = "",
+                    currentResponse = "",
+                    currentToolCall = null,
+                    plan = null,
+                    awaitingPlanConfirmation = false,
+                    isLoading = false,
+                    historyDepth = 0
+                )
+            }
+        }
+    }
+
+    /**
+     * 设置模型原生思考强度（OpenAI reasoning_effort / DeepSeek reasoning）。
+     * 持久化到 SharedPreferences，下次 LlmModule 构建 LlmClient 时生效。
+     */
+    fun setReasoningEffort(effort: ReasoningEffort) {
+        context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
+            .edit()
+            .putString("llm_reasoning_effort", effort.name)
+            .apply()
+        _uiState.update { it.copy(reasoningEffort = effort) }
     }
 }

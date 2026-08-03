@@ -114,7 +114,17 @@ class StreamingOpenAiClient(
             put("temperature", temperature)
             put("max_tokens", maxTokens)
             put("stream", stream)
-            
+
+            // 模型原生思考强度（OpenAI o-series 的 reasoning_effort；
+            // DeepSeek-R1 / Qwen3-thinking 等也兼容此字段）
+            config.reasoningEffort.apiValue?.let { effort ->
+                put("reasoning_effort", effort)
+                // MAX 模式下提高 max_completion_tokens 上限，让思考链有空间
+                if (config.reasoningEffort == ReasoningEffort.MAX) {
+                    put("max_completion_tokens", maxOf(maxTokens, 8192))
+                }
+            }
+
             putJsonArray("messages") {
                 for (msg in messages) {
                     addJsonObject {

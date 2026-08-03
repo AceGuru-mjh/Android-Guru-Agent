@@ -1,8 +1,11 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.core.engine.AgentConfig
 import com.apex.agent.core.engine.AgentEngine
-import com.apex.agent.core.engine.DefaultAgentEngine
+import com.apex.agent.core.engine.ApexAgentEngine
+import com.apex.agent.core.engine.ContextCompressor
+import com.apex.agent.core.engine.HybridCompressor
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.OpenAiCompatibleClient
 import com.apex.agent.core.tools.DefaultToolExecutor
@@ -116,16 +119,24 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideContextCompressor(llmClient: LlmClient): ContextCompressor {
+        return HybridCompressor(llmClient)
+    }
+
+    @Provides
+    @Singleton
     fun provideAgentEngine(
         llmClient: LlmClient,
         toolRegistry: ToolRegistry,
-        toolExecutor: ToolExecutor
+        toolExecutor: ToolExecutor,
+        contextCompressor: ContextCompressor
     ): AgentEngine {
-        return DefaultAgentEngine(
+        return ApexAgentEngine(
             llmClient = llmClient,
             toolRegistry = toolRegistry,
             toolExecutor = toolExecutor,
-            maxIterations = 20
+            contextCompressor = contextCompressor,
+            config = AgentConfig.STANDARD  // 默认 Build + 标准思考
         )
     }
 }

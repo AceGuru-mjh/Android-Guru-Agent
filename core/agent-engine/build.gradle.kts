@@ -10,6 +10,10 @@ java {
 }
 
 dependencies {
+    // Project deps — ApexAgentEngine consumes LlmClient/ToolRegistry/ToolExecutor directly.
+    implementation(project(":core:llm-adapter"))
+    implementation(project(":core:tool-registry"))
+
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
 }

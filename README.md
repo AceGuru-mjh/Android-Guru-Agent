@@ -58,13 +58,31 @@ The project uses Gradle convention plugins defined in `build-logic/`. To build:
 ## Key Modules
 
 ### `core:agent-engine`
-Hosts the agent loop (`AgentEngine` / `DefaultAgentEngine`), event stream (`AgentEvent`), and memory contract (`AgentMemory`).
+Hosts the agent loop with **Plan / Build dual modes**, **5-level thinking depth**, **streaming output**, and **automatic context compression**.
+
+Key types:
+- `AgentEngine` — interface (`execute(input) -> Flow<AgentEvent>`, `abort()`)
+- `ApexAgentEngine` — production implementation (replaces the old `DefaultAgentEngine`)
+- `AgentConfig` — runtime-tunable config (`mode`, `thinkingLevel`, `maxIterations`, `compressionThreshold`, `streaming`, `temperature`, …) with presets (`QUICK`, `STANDARD`, `CAREFUL`)
+- `AgentMode` — `PLAN` (think → plan → user-confirm → execute steps → reflect) vs `BUILD` (ReAct loop: think → act → observe → repeat)
+- `ThinkingLevel` — `NONE` / `LIGHT` / `STANDARD` / `DEEP` / `MAXIMUM`; each maps to a system-prompt instruction and a `thinking_budget`
+- `AgentEvent` — sealed event stream consumed by the UI: `ThinkingStart/Chunk/Complete`, `PlanGenerated/AwaitingConfirmation/Confirmed`, `StepStart`, `ToolCallStart/OutputChunk/Complete`, `ResponseChunk/Complete`, `ContextCompressed`, `IterationStart`, `UserInputRequired`, `Error`, `Complete`, `Aborted`
+- `ExecutionPlan` / `PlanStep` / `RiskLevel` — Plan-mode artifacts
+- `ContextCompressor` — interface with three implementations:
+  - `LlmSummaryCompressor` — uses an LLM call to summarize older turns
+  - `TruncationCompressor` — fast in-process truncation (no extra LLM call)
+  - `HybridCompressor` — truncates oversized tool outputs first, then escalates to LLM summarization when message count exceeds threshold
+- `AgentMemory` — memory contract
 
 ### `core:tool-registry`
-Defines `ToolRegistry` and built-in tools (`ShellTool`, `ProjectTools`) that the agent can invoke.
+Defines `ToolRegistry`, `ToolExecutor`, `AgentTool`, and built-in tools (`ShellTool`, `ProjectTools`) that the agent can invoke.
 
 ### `core:llm-adapter`
-OpenAI-compatible client with streaming (SSE) support — drop in any endpoint that speaks the OpenAI chat-completions protocol.
+OpenAI-compatible LLM client surface with streaming (SSE) support:
+- `LlmClient` interface with both `chat()` (blocking) and `chatStream()` (returns `Flow<LlmStreamChunk>`)
+- `OpenAiCompatibleClient` — original blocking+SSE client (used by default in DI)
+- `StreamingOpenAiClient` — alternative streaming-first implementation with proper OkHttp 5.x Kotlin extensions (`toRequestBody`, `await()` suspend wrapper around `Call.enqueue`)
+- Supporting types: `LlmMessage` (sealed: `System` / `User` / `Assistant` / `ToolResult`), `LlmResponse`, `LlmStreamChunk`, `ToolCall`, `ToolDefinition`, `Usage`
 
 ### `platform:privilege`
 Wraps Shizuku (sudosu-style elevated operations) and an `AccessibilityService` for UI automation. `DefaultPrivilegeManager` routes operations to the appropriate backend.
@@ -82,6 +100,26 @@ Manages isolated work directories per project, including sandboxed file access.
 ### `plugins:plugin-workflow`
 A reference plugin that exposes a workflow automation service to the agent.
 
+## Execution Modes
+
+### Plan Mode (`AgentMode.PLAN`)
+User describes a task → Agent reasons (depth-controlled) → emits an `ExecutionPlan` → UI shows the plan and asks for confirmation (`PlanAwaitingConfirmation`) → on confirm, executes each `PlanStep` sequentially → emits a final reflection. Best for complex multi-step tasks where the user wants to review the plan first.
+
+### Build Mode (`AgentMode.BUILD`)
+User describes a task → Agent enters a ReAct loop (Think → Call Tool → Observe Result → Repeat) → emits `ResponseChunk`s as the final answer streams in. Best for quick tasks where the user trusts the agent to act. Mode switches are available at runtime from the chat screen's top bar.
+
+## Thinking Depth
+
+The `ThinkingLevel` enum exposes 5 levels (`NONE`, `LIGHT`, `STANDARD`, `DEEP`, `MAXIMUM`). Each level injects a different system-prompt instruction and a corresponding `thinking_budget` for models that support it (e.g. Gemini). The chat UI exposes a dropdown to switch levels on the fly; the engine picks up the new config via `ApexAgentEngine.updateConfig()`.
+
+## Streaming Output
+
+Every LLM call routes through `LlmClient.chatStream()`, which yields `Flow<LlmStreamChunk>`. The engine translates chunks into `AgentEvent.ThinkingChunk` / `ResponseChunk` / `ToolOutputChunk` events, which the `ChatViewModel` collects and appends incrementally to `currentThinking` / `currentResponse` strings. The Compose UI renders these as growing bubbles with a typing cursor.
+
+## Context Compression
+
+When `estimateTokens(conversationHistory)` exceeds `maxContextTokens * compressionThreshold` (default 80% of 128k), the engine calls `ContextCompressor.compress(history, preserveRecent=5)`. The default `HybridCompressor` first truncates oversized `ToolResult` content, then — if the message count still exceeds `preserveRecent + 10` — escalates to `LlmSummaryCompressor`, which asks the LLM for a ≤500-word summary and replaces the older half of the history with a single `[CONTEXT SUMMARY]` system message. The UI shows a `📦 Context compressed: N→M tokens` system message.
+
 ## Permissions
 
 The `app` manifest declares a number of elevated permissions (foreground service of `specialUse`, system alert window, package usage stats, manage external storage, query all packages, etc.). End users will need to grant these on-device — Shizuku is required for the privileged operations.
@@ -94,4 +132,4 @@ The `app` manifest declares a number of elevated permissions (foreground service
 
 ---
 
-This is an initial project skeleton — module interfaces and a runnable Compose UI are in place, but several modules contain TODOs and stub implementations that should be filled in as the project evolves.
+This is an initial project skeleton — the engine, streaming LLM client, Plan/Build UI, and context compressor are now in place, but several modules still contain TODOs and stub implementations (e.g. `WorkflowPluginService.handleSaveWorkflow`, `ProotLinuxRuntime` binary path, `DefaultPrivilegeManager` Shizuku validation) that should be filled in as the project evolves.

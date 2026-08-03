@@ -171,7 +171,10 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + UiMessage.System(
-                            "📦 Context compressed: ${event.beforeTokens}→${event.afterTokens} tokens"
+                            "📦 Context compressed: ${event.beforeTokens}→${event.afterTokens} tokens " +
+                            "(${event.strategy}, removed ${event.messagesRemoved} msgs" +
+                            (if (event.messagesTruncated > 0) ", truncated ${event.messagesTruncated}" else "") +
+                            ")"
                         )
                     )
                 }

@@ -1,5 +1,8 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.engine.compression.TokenEstimator
+import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
@@ -34,8 +37,14 @@ class ApexAgentEngine(
     private val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
     private var config: AgentConfig = AgentConfig.STANDARD,
-    private val memory: ConversationMemory? = null
+    private val memory: ConversationMemory? = null,
+    private val contextCompressor: ContextCompressor? = null
 ) : AgentEngine {
+
+    /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
+    private val toolTruncator = ToolOutputTruncator(
+        maxChars = config.maxToolOutputLength
+    )
 
     private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
         memory?.load()?.let { addAll(it) }
@@ -227,6 +236,9 @@ class ApexAgentEngine(
             iteration++
             emit(AgentEvent.IterationStart(iteration))
 
+            // P7: 每轮迭代前检查是否需要压缩
+            maybeCompressContext(emit)
+
             if (config.thinkingLevel != ThinkingLevel.NONE && !thinkingEmittedForIteration) {
                 emit(AgentEvent.ThinkingStart(iteration, config.thinkingLevel))
                 thinkingEmittedForIteration = true
@@ -276,7 +288,7 @@ class ApexAgentEngine(
                         )
 
                         val toolStart = System.currentTimeMillis()
-                        val result = try {
+                        val rawResult = try {
                             toolExecutor.execute(toolCall.name, toolCall.arguments)
                         } catch (e: CancellationException) {
                             throw e
@@ -284,6 +296,10 @@ class ApexAgentEngine(
                             "Error: ${e.message}"
                         }
                         val duration = System.currentTimeMillis() - toolStart
+
+                        // P7 Layer 1: 工具输出截断（始终生效）
+                        val truncationResult = toolTruncator.smartTruncate(rawResult, toolCall.name)
+                        val result = truncationResult.text
 
                         emit(
                             AgentEvent.ToolCallComplete(
@@ -295,6 +311,7 @@ class ApexAgentEngine(
                             )
                         )
 
+                        // 截断后的结果存入历史（节省后续 token）
                         addMessage(
                             LlmMessage.ToolResult(toolCall.id, result)
                         )
@@ -360,12 +377,16 @@ class ApexAgentEngine(
                 appendLine(thinking)
             }
             appendLine()
-            appendLine("## Available Tool Categories")
-            appendLine("- shell_execute: Run device commands (ls, pm, am, dumpsys, getprop, etc.)")
-            appendLine("- read_file / write_file / list_files / delete_file: File operations")
-            appendLine("- web_fetch / web_search / http_request: Web access")
-            appendLine("- memorize / recall / forget: Long-term memory across sessions")
-            appendLine("- get_device_info / app_list / app_launch: Device control")
+            appendLine("## Available Tools (35)")
+            appendLine("- Shell: shell_execute")
+            appendLine("- Files: read_file, write_file, list_files, delete_file, search_files, copy_move_file")
+            appendLine("- Web: web_fetch, web_search, http_request, download_file")
+            appendLine("- Memory: memorize, recall, forget")
+            appendLine("- Apps: app_list, app_launch, app_install, app_uninstall, app_force_stop, app_info")
+            appendLine("- System: get_device_info, get_set_settings, control_media, clipboard, get_time, logcat")
+            appendLine("- UI: ui_tap, ui_swipe, ui_dump, screenshot, input_text")
+            appendLine("- Utility: calculate, text_transform")
+            appendLine("- Sensors: get_location, notification_read")
             appendLine()
             appendLine("## Rules")
             appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
@@ -518,6 +539,45 @@ class ApexAgentEngine(
     override suspend fun abort() {
         isRunning = false
         planConfirmationDeferred?.complete(false)
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // P7: 上下文压缩触发
+    // ═══════════════════════════════════════════════════════
+
+    private suspend fun maybeCompressContext(emit: suspend (AgentEvent) -> Unit) {
+        val compressor = contextCompressor ?: return
+
+        val currentTokens = TokenEstimator.estimateHistory(conversationHistory)
+        val thresholdTokens = (config.maxContextTokens * config.compressionThreshold).toInt()
+
+        if (currentTokens <= thresholdTokens) return
+
+        // 需要压缩
+        val report = try {
+            compressor.compress(
+                history = conversationHistory,
+                preserveRecent = config.preserveRecentTurns
+            )
+        } catch (e: Exception) {
+            // 压缩失败不应该中断主流程
+            return
+        }
+
+        // 同步到持久化记忆（如果存在）
+        memory?.save(conversationHistory)
+
+        // 发射压缩事件
+        emit(
+            AgentEvent.ContextCompressed(
+                beforeTokens = report.beforeTokens,
+                afterTokens = report.afterTokens,
+                strategy = report.strategy.name,
+                summary = report.summary.take(200),
+                messagesRemoved = report.messagesRemoved,
+                messagesTruncated = report.messagesTruncated
+            )
+        )
     }
 
     private companion object {

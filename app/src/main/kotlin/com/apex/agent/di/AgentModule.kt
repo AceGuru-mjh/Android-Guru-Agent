@@ -2,6 +2,9 @@ package com.apex.agent.di
 
 import android.content.Context
 import com.apex.agent.core.engine.*
+import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.engine.compression.HybridCompressor
+import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
@@ -38,19 +41,36 @@ object AgentModule {
 
     @Provides
     @Singleton
+    fun provideContextCompressor(llmClient: LlmClient): ContextCompressor {
+        return HybridCompressor(
+            llmClient = llmClient,
+            toolTruncator = ToolOutputTruncator(
+                maxChars = 2000,
+                headChars = 1200,
+                tailChars = 600
+            ),
+            maxContextTokens = 128000,
+            threshold = 0.8f
+        )
+    }
+
+    @Provides
+    @Singleton
     fun provideAgentEngine(
         llmClient: LlmClient,
         toolRegistry: ToolRegistry,
         toolExecutor: ToolExecutor,
         config: AgentConfig,
-        memory: ConversationMemory
+        memory: ConversationMemory,
+        contextCompressor: ContextCompressor
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
             toolRegistry = toolRegistry,
             toolExecutor = toolExecutor,
             config = config,
-            memory = memory
+            memory = memory,
+            contextCompressor = contextCompressor
         )
     }
 }

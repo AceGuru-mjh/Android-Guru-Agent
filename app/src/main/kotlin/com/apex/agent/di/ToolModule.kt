@@ -3,6 +3,8 @@ package com.apex.agent.di
 import android.content.Context
 import com.apex.agent.core.tools.*
 import com.apex.agent.core.tools.builtin.*
+import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.core.tools.skill.SkillToolAdapter
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import dagger.Module
 import dagger.Provides
@@ -17,10 +19,10 @@ import javax.inject.Singleton
 /**
  * Tool layer DI module.
  *
- * Wires up the [ToolRegistry] with all 35 built-in tools across 9 categories:
- * Shell (1), Files (6), Web (4), Memory (3), Apps (6), System (6), UI (5),
- * Utility (2), Sensors (2). Also provides the supporting [OkHttpClient]
- * (separate from the LLM streaming client) and [FileMemoryStore] singletons.
+ * Wires up the [ToolRegistry] with all built-in tools (35 static + 5 skill
+ * management + dynamic skill-provided tools). Also provides the supporting
+ * [OkHttpClient] (separate from the LLM streaming client) and
+ * [FileMemoryStore] singletons.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -51,7 +53,8 @@ object ToolModule {
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
-        memoryStore: FileMemoryStore
+        memoryStore: FileMemoryStore,
+        skillRegistry: SkillRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -118,6 +121,23 @@ object ToolModule {
         // ═══ 34-35. 传感器 ═══
         registry.register(GetLocationTool(shellExec))
         registry.register(NotificationReadTool(shellExec))
+
+        // ═══ 36-40. Skill 管理 ═══
+        registry.register(SkillSearchTool(httpClient))
+        registry.register(SkillInstallTool(skillRegistry, httpClient))
+        registry.register(SkillCreateTool(skillRegistry))
+        registry.register(SkillListTool(skillRegistry))
+        registry.register(SkillUninstallTool(skillRegistry))
+
+        // ═══ 动态：已安装 Skill 提供的工具 ═══
+        // 注意：这里需要 toolExecutor 来构造 SkillToolAdapter，但 toolExecutor 依赖
+        // registry。用 DefaultToolExecutor(registry) 即可——它内部从 registry 查找工具，
+        // 而此时 registry 已经包含所有内置工具。Skill 工具会被加到同一个 registry，
+        // 它们调用的底层工具（web_fetch / write_file 等）也在 registry 中，循环依赖解开了。
+        val toolExecutorForSkills = DefaultToolExecutor(registry)
+        skillRegistry.getActiveTools().forEach { skillTool ->
+            registry.register(SkillToolAdapter(skillTool, toolExecutorForSkills))
+        }
 
         return registry
     }

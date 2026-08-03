@@ -8,6 +8,7 @@ import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.skill.SkillRegistry
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -62,7 +63,8 @@ object AgentModule {
         toolExecutor: ToolExecutor,
         config: AgentConfig,
         memory: ConversationMemory,
-        contextCompressor: ContextCompressor
+        contextCompressor: ContextCompressor,
+        skillRegistry: SkillRegistry
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -70,7 +72,8 @@ object AgentModule {
             toolExecutor = toolExecutor,
             config = config,
             memory = memory,
-            contextCompressor = contextCompressor
+            contextCompressor = contextCompressor,
+            skillRegistry = skillRegistry
         )
     }
 }

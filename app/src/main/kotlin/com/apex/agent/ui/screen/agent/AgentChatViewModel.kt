@@ -1,4 +1,4 @@
-package com.apex.agent.ui.screen.chat
+package com.apex.agent.ui.screen.agent
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
@@ -13,53 +13,56 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Chat UI状态
+ * Agent 对话界面状态
+ *
+ * 保留与旧 ChatUiState 相同的字段名（currentResponse / currentThinking / currentToolCall），
+ * ApexDrawerContent 已依赖这些字段显示模式/思考深度/记忆深度。
  */
-data class ChatUiState(
-    val messages: List<UiMessage> = emptyList(),
+data class AgentChatUiState(
+    val messages: List<AgentUiMessage> = emptyList(),
     val isLoading: Boolean = false,
     val currentThinking: String = "",       // 当前思考内容（流式）
     val currentResponse: String = "",       // 当前回复内容（流式）
-    val currentToolCall: ToolCallUi? = null, // 当前执行的工具
+    val currentToolCall: AgentToolCallUi? = null, // 当前执行的工具
     val mode: AgentMode = AgentMode.BUILD,
     val thinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD,
-    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,  // 模型原生思考强度
-    val plan: ExecutionPlan? = null,         // Plan模式的计划
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
+    val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
-    val historyDepth: Int = 0               // 持久化历史条数（跨会话）
+    val historyDepth: Int = 0
 )
 
-sealed interface UiMessage {
-    data class User(val text: String, val timestamp: Long = System.currentTimeMillis()) : UiMessage
-    data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : UiMessage
+sealed interface AgentUiMessage {
+    data class User(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
+    data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
         val args: String,
         val output: String? = null,
         val success: Boolean? = null,
         val durationMs: Long = 0
-    ) : UiMessage
-    data class System(val text: String) : UiMessage
-    data class PlanMessage(val plan: ExecutionPlan) : UiMessage
-    data class ThinkingMessage(val thought: String) : UiMessage
+    ) : AgentUiMessage
+    data class System(val text: String) : AgentUiMessage
+    data class PlanMessage(val plan: ExecutionPlan) : AgentUiMessage
+    data class ThinkingMessage(val thought: String) : AgentUiMessage
 }
 
-data class ToolCallUi(
+data class AgentToolCallUi(
     val toolName: String,
     val args: String,
     val isRunning: Boolean = true
 )
 
 @HiltViewModel
-class ChatViewModel @Inject constructor(
+class AgentChatViewModel @Inject constructor(
     private val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatUiState(historyDepth = memory.count()))
-    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
-    
+    private val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
+    val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
+
     private var currentJob: Job? = null
 
     /**
@@ -67,26 +70,23 @@ class ChatViewModel @Inject constructor(
      */
     fun sendMessage(text: String) {
         if (text.isBlank() || _uiState.value.isLoading) return
-        
+
         _uiState.update { state ->
             state.copy(
-                messages = state.messages + UiMessage.User(text),
+                messages = state.messages + AgentUiMessage.User(text),
                 isLoading = true,
                 currentThinking = "",
                 currentResponse = ""
             )
         }
-        
+
         currentJob = viewModelScope.launch {
             agentEngine.execute(text).collect { event ->
                 handleEvent(event)
             }
         }
     }
-    
-    /**
-     * 处理Agent事件，更新UI状态
-     */
+
     private fun handleEvent(event: AgentEvent) {
         when (event) {
             // ═══ 思考 ═══
@@ -94,19 +94,19 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { it.copy(currentThinking = "") }
             }
             is AgentEvent.ThinkingChunk -> {
-                _uiState.update { 
-                    it.copy(currentThinking = it.currentThinking + event.text) 
+                _uiState.update {
+                    it.copy(currentThinking = it.currentThinking + event.text)
                 }
             }
             is AgentEvent.ThinkingComplete -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + UiMessage.ThinkingMessage(event.fullThought),
+                        messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought),
                         currentThinking = ""
                     )
                 }
             }
-            
+
             // ═══ Plan模式 ═══
             is AgentEvent.PlanGenerated -> {
                 _uiState.update { it.copy(plan = event.plan) }
@@ -118,16 +118,16 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         awaitingPlanConfirmation = false,
-                        messages = state.messages + UiMessage.PlanMessage(event.plan)
+                        messages = state.messages + AgentUiMessage.PlanMessage(event.plan)
                     )
                 }
             }
-            
+
             // ═══ 工具调用 ═══
             is AgentEvent.ToolCallStart -> {
                 _uiState.update { state ->
                     state.copy(
-                        currentToolCall = ToolCallUi(
+                        currentToolCall = AgentToolCallUi(
                             toolName = event.toolName,
                             args = event.arguments,
                             isRunning = true
@@ -139,7 +139,7 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         currentToolCall = null,
-                        messages = state.messages + UiMessage.ToolCall(
+                        messages = state.messages + AgentUiMessage.ToolCall(
                             toolName = event.toolName,
                             args = "",
                             output = event.output.take(500),
@@ -149,28 +149,28 @@ class ChatViewModel @Inject constructor(
                     )
                 }
             }
-            
+
             // ═══ 流式回复 ═══
             is AgentEvent.ResponseChunk -> {
-                _uiState.update { 
-                    it.copy(currentResponse = it.currentResponse + event.text) 
+                _uiState.update {
+                    it.copy(currentResponse = it.currentResponse + event.text)
                 }
             }
             is AgentEvent.ResponseComplete -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + UiMessage.Agent(event.fullText),
+                        messages = state.messages + AgentUiMessage.Agent(event.fullText),
                         currentResponse = "",
                         isLoading = false
                     )
                 }
             }
-            
+
             // ═══ 压缩 ═══
             is AgentEvent.ContextCompressed -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + UiMessage.System(
+                        messages = state.messages + AgentUiMessage.System(
                             "📦 Context compressed: ${event.beforeTokens}→${event.afterTokens} tokens " +
                             "(${event.strategy}, removed ${event.messagesRemoved} msgs" +
                             (if (event.messagesTruncated > 0) ", truncated ${event.messagesTruncated}" else "") +
@@ -179,12 +179,12 @@ class ChatViewModel @Inject constructor(
                     )
                 }
             }
-            
+
             // ═══ 错误/完成 ═══
             is AgentEvent.Error -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + UiMessage.System("❌ ${event.message}"),
+                        messages = state.messages + AgentUiMessage.System("❌ ${event.message}"),
                         isLoading = false
                     )
                 }
@@ -200,57 +200,40 @@ class ChatViewModel @Inject constructor(
             is AgentEvent.Aborted -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + UiMessage.System("⏹ 已中止"),
+                        messages = state.messages + AgentUiMessage.System("⏹ 已中止"),
                         isLoading = false
                     )
                 }
             }
-            
-            else -> {} // 其他事件暂不处理
+
+            else -> {}
         }
     }
-    
-    /**
-     * 切换模式
-     */
+
     fun setMode(mode: AgentMode) {
         _uiState.update { it.copy(mode = mode) }
-        // 更新引擎配置
         (agentEngine as? ApexAgentEngine)?.updateConfig(
             AgentConfig(mode = mode, thinkingLevel = _uiState.value.thinkingLevel)
         )
     }
-    
-    /**
-     * 设置思考深度
-     */
+
     fun setThinkingLevel(level: ThinkingLevel) {
         _uiState.update { it.copy(thinkingLevel = level) }
         (agentEngine as? ApexAgentEngine)?.updateConfig(
             AgentConfig(mode = _uiState.value.mode, thinkingLevel = level)
         )
     }
-    
-    /**
-     * 确认计划
-     * Resumes the suspended Plan-mode execution in [ApexAgentEngine].
-     */
+
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
     }
-    
-    /**
-     * 中止当前执行
-     */
+
     fun abort() {
         currentJob?.cancel()
         viewModelScope.launch { agentEngine.abort() }
     }
 
-    /**
-     * 开新会话：清空引擎历史 + 持久化记忆 + UI 消息列表。
-     */
     fun newChat() {
         currentJob?.cancel()
         viewModelScope.launch {
@@ -270,10 +253,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 设置模型原生思考强度（OpenAI reasoning_effort / DeepSeek reasoning）。
-     * 持久化到 SharedPreferences，下次 LlmModule 构建 LlmClient 时生效。
-     */
     fun setReasoningEffort(effort: ReasoningEffort) {
         context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
             .edit()

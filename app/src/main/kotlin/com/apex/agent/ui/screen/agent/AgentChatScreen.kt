@@ -1,24 +1,73 @@
-package com.apex.agent.ui.screen.chat
+package com.apex.agent.ui.screen.agent
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Api
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Puzzle
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -26,32 +75,34 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.engine.AgentMode
+import com.apex.agent.core.engine.ExecutionPlan
+import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
-import com.apex.agent.core.llm.ReasoningEffort
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(
-    viewModel: ChatViewModel = hiltViewModel()
+fun AgentChatScreen(
+    viewModel: AgentChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
+    var showPlusMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    
-    // 自动滚动到底部
+
+    // 自动滚动
     LaunchedEffect(uiState.messages.size, uiState.currentResponse) {
-        if (uiState.messages.isNotEmpty() || uiState.currentResponse.isNotEmpty()) {
-            listState.animateScrollToItem(
-                maxOf(0, uiState.messages.size)  // +1 for streaming message
-            )
-        }
+        val total = uiState.messages.size +
+            (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
+            (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
+            (if (uiState.currentToolCall != null) 1 else 0)
+        if (total > 0) listState.animateScrollToItem(total - 1)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        
-        // ═══ 顶部栏：模式切换 + 思考深度 + 新会话 + 历史深度 ═══
+
+        // ═══ 顶部模式栏 ═══
         Surface(
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
@@ -63,39 +114,26 @@ fun ChatScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 模式切换
-                SegmentedButtonRow {
-                    SegmentedButton(
-                        selected = uiState.mode == AgentMode.PLAN,
-                        onClick = { viewModel.setMode(AgentMode.PLAN) }
-                    ) { Text("Plan") }
-                    SegmentedButton(
-                        selected = uiState.mode == AgentMode.BUILD,
-                        onClick = { viewModel.setMode(AgentMode.BUILD) }
-                    ) { Text("Build") }
-                }
+                FilterChip(
+                    selected = uiState.mode == AgentMode.BUILD,
+                    onClick = { viewModel.setMode(AgentMode.BUILD) },
+                    label = { Text("Build") }
+                )
+                FilterChip(
+                    selected = uiState.mode == AgentMode.PLAN,
+                    onClick = { viewModel.setMode(AgentMode.PLAN) },
+                    label = { Text("Plan") }
+                )
 
-                // 思考深度选择（system prompt 层面）
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // 思考深度
                 ThinkingLevelSelector(
                     current = uiState.thinkingLevel,
                     onSelect = { viewModel.setThinkingLevel(it) }
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
-
-                // 历史深度徽章
-                if (uiState.historyDepth > 0) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = "记忆 ${uiState.historyDepth}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
 
                 // 新会话按钮
                 IconButton(
@@ -110,7 +148,7 @@ fun ChatScreen(
                 }
             }
         }
-        
+
         // ═══ 消息列表 ═══
         LazyColumn(
             state = listState,
@@ -122,31 +160,25 @@ fun ChatScreen(
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
             itemsIndexed(uiState.messages, key = { index, _ -> index }) { _, message ->
-                MessageItem(message)
+                AgentMessageItem(message)
             }
-            
+
             // 流式思考中
             if (uiState.currentThinking.isNotEmpty()) {
-                item {
-                    ThinkingBubble(text = uiState.currentThinking)
-                }
+                item { ThinkingBubble(uiState.currentThinking) }
             }
-            
+
             // 流式回复中
             if (uiState.currentResponse.isNotEmpty()) {
-                item {
-                    StreamingResponseBubble(text = uiState.currentResponse)
-                }
+                item { StreamingResponseBubble(uiState.currentResponse) }
             }
-            
+
             // 当前工具调用
             uiState.currentToolCall?.let { toolCall ->
-                item {
-                    RunningToolCallCard(toolCall)
-                }
+                item { RunningToolCallCard(toolCall) }
             }
-            
-            // Plan确认
+
+            // Plan 确认
             if (uiState.awaitingPlanConfirmation && uiState.plan != null) {
                 item {
                     PlanConfirmationCard(
@@ -157,33 +189,45 @@ fun ChatScreen(
                 }
             }
         }
-        
-        // ═══ 加载指示 ═══
-        AnimatedVisibility(visible = uiState.isLoading) {
+
+        // ═══ 加载条 ═══
+        AnimatedVisibility(uiState.isLoading) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.primary
             )
         }
-        
-        // ═══ 输入栏 ═══
+
+        // ═══ 输入栏（含加号）═══
         Surface(
             tonalElevation = 3.dp,
             shadowElevation = 8.dp
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                // 模型原生思考强度选择条（DeepSeek MAX / OpenAI o-series reasoning_effort）
+            Column(modifier = Modifier.padding(8.dp)) {
+                // 模型原生思考强度 chip
                 ReasoningEffortRow(
                     current = uiState.reasoningEffort,
                     onSelect = { viewModel.setReasoningEffort(it) }
                 )
-
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // [+] 加号按钮
+                    IconButton(
+                        onClick = { showPlusMenu = true },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "扩展能力",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    // 输入框
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
@@ -191,7 +235,7 @@ fun ChatScreen(
                         placeholder = {
                             Text(
                                 when (uiState.mode) {
-                                    AgentMode.PLAN -> "描述任务，Agent会先制定计划..."
+                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
                                     AgentMode.BUILD -> "输入指令..."
                                 }
                             )
@@ -204,11 +248,11 @@ fun ChatScreen(
                         )
                     )
 
-                    // 发送/停止按钮
+                    // 发送/停止
                     if (uiState.isLoading) {
                         FilledTonalIconButton(
                             onClick = { viewModel.abort() },
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = "停止")
                         }
@@ -221,7 +265,7 @@ fun ChatScreen(
                                 }
                             },
                             enabled = inputText.isNotBlank(),
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(44.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
                         }
@@ -230,25 +274,35 @@ fun ChatScreen(
             }
         }
     }
+
+    // ═══ 加号弹出菜单 ═══
+    if (showPlusMenu) {
+        PlusMenuBottomSheet(
+            onDismiss = { showPlusMenu = false }
+        )
+    }
 }
 
 // ═══ 消息组件 ═══
 
 @Composable
-private fun MessageItem(message: UiMessage) {
+private fun AgentMessageItem(message: AgentUiMessage) {
     when (message) {
-        is UiMessage.User -> UserBubble(message.text)
-        is UiMessage.Agent -> AgentBubble(message.text)
-        is UiMessage.ToolCall -> ToolCallCard(message)
-        is UiMessage.System -> SystemMessage(message.text)
-        is UiMessage.ThinkingMessage -> ThinkingBubble(message.thought)
-        is UiMessage.PlanMessage -> PlanCard(message.plan)
+        is AgentUiMessage.User -> UserBubble(message.text)
+        is AgentUiMessage.Agent -> AgentBubble(message.text)
+        is AgentUiMessage.ToolCall -> ToolCallCard(message)
+        is AgentUiMessage.System -> SystemMessage(message.text)
+        is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought)
+        is AgentUiMessage.PlanMessage -> PlanCard(message.plan)
     }
 }
 
 @Composable
 private fun UserBubble(text: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
             shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
@@ -288,11 +342,7 @@ private fun StreamingResponseBubble(text: String) {
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = text,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                // 打字光标动画
+                Text(text = text, color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     text = "▊",
                     color = MaterialTheme.colorScheme.primary,
@@ -335,7 +385,7 @@ private fun ThinkingBubble(text: String) {
 }
 
 @Composable
-private fun ToolCallCard(toolCall: UiMessage.ToolCall) {
+private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -346,9 +396,11 @@ private fun ToolCallCard(toolCall: UiMessage.ToolCall) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = if (toolCall.success == true) "✅" 
-                           else if (toolCall.success == false) "❌" 
-                           else "🔧",
+                    text = when {
+                        toolCall.success == true -> "✅"
+                        toolCall.success == false -> "❌"
+                        else -> "🔧"
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(
@@ -364,7 +416,6 @@ private fun ToolCallCard(toolCall: UiMessage.ToolCall) {
                     )
                 }
             }
-            
             toolCall.output?.let { output ->
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
@@ -386,11 +437,11 @@ private fun ToolCallCard(toolCall: UiMessage.ToolCall) {
 }
 
 @Composable
-private fun RunningToolCallCard(toolCall: ToolCallUi) {
+private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.elevatedCardColors(
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
         )
     ) {
@@ -430,7 +481,7 @@ private fun SystemMessage(text: String) {
 }
 
 @Composable
-private fun PlanCard(plan: com.apex.agent.core.engine.ExecutionPlan) {
+private fun PlanCard(plan: ExecutionPlan) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -453,33 +504,28 @@ private fun PlanCard(plan: com.apex.agent.core.engine.ExecutionPlan) {
 
 @Composable
 private fun PlanConfirmationCard(
-    plan: com.apex.agent.core.engine.ExecutionPlan,
+    plan: ExecutionPlan,
     onConfirm: () -> Unit,
     onReject: () -> Unit
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "确认执行此计划？",
-                style = MaterialTheme.typography.titleSmall
-            )
+            Text("确认执行此计划？", style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Button(onClick = onConfirm) { Text("执行") }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = onReject) { Text("取消") }
+                androidx.compose.material3.Button(onClick = onConfirm) { Text("执行") }
             }
         }
     }
 }
 
-// ═══ 模式/思考选择器 ═══
+// ═══ 思考深度选择器 ═══
 
 @Composable
 private fun ThinkingLevelSelector(
@@ -487,7 +533,7 @@ private fun ThinkingLevelSelector(
     onSelect: (ThinkingLevel) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    
+
     Box {
         AssistChip(
             onClick = { expanded = true },
@@ -496,7 +542,7 @@ private fun ThinkingLevelSelector(
                 Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         )
-        
+
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
@@ -519,19 +565,8 @@ private fun ThinkingLevelSelector(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SegmentedButtonRow(content: @Composable () -> Unit) {
-    // M3 SegmentedButton
-    SingleChoiceSegmentedButtonRow {
-        content()
-    }
-}
-
 /**
- * 模型原生思考强度选择条。
- * 显示为水平滚动的 FilterChip 行，覆盖 NONE/LOW/MEDIUM/HIGH/MAX 五档。
- * 选中后立即写入 SharedPreferences，下次 LlmClient 构建时生效。
+ * 模型原生思考强度选择条
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -560,6 +595,101 @@ private fun ReasoningEffortRow(
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null
             )
+        }
+    }
+}
+
+// ═══ 加号菜单 BottomSheet ═══
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlusMenuBottomSheet(
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                "扩展能力",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            PlusMenuItem(
+                icon = Icons.Default.Extension,
+                title = "Skill",
+                subtitle = "导入、下载或创建技能"
+            )
+            PlusMenuItem(
+                icon = Icons.Default.Api,
+                title = "MCP",
+                subtitle = "Model Context Protocol 服务"
+            )
+            PlusMenuItem(
+                icon = Icons.Default.Puzzle,
+                title = "插件",
+                subtitle = "已安装的插件APK管理"
+            )
+            PlusMenuItem(
+                icon = Icons.Default.Link,
+                title = "连接器",
+                subtitle = "外部服务连接（SSH/SFTP/API）"
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlusMenuItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Surface(
+        onClick = { /* TODO: 跳转到对应管理页 */ },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon, null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

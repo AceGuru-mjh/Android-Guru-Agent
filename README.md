@@ -332,3 +332,36 @@ The level is hot-swappable via `ChatViewModel.setThinkingLevel()` which calls `A
 ## Permissions
 
 The `app` manifest declares elevated permissions (foreground service of `specialUse`, system alert window, package usage stats, manage external storage, query all packages, etc.). End users will need to grant these on-device — Shizuku is required for the privileged shell operations when Root is unavailable.
+
+### Privilege execution chain (Root → Shizuku → Shell)
+
+`PrivilegeDetector.executeShell(command)` now routes through **three** priority levels, fixing the previous gap where Shizuku was declared as a dependency but never actually wired into the execution path:
+
+| Priority | Channel | Mechanism | Capability |
+|----------|---------|-----------|------------|
+| 1 (highest) | **Root** | `Runtime.exec("su -c " + command)` | Full system access: `/system`, `/data`, mount, SELinux, iptables, ptrace |
+| 2 | **Shizuku** | `Shizuku.newProcess(arrayOf("sh","-c",command), null, null)` via `ShizukuCommandExecutor` | ADB-level (uid=2000): `pm install/uninstall`, `am start/stop`, `settings get/put`, `dumpsys`, `input tap/swipe/text`, `screencap`, `/sdcard` read-write, `getprop` |
+| 3 (fallback) | **Normal shell** | `Runtime.exec("sh -c " + command)` | Sandbox only — basic file ops in `/sdcard`, no system commands |
+
+Before this fix, the chain was Root → Shell (Shizuku was completely skipped). Now Shizuku is the middle tier, so devices without Root can still execute privileged commands (`pm list packages`, `am start`, `dumpsys battery`, etc.) by installing the Shizuku app.
+
+### Shizuku integration components
+
+- **`ShizukuCommandExecutor`** (`platform/privilege/.../shizuku/`) — the actual executor. `isAvailable()` pings the binder, `hasPermission()` checks `Shizuku.checkSelfPermission()`, `execute(command)` runs via `Shizuku.newProcess()` with timeout. Returns `ShizukuExecResult(success, output, exitCode)`.
+- **`PrivilegeDetector`** — rewritten to call `ShizukuCommandExecutor.execute()` when `detectShizuku()` returns true. New `getPrivilegeLevel()` returns a `PrivilegeLevel` enum (`ROOT` / `SHIZUKU` / `NORMAL_SHELL`). The old `detectShizuku()` only checked if the Shizuku class was loadable (reflection); the new one checks both binder liveness and permission grant.
+- **`ApexApp`** — `onCreate()` registers `Shizuku.addBinderReceivedListenerSticky` / `addBinderDeadListener` / `addRequestPermissionResultListener` for logging + lifecycle awareness.
+- **`PermissionsScreen`** — the Shizuku card is now a dedicated `ShizukuPermissionCard` with three states:
+  - **Not running** → button "安装/启动" opens the Shizuku app (or its download page if not installed)
+  - **Running but not authorized** → button "授权" calls `Shizuku.requestPermission(1001)`
+  - **Authorized** → "已就绪" badge
+
+### Agent awareness (PrivilegeInfoProvider)
+
+`agent-engine` is a pure-JVM module and cannot import Android code (`PrivilegeDetector`). To let the engine's system prompt mention the current privilege level, a `PrivilegeInfoProvider` interface is defined in `agent-engine` and implemented as `AndroidPrivilegeInfoProvider` in the app module (wrapping `PrivilegeDetector.getPrivilegeLevel().name`). The engine injects it via constructor and `buildSystemPrompt()` now includes a `## Device Privilege Level: ROOT/SHIZUKU/NORMAL_SHELL` section with capability/limitation hints:
+
+- **ROOT** → "Full system access: /system, /data, mount, SELinux, iptables, etc."
+- **SHIZUKU** → "You CAN: pm install/uninstall, am start/stop, settings put/get, dumpsys, input..., screencap, /sdcard. You CANNOT: modify /system, access other apps' /data/data, mount, iptables, SELinux."
+- **NORMAL_SHELL** → "Limited to /sdcard and your sandbox. Suggest the user install Shizuku (https://shizuku.rikka.app/)."
+
+This lets the agent proactively suggest installing Shizuku when the user asks for a privileged operation that the normal shell can't do.
+

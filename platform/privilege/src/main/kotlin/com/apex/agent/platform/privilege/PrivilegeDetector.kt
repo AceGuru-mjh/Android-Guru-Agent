@@ -1,16 +1,23 @@
 package com.apex.agent.platform.privilege
 
+import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * 权限检测器：检测当前设备有哪些权限可用
+ * 权限检测与执行器
+ *
+ * 执行优先级：Root > Shizuku > 普通Shell
+ *
+ * - Root:    su -c command（全能）
+ * - Shizuku: Shizuku.newProcess()（ADB级，uid=2000）
+ * - Shell:   sh -c command（最弱，只能访问自己sandbox）
  */
 object PrivilegeDetector {
 
     /**
-     * 检测Root
-     * 检查su二进制文件是否存在
+     * 检测Root是否可用
      */
     fun detectRoot(): Boolean {
         val suPaths = listOf(
@@ -19,13 +26,11 @@ object PrivilegeDetector {
             "/sbin/su",
             "/su/bin/su",
             "/magisk/.core/bin/su",
-            "/data/adb/ksu/bin/su"  // KernelSU
+            "/data/adb/ksu/bin/su",  // KernelSU
+            "/data/adb/ap/bin/su"    // APatch
         )
-
-        // 方法1：检查文件存在
         if (suPaths.any { File(it).exists() }) return true
 
-        // 方法2：尝试执行su（带超时，避免su未响应挂起）
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("su", "--version"))
             val completed = process.waitFor(3, TimeUnit.SECONDS)
@@ -40,38 +45,75 @@ object PrivilegeDetector {
     }
 
     /**
-     * 检测Shizuku
-     * 通过反射检查Shizuku是否运行
+     * 检测Shizuku是否可用且已授权
+     *
+     * 注意：旧实现只检查 Shizuku 类是否能加载（反射），
+     * 这只能说明依赖在 classpath 中，不能说明服务真的运行了。
+     * 现在用 ShizukuCommandExecutor.isAvailable() + hasPermission() 做真实检测。
      */
     fun detectShizuku(): Boolean {
         return try {
-            val clazz = Class.forName("rikka.shizuku.Shizuku")
-            val method = clazz.getMethod("isPreV11")
-            // 如果类存在，说明Shizuku依赖已引入
-            // 实际可用性需要运行时检查
-            true
-        } catch (e: ClassNotFoundException) {
+            ShizukuCommandExecutor.isAvailable() && ShizukuCommandExecutor.hasPermission()
+        } catch (e: Exception) {
             false
         }
     }
 
     /**
-     * 执行shell命令（自动选择Root或普通shell）
-     * @param command 要执行的命令
-     * @param timeoutMs 超时毫秒数，超时后强制销毁进程
+     * 获取当前最高可用权限等级
      */
-    fun executeShell(command: String, timeoutMs: Long = 30000): ShellExecResult {
-        val hasRoot = detectRoot()
-
-        return if (hasRoot) {
-            executeWithTimeout(arrayOf("su", "-c", command), timeoutMs, "root")
-        } else {
-            executeWithTimeout(arrayOf("sh", "-c", command), timeoutMs, "shell")
+    fun getPrivilegeLevel(): PrivilegeLevel {
+        return when {
+            detectRoot() -> PrivilegeLevel.ROOT
+            detectShizuku() -> PrivilegeLevel.SHIZUKU
+            else -> PrivilegeLevel.NORMAL_SHELL
         }
     }
 
     /**
-     * 统一的带超时执行方法
+     * 执行Shell命令（自动选择最优权限通道）
+     *
+     * 执行链：
+     * 1. 有Root → su -c command
+     * 2. 有Shizuku → Shizuku.newProcess(command)  ← 之前缺失的环节
+     * 3. 都没有 → sh -c command（普通shell，能力有限）
+     */
+    fun executeShell(command: String, timeoutMs: Long = 30000): ShellExecResult {
+        // 优先级1: Root
+        if (detectRoot()) {
+            return executeWithTimeout(arrayOf("su", "-c", command), timeoutMs, "root")
+        }
+
+        // 优先级2: Shizuku ← 关键修复
+        if (detectShizuku()) {
+            return executeViaShizuku(command, timeoutMs)
+        }
+
+        // 优先级3: 普通Shell（能力最弱）
+        return executeWithTimeout(arrayOf("sh", "-c", command), timeoutMs, "shell")
+    }
+
+    /**
+     * 通过Shizuku执行命令
+     */
+    private fun executeViaShizuku(command: String, timeoutMs: Long): ShellExecResult {
+        return try {
+            val result = runBlocking {
+                ShizukuCommandExecutor.execute(command, timeoutMs)
+            }
+            ShellExecResult(
+                success = result.success,
+                output = result.output,
+                exitCode = result.exitCode,
+                via = "shizuku"
+            )
+        } catch (e: Exception) {
+            ShellExecResult(false, "Shizuku exec failed: ${e.message}", -1, "shizuku")
+        }
+    }
+
+    /**
+     * 带超时的进程执行（Root / 普通Shell 共用）
      */
     private fun executeWithTimeout(
         cmdArray: Array<String>,
@@ -109,9 +151,18 @@ object PrivilegeDetector {
     }
 }
 
+/**
+ * 权限等级
+ */
+enum class PrivilegeLevel {
+    ROOT,           // su权限，全能
+    SHIZUKU,        // ADB级，shell用户(uid=2000)
+    NORMAL_SHELL    // 普通shell，只能访问自己sandbox
+}
+
 data class ShellExecResult(
     val success: Boolean,
     val output: String,
     val exitCode: Int,
-    val via: String  // "root" | "shell" | "shizuku"
+    val via: String  // "root" | "shizuku" | "shell"
 )

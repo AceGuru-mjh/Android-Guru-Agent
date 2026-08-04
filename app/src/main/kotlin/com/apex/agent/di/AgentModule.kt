@@ -22,6 +22,12 @@ object AgentModule {
 
     @Provides
     @Singleton
+    fun providePrivilegeInfoProvider(): PrivilegeInfoProvider {
+        return AndroidPrivilegeInfoProvider()
+    }
+
+    @Provides
+    @Singleton
     fun provideAgentConfig(): AgentConfig {
         return AgentConfig(
             mode = AgentMode.BUILD,
@@ -64,7 +70,8 @@ object AgentModule {
         config: AgentConfig,
         memory: ConversationMemory,
         contextCompressor: ContextCompressor,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        privilegeInfoProvider: PrivilegeInfoProvider
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -73,7 +80,8 @@ object AgentModule {
             config = config,
             memory = memory,
             contextCompressor = contextCompressor,
-            skillRegistry = skillRegistry
+            skillRegistry = skillRegistry,
+            privilegeInfoProvider = privilegeInfoProvider
         )
     }
 }

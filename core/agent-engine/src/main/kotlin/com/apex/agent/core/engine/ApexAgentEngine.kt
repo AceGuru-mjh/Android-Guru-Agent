@@ -405,18 +405,16 @@ class ApexAgentEngine(
             }
             appendLine()
             appendLine("## Available Tools (${toolRegistry.getAllTools().size})")
-            appendLine("- Shell: shell_execute")
-            appendLine("- Files: read_file, write_file, edit_file, list_files, delete_file, search_files, glob_files, copy_move_file")
-            appendLine("- Web: web_fetch, web_search, http_request, download_file")
-            appendLine("- Memory: memorize, recall, forget")
-            appendLine("- Apps: app_list, app_launch, app_install, app_uninstall, app_force_stop, app_info")
-            appendLine("- System: get_device_info, get_set_settings, control_media, clipboard, get_time, logcat")
-            appendLine("- UI: ui_tap, ui_swipe, ui_dump, screenshot, input_text")
-            appendLine("- Utility: calculate, text_transform")
-            appendLine("- Sensors: get_location, notification_read")
-            appendLine("- Skills: skill_search, skill_install, skill_create, skill_list, skill_uninstall")
-            appendLine("- MCP: mcp_connect, mcp_list, mcp_call")
-            appendLine("- Terminal: terminal_create, terminal_exec, terminal_send, terminal_read, terminal_list, terminal_close")
+            // 动态读取当前注册的工具，不硬编码
+            toolRegistry.getAllTools().forEach { tool ->
+                val firstLine = tool.description
+                    .lineSequence()
+                    .firstOrNull()
+                    ?.trim()
+                    ?.take(160)
+                    ?: ""
+                appendLine("- ${tool.id}: ${tool.name} — $firstLine")
+            }
 
             // Skill prompt 注入
             val skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()

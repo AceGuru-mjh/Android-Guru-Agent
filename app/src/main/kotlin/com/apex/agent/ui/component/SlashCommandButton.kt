@@ -8,14 +8,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,15 +18,8 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Puzzle
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -56,7 +42,6 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    // 正方形边框按钮
     Box(
         modifier = modifier
             .size(36.dp)
@@ -80,7 +65,6 @@ fun SlashCommandButton(
         )
     }
 
-    // 级联菜单弹窗
     if (showMenu) {
         SlashCommandPopup(
             onDismiss = { showMenu = false },
@@ -92,17 +76,11 @@ fun SlashCommandButton(
     }
 }
 
-/**
- * 级联菜单弹窗
- * 一级：Skills / MCP / 连接器 / 插件（带右箭头）
- * 二级：点击后箭头旋转 90°，展开子项列表
- */
 @Composable
 private fun SlashCommandPopup(
     onDismiss: () -> Unit,
     onCommandSelected: (String) -> Unit
 ) {
-    // 菜单数据
     val menuData = remember { buildSlashMenuData() }
     var expandedCategory by remember { mutableStateOf<String?>(null) }
 
@@ -129,15 +107,13 @@ private fun SlashCommandPopup(
                 )
 
                 menuData.forEach { category ->
-                    SlashMenuCategory(
+                    SlashMenuCategoryItem(
                         category = category,
                         isExpanded = expandedCategory == category.id,
                         onToggle = {
                             expandedCategory = if (expandedCategory == category.id) null else category.id
                         },
-                        onItemClick = { command ->
-                            onCommandSelected(command)
-                        }
+                        onItemClick = { command -> onCommandSelected(command) }
                     )
                 }
             }
@@ -145,17 +121,13 @@ private fun SlashCommandPopup(
     }
 }
 
-/**
- * 一级菜单项（可展开的类别）
- */
 @Composable
-private fun SlashMenuCategory(
+private fun SlashMenuCategoryItem(
     category: SlashMenuCategoryData,
     isExpanded: Boolean,
     onToggle: () -> Unit,
     onItemClick: (String) -> Unit
 ) {
-    // 箭头旋转动画：> → v（90°）
     val arrowRotation by animateFloatAsState(
         targetValue = if (isExpanded) 90f else 0f,
         animationSpec = tween(durationMillis = 150),
@@ -163,39 +135,31 @@ private fun SlashMenuCategory(
     )
 
     Column {
-        // 一级项
         Surface(
             onClick = onToggle,
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
             color = if (isExpanded)
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            else
-                Color.Transparent
+            else Color.Transparent
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 类别图标
                 Icon(
                     imageVector = category.icon,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary
                 )
-
                 Spacer(modifier = Modifier.width(10.dp))
-
-                // 类别名称
                 Text(
                     text = category.title,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
                 )
-
-                // 右箭头（旋转为下箭头）
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowRight,
                     contentDescription = null,
@@ -207,15 +171,12 @@ private fun SlashMenuCategory(
             }
         }
 
-        // 二级子菜单（手风琴展开）
         AnimatedVisibility(
             visible = isExpanded,
             enter = expandVertically(animationSpec = tween(150)),
             exit = shrinkVertically(animationSpec = tween(150))
         ) {
-            Column(
-                modifier = Modifier.padding(start = 20.dp)
-            ) {
+            Column(modifier = Modifier.padding(start = 20.dp)) {
                 category.items.forEach { item ->
                     Surface(
                         onClick = { onItemClick(item.command) },
@@ -243,8 +204,6 @@ private fun SlashMenuCategory(
     }
 }
 
-// ═══ 数据模型 ═══
-
 data class SlashMenuCategoryData(
     val id: String,
     val title: String,
@@ -254,56 +213,42 @@ data class SlashMenuCategoryData(
 
 data class SlashMenuItemData(
     val label: String,
-    val command: String  // 填入输入框的指令
+    val command: String
 )
 
-/**
- * 构建菜单数据
- * 后续可从 SkillRegistry / McpManager / PluginManager 动态加载
- */
-private fun buildSlashMenuData(): List<SlashMenuCategoryData> {
-    return listOf(
-        SlashMenuCategoryData(
-            id = "skills",
-            title = "Skills",
-            icon = Icons.Default.Extension,
-            items = listOf(
-                SlashMenuItemData("代码解释器", "/skill:code_interpreter "),
-                SlashMenuItemData("网页搜索", "/skill:web_search "),
-                SlashMenuItemData("图表生成", "/skill:chart_generator "),
-                SlashMenuItemData("文件整理", "/skill:file_organizer "),
-                SlashMenuItemData("数据爬取", "/skill:web_scraper ")
-            )
-        ),
-        SlashMenuCategoryData(
-            id = "mcp",
-            title = "MCP",
-            icon = Icons.Default.Api,
-            items = listOf(
-                SlashMenuItemData("GitHub MCP", "/mcp:github "),
-                SlashMenuItemData("PostgreSQL MCP", "/mcp:postgres "),
-                SlashMenuItemData("Filesystem MCP", "/mcp:filesystem ")
-            )
-        ),
-        SlashMenuCategoryData(
-            id = "connectors",
-            title = "连接器",
-            icon = Icons.Default.Link,
-            items = listOf(
-                SlashMenuItemData("Google Drive", "/connector:google_drive "),
-                SlashMenuItemData("Notion", "/connector:notion "),
-                SlashMenuItemData("SSH", "/connector:ssh ")
-            )
-        ),
-        SlashMenuCategoryData(
-            id = "plugins",
-            title = "插件",
-            icon = Icons.Default.Puzzle,
-            items = listOf(
-                SlashMenuItemData("PDF 阅读器", "/plugin:pdf_reader "),
-                SlashMenuItemData("实时翻译", "/plugin:translator "),
-                SlashMenuItemData("工作流引擎", "/plugin:workflow ")
-            )
+private fun buildSlashMenuData(): List<SlashMenuCategoryData> = listOf(
+    SlashMenuCategoryData(
+        id = "skills", title = "Skills", icon = Icons.Default.Extension,
+        items = listOf(
+            SlashMenuItemData("代码解释器", "/skill:code_interpreter "),
+            SlashMenuItemData("网页搜索", "/skill:web_search "),
+            SlashMenuItemData("图表生成", "/skill:chart_generator "),
+            SlashMenuItemData("文件整理", "/skill:file_organizer "),
+            SlashMenuItemData("数据爬取", "/skill:web_scraper ")
+        )
+    ),
+    SlashMenuCategoryData(
+        id = "mcp", title = "MCP", icon = Icons.Default.Api,
+        items = listOf(
+            SlashMenuItemData("GitHub MCP", "/mcp:github "),
+            SlashMenuItemData("PostgreSQL MCP", "/mcp:postgres "),
+            SlashMenuItemData("Filesystem MCP", "/mcp:filesystem ")
+        )
+    ),
+    SlashMenuCategoryData(
+        id = "connectors", title = "连接器", icon = Icons.Default.Link,
+        items = listOf(
+            SlashMenuItemData("Google Drive", "/connector:google_drive "),
+            SlashMenuItemData("Notion", "/connector:notion "),
+            SlashMenuItemData("SSH", "/connector:ssh ")
+        )
+    ),
+    SlashMenuCategoryData(
+        id = "plugins", title = "插件", icon = Icons.Default.Puzzle,
+        items = listOf(
+            SlashMenuItemData("PDF 阅读器", "/plugin:pdf_reader "),
+            SlashMenuItemData("实时翻译", "/plugin:translator "),
+            SlashMenuItemData("工作流引擎", "/plugin:workflow ")
         )
     )
-}
+)

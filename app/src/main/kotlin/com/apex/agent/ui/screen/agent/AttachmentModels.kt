@@ -2,32 +2,23 @@ package com.apex.agent.ui.screen.agent
 
 import android.net.Uri
 
-/**
- * 附件类型
- */
-enum class AttachmentType {
-    FILE,       // 通用文件
-    IMAGE,      // 图片
-    AUDIO,      // 音频
-    VIDEO,      // 视频
-    ARCHIVE     // 压缩包
-}
+enum class AttachmentType { FILE, IMAGE, AUDIO, VIDEO, ARCHIVE }
+enum class UploadStatus { UPLOADING, SUCCESS, ERROR }
 
-/**
- * 附件数据（选中后、发送前）
- */
 data class Attachment(
     val uri: Uri,
     val name: String,
     val mimeType: String,
     val sizeBytes: Long,
-    val type: AttachmentType
+    val type: AttachmentType,
+    val uploadProgress: Float = 1.0f,
+    val status: UploadStatus = UploadStatus.SUCCESS
 ) {
     val sizeDisplay: String
         get() = when {
             sizeBytes < 1024 -> "${sizeBytes}B"
-            sizeBytes < 1024 * 1024 -> "${sizeBytes / 1024}KB"
-            else -> "${sizeBytes / (1024 * 1024)}MB"
+            sizeBytes < 1048576 -> "${sizeBytes / 1024}KB"
+            else -> "${sizeBytes / 1048576}MB"
         }
 
     val icon: String
@@ -40,9 +31,6 @@ data class Attachment(
         }
 }
 
-/**
- * 消息中的附件（发送后存储在消息历史中）
- */
 data class MessageAttachment(
     val name: String,
     val mimeType: String,
@@ -54,7 +42,7 @@ data class MessageAttachment(
     val sizeDisplay: String
         get() = when {
             sizeBytes < 1024 -> "${sizeBytes}B"
-            sizeBytes < 1024 * 1024 -> "${sizeBytes / 1024}KB"
-            else -> "${sizeBytes / (1024 * 1024)}MB"
+            sizeBytes < 1048576 -> "${sizeBytes / 1024}KB"
+            else -> "${sizeBytes / 1048576}MB"
         }
 }

@@ -75,7 +75,9 @@ object ToolModule {
     @Singleton
     fun provideToolRegistry(
         @ApplicationContext context: Context,
-        httpClient: OkHttpClient
+        httpClient: OkHttpClient,
+        githubTokenManager: com.apex.agent.github.GithubTokenManager,
+        githubApiService: com.apex.agent.github.GithubApiService
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -132,6 +134,22 @@ object ToolModule {
 
         tools.forEach { tool ->
             registry.register(SafeAgentTool(tool))
+        }
+
+        // ═══ GitHub 工具（7个，仅在已连接时注册）═══
+        if (githubTokenManager.isConnected()) {
+            val githubTools = listOf(
+                com.apex.agent.github.tools.GithubGetUserTool(githubApiService),
+                com.apex.agent.github.tools.GithubListReposTool(githubApiService),
+                com.apex.agent.github.tools.GithubReadFileTool(githubApiService),
+                com.apex.agent.github.tools.GithubWriteFileTool(githubApiService),
+                com.apex.agent.github.tools.GithubCreateIssueTool(githubApiService),
+                com.apex.agent.github.tools.GithubListIssuesTool(githubApiService),
+                com.apex.agent.github.tools.GithubSearchCodeTool(githubApiService)
+            )
+            githubTools.forEach { tool ->
+                registry.register(SafeAgentTool(tool))
+            }
         }
 
         android.util.Log.d("ToolModule",

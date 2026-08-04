@@ -24,10 +24,16 @@ interface LlmClient {
 
 sealed interface LlmMessage {
     data class System(val content: String) : LlmMessage
-    data class User(val content: String) : LlmMessage
+    data class User(val content: String, val images: List<ImageContent> = emptyList()) : LlmMessage
     data class Assistant(val content: String, val toolCalls: List<ToolCall> = emptyList()) : LlmMessage
     data class ToolResult(val toolCallId: String, val content: String) : LlmMessage
 }
+
+data class ImageContent(
+    val base64Data: String,
+    val mimeType: String = "image/jpeg",
+    val detail: String = "auto"
+)
 
 data class LlmResponse(
     val content: String?,

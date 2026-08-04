@@ -78,4 +78,7 @@ dependencies {
 
     // Coil (image loading)
     implementation(libs.coil.compose)
+
+    // Security (encrypted SharedPreferences for GitHub token)
+    implementation(libs.security.crypto)
 }

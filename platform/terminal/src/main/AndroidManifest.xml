@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 终端模块无需额外权限，PTY通过forkpty()在进程内创建 -->
+</manifest>

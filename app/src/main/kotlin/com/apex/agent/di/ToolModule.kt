@@ -55,7 +55,8 @@ object ToolModule {
         httpClient: OkHttpClient,
         memoryStore: FileMemoryStore,
         skillRegistry: SkillRegistry,
-        mcpManager: com.apex.agent.core.tools.mcp.McpManager
+        mcpManager: com.apex.agent.core.tools.mcp.McpManager,
+        terminalManager: com.apex.agent.platform.terminal.TerminalManager
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -136,6 +137,14 @@ object ToolModule {
         registry.register(McpCallTool(mcpManager))
         registry.register(McpListTool(mcpManager))
         registry.register(McpConnectTool(mcpManager))
+
+        // ═══ 44-49. Terminal (PTY) ═══
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalCreateTool(terminalManager))
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalExecTool(terminalManager))
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalSendTool(terminalManager))
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalReadTool(terminalManager))
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalListTool(terminalManager))
+        registry.register(com.apex.agent.platform.terminal.tools.TerminalCloseTool(terminalManager))
 
         // ═══ 动态：已安装 Skill 提供的工具 ═══
         // 注意：这里需要 toolExecutor 来构造 SkillToolAdapter，但 toolExecutor 依赖

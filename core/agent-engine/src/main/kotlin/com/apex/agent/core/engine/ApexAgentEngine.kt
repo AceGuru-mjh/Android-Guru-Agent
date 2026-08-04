@@ -416,6 +416,7 @@ class ApexAgentEngine(
             appendLine("- Sensors: get_location, notification_read")
             appendLine("- Skills: skill_search, skill_install, skill_create, skill_list, skill_uninstall")
             appendLine("- MCP: mcp_connect, mcp_list, mcp_call")
+            appendLine("- Terminal: terminal_create, terminal_exec, terminal_send, terminal_read, terminal_list, terminal_close")
 
             // Skill prompt 注入
             val skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()

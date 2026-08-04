@@ -43,6 +43,7 @@ dependencies {
     implementation(project(":core:tool-registry"))
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
+    implementation(project(":platform:terminal"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose

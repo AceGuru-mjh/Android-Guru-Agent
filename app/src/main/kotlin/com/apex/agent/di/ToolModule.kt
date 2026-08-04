@@ -54,7 +54,8 @@ object ToolModule {
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
         memoryStore: FileMemoryStore,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        mcpManager: com.apex.agent.core.tools.mcp.McpManager
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -130,6 +131,11 @@ object ToolModule {
         registry.register(SkillCreateTool(skillRegistry))
         registry.register(SkillListTool(skillRegistry))
         registry.register(SkillUninstallTool(skillRegistry))
+
+        // ═══ 41-43. MCP 管理 ═══
+        registry.register(McpCallTool(mcpManager))
+        registry.register(McpListTool(mcpManager))
+        registry.register(McpConnectTool(mcpManager))
 
         // ═══ 动态：已安装 Skill 提供的工具 ═══
         // 注意：这里需要 toolExecutor 来构造 SkillToolAdapter，但 toolExecutor 依赖

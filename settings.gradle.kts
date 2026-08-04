@@ -28,6 +28,7 @@ include(":core:tool-registry")
 // Android平台层
 include(":platform:privilege")
 include(":platform:persistence")
+include(":platform:terminal")
 
 // 插件SDK
 include(":plugin-sdk:plugin-api")

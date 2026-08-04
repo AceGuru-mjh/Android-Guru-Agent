@@ -35,7 +35,11 @@ data class AgentChatUiState(
 )
 
 sealed interface AgentUiMessage {
-    data class User(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
+    data class User(
+        val text: String,
+        val attachments: List<MessageAttachment> = emptyList(),
+        val timestamp: Long = System.currentTimeMillis()
+    ) : AgentUiMessage
     data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
@@ -65,13 +69,17 @@ class AgentChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
 
+    private val _attachments = MutableStateFlow<List<Attachment>>(emptyList())
+    val attachments: StateFlow<List<Attachment>> = _attachments.asStateFlow()
+
     private var currentJob: Job? = null
 
     /**
      * 发送消息
      */
     fun sendMessage(text: String) {
-        if (text.isBlank() || _uiState.value.isLoading) return
+        if (text.isBlank() && _attachments.value.isEmpty()) return
+        if (_uiState.value.isLoading) return
 
         // 检查是否是斜杠指令
         if (text.startsWith("/")) {
@@ -79,17 +87,43 @@ class AgentChatViewModel @Inject constructor(
             return
         }
 
+        // 收集当前附件并清空
+        val currentAttachments = _attachments.value.toList()
+        _attachments.value = emptyList()
+
+        // 将附件复制到应用沙箱（持久化）
+        val persistedAttachments = currentAttachments.map { att ->
+            val localPath = copyToSandbox(att.uri, att.name)
+            MessageAttachment(
+                name = att.name,
+                mimeType = att.mimeType,
+                sizeBytes = att.sizeBytes,
+                type = att.type,
+                localPath = localPath,
+                thumbnailUri = if (att.type == AttachmentType.IMAGE) att.uri else null
+            )
+        }
+
         _uiState.update { state ->
             state.copy(
-                messages = state.messages + AgentUiMessage.User(text),
+                messages = state.messages + AgentUiMessage.User(
+                    text = text,
+                    attachments = persistedAttachments
+                ),
                 isLoading = true,
                 currentThinking = "",
                 currentResponse = ""
             )
         }
 
+        // 将附件路径告知 Agent
+        val attachmentContext = if (persistedAttachments.isNotEmpty()) {
+            val fileList = persistedAttachments.joinToString("\n") { "  - ${it.localPath} (${it.name})" }
+            "[用户附加了 ${persistedAttachments.size} 个文件]\n$fileList\n\n用户消息: $text"
+        } else text
+
         currentJob = viewModelScope.launch {
-            agentEngine.execute(text).collect { event ->
+            agentEngine.execute(attachmentContext).collect { event ->
                 handleEvent(event)
             }
         }
@@ -275,19 +309,24 @@ class AgentChatViewModel @Inject constructor(
      * 处理文件附件
      */
     fun attachFile(uri: Uri) {
-        val fileName = getFileNameFromUri(uri) ?: "file_${System.currentTimeMillis()}"
-        _uiState.update { s ->
-            s.copy(messages = s.messages + AgentUiMessage.System("📎 已附加文件: $fileName"))
-        }
+        val info = getFileMetadata(uri)
+        _attachments.update { it + info }
     }
 
     /**
      * 处理图片附件
      */
     fun attachImage(uri: Uri) {
-        val fileName = getFileNameFromUri(uri) ?: "image_${System.currentTimeMillis()}"
-        _uiState.update { s ->
-            s.copy(messages = s.messages + AgentUiMessage.System("🖼️ 已附加图片: $fileName"))
+        val info = getFileMetadata(uri).copy(type = AttachmentType.IMAGE)
+        _attachments.update { it + info }
+    }
+
+    /**
+     * 移除附件
+     */
+    fun removeAttachment(index: Int) {
+        _attachments.update { list ->
+            list.filterIndexed { i, _ -> i != index }
         }
     }
 
@@ -314,12 +353,43 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    private fun getFileNameFromUri(uri: Uri): String? {
-        return try {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
+    private fun getFileMetadata(uri: Uri): Attachment {
+        val resolver = context.contentResolver
+        var name = "unknown_file"
+        var mimeType = "application/octet-stream"
+        var size = 0L
+
+        resolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: name
+                if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
             }
-        } catch (e: Exception) { null }
+        }
+        mimeType = resolver.getType(uri) ?: mimeType
+
+        val type = when {
+            mimeType.startsWith("image/") -> AttachmentType.IMAGE
+            mimeType.startsWith("audio/") -> AttachmentType.AUDIO
+            mimeType.startsWith("video/") -> AttachmentType.VIDEO
+            mimeType.contains("zip") || mimeType.contains("tar") || mimeType.contains("rar") -> AttachmentType.ARCHIVE
+            else -> AttachmentType.FILE
+        }
+
+        return Attachment(uri, name, mimeType, size, type)
+    }
+
+    private fun copyToSandbox(uri: Uri, fileName: String): String {
+        val targetDir = java.io.File(context.filesDir, "attachments")
+        targetDir.mkdirs()
+        val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$fileName")
+
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            targetFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        return targetFile.absolutePath
     }
 }

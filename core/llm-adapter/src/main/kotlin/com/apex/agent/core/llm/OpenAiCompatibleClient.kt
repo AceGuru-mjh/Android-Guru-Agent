@@ -3,6 +3,8 @@ package com.apex.agent.core.llm
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * OpenAI兼容API客户端
@@ -28,10 +30,7 @@ class OpenAiCompatibleClient(
             .url("$baseUrl/chat/completions")
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
-            .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("application/json"),
-                requestBody.toString()
-            ))
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
         
         val response = httpClient.newCall(request).execute()
@@ -52,10 +51,7 @@ class OpenAiCompatibleClient(
             .url("$baseUrl/chat/completions")
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("Content-Type", "application/json")
-            .post(okhttp3.RequestBody.create(
-                okhttp3.MediaType.parse("application/json"),
-                requestBody.toString()
-            ))
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
         
         val response = httpClient.newCall(request).execute()

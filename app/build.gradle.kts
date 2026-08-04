@@ -75,4 +75,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.okhttp)
     implementation(libs.work.runtime)
+
+    // Coil (image loading)
+    implementation(libs.coil.compose)
 }

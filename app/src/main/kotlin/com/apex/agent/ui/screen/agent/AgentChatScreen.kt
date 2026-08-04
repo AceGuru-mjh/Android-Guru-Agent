@@ -79,6 +79,8 @@ import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.ui.component.AttachButton
+import com.apex.agent.ui.component.AttachmentPreviewBar
+import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
 import kotlinx.coroutines.launch
 
@@ -205,6 +207,13 @@ fun AgentChatScreen(
             shadowElevation = 8.dp
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
+                // ═══ 附件预览条（发送前）═══
+                val attachments by viewModel.attachments.collectAsStateWithLifecycle()
+                AttachmentPreviewBar(
+                    attachments = attachments,
+                    onRemove = { index -> viewModel.removeAttachment(index) }
+                )
+
                 // 模型原生思考强度 chip
                 ReasoningEffortRow(
                     current = uiState.reasoningEffort,
@@ -289,7 +298,7 @@ fun AgentChatScreen(
 @Composable
 private fun AgentMessageItem(message: AgentUiMessage) {
     when (message) {
-        is AgentUiMessage.User -> UserBubble(message.text)
+        is AgentUiMessage.User -> UserBubble(message)
         is AgentUiMessage.Agent -> AgentBubble(message.text)
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
@@ -299,7 +308,7 @@ private fun AgentMessageItem(message: AgentUiMessage) {
 }
 
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(message: AgentUiMessage.User) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -309,11 +318,23 @@ private fun UserBubble(text: String) {
             shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
             modifier = Modifier.widthIn(max = 300.dp)
         ) {
-            Text(
-                text = text,
-                modifier = Modifier.padding(12.dp),
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            Column(modifier = Modifier.padding(12.dp)) {
+                // 附件展示（如果有）
+                if (message.attachments.isNotEmpty()) {
+                    MessageAttachmentList(
+                        attachments = message.attachments,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+
+                // 文本内容
+                if (message.text.isNotBlank()) {
+                    Text(
+                        text = message.text,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
     }
 }

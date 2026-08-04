@@ -3,7 +3,6 @@ package com.apex.agent.core.tools.builtin
 import com.apex.agent.core.tools.AgentTool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.content
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive

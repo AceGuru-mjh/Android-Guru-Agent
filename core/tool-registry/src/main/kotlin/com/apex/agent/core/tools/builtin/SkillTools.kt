@@ -226,7 +226,7 @@ class SkillInstallTool(
     }
 
     companion object {
-        const val WEB_SCRAPER_TEMPLATE = """
+        val WEB_SCRAPER_TEMPLATE = """
 {
   "schema": "apex-skill-v1",
   "id": "web_scraper",
@@ -252,7 +252,7 @@ class SkillInstallTool(
 }
 """.trimIndent()
 
-        const val FILE_ORGANIZER_TEMPLATE = """
+        val FILE_ORGANIZER_TEMPLATE = """
 {
   "schema": "apex-skill-v1",
   "id": "file_organizer",
@@ -275,7 +275,7 @@ class SkillInstallTool(
 }
 """.trimIndent()
 
-        const val CODE_RUNNER_TEMPLATE = """
+        val CODE_RUNNER_TEMPLATE = """
 {
   "schema": "apex-skill-v1",
   "id": "code_runner",
@@ -300,7 +300,7 @@ class SkillInstallTool(
 }
 """.trimIndent()
 
-        const val DATA_ANALYZER_TEMPLATE = """
+        val DATA_ANALYZER_TEMPLATE = """
 {
   "schema": "apex-skill-v1",
   "id": "data_analyzer",

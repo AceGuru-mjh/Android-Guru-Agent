@@ -6,7 +6,13 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.*
-import okhttp3.*
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.coroutines.resume
@@ -84,10 +90,7 @@ class StreamingOpenAiClient(
         val builder = Request.Builder()
             .url("${config.baseUrl.trimEnd('/')}/chat/completions")
             .addHeader("Content-Type", "application/json")
-            .post(RequestBody.create(
-                MediaType.parse("application/json; charset=utf-8"),
-                body.toString()
-            ))
+            .post(body.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
         
         // API Key（某些API用Bearer，某些用自定义header）
         if (config.apiKey.isNotBlank()) {
@@ -259,7 +262,7 @@ class StreamingOpenAiClient(
                 }
             }
         })
-        invokeOnCancellation { cancel() }
+        cont.invokeOnCancellation { cancel() }
     }
 }
 

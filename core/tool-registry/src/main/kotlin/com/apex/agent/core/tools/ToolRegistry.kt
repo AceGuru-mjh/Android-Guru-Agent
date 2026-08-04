@@ -65,14 +65,28 @@ class DefaultToolRegistry : ToolRegistry {
 class DefaultToolExecutor(
     private val registry: ToolRegistry
 ) : ToolExecutor {
+
     override suspend fun execute(toolId: String, arguments: String): String {
         val tool = registry.getTool(toolId)
-            ?: return "Error: Tool '$toolId' not found"
-        
+
+        if (tool == null) {
+            val available = registry.getAllTools()
+                .joinToString(", ") { it.id }
+                .ifBlank { "none" }
+
+            return "Error: Tool '$toolId' not found. Available tools: $available"
+        }
+
         return try {
             tool.execute(arguments)
-        } catch (e: Exception) {
-            "Error: ${e.message}"
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: SecurityException) {
+            "Error: 权限不足，无法执行。${e.message ?: toolId}"
+        } catch (e: java.io.IOException) {
+            "Error: 权限不足或 I/O 失败，无法执行。${e.message ?: toolId}"
+        } catch (e: Throwable) {
+            "Error: 工具执行失败。${e.message ?: e::class.simpleName}"
         }
     }
 }

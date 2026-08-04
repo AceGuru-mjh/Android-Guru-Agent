@@ -72,15 +72,17 @@ object ToolModule {
         // ═══ 1. Shell ═══
         registry.register(ShellExecuteTool(shellExec))
 
-        // ═══ 2-7. 文件工具 ═══
-        registry.register(ReadFileTool(workspaceDir))
-        registry.register(WriteFileTool(workspaceDir))
-        registry.register(ListFilesTool(workspaceDir))
-        registry.register(DeleteFileTool(workspaceDir))
-        registry.register(SearchFilesTool(workspaceDir))
-        registry.register(CopyMoveFileTool(workspaceDir))
+        // ═══ 2-8. 文件工具 ═══
+        registry.register(FileReadTool(workspaceDir))       // 视口滚动读取
+        registry.register(FileWriteTool(workspaceDir))     // 创建/覆写
+        registry.register(FileEditTool(workspaceDir))      // 搜索-替换编辑
+        registry.register(ListFilesTool(workspaceDir))     // 目录列表（深度/模式）
+        registry.register(DeleteFileTool(workspaceDir))   // 删除文件
+        registry.register(FileSearchTool(workspaceDir))    // 内容搜索（上下文+类型）
+        registry.register(CopyMoveFileTool(workspaceDir))  // 复制/移动
+        registry.register(FileGlobTool(workspaceDir))      // 文件发现（glob模式）
 
-        // ═══ 8-11. 网络工具 ═══
+        // ═══ 9-12. 网络工具 ═══
         registry.register(WebFetchTool(httpClient))
         registry.register(WebSearchTool(httpClient))
         registry.register(HttpRequestTool(httpClient))

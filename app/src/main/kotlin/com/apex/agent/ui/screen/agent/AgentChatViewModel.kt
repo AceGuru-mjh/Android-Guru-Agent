@@ -1,6 +1,8 @@
 package com.apex.agent.ui.screen.agent
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.engine.*
@@ -70,6 +72,12 @@ class AgentChatViewModel @Inject constructor(
      */
     fun sendMessage(text: String) {
         if (text.isBlank() || _uiState.value.isLoading) return
+
+        // 检查是否是斜杠指令
+        if (text.startsWith("/")) {
+            handleSlashCommand(text)
+            return
+        }
 
         _uiState.update { state ->
             state.copy(
@@ -259,5 +267,59 @@ class AgentChatViewModel @Inject constructor(
             .putString("llm_reasoning_effort", effort.name)
             .apply()
         _uiState.update { it.copy(reasoningEffort = effort) }
+    }
+
+    // ═══ 附件处理 ═══
+
+    /**
+     * 处理文件附件
+     */
+    fun attachFile(uri: Uri) {
+        val fileName = getFileNameFromUri(uri) ?: "file_${System.currentTimeMillis()}"
+        _uiState.update { s ->
+            s.copy(messages = s.messages + AgentUiMessage.System("📎 已附加文件: $fileName"))
+        }
+    }
+
+    /**
+     * 处理图片附件
+     */
+    fun attachImage(uri: Uri) {
+        val fileName = getFileNameFromUri(uri) ?: "image_${System.currentTimeMillis()}"
+        _uiState.update { s ->
+            s.copy(messages = s.messages + AgentUiMessage.System("🖼️ 已附加图片: $fileName"))
+        }
+    }
+
+    // ═══ 斜杠指令处理 ═══
+
+    /**
+     * 处理斜杠指令
+     */
+    private fun handleSlashCommand(command: String) {
+        val parts = command.split(":", limit = 2)
+        val type = parts[0].removePrefix("/")
+        val name = parts.getOrNull(1)?.trim() ?: ""
+
+        val message = when (type) {
+            "skill" -> "🧩 激活 Skill: $name"
+            "mcp" -> "🔌 连接 MCP: $name"
+            "connector" -> "🔗 使用连接器: $name"
+            "plugin" -> "📦 调用插件: $name"
+            else -> "未知指令: $command"
+        }
+
+        _uiState.update { s ->
+            s.copy(messages = s.messages + AgentUiMessage.System(message))
+        }
+    }
+
+    private fun getFileNameFromUri(uri: Uri): String? {
+        return try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (cursor.moveToFirst() && nameIndex >= 0) cursor.getString(nameIndex) else null
+            }
+        } catch (e: Exception) { null }
     }
 }

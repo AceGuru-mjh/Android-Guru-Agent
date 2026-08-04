@@ -78,6 +78,8 @@ import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.ui.component.AttachButton
+import com.apex.agent.ui.component.SlashCommandButton
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,7 +89,6 @@ fun AgentChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
-    var showPlusMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -198,7 +199,7 @@ fun AgentChatScreen(
             )
         }
 
-        // ═══ 输入栏（含加号）═══
+        // ═══ 输入栏（/ 斜杠 + 旋转加号 + 输入框 + 发送）═══
         Surface(
             tonalElevation = 3.dp,
             shadowElevation = 8.dp
@@ -215,19 +216,26 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // [+] 加号按钮
-                    IconButton(
-                        onClick = { showPlusMenu = true },
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "扩展能力",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    // ═══ / 斜杠指令按钮 ═══
+                    SlashCommandButton(
+                        onCommandSelected = { command ->
+                            inputText = command
+                        },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
 
-                    // 输入框
+                    // ═══ + 旋转附件按钮 ═══
+                    AttachButton(
+                        onFileSelected = { uri ->
+                            viewModel.attachFile(uri)
+                        },
+                        onImageSelected = { uri ->
+                            viewModel.attachImage(uri)
+                        },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    // ═══ 输入框 ═══
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
@@ -236,7 +244,7 @@ fun AgentChatScreen(
                             Text(
                                 when (uiState.mode) {
                                     AgentMode.PLAN -> "描述任务，Agent先规划..."
-                                    AgentMode.BUILD -> "输入指令..."
+                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
                                 }
                             )
                         },
@@ -248,7 +256,7 @@ fun AgentChatScreen(
                         )
                     )
 
-                    // 发送/停止
+                    // ═══ 发送/停止 ═══
                     if (uiState.isLoading) {
                         FilledTonalIconButton(
                             onClick = { viewModel.abort() },
@@ -273,13 +281,6 @@ fun AgentChatScreen(
                 }
             }
         }
-    }
-
-    // ═══ 加号弹出菜单 ═══
-    if (showPlusMenu) {
-        PlusMenuBottomSheet(
-            onDismiss = { showPlusMenu = false }
-        )
     }
 }
 

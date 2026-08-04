@@ -137,40 +137,30 @@ class MemorizeTool(
     override val id = "memorize"
     override val name = "Memorize"
     override val description = """
-        Save information to long-term memory for future recall.
-        Use this to remember: user preferences, project facts, learned patterns, important data.
-        Memories persist across conversations.
+        Save information to long-term memory.
+        Memories persist across conversations and can be recalled later.
 
-        Categories:
-        - "preference": User preferences (editor, language, style)
-        - "project": Project-specific facts (tech stack, structure)
-        - "fact": General knowledge or learned facts
-        - "task": Task outcomes and results
-        - "person": Information about people/contacts
-        - "custom": Any other category
+        When to memorize:
+        - User preferences ("user likes dark mode")
+        - Project facts ("API runs on port 8080")
+        - Task outcomes ("deployment succeeded at 14:30")
+        - Important paths/credentials
+
+        Auto-categorization: if you don't specify category, it will be inferred.
 
         Examples:
-        - {"key": "user_editor", "content": "User prefers vim keybindings", "category": "preference"}
-        - {"key": "project_stack", "content": "Backend uses FastAPI + PostgreSQL", "category": "project"}
-        - {"key": "wifi_pass", "content": "Office WiFi: DevNet5G / password123", "category": "fact"}
+        - {"key": "user_theme", "content": "User prefers dark theme", "category": "preference"}
+        - {"key": "api_endpoint", "content": "Production API: https://api.example.com/v2", "category": "project"}
+        - {"key": "task_result_0803", "content": "Successfully deployed v2.1 to staging", "category": "task"}
     """.trimIndent()
 
     override val parametersSchema = """
         {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "Unique identifier for this memory (snake_case recommended)"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The information to remember"
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Memory category (default: 'fact')"
-                }
+                "key": {"type": "string", "description": "Unique identifier (snake_case)"},
+                "content": {"type": "string", "description": "Information to remember"},
+                "category": {"type": "string", "enum": ["preference", "project", "fact", "task", "skill", "credential", "general"], "description": "Category (default: auto)"}
             },
             "required": ["key", "content"]
         }
@@ -180,15 +170,26 @@ class MemorizeTool(
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
             val key = json["key"]?.jsonPrimitive?.content
-                ?: return "Error: 'key' parameter is required"
+                ?: return "Error: 'key' required"
             val content = json["content"]?.jsonPrimitive?.content
-                ?: return "Error: 'content' parameter is required"
-            val category = json["category"]?.jsonPrimitive?.content ?: "fact"
+                ?: return "Error: 'content' required"
+            val category = json["category"]?.jsonPrimitive?.content ?: inferCategory(content)
 
-            val entry = memoryStore.save(key, content, category)
-            "OK: Memorized '$key' in category '$category' (${content.length} chars, id=${entry.createdAt})"
+            memoryStore.save(key, content, category)
+            "✅ Memorized '$key' [$category] (${content.length} chars)"
         } catch (e: Exception) {
-            "Error saving memory: ${e.message}"
+            "Error: ${e.message}"
+        }
+    }
+
+    private fun inferCategory(content: String): String {
+        val lower = content.lowercase()
+        return when {
+            lower.contains("prefer") || lower.contains("likes") || lower.contains("favorite") -> "preference"
+            lower.contains("api") || lower.contains("url") || lower.contains("endpoint") || lower.contains("port") -> "project"
+            lower.contains("password") || lower.contains("token") || lower.contains("secret") -> "credential"
+            lower.contains("deployed") || lower.contains("completed") || lower.contains("failed") -> "task"
+            else -> "fact"
         }
     }
 }
@@ -206,41 +207,26 @@ class RecallTool(
     override val id = "recall"
     override val name = "Recall"
     override val description = """
-        Search and retrieve information from long-term memory.
-        Use this to recall previously memorized information.
-        Supports keyword search across all memory content.
+        Search long-term memory. Supports keyword search, category filter, and exact key lookup.
 
         Examples:
         - {"query": "user preferences"}
-        - {"query": "project", "category": "project"}
-        - {"query": "", "list_all": true} - list all memories
-        - {"key": "user_editor"} - get specific memory by key
+        - {"query": "api", "category": "project"}
+        - {"key": "user_theme"} - exact lookup
+        - {"list_all": true, "category": "task"} - list all task memories
+        - {"recent": 5} - last 5 memories
     """.trimIndent()
 
     override val parametersSchema = """
         {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query (keyword match)"
-                },
-                "key": {
-                    "type": "string",
-                    "description": "Exact key to retrieve"
-                },
-                "category": {
-                    "type": "string",
-                    "description": "Filter by category"
-                },
-                "list_all": {
-                    "type": "boolean",
-                    "description": "List all memories (default: false)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default: 5)"
-                }
+                "query": {"type": "string", "description": "Search keywords"},
+                "key": {"type": "string", "description": "Exact key lookup"},
+                "category": {"type": "string", "description": "Filter by category"},
+                "list_all": {"type": "boolean", "description": "List all memories"},
+                "recent": {"type": "integer", "description": "Show N most recent"},
+                "limit": {"type": "integer", "description": "Max results (default 5)"}
             },
             "required": []
         }
@@ -249,58 +235,59 @@ class RecallTool(
     override suspend fun execute(arguments: String): String {
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
-            val query = json["query"]?.jsonPrimitive?.content ?: ""
+            val query = json["query"]?.jsonPrimitive?.content
             val key = json["key"]?.jsonPrimitive?.content
             val category = json["category"]?.jsonPrimitive?.content
             val listAll = json["list_all"]?.jsonPrimitive?.booleanOrNull ?: false
+            val recent = json["recent"]?.jsonPrimitive?.intOrNull
             val limit = json["limit"]?.jsonPrimitive?.intOrNull ?: 5
 
             // 精确key查找
             if (key != null) {
                 val entry = memoryStore.get(key)
-                return if (entry != null) {
-                    formatEntry(entry)
-                } else {
-                    "Memory not found: '$key'"
-                }
+                return if (entry != null) formatEntry(entry) else "Memory '$key' not found."
+            }
+
+            // 最近N条
+            if (recent != null) {
+                val all = memoryStore.getAll(category).take(recent)
+                return formatList(all, "Last $recent memories")
             }
 
             // 列出全部
-            if (listAll) {
-                val all = memoryStore.getAll(category)
-                if (all.isEmpty()) return "No memories stored yet."
-                return buildString {
-                    appendLine("All memories (${all.size} total):")
-                    appendLine("---")
-                    all.take(limit * 2).forEach { appendLine(formatEntry(it)) }
-                }
+            if (listAll || query.isNullOrBlank()) {
+                val all = memoryStore.getAll(category).take(limit * 2)
+                return formatList(all, if (category != null) "Memories in '$category'" else "All memories")
             }
 
             // 关键词搜索
-            if (query.isBlank()) {
-                val categories = memoryStore.listCategories()
-                return "Available categories: ${categories.joinToString(", ")}\nUse query, key, or list_all parameter."
-            }
-
             val results = memoryStore.search(query, category, limit)
-            if (results.isEmpty()) {
-                return "No memories found matching: '$query'"
-            }
-
-            buildString {
-                appendLine("Found ${results.size} memories for '$query':")
-                appendLine("---")
-                results.forEach { appendLine(formatEntry(it)) }
-            }
+            if (results.isEmpty()) return "No memories matching '$query'"
+            formatList(results, "Results for '$query'")
         } catch (e: Exception) {
-            "Error recalling memory: ${e.message}"
+            "Error: ${e.message}"
         }
     }
 
     private fun formatEntry(entry: MemoryEntry): String {
         val date = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
             .format(java.util.Date(entry.createdAt))
-        return "[${entry.category}] ${entry.key} ($date)\n  ${entry.content}\n"
+        return "📌 [${entry.category}] ${entry.key} ($date)\n${entry.content}"
+    }
+
+    private fun formatList(entries: List<MemoryEntry>, header: String): String {
+        if (entries.isEmpty()) return "$header: (none)"
+        return buildString {
+            appendLine("🧠 $header (${entries.size}):")
+            appendLine("---")
+            entries.forEach { e ->
+                val date = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(e.createdAt))
+                appendLine("📌 [${e.category}] ${e.key} ($date)")
+                appendLine("   ${e.content.take(200)}")
+                appendLine()
+            }
+        }
     }
 }
 

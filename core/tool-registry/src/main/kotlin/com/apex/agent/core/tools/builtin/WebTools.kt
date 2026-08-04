@@ -10,51 +10,54 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
- * 网页抓取工具
+ * 网页内容获取工具（智能提取 + 分段）
  *
- * Fetches a URL and extracts readable text from HTML pages (strips scripts,
- * styles, nav, etc.). For JSON or raw responses, returns the body unchanged.
+ * 智能内容提取：
+ * - 自动去除导航、广告、脚本等噪音
+ * - 保留正文结构（标题层级、列表、代码块）
+ * - 对JSON API响应自动格式化
+ * - 分段输出，支持max_chars截断
+ *
+ * 多种提取模式：
+ * - "text"：纯文本正文（默认）
+ * - "links"：提取所有链接
+ * - "structure"：页面结构概览（标题、段落数、链接数）
+ * - "raw"：原始响应（适合API）
  */
 class WebFetchTool(
     private val httpClient: OkHttpClient = defaultClient()
 ) : AgentTool {
 
     override val id = "web_fetch"
-    override val name = "Fetch Web Page"
+    override val name = "Fetch URL"
     override val description = """
-        Fetch content from a URL and extract readable text.
-        Automatically strips HTML tags, scripts, styles, and navigation elements.
-        Returns clean text content suitable for reading.
+        Fetch and extract content from a URL.
+        Intelligently strips navigation, ads, scripts. Preserves readable content.
 
-        Best for: articles, documentation, blog posts, API responses.
-        For search queries, use web_search instead.
+        Modes:
+        - "text": Extract readable text (default)
+        - "links": Get all links on the page
+        - "structure": Page overview (title, sections, stats)
+        - "raw": Raw response (for APIs/JSON)
+
+        For long content, use max_chars to limit output.
+        The response indicates if content was truncated.
 
         Examples:
-        - {"url": "https://docs.python.org/3/tutorial/index.html"}
-        - {"url": "https://api.github.com/repos/octocat/hello-world", "raw": true}
-        - {"url": "https://example.com", "max_chars": 5000}
+        - {"url": "https://docs.python.org/3/tutorial/introduction.html"}
+        - {"url": "https://api.github.com/repos/user/repo", "mode": "raw"}
+        - {"url": "https://news.ycombinator.com", "mode": "links"}
+        - {"url": "https://example.com", "mode": "structure"}
     """.trimIndent()
 
     override val parametersSchema = """
         {
             "type": "object",
             "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to fetch"
-                },
-                "raw": {
-                    "type": "boolean",
-                    "description": "Return raw response without text extraction (for APIs). Default: false"
-                },
-                "max_chars": {
-                    "type": "integer",
-                    "description": "Maximum characters to return (default 8000)"
-                },
-                "headers": {
-                    "type": "object",
-                    "description": "Custom HTTP headers as key-value pairs"
-                }
+                "url": {"type": "string", "description": "URL to fetch"},
+                "mode": {"type": "string", "enum": ["text", "links", "structure", "raw"], "description": "Extraction mode (default: text)"},
+                "max_chars": {"type": "integer", "description": "Max output chars (default 4000)"},
+                "headers": {"type": "object", "description": "Custom HTTP headers"}
             },
             "required": ["url"]
         }
@@ -63,97 +66,139 @@ class WebFetchTool(
     override suspend fun execute(arguments: String): String {
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
-            val url = json["url"]?.jsonPrimitive?.content
-                ?: return "Error: 'url' parameter is required"
-            val raw = json["raw"]?.jsonPrimitive?.booleanOrNull ?: false
-            val maxChars = json["max_chars"]?.jsonPrimitive?.intOrNull ?: 8000
+            val url = json["url"]?.jsonPrimitive?.content ?: return "Error: 'url' required"
+            val mode = json["mode"]?.jsonPrimitive?.content ?: "text"
+            val maxChars = json["max_chars"]?.jsonPrimitive?.intOrNull ?: 4000
 
-            val requestBuilder = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ApexAgent/1.0 (Android; +https://github.com/AceGuru-mjh)")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) ApexAgent/1.0")
                 .header("Accept", "text/html,application/xhtml+xml,application/json,text/plain,*/*")
 
-            // 自定义headers
-            json["headers"]?.jsonObject?.forEach { (key, value) ->
-                requestBuilder.header(key, value.jsonPrimitive.content)
+            json["headers"]?.jsonObject?.forEach { (k, v) ->
+                reqBuilder.header(k, v.jsonPrimitive.content)
             }
 
-            val response = httpClient.newCall(requestBuilder.build()).execute()
-            val body = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return "HTTP Error ${response.code}: ${response.message}\n${body.take(500)}"
-            }
-
+            val response = httpClient.newCall(reqBuilder.build()).execute()
+            val rawBody = response.body?.string() ?: ""
             val contentType = response.header("Content-Type") ?: ""
+            val statusCode = response.code
 
-            val content = when {
-                // JSON响应直接返回
-                raw || contentType.contains("application/json") -> {
-                    formatJson(body)
-                }
-                // HTML提取文本
-                contentType.contains("text/html") -> {
-                    extractReadableText(body)
-                }
-                // 纯文本
-                else -> body
+            if (statusCode !in 200..299) {
+                return "❌ HTTP $statusCode\n${rawBody.take(500)}"
             }
 
-            val truncated = if (content.length > maxChars) {
-                content.take(maxChars) + "\n\n[... truncated at $maxChars chars, total ${content.length}]"
-            } else {
-                content
+            when (mode) {
+                "raw" -> formatRaw(rawBody, contentType, maxChars)
+                "structure" -> extractStructure(rawBody, url)
+                "links" -> extractLinks(rawBody, maxChars)
+                else -> extractReadableText(rawBody, maxChars)
             }
-
-            "URL: $url\nStatus: ${response.code}\nContent-Type: $contentType\n---\n$truncated"
         } catch (e: Exception) {
-            "Error fetching URL: ${e.message}"
+            "❌ Fetch failed: ${e.message}"
         }
     }
 
-    /**
-     * 从HTML中提取可读文本
-     * 简化版Readability算法
-     */
-    private fun extractReadableText(html: String): String {
-        return html
-            // 移除script和style块
+    private fun extractReadableText(html: String, maxChars: Int): String {
+        val text = html
+            // 移除噪音
             .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
-            // 移除HTML注释
+            .replace(Regex("<nav[^>]*>[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<header[^>]*>[\\s\\S]*?</header>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<footer[^>]*>[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<aside[^>]*>[\\s\\S]*?</aside>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<!--[\\s\\S]*?-->"), "")
-            // 移除nav, header, footer
-            .replace(Regex("<(nav|header|footer)[^>]*>[\\s\\S]*?</\\1>", RegexOption.IGNORE_CASE), "")
-            // 块级元素转换行
-            .replace(Regex("<(br|/p|/div|/h[1-6]|/li|/tr)[^>]*>", RegexOption.IGNORE_CASE), "\n")
-            // 标题加标记
-            .replace(Regex("<h1[^>]*>", RegexOption.IGNORE_CASE), "\n# ")
-            .replace(Regex("<h2[^>]*>", RegexOption.IGNORE_CASE), "\n## ")
-            .replace(Regex("<h3[^>]*>", RegexOption.IGNORE_CASE), "\n### ")
-            // 移除所有剩余标签
+            // 保留结构
+            .replace(Regex("<h1[^>]*>", RegexOption.IGNORE_CASE), "\n\n# ")
+            .replace(Regex("<h2[^>]*>", RegexOption.IGNORE_CASE), "\n\n## ")
+            .replace(Regex("<h3[^>]*>", RegexOption.IGNORE_CASE), "\n\n### ")
+            .replace(Regex("<(br|/p|/div|/li|/tr)[^>]*>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n• ")
+            .replace(Regex("<code[^>]*>", RegexOption.IGNORE_CASE), "`")
+            .replace(Regex("</code>", RegexOption.IGNORE_CASE), "`")
+            // 移除剩余标签
             .replace(Regex("<[^>]+>"), "")
-            // 解码HTML实体
-            .replace("&amp;", "&")
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&nbsp;", " ")
-            .replace("&mdash;", "—")
-            // 清理多余空行
+            // 解码实体
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            .replace("&#x27;", "'").replace("&mdash;", "—")
+            // 清理
             .replace(Regex("\n{3,}"), "\n\n")
             .replace(Regex("[ \t]+"), " ")
             .trim()
-    }
 
-    private fun formatJson(text: String): String {
-        return try {
-            val element = Json.parseToJsonElement(text)
-            Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), element)
-        } catch (e: Exception) {
+        return if (text.length > maxChars) {
+            text.take(maxChars) + "\n\n[... truncated at $maxChars/${text.length} chars]"
+        } else {
             text
         }
+    }
+
+    private fun extractStructure(html: String, url: String): String {
+        val title = Regex("<title[^>]*>(.*?)</title>", RegexOption.IGNORE_CASE)
+            .find(html)?.groupValues?.get(1)?.trim() ?: "(untitled)"
+        val h1s = Regex("<h1[^>]*>(.*?)</h1>", RegexOption.IGNORE_CASE).findAll(html)
+            .map { it.groupValues[1].replace(Regex("<[^>]+>"), "") }.toList()
+        val h2s = Regex("<h2[^>]*>(.*?)</h2>", RegexOption.IGNORE_CASE).findAll(html)
+            .map { it.groupValues[1].replace(Regex("<[^>]+>"), "") }.toList()
+        val links = Regex("href=\"([^\"]+)\"").findAll(html).count()
+        val paragraphs = Regex("<p[^>]*>").findAll(html).count()
+        val images = Regex("<img[^>]*>").findAll(html).count()
+        val textLen = extractReadableText(html, Int.MAX_VALUE).length
+
+        return buildString {
+            appendLine("🌐 Page Structure")
+            appendLine("URL: $url")
+            appendLine("Title: $title")
+            appendLine("─".repeat(40))
+            appendLine("Stats: $paragraphs paragraphs, $links links, $images images")
+            appendLine("Text length: $textLen chars")
+            appendLine()
+            if (h1s.isNotEmpty()) {
+                appendLine("H1 headings:")
+                h1s.take(5).forEach { appendLine("  # $it") }
+            }
+            if (h2s.isNotEmpty()) {
+                appendLine("H2 headings:")
+                h2s.take(10).forEach { appendLine("  ## $it") }
+            }
+            appendLine()
+            appendLine("Use mode:\"text\" to read content, mode:\"links\" to get URLs.")
+        }
+    }
+
+    private fun extractLinks(html: String, maxChars: Int): String {
+        val links = Regex("href=\"([^\"]+)\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
+            .findAll(html)
+            .map { m ->
+                val url = m.groupValues[1]
+                val text = m.groupValues[2].replace(Regex("<[^>]+>"), "").trim().take(60)
+                if (url.startsWith("http") || url.startsWith("/")) "$text → $url" else null
+            }
+            .filterNotNull()
+            .distinct()
+            .take(50)
+            .toList()
+
+        val result = buildString {
+            appendLine("🔗 Links (${links.size}):")
+            links.forEach { appendLine("  $it") }
+        }
+        return result.take(maxChars)
+    }
+
+    private fun formatRaw(body: String, contentType: String, maxChars: Int): String {
+        val formatted = if (contentType.contains("json")) {
+            try {
+                val el = Json.parseToJsonElement(body)
+                Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), el)
+            } catch (e: Exception) { body }
+        } else body
+
+        return if (formatted.length > maxChars) {
+            formatted.take(maxChars) + "\n\n[... truncated at $maxChars/${formatted.length} chars]"
+        } else formatted
     }
 
     companion object {

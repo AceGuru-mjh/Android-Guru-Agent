@@ -1,197 +1,25 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.content
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * 文件读取工具
+ * 目录列表工具（优化版）
  *
- * Reads a text file from the device. Supports workspace-relative or absolute paths.
- * For very large files, returns a windowed slice via max_lines / offset_lines.
- */
-class ReadFileTool(
-    private val basePath: File
-) : AgentTool {
-
-    override val id = "read_file"
-    override val name = "Read File"
-    override val description = """
-        Read the content of a file. Returns the file content as text.
-        Supports any text file (code, config, markdown, json, etc.)
-        For large files, returns first N lines with truncation notice.
-
-        Path resolution:
-        - Relative paths are relative to the workspace directory
-        - Absolute paths (starting with /) are used directly
-
-        Examples:
-        - {"path": "main.py"} - read workspace file
-        - {"path": "/sdcard/Download/data.csv"} - read absolute path
-        - {"path": "src/config.json", "max_lines": 100}
-    """.trimIndent()
-
-    override val parametersSchema = """
-        {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path (relative to workspace or absolute)"
-                },
-                "max_lines": {
-                    "type": "integer",
-                    "description": "Maximum lines to read (default 200)"
-                },
-                "offset_lines": {
-                    "type": "integer",
-                    "description": "Start reading from this line (default 0)"
-                }
-            },
-            "required": ["path"]
-        }
-    """.trimIndent()
-
-    override suspend fun execute(arguments: String): String {
-        return try {
-            val json = Json.parseToJsonElement(arguments).jsonObject
-            val path = json["path"]?.jsonPrimitive?.content
-                ?: return "Error: 'path' parameter is required"
-            val maxLines = json["max_lines"]?.jsonPrimitive?.intOrNull ?: 200
-            val offsetLines = json["offset_lines"]?.jsonPrimitive?.intOrNull ?: 0
-
-            val file = resolveFile(path)
-
-            if (!file.exists()) {
-                return "Error: File not found: ${file.absolutePath}"
-            }
-            if (!file.canRead()) {
-                return "Error: Permission denied: ${file.absolutePath}"
-            }
-            if (file.isDirectory) {
-                return "Error: '$path' is a directory, use list_files instead"
-            }
-
-            val sizeKb = file.length() / 1024.0
-            if (sizeKb > 512) {
-                return "Error: File too large (${String.format("%.1f", sizeKb)}KB). " +
-                    "Use max_lines/offset_lines to read portions, or shell_execute with head/tail."
-            }
-
-            val allLines = file.readLines()
-            val totalLines = allLines.size
-
-            if (offsetLines >= totalLines) {
-                return "File has $totalLines lines, offset $offsetLines is beyond end."
-            }
-
-            val endLine = minOf(offsetLines + maxLines, totalLines)
-            val selectedLines = allLines.subList(offsetLines, endLine)
-            val content = selectedLines.joinToString("\n")
-
-            val header = buildString {
-                append("File: ${file.name} (${String.format("%.1f", sizeKb)}KB, $totalLines lines)\n")
-                if (offsetLines > 0 || endLine < totalLines) {
-                    append("Showing lines ${offsetLines + 1}-$endLine of $totalLines\n")
-                }
-                append("---\n")
-            }
-
-            header + content
-        } catch (e: Exception) {
-            "Error reading file: ${e.message}"
-        }
-    }
-
-    private fun resolveFile(path: String): File {
-        return if (path.startsWith("/")) {
-            File(path)
-        } else {
-            File(basePath, path)
-        }
-    }
-}
-
-/**
- * 文件写入工具
- *
- * Writes content to a file, creating parent directories as needed.
- * Default mode overwrites; "append" mode adds to end of file.
- */
-class WriteFileTool(
-    private val basePath: File
-) : AgentTool {
-
-    override val id = "write_file"
-    override val name = "Write File"
-    override val description = """
-        Write content to a file. Creates the file and parent directories if they don't exist.
-        Overwrites existing file content by default.
-        Use mode="append" to add content to end of file.
-
-        Examples:
-        - {"path": "main.py", "content": "print('hello')"}
-        - {"path": "log.txt", "content": "new entry", "mode": "append"}
-        - {"path": "/sdcard/Documents/report.md", "content": "# Report\n..."}
-    """.trimIndent()
-
-    override val parametersSchema = """
-        {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path to write to"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write"
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": ["write", "append"],
-                    "description": "Write mode: 'write' (overwrite) or 'append'. Default: write"
-                }
-            },
-            "required": ["path", "content"]
-        }
-    """.trimIndent()
-
-    override suspend fun execute(arguments: String): String {
-        return try {
-            val json = Json.parseToJsonElement(arguments).jsonObject
-            val path = json["path"]?.jsonPrimitive?.content
-                ?: return "Error: 'path' parameter is required"
-            val content = json["content"]?.jsonPrimitive?.content
-                ?: return "Error: 'content' parameter is required"
-            val mode = json["mode"]?.jsonPrimitive?.content ?: "write"
-
-            val file = resolveFile(path)
-
-            // 创建父目录
-            file.parentFile?.mkdirs()
-
-            when (mode) {
-                "append" -> file.appendText(content + "\n")
-                else -> file.writeText(content)
-            }
-
-            val sizeKb = file.length() / 1024.0
-            "OK: Written to ${file.absolutePath} (${String.format("%.1f", sizeKb)}KB, mode=$mode)"
-        } catch (e: Exception) {
-            "Error writing file: ${e.message}"
-        }
-    }
-
-    private fun resolveFile(path: String): File {
-        return if (path.startsWith("/")) File(path) else File(basePath, path)
-    }
-}
-
-/**
- * 目录列表工具
- *
- * Lists files and directories at a path with size, type, and modification time.
+ * 新增：
+ * - depth: 递归深度控制
+ * - pattern: 文件名过滤
+ * - show_size: 是否显示大小
+ * - 输出截断 + 提示
  */
 class ListFilesTool(
     private val basePath: File
@@ -200,70 +28,107 @@ class ListFilesTool(
     override val id = "list_files"
     override val name = "List Files"
     override val description = """
-        List files and directories at a given path.
-        Shows name, type (file/dir), size, and modification time.
+        List directory contents with optional recursion and filtering.
 
         Examples:
         - {"path": "."} - list workspace root
-        - {"path": "src"} - list src directory
-        - {"path": "/sdcard/Download"} - list downloads
+        - {"path": ".", "depth": 2} - recursive 2 levels
+        - {"path": ".", "pattern": "*.py"} - only Python files
+        - {"path": "/sdcard/Download", "show_size": true}
     """.trimIndent()
 
     override val parametersSchema = """
         {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Directory path (default: workspace root)"
-                },
-                "show_hidden": {
-                    "type": "boolean",
-                    "description": "Show hidden files (default: false)"
-                }
+                "path": {"type": "string", "description": "Directory path (default: '.')"},
+                "depth": {"type": "integer", "description": "Recursion depth (default 1, max 4)"},
+                "pattern": {"type": "string", "description": "Filename glob filter (e.g., '*.kt')"},
+                "show_hidden": {"type": "boolean", "description": "Show hidden files (default: false)"},
+                "show_size": {"type": "boolean", "description": "Show file sizes (default: true)"},
+                "max_items": {"type": "integer", "description": "Max items to show (default 50)"}
             },
             "required": []
         }
     """.trimIndent()
 
+    private val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+
     override suspend fun execute(arguments: String): String {
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
             val path = json["path"]?.jsonPrimitive?.content ?: "."
+            val depth = (json["depth"]?.jsonPrimitive?.intOrNull ?: 1).coerceIn(1, 4)
+            val pattern = json["pattern"]?.jsonPrimitive?.content
             val showHidden = json["show_hidden"]?.jsonPrimitive?.booleanOrNull ?: false
+            val showSize = json["show_size"]?.jsonPrimitive?.booleanOrNull ?: true
+            val maxItems = json["max_items"]?.jsonPrimitive?.intOrNull ?: 50
 
             val dir = if (path.startsWith("/")) File(path) else File(basePath, path)
+            if (!dir.exists()) return "Error: Not found: $path"
+            if (!dir.isDirectory) return "Error: Not a directory: $path"
 
-            if (!dir.exists()) {
-                return "Error: Directory not found: ${dir.absolutePath}"
-            }
-            if (!dir.isDirectory) {
-                return "Error: '$path' is not a directory, use read_file instead"
-            }
-
-            val files = dir.listFiles()
-                ?.filter { showHidden || !it.name.startsWith(".") }
-                ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-                ?: emptyList()
-
-            if (files.isEmpty()) {
-                return "Directory is empty: ${dir.absolutePath}"
-            }
+            val items = mutableListOf<String>()
+            var totalItems = 0
+            listDirRecursive(dir, "", depth, 0, pattern, showHidden, showSize, items, { totalItems++ }, maxItems)
 
             buildString {
-                appendLine("Directory: ${dir.absolutePath} (${files.size} items)")
+                appendLine("📁 ${dir.absolutePath}")
                 appendLine("---")
-                for (file in files) {
-                    val type = if (file.isDirectory) "📁" else "📄"
-                    val size = if (file.isFile) formatSize(file.length()) else "-"
-                    val modified = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-                        .format(java.util.Date(file.lastModified()))
-                    appendLine("$type ${file.name.padEnd(30)} ${size.padEnd(10)} $modified")
+                items.forEach { appendLine(it) }
+                if (totalItems > maxItems) {
+                    appendLine("---")
+                    appendLine("📌 Showing $maxItems of $totalItems items. Use pattern filter or increase max_items.")
                 }
             }
         } catch (e: Exception) {
-            "Error listing files: ${e.message}"
+            "Error: ${e.message}"
         }
+    }
+
+    private fun listDirRecursive(
+        dir: File, indent: String, maxDepth: Int, currentDepth: Int,
+        pattern: String?, showHidden: Boolean, showSize: Boolean,
+        items: MutableList<String>, countIncrement: () -> Unit, maxItems: Int
+    ) {
+        if (currentDepth >= maxDepth || items.size >= maxItems) return
+
+        val files = dir.listFiles()
+            ?.filter { showHidden || !it.name.startsWith(".") }
+            ?.filter { f -> pattern == null || f.isDirectory || matchesGlob(f.name, pattern) }
+            ?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+            ?: return
+
+        for (file in files) {
+            if (items.size >= maxItems) break
+            countIncrement()
+
+            val icon = if (file.isDirectory) "📁" else getFileIcon(file.name)
+            val size = if (showSize && file.isFile) " (${formatSize(file.length())})" else ""
+            items.add("$indent$icon ${file.name}$size")
+
+            if (file.isDirectory && currentDepth + 1 < maxDepth) {
+                listDirRecursive(file, "$indent  ", maxDepth, currentDepth + 1, pattern, showHidden, showSize, items, countIncrement, maxItems)
+            }
+        }
+    }
+
+    private fun getFileIcon(name: String): String = when {
+        name.endsWith(".py") -> "🐍"
+        name.endsWith(".kt") || name.endsWith(".java") -> "☕"
+        name.endsWith(".js") || name.endsWith(".ts") -> "📜"
+        name.endsWith(".json") -> "📋"
+        name.endsWith(".xml") || name.endsWith(".html") -> "🌐"
+        name.endsWith(".md") || name.endsWith(".txt") -> "📝"
+        name.endsWith(".sh") -> "⚙️"
+        name.endsWith(".png") || name.endsWith(".jpg") -> "🖼️"
+        name.endsWith(".zip") || name.endsWith(".tar") -> "📦"
+        else -> "📄"
+    }
+
+    private fun matchesGlob(name: String, glob: String): Boolean {
+        val regex = glob.replace(".", "\\.").replace("*", ".*").replace("?", ".")
+        return Regex(regex).matches(name)
     }
 
     private fun formatSize(bytes: Long): String = when {

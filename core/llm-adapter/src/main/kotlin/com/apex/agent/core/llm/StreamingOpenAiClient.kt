@@ -138,7 +138,25 @@ class StreamingOpenAiClient(
                             }
                             is LlmMessage.User -> {
                                 put("role", "user")
-                                put("content", msg.content)
+                                if (msg.images.isEmpty()) {
+                                    put("content", msg.content)
+                                } else {
+                                    putJsonArray("content") {
+                                        addJsonObject {
+                                            put("type", "text")
+                                            put("text", msg.content)
+                                        }
+                                        msg.images.forEach { img ->
+                                            addJsonObject {
+                                                put("type", "image_url")
+                                                putJsonObject("image_url") {
+                                                    put("url", "data:${img.mimeType};base64,${img.base64Data}")
+                                                    put("detail", img.detail)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             is LlmMessage.Assistant -> {
                                 put("role", "assistant")

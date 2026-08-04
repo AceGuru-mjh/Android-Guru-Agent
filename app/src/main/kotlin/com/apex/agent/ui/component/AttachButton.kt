@@ -17,20 +17,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 
 /**
  * 附件按钮（+ → × 旋转动画）
- *
- * 点击展开：+ 顺时针旋转 45° 变为 ×，弹出菜单
- * 关闭时：× 逆时针旋转回 0° 恢复为 +
+ * 展开时 + 顺时针旋转 45° 变为 ×
+ * 关闭时逆时针旋转回 0°
  */
 @Composable
 fun AttachButton(
@@ -40,26 +35,19 @@ fun AttachButton(
 ) {
     var isMenuExpanded by remember { mutableStateOf(false) }
 
-    // 旋转动画：展开时 45°（+ → ×），收起时 0°
     val rotation by animateFloatAsState(
         targetValue = if (isMenuExpanded) 45f else 0f,
         animationSpec = tween(durationMillis = 200),
         label = "attach_rotation"
     )
 
-    // 文件选择器（所有类型）
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { onFileSelected(it) }
-    }
+    ) { uri: Uri? -> uri?.let { onFileSelected(it) } }
 
-    // 图片选择器（仅图片）
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { onImageSelected(it) }
-    }
+    ) { uri: Uri? -> uri?.let { onImageSelected(it) } }
 
     Box(modifier = modifier) {
         IconButton(
@@ -68,7 +56,7 @@ fun AttachButton(
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = if (isMenuExpanded) "关闭附件菜单" else "添加附件",
+                contentDescription = if (isMenuExpanded) "关闭" else "添加附件",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .size(24.dp)
@@ -76,16 +64,13 @@ fun AttachButton(
             )
         }
 
-        // 弹出菜单
         DropdownMenu(
             expanded = isMenuExpanded,
             onDismissRequest = { isMenuExpanded = false }
         ) {
             DropdownMenuItem(
                 text = { Text("上传文件") },
-                leadingIcon = {
-                    Icon(Icons.Default.AttachFile, contentDescription = null)
-                },
+                leadingIcon = { Icon(Icons.Default.AttachFile, null) },
                 onClick = {
                     isMenuExpanded = false
                     filePickerLauncher.launch("*/*")
@@ -93,9 +78,7 @@ fun AttachButton(
             )
             DropdownMenuItem(
                 text = { Text("上传图片") },
-                leadingIcon = {
-                    Icon(Icons.Default.Image, contentDescription = null)
-                },
+                leadingIcon = { Icon(Icons.Default.Image, null) },
                 onClick = {
                     isMenuExpanded = false
                     imagePickerLauncher.launch("image/*")

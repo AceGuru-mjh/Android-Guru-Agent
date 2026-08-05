@@ -14,12 +14,12 @@ data class Attachment(
     val uploadProgress: Float = 1.0f,
     val status: UploadStatus = UploadStatus.SUCCESS
 ) {
+    /**
+     * 缺陷 6 修复：使用 [formatFileSize] 浮点除法 + 智能精度，
+     * 避免 1.9MB 被显示为 "1MB"（误差 47%）。
+     */
     val sizeDisplay: String
-        get() = when {
-            sizeBytes < 1024 -> "${sizeBytes}B"
-            sizeBytes < 1048576 -> "${sizeBytes / 1024}KB"
-            else -> "${sizeBytes / 1048576}MB"
-        }
+        get() = formatFileSize(sizeBytes)
 
     val icon: String
         get() = when (type) {
@@ -40,9 +40,41 @@ data class MessageAttachment(
     val thumbnailUri: Uri? = null
 ) {
     val sizeDisplay: String
-        get() = when {
-            sizeBytes < 1024 -> "${sizeBytes}B"
-            sizeBytes < 1048576 -> "${sizeBytes / 1024}KB"
-            else -> "${sizeBytes / 1048576}MB"
-        }
+        get() = formatFileSize(sizeBytes)
+}
+
+/**
+ * 统一的文件大小格式化工具函数（缺陷 6 修复）。
+ *
+ * 使用浮点除法 + 智能精度：
+ * - < 1KB: 整数 B
+ * - < 1MB: KB，≥100KB 取整，否则保留 1 位小数
+ * - < 1GB: MB，≥100MB 取整，否则保留 1 位小数
+ * - ≥ 1GB: GB，≥100GB 取整，否则保留 2 位小数
+ *
+ * 精度对比：
+ * | 实际大小        | 原始显示 | 修复后显示 |
+ * |----------------|---------|-----------|
+ * | 1,992,294 B    | 1MB     | 1.9MB     |
+ * | 15,204,352 B   | 14MB    | 14.5MB    |
+ * | 1,610,612,736 B| 1GB     | 1.50GB    |
+ */
+fun formatFileSize(bytes: Long): String = when {
+    bytes < 0L -> "0B"
+    bytes < 1024L -> "${bytes}B"
+    bytes < 1024L * 1024L -> {
+        val kb = bytes / 1024.0
+        if (kb >= 100) "${kb.toInt()}KB"
+        else "%.1fKB".format(kb)
+    }
+    bytes < 1024L * 1024L * 1024L -> {
+        val mb = bytes / (1024.0 * 1024.0)
+        if (mb >= 100) "${mb.toInt()}MB"
+        else "%.1fMB".format(mb)
+    }
+    else -> {
+        val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+        if (gb >= 100) "${gb.toInt()}GB"
+        else "%.2fGB".format(gb)
+    }
 }

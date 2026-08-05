@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.apex.agent.ui.screen.agent.AttachmentType
 import com.apex.agent.ui.screen.agent.MessageAttachment
+import com.apex.agent.ui.screen.agent.formatFileSize
 
 @Composable
 fun MessageAttachmentList(
@@ -48,7 +49,7 @@ private fun FileBubble(attachment: MessageAttachment, onClick: () -> Unit) {
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(attachment.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("${getTypeLabel(attachment.mimeType)} · ${formatSize(attachment.sizeBytes)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
+                Text("${getTypeLabel(attachment.mimeType)} · ${formatFileSize(attachment.sizeBytes)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
             }
             Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f))
         }
@@ -68,7 +69,7 @@ private fun ImageBubble(attachment: MessageAttachment, onClick: () -> Unit) {
         }
         Row(modifier = Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(attachment.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(formatSize(attachment.sizeBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.4f))
+            Text(formatFileSize(attachment.sizeBytes), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.4f))
         }
     }
 }
@@ -85,8 +86,4 @@ private fun getTypeLabel(mimeType: String): String = when {
     mimeType.contains("excel") -> "Excel"; mimeType.contains("text") -> "文本"
     mimeType.contains("json") -> "JSON"; mimeType.contains("zip") -> "压缩包"
     else -> "文件"
-}
-private fun formatSize(bytes: Long): String = when {
-    bytes < 1024 -> "${bytes}B"; bytes < 1048576 -> "${bytes / 1024}KB"
-    else -> "${bytes / 1048576}MB"
 }

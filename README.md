@@ -20,7 +20,7 @@ apex-agent/
 │       ├── ApexRoot.kt             # ModalNavigationDrawer + DrawerDestination
 │       ├── ApexDrawerContent.kt    # Drawer header/nav items/status footer
 │       └── screen/
-│           ├── agent/              # AgentChatScreen + AgentChatViewModel (+ PlusMenuBottomSheet)
+│           ├── agent/              # AgentChatScreen + AgentChatViewModel (+ slash command router)
 │           ├── skill/              # SkillScreen + SkillViewModel (list/enable/disable)
 │           ├── memory/             # MemoryScreen (FileMemoryStore browser)
 │           ├── model/              # ModelScreen (LLM config + presets)
@@ -210,7 +210,7 @@ The level is selected via a horizontal **FilterChip** row above the input box in
 
 This is orthogonal to `ThinkingLevel` — you can use `ThinkingLevel.NONE` (no system-prompt instruction) + `ReasoningEffort.MAX` (let the model's native thinking do all the work), or `ThinkingLevel.DEEP` + `ReasoningEffort.NONE` (prompt-guided reasoning only), or both together.
 
-## Drawer Navigation + Plus Menu
+## Drawer Navigation + Slash Commands
 
 The old bottom-navigation `ApexNavHost` has been replaced with a `ModalNavigationDrawer`-based layout (`ApexRoot`). Tap the ☰ icon (top-left) or swipe from the left edge to open the drawer, which contains:
 
@@ -223,7 +223,35 @@ The old bottom-navigation `ApexNavHost` has been replaced with a `ModalNavigatio
 
 The drawer footer shows the current `mode` (BUILD/PLAN), `thinkingLevel`, and `historyDepth` (persisted memory count) pulled live from `AgentChatViewModel`.
 
-In the Agent chat screen, the input bar has a **[+]** button on the left that opens a `ModalBottomSheet` (`PlusMenuBottomSheet`) with 4 items: Skill / MCP / 插件 / 连接器. The Skill item is wired to the Skill screen (via drawer navigation); the other three are placeholders for future MCP/plugin/connector management.
+The Agent chat input bar exposes two distinct affordances on its left side:
+
+- **`/` button** (`SlashCommandButton`) — a 36dp bordered box that opens a `Popup` with four collapsible categories: **Skills**, **MCP**, **连接器**, **插件**. Each category expands with an animated 90° arrow rotation and lists concrete commands (e.g. `/skill:code_interpreter`, `/mcp:github`, `/connector:google_drive`, `/plugin:pdf_reader`). Selecting a command **appends** it to the current input (preserving any text the user has already typed) rather than overwriting it.
+- **`+` button** (`AttachButton`) — opens the file/image picker for multimodal attachments. (The earlier `PlusMenuBottomSheet` that carried Skill/MCP/插件/连接器 entries has been superseded by the `/` button; the `+` button is now exclusively for attachments.)
+
+### Slash command grammar & routing
+
+Commands follow a forgiving, whitespace-tolerant grammar:
+
+```
+/<type>:<id> [key=value ...] [positional user text ...]
+```
+
+Examples:
+
+| Input | Parsed |
+|-------|--------|
+| `/skill:code_interpreter` | `Skill(id=code_interpreter)` |
+| `/skill:web_search query=Android latest news` | `Skill(id=web_search, args={query=Android}, userExtra="latest news")` |
+| `/mcp:github repo=owner/name` | `Mcp(id=github, args={repo=owner/name})` |
+| `/help` | `Unknown(raw=/help)` — forwarded verbatim to the agent |
+
+Parsing and routing live in the `com.apex.agent.slash` package (pure JVM, no Compose/Android dependencies, unit-testable):
+
+- `SlashCommand` — sealed model: `Skill` / `Mcp` / `Connector` / `Plugin` / `Unknown`
+- `SlashCommandParser` — defensive parser; malformed shapes degrade to `Unknown`, malformed `key=value` tokens fall back to positional user text
+- `SlashCommandRouter` — maps a parsed command to a `SlashCommandRoute(systemMessage, agentPrompt)`
+
+`AgentChatViewModel.handleSlashCommand()` consumes the router: the `systemMessage` is appended as an `AgentUiMessage.System` bubble, and `agentPrompt` (which now includes parsed args + user extra) is handed to `AgentEngine.execute(...)`. This replaces the previous inline `when(type)` string concatenation and makes the command surface independently testable and extensible for future command types (`tool:`, `help:`, …).
 
 ## Skill System
 

@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
@@ -70,6 +71,7 @@ class AgentChatViewModel @Inject constructor(
     private val memory: ConversationMemory,
     val githubTokenManager: GithubTokenManager,
     private val savedStateHandle: SavedStateHandle,
+    private val preprocessor: PredictiveAttachmentPreprocessor,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -100,6 +102,11 @@ class AgentChatViewModel @Inject constructor(
      */
     private val attachmentJobs = mutableMapOf<Int, Job>()
     private var attachmentIdCounter = 0
+
+    init {
+        // 启动预测性附件预处理清理循环（每 5 分钟清理 30 分钟前的预拷贝文件）
+        preprocessor.startCleanupLoop(viewModelScope)
+    }
 
     /**
      * 发送消息（含附件）。
@@ -146,16 +153,21 @@ class AgentChatViewModel @Inject constructor(
     /**
      * 普通消息发送：附件落盘 + UI 追加 User 气泡 + 调用 AgentEngine。
      *
-     * 附件落盘使用 [copyToSandboxSafe]（64KB buffer + ensureActive + 进度回调），全部在 IO 线程。
+     * 创新优化：优先使用预测性预处理的预拷贝结果（零等待），
+     * 未预拷贝的附件回退到 [copyToSandboxSafe]（64KB buffer + ensureActive）。
      */
     private suspend fun executeNormalMessage(
         text: String,
         currentAttachments: List<Attachment>
     ) {
-        // 异步落盘附件（IO 线程，64KB buffer，可取消）
+        // 异步落盘附件（IO 线程）
+        // 优先使用预拷贝结果，未预拷贝的回退到同步拷贝
         val persistedAttachments = withContext(Dispatchers.IO) {
             currentAttachments.map { att ->
-                val localPath = copyToSandboxSafe(att.uri, att.name)
+                // 尝试从预拷贝缓存获取（零等待）
+                val preprocessedPath = preprocessor.getSandboxPath(att.uri)
+                val localPath = preprocessedPath ?: copyToSandboxSafe(att.uri, att.name)
+
                 MessageAttachment(
                     name = att.name,
                     mimeType = att.mimeType,
@@ -370,6 +382,7 @@ class AgentChatViewModel @Inject constructor(
 
     /**
      * 处理文件附件。立即添加 UPLOADING 占位项，IO 线程读取真实元数据后回填。
+     * 同时触发预测性预处理（后台拷贝到沙箱），发送时零等待。
      */
     fun attachFile(uri: Uri) {
         val id = attachmentIdCounter++
@@ -399,6 +412,8 @@ class AgentChatViewModel @Inject constructor(
                         } else att
                     }
                 }
+                // ★ 触发预测性预处理：后台拷贝到沙箱，用户编辑文本时同步进行
+                preprocessor.preprocess(uri, info.name)
             } catch (e: Exception) {
                 _attachments.update { list ->
                     list.mapIndexed { index, att ->
@@ -413,6 +428,7 @@ class AgentChatViewModel @Inject constructor(
 
     /**
      * 处理图片附件。立即添加 UPLOADING 占位项，IO 线程读取真实元数据后回填。
+     * 同时触发预测性预处理（后台拷贝到沙箱），发送时零等待。
      */
     fun attachImage(uri: Uri) {
         val id = attachmentIdCounter++
@@ -442,6 +458,8 @@ class AgentChatViewModel @Inject constructor(
                         } else att
                     }
                 }
+                // ★ 触发预测性预处理
+                preprocessor.preprocess(uri, info.name)
             } catch (e: Exception) {
                 _attachments.update { list ->
                     list.mapIndexed { index, att ->
@@ -455,10 +473,13 @@ class AgentChatViewModel @Inject constructor(
     }
 
     /**
-     * 移除附件。同时取消对应的元数据读取 Job（如果还在执行）。
+     * 移除附件。同时取消对应的元数据读取 Job 和预测性预拷贝。
      */
     fun removeAttachment(index: Int) {
         attachmentJobs.values.forEach { it.cancel() }
+        // 取消被移除附件的预测性预拷贝
+        val removed = _attachments.value.getOrNull(index)
+        removed?.uri?.let { preprocessor.cancel(it) }
         _attachments.update { list ->
             list.filterIndexed { i, _ -> i != index }
         }
@@ -467,6 +488,7 @@ class AgentChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         attachmentJobs.values.forEach { it.cancel() }
+        preprocessor.stopCleanupLoop()
     }
 
     // ═══ 斜杠指令处理 ═══

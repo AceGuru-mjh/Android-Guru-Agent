@@ -74,6 +74,7 @@ import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.ui.component.AttachButton
+import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachmentPreviewBar
 import com.apex.agent.ui.component.FileOpener
 import com.apex.agent.ui.component.GithubIconButton
@@ -294,25 +295,15 @@ fun AgentChatScreen(
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
 
-                    // ═══ 输入框 ═══
-                    OutlinedTextField(
+                    // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏）═══
+                    AdaptiveInputField(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
-                        placeholder = {
-                            Text(
-                                when (uiState.mode) {
-                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
-                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
-                                }
-                            )
-                        },
-                        maxLines = 5,
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                        )
+                        placeholder = when (uiState.mode) {
+                            AgentMode.PLAN -> "描述任务，Agent先规划..."
+                            AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                        }
                     )
 
                     // ═══ 发送/停止 ═══

@@ -175,8 +175,8 @@ jobs:
           echo "❌ BUILD FAILED — analyzing errors..."
 
           # Separate KSP errors from Kotlin compilation errors
-          KSP_ERRORS=$(grep -c "\[ksp\]\|Error occurred in KSP" compile.log || true)
-          KOTLIN_ERRORS=$(grep -E "^e: " compile.log | grep -v "\[ksp\]\|Error occurred in KSP" | wc -l || true)
+          KSP_ERRORS=$(grep -c "\[ksp\]\|Error occurred in KSP\|daemon has terminated" compile.log || true)
+          KOTLIN_ERRORS=$(grep -E "^e: " compile.log | grep -v "\[ksp\]\|Error occurred in KSP\|daemon has terminated" | wc -l || true)
 
           echo "  KSP/Hilt annotation errors: $KSP_ERRORS"
           echo "  Kotlin compilation errors: $KOTLIN_ERRORS"

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 覆盖内部存储 files 目录及所有子目录（attachments / workspace / agent_memory 等） -->
+    <files-path name="files" path="." />
+
+    <!-- 覆盖内部存储 cache 目录及所有子目录 -->
+    <cache-path name="cache" path="." />
+
+    <!-- 覆盖外部存储 Android/data/<pkg>/files 目录 -->
+    <external-files-path name="external_files" path="." />
+
+    <!-- 覆盖外部存储 cache 目录 -->
+    <external-cache-path name="external_cache" path="." />
+
+    <!-- 兜底：external-path（旧式外部存储根目录，API ≤ 28 才需要） -->
+    <external-path name="external" path="." />
+</paths>

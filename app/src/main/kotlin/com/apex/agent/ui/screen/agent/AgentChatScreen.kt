@@ -30,16 +30,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Api
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Puzzle
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,13 +46,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,7 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,9 +72,11 @@ import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.ui.component.AttachButton
 import com.apex.agent.ui.component.AttachmentPreviewBar
+import com.apex.agent.ui.component.FileOpener
+import com.apex.agent.ui.component.GithubIconButton
+import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,7 +86,10 @@ fun AgentChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Lightbox 状态：点击附件图片时展开全屏预览
+    var lightboxImage by remember { mutableStateOf<Any?>(null) }
 
     // 自动滚动
     LaunchedEffect(uiState.messages.size, uiState.currentResponse) {
@@ -163,7 +160,15 @@ fun AgentChatScreen(
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
             itemsIndexed(uiState.messages, key = { index, _ -> index }) { _, message ->
-                AgentMessageItem(message)
+                AgentMessageItem(
+                    message = message,
+                    onImageClick = { att ->
+                        lightboxImage = att.thumbnailUri ?: att.localPath
+                    },
+                    onFileClick = { att ->
+                        att.localPath?.let { FileOpener.openFile(context, it, att.mimeType) }
+                    }
+                )
             }
 
             // 流式思考中
@@ -201,7 +206,7 @@ fun AgentChatScreen(
             )
         }
 
-        // ═══ 输入栏（/ 斜杠 + 旋转加号 + 输入框 + 发送）═══
+        // ═══ 输入栏（/ 斜杠 + GitHub + 旋转加号 + 输入框 + 发送）═══
         Surface(
             tonalElevation = 3.dp,
             shadowElevation = 8.dp
@@ -230,6 +235,12 @@ fun AgentChatScreen(
                         onCommandSelected = { command ->
                             inputText = command
                         },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    // ═══ GitHub 连接状态按钮 ═══
+                    GithubIconButton(
+                        tokenManager = viewModel.githubTokenManager,
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
 
@@ -291,14 +302,26 @@ fun AgentChatScreen(
             }
         }
     }
+
+    // ═══ Lightbox 全屏预览（点击附件图片时展开）═══
+    if (lightboxImage != null) {
+        ImageLightbox(
+            imageModel = lightboxImage!!,
+            onDismiss = { lightboxImage = null }
+        )
+    }
 }
 
 // ═══ 消息组件 ═══
 
 @Composable
-private fun AgentMessageItem(message: AgentUiMessage) {
+private fun AgentMessageItem(
+    message: AgentUiMessage,
+    onImageClick: (MessageAttachment) -> Unit = {},
+    onFileClick: (MessageAttachment) -> Unit = {}
+) {
     when (message) {
-        is AgentUiMessage.User -> UserBubble(message)
+        is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
         is AgentUiMessage.Agent -> AgentBubble(message.text)
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
@@ -308,7 +331,11 @@ private fun AgentMessageItem(message: AgentUiMessage) {
 }
 
 @Composable
-private fun UserBubble(message: AgentUiMessage.User) {
+private fun UserBubble(
+    message: AgentUiMessage.User,
+    onImageClick: (MessageAttachment) -> Unit = {},
+    onFileClick: (MessageAttachment) -> Unit = {}
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -323,6 +350,8 @@ private fun UserBubble(message: AgentUiMessage.User) {
                 if (message.attachments.isNotEmpty()) {
                     MessageAttachmentList(
                         attachments = message.attachments,
+                        onFileClick = onFileClick,
+                        onImageClick = onImageClick,
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                 }
@@ -617,101 +646,6 @@ private fun ReasoningEffortRow(
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null
             )
-        }
-    }
-}
-
-// ═══ 加号菜单 BottomSheet ═══
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlusMenuBottomSheet(
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(),
-        dragHandle = { BottomSheetDefaults.DragHandle() }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp)
-        ) {
-            Text(
-                "扩展能力",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-
-            PlusMenuItem(
-                icon = Icons.Default.Extension,
-                title = "Skill",
-                subtitle = "导入、下载或创建技能"
-            )
-            PlusMenuItem(
-                icon = Icons.Default.Api,
-                title = "MCP",
-                subtitle = "Model Context Protocol 服务"
-            )
-            PlusMenuItem(
-                icon = Icons.Default.Puzzle,
-                title = "插件",
-                subtitle = "已安装的插件APK管理"
-            )
-            PlusMenuItem(
-                icon = Icons.Default.Link,
-                title = "连接器",
-                subtitle = "外部服务连接（SSH/SFTP/API）"
-            )
-        }
-    }
-}
-
-@Composable
-private fun PlusMenuItem(
-    icon: ImageVector,
-    title: String,
-    subtitle: String
-) {
-    Surface(
-        onClick = { /* TODO: 跳转到对应管理页 */ },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Surface(
-                modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        icon, null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-            Column {
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.weight(1f))
-            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

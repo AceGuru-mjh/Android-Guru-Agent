@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.apex.agent.attachment.AttachmentCleanupManager
 import dagger.hilt.android.HiltAndroidApp
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
@@ -14,6 +15,9 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    @Inject
+    lateinit var attachmentCleanupManager: AttachmentCleanupManager
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -22,6 +26,8 @@ class ApexApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         initShizuku()
+        // 调度附件清理周期任务（24h 一次，KEEP 策略避免重复）
+        attachmentCleanupManager.schedulePeriodicCleanup()
     }
 
     /**

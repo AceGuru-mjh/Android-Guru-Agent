@@ -109,14 +109,16 @@ object ShizukuCommandExecutor {
 
     /**
      * 阻塞式执行（内部方法）
+     *
+     * TODO: Shizuku v13 将 newProcess() 设为 private，需要迁移到 IShellService AIDL
+     * 当前先使用 Runtime.exec() 作为 fallback，PrivilegeDetector 已有 Root→Shizuku→Shell 三级降级
      */
     private fun executeBlocking(command: String): ShizukuExecResult {
         return try {
-            // 核心：通过Shizuku创建shell进程
-            val process = Shizuku.newProcess(
-                arrayOf("sh", "-c", command),  // 命令数组
-                null,                           // 环境变量（null=继承）
-                null                            // 工作目录（null=默认）
+            // 使用 Runtime.exec() 执行命令
+            // 注意：此处不经过 Shizuku shell 提权，实际提权由 PrivilegeDetector 链路处理
+            val process = Runtime.getRuntime().exec(
+                arrayOf("sh", "-c", command)
             )
 
             // 读取stdout / stderr

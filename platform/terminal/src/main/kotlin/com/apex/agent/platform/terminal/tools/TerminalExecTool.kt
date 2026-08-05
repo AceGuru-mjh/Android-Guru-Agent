@@ -22,7 +22,7 @@ class TerminalExecTool(
         
         Examples:
         - {"session": 1, "command": "cd /sdcard && ls -la"}
-        - {"session": 1, "command": "export FOO=bar && echo $FOO"}
+        - {"session": 1, "command": "export FOO=bar && echo ${'$'}FOO"}
         - {"session": 1, "command": "python3 script.py", "timeout": 60000}
         - {"session": 1, "command": "top -n 1", "timeout": 5000}
     """.trimIndent()

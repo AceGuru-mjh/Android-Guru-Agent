@@ -134,21 +134,17 @@ jobs:
 
       - name: Configure pre-installed Android SDK
         run: |
-          # ubuntu-latest 自带 Android SDK / NDK / CMake，只需配置路径
+          # ubuntu-latest 自带 Android SDK，只需配置路径
           echo "ANDROID_HOME=$ANDROID_HOME"
+          # AGP 8.7.3 默认需要 NDK 27.0.12077973，runner 自带 27.3.x
+          # 安装 AGP 期望的版本
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
+          yes | $ANDROID_HOME/tools/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
+          echo "⚠️ Could not install NDK 27.0.12077973, will try with pre-installed"
+          # 检查 NDK 目录
           ls "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK pre-installed"
-          ls "$ANDROID_HOME/cmake/" 2>/dev/null || echo "No CMake pre-installed"
-          # 选择已安装的 NDK 版本（27.x 优先）
-          NDK_DIR=$(ls -d "$ANDROID_HOME"/ndk/27.* 2>/dev/null | head -1)
-          if [ -z "$NDK_DIR" ]; then
-            NDK_DIR=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | head -1)
-          fi
-          echo "NDK_DIR=$NDK_DIR"
-          # 写入 local.properties
+          # 写入 local.properties（不设 ndk.dir，让 AGP 自动从 SDK 查找）
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          if [ -n "$NDK_DIR" ]; then
-            echo "ndk.dir=$NDK_DIR" >> local.properties
-          fi
           cat local.properties
 
       - name: Set up Gradle

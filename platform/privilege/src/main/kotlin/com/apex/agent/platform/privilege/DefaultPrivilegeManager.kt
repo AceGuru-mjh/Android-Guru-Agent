@@ -194,13 +194,16 @@ class DefaultPrivilegeManager @Inject constructor(
         depth: Int = 0
     ) {
         if (depth > 20) return  // 防止无限递归
-        
+
+        val boundsRect = android.graphics.Rect()
+        node.getBoundsInScreen(boundsRect)
+
         result.add(UiNode(
             className = node.className?.toString() ?: "",
             text = node.text?.toString() ?: "",
             contentDescription = node.contentDescription?.toString() ?: "",
             resourceId = node.viewIdResourceName ?: "",
-            bounds = node.boundsInScreen.toString(),
+            bounds = boundsRect.toString(),
             clickable = node.isClickable,
             scrollable = node.isScrollable
         ))

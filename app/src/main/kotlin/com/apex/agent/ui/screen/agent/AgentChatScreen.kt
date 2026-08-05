@@ -78,6 +78,7 @@ import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachmentPreviewBar
 import com.apex.agent.ui.component.FileOpener
 import com.apex.agent.ui.component.GithubIconButton
+import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
@@ -97,6 +98,15 @@ fun AgentChatScreen(
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
+
+    // ═══ /mcp:github 未连接时的连接对话框 ═══
+    // ViewModel 在路由 /mcp:github 时若发现 GitHub 未连接，会发射 requestGithubConnect
+    // 一次性事件；这里收集后打开复用的 GithubTokenDialog，避免用户必须先点输入栏 GitHub
+    // 图标才能连接 —— 让斜杠命令自身引导完成连接闭环。
+    var showGithubConnectDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        viewModel.requestGithubConnect.collect { showGithubConnectDialog = true }
+    }
 
     // ═══ 缺陷 4 修复：智能滚动策略 ═══
     // 追踪用户是否在底部附近（150px 阈值）
@@ -377,6 +387,18 @@ fun AgentChatScreen(
         ImageLightbox(
             imageModel = lightboxImage!!,
             onDismiss = { lightboxImage = null }
+        )
+    }
+
+    // ═══ /mcp:github 连接对话框（未连接时由 ViewModel 信号触发）═══
+    if (showGithubConnectDialog) {
+        GithubTokenDialog(
+            onDismiss = { showGithubConnectDialog = false },
+            onSubmit = { token -> viewModel.githubTokenManager.validateToken(token) },
+            onSuccess = { token, username ->
+                viewModel.githubTokenManager.saveToken(token, username)
+                showGithubConnectDialog = false
+            }
         )
     }
 }

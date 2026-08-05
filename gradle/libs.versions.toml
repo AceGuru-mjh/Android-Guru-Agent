@@ -16,6 +16,7 @@ work = "2.10.0"
 ksp = "2.0.21-1.0.28"
 coil = "2.6.0"
 security-crypto = "1.1.0-alpha06"
+junit = "4.13.2"
 
 [libraries]
 # Compose
@@ -64,6 +65,10 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 
 # Security
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
+
+# Testing (unit tests in app/src/test)
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

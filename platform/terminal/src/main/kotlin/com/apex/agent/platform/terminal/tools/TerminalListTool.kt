@@ -23,7 +23,7 @@ class TerminalListTool(
             return "No active terminal sessions. Use terminal_create to start one."
         }
 
-        buildString {
+        return buildString {
             appendLine("Active terminal sessions (${sessions.size}):")
             appendLine("─".repeat(50))
             sessions.forEach { s ->

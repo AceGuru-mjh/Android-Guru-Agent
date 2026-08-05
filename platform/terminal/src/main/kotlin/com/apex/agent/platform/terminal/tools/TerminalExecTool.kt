@@ -22,7 +22,7 @@ class TerminalExecTool(
         
         Examples:
         - {"session": 1, "command": "cd /sdcard && ls -la"}
-        - {"session": 1, "command": "export FOO=bar && echo $FOO"}
+        - {"session": 1, "command": "export FOO=bar && echo ${'$'}FOO"}
         - {"session": 1, "command": "python3 script.py", "timeout": 60000}
         - {"session": 1, "command": "top -n 1", "timeout": 5000}
     """.trimIndent()
@@ -55,7 +55,7 @@ class TerminalExecTool(
 
         val result = manager.execute(sessionId, command, timeout)
 
-        buildString {
+        return buildString {
             // 状态行
             if (result.timedOut) {
                 appendLine("⚠️ Command timed out after ${timeout}ms")

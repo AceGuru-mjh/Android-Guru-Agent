@@ -7,11 +7,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.engine.*
 import com.apex.agent.core.llm.ReasoningEffort
+import com.apex.agent.github.GithubTokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -63,6 +65,7 @@ data class AgentToolCallUi(
 class AgentChatViewModel @Inject constructor(
     private val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
+    val githubTokenManager: GithubTokenManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -75,33 +78,51 @@ class AgentChatViewModel @Inject constructor(
     private var currentJob: Job? = null
 
     /**
-     * 发送消息
+     * 发送消息（含附件）。
+     *
+     * - 取消尚未完成的前一个流式任务，避免竞态；
+     * - 斜杠指令走 [handleSlashCommand]，避免被当作普通文本吞掉参数；
+     * - 附件复制到沙箱切到 IO 线程。
      */
     fun sendMessage(text: String) {
-        if (text.isBlank() && _attachments.value.isEmpty()) return
-        if (_uiState.value.isLoading) return
+        val trimmedText = text.trim()
+        if (trimmedText.isEmpty() && _attachments.value.isEmpty()) return
+
+        // 取消前一个尚未完成的流式任务（避免竞态：旧事件流被混入新会话状态）
+        currentJob?.cancel()
 
         // 检查是否是斜杠指令
-        if (text.startsWith("/")) {
-            handleSlashCommand(text)
+        if (trimmedText.startsWith("/")) {
+            handleSlashCommand(trimmedText)
             return
         }
 
+        currentJob = viewModelScope.launch {
+            executeNormalMessage(trimmedText)
+        }
+    }
+
+    /**
+     * 普通消息发送：附件落盘 + UI 追加 User 气泡 + 调用 AgentEngine。
+     */
+    private suspend fun executeNormalMessage(text: String) {
         // 收集当前附件并清空
         val currentAttachments = _attachments.value.toList()
         _attachments.value = emptyList()
 
-        // 将附件复制到应用沙箱（持久化）
-        val persistedAttachments = currentAttachments.map { att ->
-            val localPath = copyToSandbox(att.uri, att.name)
-            MessageAttachment(
-                name = att.name,
-                mimeType = att.mimeType,
-                sizeBytes = att.sizeBytes,
-                type = att.type,
-                localPath = localPath,
-                thumbnailUri = if (att.type == AttachmentType.IMAGE) att.uri else null
-            )
+        // 将附件复制到应用沙箱（切到 IO 线程，避免阻塞主线程）
+        val persistedAttachments = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            currentAttachments.map { att ->
+                val localPath = copyToSandbox(att.uri, att.name)
+                MessageAttachment(
+                    name = att.name,
+                    mimeType = att.mimeType,
+                    sizeBytes = att.sizeBytes,
+                    type = att.type,
+                    localPath = localPath,
+                    thumbnailUri = if (att.type == AttachmentType.IMAGE) att.uri else null
+                )
+            }
         }
 
         _uiState.update { state ->
@@ -122,10 +143,8 @@ class AgentChatViewModel @Inject constructor(
             "[用户附加了 ${persistedAttachments.size} 个文件]\n$fileList\n\n用户消息: $text"
         } else text
 
-        currentJob = viewModelScope.launch {
-            agentEngine.execute(attachmentContext).collect { event ->
-                handleEvent(event)
-            }
+        agentEngine.execute(attachmentContext).collect { event ->
+            handleEvent(event)
         }
     }
 
@@ -333,23 +352,61 @@ class AgentChatViewModel @Inject constructor(
     // ═══ 斜杠指令处理 ═══
 
     /**
-     * 处理斜杠指令
+     * 处理斜杠指令。
+     *
+     * 解析格式：`/skill:code_interpreter 附加的用户要求...`
+     *
+     * - 在消息列表中追加一条 System 消息提示用户已触发指令；
+     * - 同时把指令 + 附加要求作为上下文发给 Agent，由 Agent 决定后续工具调用。
+     *
+     * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
-        val parts = command.split(":", limit = 2)
+        // 解析「指令部分」与「附加用户输入」
+        val spaceIndex = command.indexOf(' ')
+        val cmdPart = if (spaceIndex != -1) command.substring(0, spaceIndex) else command
+        val userExtraInput = if (spaceIndex != -1) command.substring(spaceIndex + 1).trim() else ""
+
+        // 解析 /<type>:<name> 结构
+        val parts = cmdPart.split(":", limit = 2)
         val type = parts[0].removePrefix("/")
         val name = parts.getOrNull(1)?.trim() ?: ""
 
-        val message = when (type) {
+        val systemMsg = when (type) {
             "skill" -> "🧩 激活 Skill: $name"
             "mcp" -> "🔌 连接 MCP: $name"
             "connector" -> "🔗 使用连接器: $name"
             "plugin" -> "📦 调用插件: $name"
-            else -> "未知指令: $command"
+            else -> "⚡ 指令: $cmdPart"
         }
 
         _uiState.update { s ->
-            s.copy(messages = s.messages + AgentUiMessage.System(message))
+            s.copy(
+                messages = s.messages + AgentUiMessage.System(systemMsg),
+                isLoading = true,
+                currentThinking = "",
+                currentResponse = ""
+            )
+        }
+
+        // 拼接完整的 Agent 提示词：指令 + 名称 + 用户附加要求
+        val agentInput = buildString {
+            append("用户触发了快捷指令: ").append(cmdPart).append("\n")
+            append("请根据此指令执行对应操作。")
+            when (type) {
+                "skill" -> append("（通过 skill 相关工具执行：").append(name).append("）")
+                "mcp" -> append("（通过 MCP 工具执行：").append(name).append("）")
+                "connector" -> append("（通过 connector 工具执行：").append(name).append("）")
+                "plugin" -> append("（通过 plugin 工具执行：").append(name).append("）")
+                else -> {}
+            }
+            if (userExtraInput.isNotBlank()) {
+                append("\n\n用户附加要求: ").append(userExtraInput)
+            }
+        }
+
+        currentJob = viewModelScope.launch {
+            agentEngine.execute(agentInput).collect { event -> handleEvent(event) }
         }
     }
 

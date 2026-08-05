@@ -55,7 +55,7 @@ class TerminalExecTool(
 
         val result = manager.execute(sessionId, command, timeout)
 
-        buildString {
+        return buildString {
             // 状态行
             if (result.timedOut) {
                 appendLine("⚠️ Command timed out after ${timeout}ms")

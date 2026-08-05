@@ -81,4 +81,8 @@ dependencies {
 
     // Security (encrypted SharedPreferences for GitHub token)
     implementation(libs.security.crypto)
+
+    // Unit testing (pure-JVM src/test)
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

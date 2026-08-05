@@ -12,6 +12,7 @@ import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.slash.SlashCommandParser
 import com.apex.agent.slash.SlashCommandRouter
+import com.apex.agent.slash.SlashRouteContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +83,19 @@ class AgentChatViewModel @Inject constructor(
 
     private val _attachments = MutableStateFlow<List<Attachment>>(emptyList())
     val attachments: StateFlow<List<Attachment>> = _attachments.asStateFlow()
+
+    /**
+     * One-shot signal emitted when a slash command needs the user to complete
+     * the GitHub connection flow before it can execute (currently only
+     * `/mcp:github` when no token is saved). The Agent chat screen collects
+     * this and opens the GitHub token dialog.
+     *
+     * Uses [MutableSharedFlow] (not StateFlow) because this is an event, not
+     * a persistent state — repeated `/mcp:github` attempts while still
+     * unconnected should re-open the dialog each time.
+     */
+    private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
 
     /**
      * 输入框草稿持久化（缺陷 3 修复）。
@@ -502,22 +516,42 @@ class AgentChatViewModel @Inject constructor(
      *
      * 解析与路由职责已下沉到 [SlashCommandParser] + [SlashCommandRouter]，
      * 本方法只负责：
+     * - 把当前 GitHub 连接状态快照成 [SlashRouteContext] 传给路由器；
      * - 把路由结果（systemMessage + agentPrompt）应用到 UI 状态；
      * - 把 agentPrompt 交给 [agentEngine] 执行。
+     *
+     * 特例：当路由器返回 `requestGithubConnect = true`（目前仅 `/mcp:github`
+     * 在未连接时触发）时，本方法只追加 systemMessage 并发射
+     * [requestGithubConnect] 信号让 UI 打开 GitHub 连接对话框，**不**调用
+     * agentEngine.execute —— 因为没有可执行的上下文。
      *
      * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
         val parsed = SlashCommandParser.parse(command)
-        val route = SlashCommandRouter.route(parsed)
+        val githubState = githubTokenManager.connectionState.value
+        val context = SlashRouteContext(
+            githubConnected = githubState.isConnected,
+            githubUsername = githubState.username
+        )
+        val route = SlashCommandRouter.route(parsed, context)
 
+        // 始终追加系统消息，让用户看到指令被识别 + 当前状态。
         _uiState.update { s ->
             s.copy(
                 messages = s.messages + AgentUiMessage.System(route.systemMessage),
-                isLoading = true,
+                isLoading = !route.requestGithubConnect,
                 currentThinking = "",
                 currentResponse = ""
             )
+        }
+
+        if (route.requestGithubConnect) {
+            // 请求 UI 打开 GitHub 连接流程；不进入 Agent 主循环。
+            // tryEmit 因为 extraBufferCapacity=1，订阅者存在时一定成功；
+            // 即便 UI 尚未订阅（冷启动竞态），缓冲区也会保留一次事件。
+            _requestGithubConnect.tryEmit(Unit)
+            return
         }
 
         currentJob = viewModelScope.launch {

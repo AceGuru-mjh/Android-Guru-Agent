@@ -155,9 +155,12 @@ fun GithubIconButton(
  * 2. 增加 errorMessage 字段，验证失败时 inline 提示，不直接关闭弹窗；
  * 3. 调用期间禁用输入框与按钮；
  * 4. 加入格式预检（ghp_ / github_pat_ 前缀）。
+ *
+ * `internal`（非 private）以便 [com.apex.agent.ui.screen.agent.AgentChatScreen]
+ * 在 `/mcp:github` 未连接时复用同一个对话框 —— 避免在两处维护一份 Token 输入 UI。
  */
 @Composable
-private fun GithubTokenDialog(
+internal fun GithubTokenDialog(
     onDismiss: () -> Unit,
     onSubmit: suspend (String) -> String?,
     onSuccess: (token: String, username: String) -> Unit

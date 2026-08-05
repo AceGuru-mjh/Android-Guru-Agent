@@ -249,9 +249,24 @@ Parsing and routing live in the `com.apex.agent.slash` package (pure JVM, no Com
 
 - `SlashCommand` — sealed model: `Skill` / `Mcp` / `Connector` / `Plugin` / `Unknown`
 - `SlashCommandParser` — defensive parser; malformed shapes degrade to `Unknown`, malformed `key=value` tokens fall back to positional user text
-- `SlashCommandRouter` — maps a parsed command to a `SlashCommandRoute(systemMessage, agentPrompt)`
+- `SlashRouteContext` — immutable runtime context the router consults for connection-aware commands (currently `githubConnected` / `githubUsername`)
+- `SlashCommandRouter` — maps a parsed command + context to a `SlashCommandRoute(systemMessage, agentPrompt, requestGithubConnect)`
+- Unit tests: `app/src/test/kotlin/com/apex/agent/slash/` (`SlashCommandParserTest`, `SlashCommandRouterTest`)
 
-`AgentChatViewModel.handleSlashCommand()` consumes the router: the `systemMessage` is appended as an `AgentUiMessage.System` bubble, and `agentPrompt` (which now includes parsed args + user extra) is handed to `AgentEngine.execute(...)`. This replaces the previous inline `when(type)` string concatenation and makes the command surface independently testable and extensible for future command types (`tool:`, `help:`, …).
+`AgentChatViewModel.handleSlashCommand()` snapshots the current GitHub connection state into a `SlashRouteContext`, calls the router, appends `systemMessage` as an `AgentUiMessage.System` bubble, and hands `agentPrompt` to `AgentEngine.execute(...)`. This replaces the previous inline `when(type)` string concatenation and makes the command surface independently testable and extensible for future command types (`tool:`, `help:`, …).
+
+### `/mcp:github` real binding
+
+`/mcp:github` is the first slash command wired to a **real** backend capability: the 7 GitHub tools registered in `ToolModule` when a token is present (`github_get_user`, `github_list_repos`, `github_read_file`, `github_write_file`, `github_create_issue`, `github_list_issues`, `github_search_code`).
+
+The router branches on the connection state carried in `SlashRouteContext`:
+
+| State | Behavior |
+|-------|----------|
+| **Connected** | `systemMessage` = `"🔌 已启用 GitHub MCP 上下文（用户: <login>）"`; `agentPrompt` explicitly enumerates the 7 `github_*` tool IDs and instructs the agent to prefer them; `AgentEngine.execute()` runs normally. User args (`repo=owner/name`) and extra text are forwarded. |
+| **Not connected** | `systemMessage` = `"⚠️ GitHub 未连接，请通过输入栏 GitHub 图标连接后再使用 /mcp:github"`; `agentPrompt` is empty; the router sets `requestGithubConnect = true`. The ViewModel emits a one-shot `requestGithubConnect` `SharedFlow` event, which `AgentChatScreen` collects to open the existing `GithubTokenDialog` — so the slash command itself bootstraps the connection flow instead of forcing the user to find the input-bar GitHub icon. `AgentEngine.execute()` is **not** called (no hollow prompt). |
+
+This closes the gap flagged in the slash-command audit: `/mcp:github` is no longer a semantic hint — it either activates a real GitHub tool context or guides the user through the connect flow.
 
 ## Skill System
 

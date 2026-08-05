@@ -132,37 +132,39 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-35
-            build-tools;35.0.0
-            ndk;27.0.12077973
-            cmake;3.22.1
+      - name: Configure pre-installed Android SDK
+        run: |
+          # ubuntu-latest 自带 Android SDK / NDK / CMake，只需配置路径
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK pre-installed"
+          ls "$ANDROID_HOME/cmake/" 2>/dev/null || echo "No CMake pre-installed"
+          # 选择已安装的 NDK 版本（27.x 优先）
+          NDK_DIR=$(ls -d "$ANDROID_HOME"/ndk/27.* 2>/dev/null | head -1)
+          if [ -z "$NDK_DIR" ]; then
+            NDK_DIR=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | head -1)
+          fi
+          echo "NDK_DIR=$NDK_DIR"
+          # 写入 local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          if [ -n "$NDK_DIR" ]; then
+            echo "ndk.dir=$NDK_DIR" >> local.properties
+          fi
+          cat local.properties
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10'
 
-      - name: Generate local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/27.0.12077973" >> local.properties
-          cat local.properties
-
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10
 
-      - name: Compile app module (Kotlin only, skip NDK)
+      - name: Compile app module
         run: |
           ./gradlew :app:compileDebugKotlin \
             --no-daemon \
             --no-build-cache \
-            -PskipNativeBuild=true \
-            -x :platform:terminal:externalNativeBuildDebug \
-            -x :platform:terminal:externalNativeBuildRelease \
+            --stacktrace \
             2>&1 | tee compile.log
         continue-on-error: true
 
@@ -173,11 +175,11 @@ jobs:
             exit 0
           elif grep -q "BUILD FAILED" compile.log; then
             echo "❌ App module compilation failed"
-            echo "--- Error summary ---"
+            echo "--- Error summary (first 50 errors) ---"
             grep -E "^e: |error:|FAILED" compile.log | head -50
             exit 1
           else
             echo "⚠️ Unexpected: no BUILD SUCCESSFUL or BUILD FAILED found"
-            tail -30 compile.log
+            tail -50 compile.log
             exit 1
           fi

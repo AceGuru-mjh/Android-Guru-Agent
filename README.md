@@ -330,13 +330,47 @@ For each iteration (up to config.maxIterations):
   1. Build messages (system prompt + history)
   2. llmClient.chatStream(messages, tools) -> Flow<LlmStreamChunk>
   3. Accumulate content + toolCalls (with ToolCallAccumulator for streamed args)
-  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor, emit ToolCallComplete, loop
+  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor (streaming), emit ToolOutputChunk per output line, emit ToolCallComplete, loop
   5. If content only: emit ResponseChunk(s) then ResponseComplete, done
   ↓
 ChatViewModel collects events -> updates ChatUiState
   ↓
 ChatScreen re-renders streaming bubbles, tool cards
 ```
+
+### Tool output streaming
+
+Tool execution is no longer an opaque "start → wait → complete" block. `ToolExecutor.executeStream(toolId, arguments): Flow<ToolStreamEvent>` is the primary execution path; `ApexAgentEngine.executeToolCallStreaming` collects it so tool output surfaces live in the UI:
+
+```
+ToolCallStart(toolName, arguments)
+  ↓
+toolExecutor.executeStream(...) -> Flow<ToolStreamEvent>
+  ├─ Output(chunk)   → emit ToolOutputChunk(callId, chunk)   (zero or more, as output arrives)
+  ├─ Progress(p, m)  → emit ToolProgress(callId, p, m)        (optional, for estimable tasks)
+  ├─ Complete(output)                                          (terminal — success)
+  └─ Error(message)                                            (terminal — failure)
+  ↓
+ToolCallComplete(callId, toolName, output, success, durationMs)
+```
+
+The streaming layer is opt-in per tool:
+
+- **`StreamingAgentTool`** (interface, extends `AgentTool`) — a tool that can produce output incrementally implements `executeStream(arguments): Flow<ToolStreamEvent>`. The executor detects it at runtime (`tool is StreamingAgentTool`) and forwards its events verbatim.
+- **Plain `AgentTool`** — unchanged. The executor transparently wraps `execute()` into a single `Output(result)` + `Complete(result)` (or `Error` if `"Error"`-prefixed), so every existing tool works without modification and the engine/UI code path is unified.
+- **`SafeAgentTool`** — the safety wrapper applied to every tool in `ToolModule` — implements `StreamingAgentTool` so it **transparently passes through** a delegate's streaming capability. Without this, the wrapper would hide streaming from the executor's `is`-check and silently kill it for every tool. (`SafeAgentToolStreamingTest` guards this regression.)
+
+The first concrete streaming tool is **`shell_execute`**:
+
+- `ShellStreamSource` (`platform/privilege`) reads the process stdout/stderr line-by-line via `callbackFlow`, emitting one `Output(line)` per line. `stderr` lines are prefixed `[stderr] ` and interleaved with stdout. On collector cancellation (`abort()`), `awaitClose` runs `process.destroy()`, immediately killing the subprocess — no zombies, no continued output.
+- `StreamingShellExecuteTool` (app module) parses `{"command": "..."}` and delegates to `ShellStreamSource`. It's registered in `ToolModule` in place of the old blocking `ShellExecuteTool`.
+- Privilege routing: `ShellStreamSource` uses `PrivilegeDetector.getPrivilegeLevel()` to pick `su -c` (ROOT) vs `sh -c` (NORMAL_SHELL/SHIZUKU). Shizuku streaming (needs a Flow adapter over `Shizuku.newProcess`) is deferred to a follow-up; Shizuku devices currently fall back to `sh -c`.
+
+On the UI side, `AgentChatViewModel` handles `ToolOutputChunk` by appending to a `StringBuilder` buffer, then flushing to `currentToolCall.output` on a **16ms throttle** (≈1 frame) — so fast tool output doesn't trigger a recompose per token. The buffer is capped to the last 4000 chars. `ToolProgress` updates a progress bar + message. `RunningToolCallCard` renders the live output in a monospace, vertically-scrollable area — so the user sees `ping` / `logcat` / `for i in 1 2 3; do echo $i; sleep 1; done` output appear as it happens instead of staring at a spinner until the tool finishes.
+
+Cancellation propagates through the whole chain: `abort()` → cancels the engine job → cancels `collect` → cancels the tool's Flow → `ShellStreamSource.awaitClose` → `process.destroy()`.
+
+> **Example:** `for i in 1 2 3; do echo $i; sleep 1; done` now shows `1`, `2`, `3` appearing one per second in the running tool card, then the completed tool card with the full output — instead of a 3-second spinner followed by all three lines at once.
 
 ### Plan mode
 

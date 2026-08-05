@@ -23,11 +23,16 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:tool-registry"))
     implementation(libs.core.ktx)
     implementation(libs.coroutines.android)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
-    
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
+    // Unit testing (pure-JVM src/test)
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

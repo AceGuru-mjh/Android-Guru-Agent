@@ -11,15 +11,14 @@ import com.apex.agent.core.tools.builtin.FileReadTool
 import com.apex.agent.core.tools.builtin.FileWriteTool
 import com.apex.agent.core.tools.builtin.HttpRequestTool
 import com.apex.agent.core.tools.builtin.ListFilesTool
-import com.apex.agent.core.tools.builtin.ShellExecuteTool
 import com.apex.agent.core.tools.builtin.WebFetchTool
-import com.apex.agent.platform.privilege.PrivilegeDetector
+import com.apex.agent.platform.privilege.ShellStreamSource
+import com.apex.agent.tools.StreamingShellExecuteTool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -83,48 +82,17 @@ object ToolModule {
 
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
 
-        /**
-         * Shell 执行器。
-         *
-         * 第一层权限兜底：
-         * - 不把异常抛给工具内部
-         * - 不把异常抛给 AgentEngine
-         * - 始终返回 LLM 可理解的 Error 字符串
-         * - 权限不足时返回友好提示，建议用户授予 Root 或 Shizuku
-         */
-        val shellExec: suspend (String) -> String = { command ->
-            try {
-                val result = PrivilegeDetector.executeShell(command)
-
-                if (result.success) {
-                    result.output.ifBlank { "(completed, no output)" }
-                } else {
-                    val lowerOutput = result.output.lowercase()
-
-                    val looksLikePermissionError =
-                        lowerOutput.contains("permission denied") ||
-                            lowerOutput.contains("operation not permitted") ||
-                            lowerOutput.contains("access denied") ||
-                            lowerOutput.contains("not permitted") ||
-                            lowerOutput.contains("permission")
-
-                    if (looksLikePermissionError) {
-                        "Error: 权限不足，无法执行。当前权限通道：${result.via}。" +
-                            "建议用户授予 Root 或 Shizuku，或改用应用沙箱内工具。"
-                    } else {
-                        "Error: 命令执行失败（exit=${result.exitCode}, via=${result.via}）：${result.output}"
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                "Error: 权限不足或执行失败，无法执行。${e.message ?: "unknown error"}"
-            }
-        }
+        // ═══ shell_execute：流式版（逐行 stdout/stderr）═══
+        // 由 ShellStreamSource 逐行发射 ToolStreamEvent，经 StreamingShellExecuteTool
+        // 暴露为 StreamingAgentTool。SafeAgentTool 会透传流式能力（它实现了
+        // StreamingAgentTool）。旧的阻塞式 shellExec lambda 已移除 —— 权限检测与
+        // Root/Shizuku/shell 通道选择下沉到 ShellStreamSource。
+        val shellStream: (String) -> kotlinx.coroutines.flow.Flow<com.apex.agent.core.tools.ToolStreamEvent> =
+            { command -> ShellStreamSource.executeStream(command) }
 
         // ═══ 只注册 6 个 MVP 基础工具，全部包 SafeAgentTool ═══
         val tools = listOf(
-            ShellExecuteTool(shellExec),
+            StreamingShellExecuteTool(shellStream),
             FileReadTool(workspaceDir),
             FileWriteTool(workspaceDir),
             ListFilesTool(workspaceDir),

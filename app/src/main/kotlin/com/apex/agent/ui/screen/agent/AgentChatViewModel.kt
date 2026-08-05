@@ -17,6 +17,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -63,10 +64,22 @@ sealed interface AgentUiMessage {
 }
 
 data class AgentToolCallUi(
+    val callId: String = "",
     val toolName: String,
     val args: String,
+    /** 实时输出（由 ToolOutputChunk 逐段累积，节流后刷新；尾部窗口 4000 字符）。 */
+    val output: String = "",
+    /** 进度（0..1），由 ToolProgress 事件更新；null 表示工具无进度信息。 */
+    val progress: Float? = null,
+    /** 进度说明文本，由 ToolProgress 事件更新。 */
+    val progressMessage: String? = null,
     val isRunning: Boolean = true
-)
+) {
+    companion object {
+        /** 运行中工具卡片最多保留的实时输出字符数（尾部窗口）。 */
+        const val MAX_LIVE_TOOL_OUTPUT_CHARS = 4000
+    }
+}
 
 @HiltViewModel
 class AgentChatViewModel @Inject constructor(
@@ -112,6 +125,16 @@ class AgentChatViewModel @Inject constructor(
     }
 
     private var currentJob: Job? = null
+
+    // ═══ 工具输出流式缓冲（16ms 节流刷新）═══
+    // 每个 ToolOutputChunk 直接更新 StateFlow 会导致高频重组（模型/工具吐字快时
+    // 每秒数十次）。这里先把 chunk 追加到 [toolOutputBuffer]，并启动一个 16ms
+    // (≈1 帧) 的 flush Job；期间到达的 chunk 不再启动新 Job，到点后一次性把
+    // 缓冲区快照写入 currentToolCall.output。既保留所有文本，又把重组次数压到
+    // 每秒 ≤60 次。
+    private val toolOutputBuffer = StringBuilder()
+    private var activeToolCallId: String? = null
+    private var toolFlushJob: Job? = null
 
     /**
      * 附件处理 Job 追踪，支持取消（缺陷 1 修复）。
@@ -254,19 +277,68 @@ class AgentChatViewModel @Inject constructor(
                 }
             }
 
-            // ═══ 工具调用 ═══
+            // ═══ 工具调用（流式）═══
             is AgentEvent.ToolCallStart -> {
+                // 重置缓冲区 + 节流状态，记录当前活跃工具 callId 用于 chunk 路由。
+                activeToolCallId = event.callId
+                toolOutputBuffer.clear()
+                toolFlushJob?.cancel()
+                toolFlushJob = null
+
                 _uiState.update { state ->
                     state.copy(
                         currentToolCall = AgentToolCallUi(
+                            callId = event.callId,
                             toolName = event.toolName,
                             args = event.arguments,
+                            output = "",
+                            progress = null,
+                            progressMessage = null,
                             isRunning = true
                         )
                     )
                 }
             }
+            is AgentEvent.ToolOutputChunk -> {
+                // 仅处理当前活跃工具的 chunk；上一轮工具迟到的 chunk 丢弃（安全）。
+                if (event.callId != activeToolCallId) return
+
+                toolOutputBuffer.append(event.chunk)
+
+                // 16ms 内的多个 chunk 合并为一次 UI 更新（≈1 帧节流）。
+                if (toolFlushJob == null) {
+                    toolFlushJob = viewModelScope.launch {
+                        delay(FLUSH_INTERVAL_MS)
+                        val snapshot = toolOutputBuffer.toString()
+                            .takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
+                        _uiState.update { state ->
+                            state.copy(
+                                currentToolCall = state.currentToolCall?.copy(output = snapshot)
+                            )
+                        }
+                        toolFlushJob = null
+                    }
+                }
+            }
+            is AgentEvent.ToolProgress -> {
+                if (event.callId != activeToolCallId) return
+                _uiState.update { state ->
+                    state.copy(
+                        currentToolCall = state.currentToolCall?.copy(
+                            progress = event.percent,
+                            progressMessage = event.message
+                        )
+                    )
+                }
+            }
             is AgentEvent.ToolCallComplete -> {
+                // 取消尚未刷新的 flush Job，并把剩余缓冲区一次性写入历史消息输出
+                // （ToolCallComplete.output 已是 engine 截断后的完整输出，直接用即可）。
+                toolFlushJob?.cancel()
+                toolFlushJob = null
+                activeToolCallId = null
+                toolOutputBuffer.clear()
+
                 _uiState.update { state ->
                     state.copy(
                         currentToolCall = null,
@@ -639,5 +711,8 @@ class AgentChatViewModel @Inject constructor(
 
     companion object {
         private const val KEY_DRAFT_INPUT = "draft_input"
+
+        /** 工具输出 UI 刷新节流间隔（≈1 帧 = 16ms）。 */
+        private const val FLUSH_INTERVAL_MS = 16L
     }
 }

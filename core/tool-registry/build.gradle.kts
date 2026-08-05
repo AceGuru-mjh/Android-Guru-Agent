@@ -13,6 +13,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core:llm-adapter"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)  // WebFetchTool / WebSearchTool / HttpRequestTool

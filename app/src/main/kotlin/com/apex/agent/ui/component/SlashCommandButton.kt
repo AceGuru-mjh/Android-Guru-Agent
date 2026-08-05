@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -54,6 +56,9 @@ fun SlashCommandButton(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(6.dp)
             )
+            // TalkBack: announce the button's purpose so screen-reader users
+            // know this opens the Skills / MCP / 连接器 / 插件 command menu.
+            .semantics { contentDescription = "打开斜杠指令菜单" }
             .clickable { showMenu = true },
         contentAlignment = Alignment.Center
     ) {

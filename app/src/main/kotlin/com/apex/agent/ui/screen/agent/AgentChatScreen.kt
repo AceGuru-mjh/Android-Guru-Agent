@@ -273,7 +273,18 @@ fun AgentChatScreen(
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
                         onCommandSelected = { command ->
-                            viewModel.updateInputText(command)
+                            // Insert the command rather than overwriting existing input.
+                            // If the user has already typed something (e.g.
+                            // "请帮我用 ... 查询"), the selected command is space-joined
+                            // after it so the original intent is preserved. The command
+                            // itself carries a trailing space so the user can keep typing
+                            // arguments right away.
+                            val merged = if (inputText.isBlank()) {
+                                command
+                            } else {
+                                inputText.trimEnd() + " " + command
+                            }
+                            viewModel.updateInputText(merged)
                         },
                         modifier = Modifier.padding(bottom = 4.dp)
                     )

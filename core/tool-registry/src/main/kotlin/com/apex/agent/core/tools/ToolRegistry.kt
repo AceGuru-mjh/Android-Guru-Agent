@@ -1,6 +1,9 @@
 package com.apex.agent.core.tools
 
 import com.apex.agent.core.llm.ToolDefinition
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 
 /**
  * 工具注册表
@@ -16,9 +19,24 @@ interface ToolRegistry {
 
 /**
  * 工具执行器
+ *
+ * 提供两种执行入口：
+ * - [execute]：一次性返回完整输出（向后兼容，所有现有调用点不变）。
+ * - [executeStream]：返回 [ToolStreamEvent] 流，允许工具逐段输出。引擎优先
+ *   使用 [executeStream]，这样实现了 [StreamingAgentTool] 的工具（如
+ *   shell_execute）能逐行把输出推到 UI，而非流式工具则被透明包装成
+ *   “单个 Output + Complete” 的事件序列。
  */
 interface ToolExecutor {
     suspend fun execute(toolId: String, arguments: String): String
+
+    /**
+     * 流式执行入口。始终以 [Flow] 形式返回，无论工具是否实现 [StreamingAgentTool]：
+ * - 实现了 [StreamingAgentTool]：直接转发 `tool.executeStream(...)` 的事件。
+ * - 未实现：在 IO 调度器上调用 `tool.execute(...)`，把结果包成单个
+ *   [ToolStreamEvent.Output] + [ToolStreamEvent.Complete]（失败时为 [ToolStreamEvent.Error]）。
+     */
+    fun executeStream(toolId: String, arguments: String): Flow<ToolStreamEvent>
 }
 
 /**
@@ -89,4 +107,42 @@ class DefaultToolExecutor(
             "Error: 工具执行失败。${e.message ?: e::class.simpleName}"
         }
     }
+
+    /**
+     * 流式执行入口。
+     *
+     * - 工具不存在：发射一条 [ToolStreamEvent.Error] 后结束。
+     * - 工具实现了 [StreamingAgentTool]：透传其事件流。
+     * - 普通工具：调用 [execute] 并把结果包成单个 [ToolStreamEvent.Output] +
+     *   [ToolStreamEvent.Complete]（结果以 "Error" 开头时改发 [ToolStreamEvent.Error]）。
+     *
+     * 整个流在 [kotlinx.coroutines.Dispatchers.IO] 上执行，避免阻塞调用方。
+     */
+    override fun executeStream(toolId: String, arguments: String): Flow<ToolStreamEvent> = flow {
+        val tool = registry.getTool(toolId)
+
+        if (tool == null) {
+            val available = registry.getAllTools()
+                .joinToString(", ") { it.id }
+                .ifBlank { "none" }
+            emit(ToolStreamEvent.Error("Error: Tool '$toolId' not found. Available tools: $available"))
+            emit(ToolStreamEvent.Complete(""))
+            return@flow
+        }
+
+        if (tool is StreamingAgentTool) {
+            emitAll(tool.executeStream(arguments))
+            return@flow
+        }
+
+        // 普通工具：调用阻塞 execute 并包成单个 chunk。
+        // execute() 内部已处理异常并返回 "Error: ..." 字符串，这里只做分流。
+        val result = execute(toolId, arguments)
+        if (result.startsWith("Error")) {
+            emit(ToolStreamEvent.Error(result))
+        } else {
+            emit(ToolStreamEvent.Output(result))
+            emit(ToolStreamEvent.Complete(result))
+        }
+    }.flowOn(kotlinx.coroutines.Dispatchers.IO)
 }

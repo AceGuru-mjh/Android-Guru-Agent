@@ -65,8 +65,21 @@ sealed interface AgentUiMessage {
 data class AgentToolCallUi(
     val toolName: String,
     val args: String,
-    val isRunning: Boolean = true
-)
+    val isRunning: Boolean = true,
+    /**
+     * 工具执行期间的实时输出（由 [AgentEvent.ToolOutputChunk] 逐段累积）。
+     * 仅保留最后 [MAX_LIVE_TOOL_OUTPUT_CHARS] 个字符，避免长输出（如
+     * `logcat` / `ping`）导致 UI 字符串无限增长 + 重组开销。
+     * 工具完成后，[handleEvent] 会清空 `currentToolCall`，完整输出经截断
+     * 后进入 [AgentUiMessage.ToolCall] 历史消息。
+     */
+    val output: String = ""
+) {
+    companion object {
+        /** 运行中工具卡片最多保留的实时输出字符数（尾部窗口）。 */
+        const val MAX_LIVE_TOOL_OUTPUT_CHARS = 4000
+    }
+}
 
 @HiltViewModel
 class AgentChatViewModel @Inject constructor(
@@ -261,7 +274,28 @@ class AgentChatViewModel @Inject constructor(
                         currentToolCall = AgentToolCallUi(
                             toolName = event.toolName,
                             args = event.arguments,
-                            isRunning = true
+                            isRunning = true,
+                            output = ""
+                        )
+                    )
+                }
+            }
+            is AgentEvent.ToolOutputChunk -> {
+                // 工具输出流式：把 chunk 追加到当前运行中工具卡片的实时输出。
+                // AgentToolCallUi 不单独存 callId —— engine 保证 ToolOutputChunk
+                // 一定夹在对应 ToolCallStart / ToolCallComplete 之间，因此只要
+                // currentToolCall 存在就追加即可。若上一轮工具刚 Complete 清空了
+                // currentToolCall，迟到的 chunk 会被这里的 null 检查丢弃（安全）。
+                _uiState.update { state ->
+                    val current = state.currentToolCall ?: return@update state
+                    val combined = current.output + event.chunk
+                    state.copy(
+                        currentToolCall = current.copy(
+                            output = if (combined.length > AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS) {
+                                combined.takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
+                            } else {
+                                combined
+                            }
                         )
                     )
                 }

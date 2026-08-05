@@ -338,6 +338,32 @@ ChatViewModel collects events -> updates ChatUiState
 ChatScreen re-renders streaming bubbles, tool cards
 ```
 
+### Tool output streaming
+
+Tool execution is no longer an opaque "start → wait → complete" block. The `ToolExecutor` exposes `executeStream(toolId, arguments): Flow<ToolStreamEvent>`, and `ApexAgentEngine` collects it so tool output surfaces live in the UI:
+
+```
+ToolCallStart(toolName, arguments)
+  ↓
+toolExecutor.executeStream(...) -> Flow<ToolStreamEvent>
+  ├─ Output(chunk)  → emit ToolOutputChunk(callId, chunk)   (zero or more, as output arrives)
+  ├─ Complete(output)                                        (terminal — success)
+  └─ Error(message)                                          (terminal — failure)
+  ↓
+ToolCallComplete(callId, toolName, output, success, durationMs)
+```
+
+The streaming layer is opt-in per tool:
+
+- **`StreamingAgentTool`** (new interface, extends `AgentTool`) — a tool that can produce output incrementally implements `executeStream(arguments): Flow<ToolStreamEvent>`. The executor detects it at runtime and forwards its events verbatim. This is the path a future `shell_execute` streaming variant will take (reading a long-running process line-by-line).
+- **Plain `AgentTool`** — unchanged. The executor transparently wraps `execute()` into a single `Output(result)` + `Complete(result)` (or `Error` if the result is `"Error"`-prefixed), so every existing tool works without modification and the engine/UI code path is unified.
+
+On the UI side, `AgentChatViewModel` handles `AgentEvent.ToolOutputChunk` by appending to `currentToolCall.output` (capped to the last 4000 chars to bound recomposition on long outputs like `logcat`). `RunningToolCallCard` renders that live output in a monospace, vertically-scrollable area under the tool header — so the user sees `ping` / `logcat` / build output appear as it happens instead of staring at a spinner until the tool finishes.
+
+Cancellation propagates through the flow: `abort()` cancels the engine job, which cancels the `collect`, which cancels the tool's flow — so a streaming tool that honors coroutine cancellation (e.g. destroying its `Process`) stops immediately.
+
+> **Status:** the streaming **infrastructure** is complete end-to-end (executor → engine → ViewModel → UI). The first concrete streaming tool (`shell_execute` reading stdout line-by-line across the Root/Shizuku/shell privilege tiers) is the next PR — it requires extending the privilege-layer executor lambda from `suspend (String) -> String` to a streaming variant, which is a larger, separately-scoped change.
+
 ### Plan mode
 
 ```

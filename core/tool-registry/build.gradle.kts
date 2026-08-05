@@ -17,4 +17,8 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)  // WebFetchTool / WebSearchTool / HttpRequestTool
+
+    // Unit testing (pure-JVM src/test)
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

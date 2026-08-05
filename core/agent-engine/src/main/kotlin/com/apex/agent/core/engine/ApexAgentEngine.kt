@@ -6,6 +6,7 @@ import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.ToolStreamEvent
 import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -291,13 +292,63 @@ class ApexAgentEngine(
                         )
 
                         val toolStart = System.currentTimeMillis()
-                        val rawResult = try {
-                            toolExecutor.execute(toolCall.name, toolCall.arguments)
+                        // ★ 工具输出流式：收集 executeStream 的事件流，逐段发射
+                        // AgentEvent.ToolOutputChunk，让 UI 在工具执行期间就能看到
+                        // 实时输出（而非等工具完成后一次性显示）。
+                        // - 实现了 StreamingAgentTool 的工具（如 shell_execute）会逐行输出；
+                        // - 普通工具被 DefaultToolExecutor 透明包装成“单个 Output + Complete”，
+                        //   因此这段逻辑对非流式工具没有行为变化（一个 chunk 即完整输出）。
+                        val outputBuilder = StringBuilder()
+                        try {
+                            toolExecutor.executeStream(toolCall.name, toolCall.arguments)
+                                .collect { event ->
+                                    when (event) {
+                                        is ToolStreamEvent.Output -> {
+                                            outputBuilder.append(event.chunk)
+                                            emit(
+                                                AgentEvent.ToolOutputChunk(
+                                                    callId = toolCall.id,
+                                                    chunk = event.chunk
+                                                )
+                                            )
+                                        }
+                                        is ToolStreamEvent.Complete -> {
+                                            // 防御：若工具只发 Complete 没发 Output（非典型），
+                                            // 把最终输出补发一次，保证 UI 不空。
+                                            if (outputBuilder.isEmpty() && event.output.isNotEmpty()) {
+                                                outputBuilder.append(event.output)
+                                                emit(
+                                                    AgentEvent.ToolOutputChunk(
+                                                        callId = toolCall.id,
+                                                        chunk = event.output
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        is ToolStreamEvent.Error -> {
+                                            outputBuilder.append(event.message)
+                                            emit(
+                                                AgentEvent.ToolOutputChunk(
+                                                    callId = toolCall.id,
+                                                    chunk = event.message
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
-                            "Error: ${e.message}"
+                            val errMsg = "Error: ${e.message}"
+                            outputBuilder.append(errMsg)
+                            emit(
+                                AgentEvent.ToolOutputChunk(
+                                    callId = toolCall.id,
+                                    chunk = errMsg
+                                )
+                            )
                         }
+                        val rawResult = outputBuilder.toString()
                         val duration = System.currentTimeMillis() - toolStart
 
                         // P7 Layer 1: 工具输出截断（始终生效）

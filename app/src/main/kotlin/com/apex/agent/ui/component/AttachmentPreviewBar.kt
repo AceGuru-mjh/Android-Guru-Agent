@@ -20,6 +20,7 @@ import coil.compose.AsyncImage
 import com.apex.agent.ui.screen.agent.Attachment
 import com.apex.agent.ui.screen.agent.AttachmentType
 import com.apex.agent.ui.screen.agent.UploadStatus
+import com.apex.agent.ui.screen.agent.formatFileSize
 
 @Composable
 fun AttachmentPreviewBar(
@@ -47,6 +48,11 @@ fun AttachmentPreviewBar(
     }
 }
 
+/**
+ * 图片附件 chip（含缩略图 + 上传进度 + 移除按钮）
+ *
+ * 缺陷 5 修复：移除按钮视觉尺寸 20dp，但触控区域扩大到 48dp（WCAG 2.1 AAA 标准）。
+ */
 @Composable
 private fun OptimizedImageChip(attachment: Attachment, onRemove: () -> Unit) {
     Box(modifier = Modifier.size(64.dp)) {
@@ -76,27 +82,39 @@ private fun OptimizedImageChip(attachment: Attachment, onRemove: () -> Unit) {
             }
         }
 
-        Surface(
-            onClick = onRemove,
+        // ★ 触控区域 48dp（视觉 20dp）— WCAG 2.1 Target Size AAA
+        Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .offset(x = 4.dp, y = (-4).dp)
-                .size(18.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.errorContainer,
-            shadowElevation = 2.dp
+                .offset(x = 6.dp, y = (-6).dp)
+                .size(48.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Close, null,
-                    modifier = Modifier.size(10.dp),
-                    tint = MaterialTheme.colorScheme.onErrorContainer
-                )
+            Surface(
+                onClick = onRemove,
+                modifier = Modifier.size(20.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.errorContainer,
+                shadowElevation = 2.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Close, null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
             }
         }
     }
 }
 
+/**
+ * 文件附件 chip（含图标 + 文件名 + 大小 + 移除按钮）
+ *
+ * 缺陷 5 修复：移除按钮触控区域 48dp。
+ * 缺陷 6 修复：文件大小使用 formatFileSize 浮点显示。
+ */
 @Composable
 private fun OptimizedFileChip(attachment: Attachment, onRemove: () -> Unit) {
     Surface(
@@ -113,14 +131,35 @@ private fun OptimizedFileChip(attachment: Attachment, onRemove: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(attachment.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(attachment.sizeDisplay, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        formatFileSize(attachment.sizeBytes),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (attachment.status == UploadStatus.UPLOADING) {
-                        CircularProgressIndicator(progress = { attachment.uploadProgress }, modifier = Modifier.size(10.dp), strokeWidth = 1.dp)
+                        CircularProgressIndicator(
+                            progress = { attachment.uploadProgress },
+                            modifier = Modifier.size(10.dp),
+                            strokeWidth = 1.dp
+                        )
                     }
                 }
             }
-            IconButton(onClick = onRemove, modifier = Modifier.size(18.dp)) {
-                Icon(Icons.Default.Close, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            // ★ 触控区域 48dp（视觉 24dp）
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close, null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

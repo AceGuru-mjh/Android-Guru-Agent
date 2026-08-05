@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
@@ -53,9 +54,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +80,7 @@ import com.apex.agent.ui.component.GithubIconButton
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,22 +88,57 @@ fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var inputText by remember { mutableStateOf("") }
+    // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
+    val inputText by viewModel.inputText.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scrollScope = rememberCoroutineScope()
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
 
-    // 自动滚动
+    // ═══ 缺陷 4 修复：智能滚动策略 ═══
+    // 追踪用户是否在底部附近（150px 阈值）
+    val isAtBottom by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+            if (lastVisibleItem == null) true
+            else {
+                val viewportHeight = layoutInfo.viewportSize.height
+                val itemBottom = lastVisibleItem.offset + lastVisibleItem.size
+                val distanceToBottom = viewportHeight - itemBottom
+                distanceToBottom < 150
+            }
+        }
+    }
+
+    // 追踪用户是否主动向上滑动（进入「阅读模式」）
+    var userScrolledUp by remember { mutableStateOf(false) }
+
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
+            val firstVisibleIndex = listState.firstVisibleItemIndex
+            val totalItems = uiState.messages.size
+            if (firstVisibleIndex < totalItems - 2) {
+                userScrolledUp = true
+            }
+        }
+    }
+
+    // 仅在用户处于底部 或 未进入阅读模式时自动滚动
     LaunchedEffect(uiState.messages.size, uiState.currentResponse) {
         val total = uiState.messages.size +
             (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
             (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
             (if (uiState.currentToolCall != null) 1 else 0)
-        if (total > 0) listState.animateScrollToItem(total - 1)
+        if (total > 0 && (isAtBottom || !userScrolledUp)) {
+            listState.animateScrollToItem(total - 1)
+            userScrolledUp = false
+        }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
 
         // ═══ 顶部模式栏 ═══
@@ -233,7 +272,7 @@ fun AgentChatScreen(
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
                         onCommandSelected = { command ->
-                            inputText = command
+                            viewModel.updateInputText(command)
                         },
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
@@ -258,7 +297,7 @@ fun AgentChatScreen(
                     // ═══ 输入框 ═══
                     OutlinedTextField(
                         value = inputText,
-                        onValueChange = { inputText = it },
+                        onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
                         placeholder = {
                             Text(
@@ -289,7 +328,7 @@ fun AgentChatScreen(
                             onClick = {
                                 if (inputText.isNotBlank()) {
                                     viewModel.sendMessage(inputText.trim())
-                                    inputText = ""
+                                    // ★ viewModel.sendMessage 内部已调用 updateInputText("")
                                 }
                             },
                             enabled = inputText.isNotBlank(),
@@ -299,6 +338,34 @@ fun AgentChatScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+        // ═══ 缺陷 4 修复：回到底部 FAB ═══
+        // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮
+        AnimatedVisibility(
+            visible = userScrolledUp && uiState.isLoading,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 80.dp, end = 16.dp)
+        ) {
+            FilledIconButton(
+                onClick = {
+                    userScrolledUp = false
+                    scrollScope.launch {
+                        val total = uiState.messages.size +
+                            (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
+                            (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
+                            (if (uiState.currentToolCall != null) 1 else 0)
+                        if (total > 0) {
+                            listState.animateScrollToItem(total - 1)
+                        }
+                    }
+                },
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "回到底部")
             }
         }
     }

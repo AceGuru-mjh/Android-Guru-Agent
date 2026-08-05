@@ -15,6 +15,9 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    // ★ 保留此字段以触发 Hilt 创建 AttachmentCleanupManager @Singleton 实例。
+    // 实例创建时，AttachmentModule 的 @Provides apply block 会自动调用
+    // schedulePeriodicCleanup()，无需在此处手动调用。
     @Inject
     lateinit var attachmentCleanupManager: AttachmentCleanupManager
 
@@ -26,8 +29,8 @@ class ApexApp : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         initShizuku()
-        // 调度附件清理周期任务（24h 一次，KEEP 策略避免重复）
-        attachmentCleanupManager.schedulePeriodicCleanup()
+        // attachmentCleanupManager 字段已通过 Hilt @Inject 触发单例创建，
+        // schedulePeriodicCleanup() 已在 AttachmentModule 的 @Provides apply block 中调用。
     }
 
     /**

@@ -8,15 +8,11 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedInject
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dagger.hilt.android.work.HiltWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
@@ -28,9 +24,12 @@ import javax.inject.Singleton
  * 附件存储位置：`/data/data/com.apex.agent/files/attachments/`
  *
  * ⚠️ 所有磁盘 I/O 都切到 [Dispatchers.IO]，避免阻塞主线程。
+ *
+ * DI：通过 [com.apex.agent.di.AttachmentModule] 提供 @Singleton 实例，
+ * 构造时自动调用 [schedulePeriodicCleanup]。
  */
 @Singleton
-class AttachmentCleanupManager @Inject constructor(
+class AttachmentCleanupManager(
     @ApplicationContext private val context: Context
 ) {
     private val attachmentsDir: File

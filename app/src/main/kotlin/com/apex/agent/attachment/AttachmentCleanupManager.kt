@@ -124,24 +124,27 @@ class AttachmentCleanupManager @Inject constructor(
 }
 
 /**
- * 周期性附件清理 Worker（Hilt 注入版本）。
+ * 周期性附件清理 Worker。
  *
- * 使用 [@HiltWorker][HiltWorker] + [@AssistedInject][AssistedInject] 让 Worker
- * 能够拿到 [AttachmentCleanupManager] 这种单例依赖。
- *
- * 注意：依赖 HiltWorkerFactory，已在 [com.apex.agent.ApexApp] 中通过
- * `Configuration.Provider` 接入。
+ * 不使用 @HiltWorker / @AssistedInject（KSP 处理有兼容性问题），
+ * 直接通过 applicationContext 访问 attachments 目录。
+ * AttachmentCleanupManager 的 schedulePeriodicCleanup() 负责调度此 Worker。
  */
-@HiltWorker
-class AttachmentCleanupWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val cleanupManager: AttachmentCleanupManager
+class AttachmentCleanupWorker(
+    context: Context,
+    params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         return try {
-            cleanupManager.cleanupExpired(maxAgeDays = AttachmentCleanupManager.DEFAULT_MAX_AGE_DAYS)
+            val dir = File(applicationContext.filesDir, "attachments")
+            if (dir.exists()) {
+                val cutoff = System.currentTimeMillis() -
+                    AttachmentCleanupManager.DEFAULT_MAX_AGE_DAYS * 24L * 60 * 60 * 1000
+                dir.listFiles()?.forEach { file ->
+                    if (file.lastModified() < cutoff) file.delete()
+                }
+            }
             Result.success()
         } catch (e: Exception) {
             Result.retry()

@@ -25,6 +25,7 @@ android {
 dependencies {
     implementation(project(":core:tool-registry"))
     implementation(libs.core.ktx)
+    implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)

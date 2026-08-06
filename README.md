@@ -330,13 +330,54 @@ For each iteration (up to config.maxIterations):
   1. Build messages (system prompt + history)
   2. llmClient.chatStream(messages, tools) -> Flow<LlmStreamChunk>
   3. Accumulate content + toolCalls (with ToolCallAccumulator for streamed args)
-  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor, emit ToolCallComplete, loop
+  4. If toolCalls: emit ToolCallStart, execute via ToolExecutor (streaming), emit ToolOutputChunk per output line, emit ToolCallComplete, loop
   5. If content only: emit ResponseChunk(s) then ResponseComplete, done
   ↓
 ChatViewModel collects events -> updates ChatUiState
   ↓
 ChatScreen re-renders streaming bubbles, tool cards
 ```
+
+### Tool output streaming
+
+Tool execution is no longer an opaque "start → wait → complete" block. `ToolExecutor.executeStream(toolId, arguments): Flow<ToolStreamEvent>` is the primary execution path; `ApexAgentEngine.executeToolCallStreaming` collects it so tool output surfaces live in the UI:
+
+```
+ToolCallStart(toolName, arguments)
+  ↓
+toolExecutor.executeStream(...) -> Flow<ToolStreamEvent>
+  ├─ Output(chunk)   → emit ToolOutputChunk(callId, chunk)   (zero or more, as output arrives)
+  ├─ Progress(p, m)  → emit ToolProgress(callId, p, m)        (optional, for estimable tasks)
+  ├─ Complete(output)                                          (terminal — success)
+  └─ Error(message)                                            (terminal — failure)
+  ↓
+ToolCallComplete(callId, toolName, output, success, durationMs)
+```
+
+The streaming layer is opt-in per tool:
+
+- **`StreamingAgentTool`** (interface, extends `AgentTool`) — a tool that can produce output incrementally implements `executeStream(arguments): Flow<ToolStreamEvent>`. The executor detects it at runtime (`tool is StreamingAgentTool`) and forwards its events verbatim.
+- **Plain `AgentTool`** — unchanged. The executor transparently wraps `execute()` into a single `Output(result)` + `Complete(result)` (or `Error` if `"Error"`-prefixed), so every existing tool works without modification and the engine/UI code path is unified.
+- **`SafeAgentTool`** — the safety wrapper applied to every tool in `ToolModule` — implements `StreamingAgentTool` so it **transparently passes through** a delegate's streaming capability. Without this, the wrapper would hide streaming from the executor's `is`-check and silently kill it for every tool. (`SafeAgentToolStreamingTest` guards this regression.)
+
+The first concrete streaming tool is **`shell_execute`**:
+
+- `ShellStreamSource` (`platform/privilege`) routes through the full privilege chain — **Root → Shizuku → normal shell** — by delegating process creation to `ProcessStreamFactory` (and `ShizukuStreamAdapter` for the Shizuku tier). All three tiers share the same stdout/stderr line-by-line reader, exit-code → `Complete`/`Error` mapping, and `awaitClose` → `process.destroy()` cancellation. `stderr` lines are prefixed `[stderr] ` and interleaved with stdout.
+- `ProcessStreamFactory` (`platform/privilege`) converts any `Process` into a `Flow<ToolStreamEvent>` — extracted so Root/Shizuku/shell reuse identical reading logic. The only per-tier difference is how the `Process` is created (`su -c` / `Shizuku.newProcess` / `sh -c`).
+- `ShizukuStreamAdapter` (`platform/privilege`) uses `Shizuku.newProcess(...)` (ADB-level, uid=2000) so devices without Root can still stream `pm list packages` / `am start` / `dumpsys` etc. Reuses `ShizukuCommandExecutor.hasPermission()` for the availability check (consistent with `PrivilegeDetector.detectShizuku()`). Not available → `ShellStreamSource` falls back to normal `sh -c`.
+- `StreamingShellExecuteTool` (app module) parses `{"command": "..."}` and delegates to `ShellStreamSource`. Registered in `ToolModule` in place of the old blocking `ShellExecuteTool`.
+
+The second streaming tool is **`download_file`** — the first real `ToolStreamEvent.Progress` producer:
+
+- `DownloadFileTool` (app module) streams an HTTP/HTTPS download into `filesDir/workspace/downloads/`. When `Content-Length` is known, it emits **deterministic** progress (`percent = downloaded/total`, every 5%) — the UI shows a determinate progress bar. When `Content-Length` is unknown, it emits **indeterminate** progress (`percent = null`, every 1s) — the UI shows an indeterminate bar. Either way, `progressMessage` carries a human-readable `"3.5 MB / 10 MB"` / `"Downloaded 3.5 MB"` string.
+- Safety: 100 MB cap, filename sanitization (path-traversal safe), `ensureActive()` checkpoint so `abort()` stops the write immediately. `execute()` compat path collects the stream into a string for non-streaming callers (skill composite steps).
+- Registered in `ToolModule` alongside `StreamingShellExecuteTool`; wrapped in `SafeAgentTool` which transparently passes through its streaming + progress events.
+
+On the UI side, `AgentChatViewModel` handles `ToolOutputChunk` by appending to a `StringBuilder` buffer, then flushing to `currentToolCall.output` on a **16ms throttle** (≈1 frame) — so fast tool output doesn't trigger a recompose per token. The buffer is capped to the last 4000 chars. `ToolProgress` updates `currentToolCall.progress` (Float?) + `progressMessage`. `RunningToolCallCard` renders: a **determinate** `LinearProgressIndicator` when `progress != null`, an **indeterminate** `LinearProgressIndicator` when `progress == null` but a message is present, the progress message text, and the live monospace output block (maxLines=12, scrollable) — so the user sees `ping` / `logcat` / download progress appear as it happens.
+
+Cancellation propagates through the whole chain: `abort()` → cancels the engine job → cancels `collect` → cancels the tool's Flow → `ProcessStreamFactory.awaitClose` → `process.destroy()` (for shell) or `call.cancel()` (for download).
+
+> **Example:** `for i in 1 2 3; do echo $i; sleep 1; done` now shows `1`, `2`, `3` appearing one per second in the running tool card, then the completed tool card with the full output — instead of a 3-second spinner followed by all three lines at once.
 
 ### Plan mode
 

@@ -1,6 +1,13 @@
 package com.apex.agent.core.tools
 
 import com.apex.agent.core.llm.ToolDefinition
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import java.io.IOException
 
 /**
  * 工具注册表
@@ -15,10 +22,30 @@ interface ToolRegistry {
 }
 
 /**
- * 工具执行器
+ * 工具执行器。
+ *
+ * 提供两种执行入口：
+ * - [execute]：一次性返回完整输出（向后兼容，现有调用点不变）。
+ * - [executeStream]：返回 [ToolStreamEvent] 流，允许工具逐段输出。engine 优先
+ *   使用 [executeStream]，这样实现了 [StreamingAgentTool] 的工具（如
+ *   shell_execute）能逐行把输出推到 UI，而非流式工具则被透明包装成
+ *   “单个 Output + Complete” 的事件序列。
  */
 interface ToolExecutor {
+
+    /**
+     * 兼容旧逻辑：一次性执行工具。
+     */
     suspend fun execute(toolId: String, arguments: String): String
+
+    /**
+     * 新逻辑：流式执行工具。始终以 [Flow] 形式返回，无论工具是否实现
+     * [StreamingAgentTool]：
+     * - 实现了 [StreamingAgentTool]：直接转发 `tool.executeStream(...)` 的事件。
+     * - 未实现：调用 `tool.execute(...)`，把结果包成单个
+     *   [ToolStreamEvent.Output] + [ToolStreamEvent.Complete]（失败时为 [ToolStreamEvent.Error]）。
+     */
+    fun executeStream(toolId: String, arguments: String): Flow<ToolStreamEvent>
 }
 
 /**
@@ -79,14 +106,62 @@ class DefaultToolExecutor(
 
         return try {
             tool.execute(arguments)
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (e: SecurityException) {
             "Error: 权限不足，无法执行。${e.message ?: toolId}"
-        } catch (e: java.io.IOException) {
+        } catch (e: IOException) {
             "Error: 权限不足或 I/O 失败，无法执行。${e.message ?: toolId}"
         } catch (e: Throwable) {
             "Error: 工具执行失败。${e.message ?: e::class.simpleName}"
         }
     }
+
+    /**
+     * 流式执行入口。
+     *
+     * - 工具不存在：发射一条 [ToolStreamEvent.Error] 后结束。
+     * - 工具实现了 [StreamingAgentTool]：透传其事件流（`emitAll`）。
+     * - 普通工具：调用 [execute] 并把结果包成单个 [ToolStreamEvent.Output] +
+     *   [ToolStreamEvent.Complete]（结果以 "Error" 开头时改发 [ToolStreamEvent.Error]）。
+     *
+     * 异常处理与 [execute] 一致：CancellationException 重抛，其他异常转成
+     * [ToolStreamEvent.Error]，保证收集方永远拿到一个完整的事件序列。
+     * 整个流在 [Dispatchers.IO] 上执行，避免阻塞调用方。
+     */
+    override fun executeStream(toolId: String, arguments: String): Flow<ToolStreamEvent> = flow {
+        val tool = registry.getTool(toolId)
+
+        if (tool == null) {
+            val available = registry.getAllTools()
+                .joinToString(", ") { it.id }
+                .ifBlank { "none" }
+            emit(ToolStreamEvent.Error("Error: Tool '$toolId' not found. Available tools: $available"))
+            return@flow
+        }
+
+        try {
+            if (tool is StreamingAgentTool) {
+                emitAll(tool.executeStream(arguments))
+            } else {
+                val result = tool.execute(arguments)
+                if (result.startsWith("Error")) {
+                    emit(ToolStreamEvent.Error(result))
+                } else {
+                    if (result.isNotEmpty()) {
+                        emit(ToolStreamEvent.Output(result))
+                    }
+                    emit(ToolStreamEvent.Complete(result))
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SecurityException) {
+            emit(ToolStreamEvent.Error("Error: 权限不足，无法执行。${e.message ?: toolId}"))
+        } catch (e: IOException) {
+            emit(ToolStreamEvent.Error("Error: 权限不足或 I/O 失败。${e.message ?: toolId}"))
+        } catch (e: Throwable) {
+            emit(ToolStreamEvent.Error("Error: 工具执行失败。${e.message ?: e::class.simpleName}"))
+        }
+    }.flowOn(Dispatchers.IO)
 }

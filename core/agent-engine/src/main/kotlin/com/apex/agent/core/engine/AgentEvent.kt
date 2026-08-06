@@ -61,7 +61,20 @@ sealed interface AgentEvent {
         val callId: String,
         val chunk: String
     ) : AgentEvent
-    
+
+    /**
+     * 工具进度（流式）。
+     *
+     * 由实现了 [com.apex.agent.core.tools.StreamingAgentTool] 的工具在长任务中
+     * 发射，UI 据此显示进度条。[percent] 为 0..1，[message] 为可选说明。
+     * shell_execute 等无明确完成度的工具不发射本事件。
+     */
+    data class ToolProgress(
+        val callId: String,
+        val percent: Float?,
+        val message: String?
+    ) : AgentEvent
+
     /** 工具调用完成 */
     data class ToolCallComplete(
         val callId: String,

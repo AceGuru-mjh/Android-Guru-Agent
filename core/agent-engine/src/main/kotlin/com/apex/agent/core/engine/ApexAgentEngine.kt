@@ -6,6 +6,7 @@ import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.ToolStreamEvent
 import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -282,42 +283,7 @@ class ApexAgentEngine(
                     )
 
                     for (toolCall in toolCalls) {
-                        emit(
-                            AgentEvent.ToolCallStart(
-                                callId = toolCall.id,
-                                toolName = toolCall.name,
-                                arguments = toolCall.arguments
-                            )
-                        )
-
-                        val toolStart = System.currentTimeMillis()
-                        val rawResult = try {
-                            toolExecutor.execute(toolCall.name, toolCall.arguments)
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            "Error: ${e.message}"
-                        }
-                        val duration = System.currentTimeMillis() - toolStart
-
-                        // P7 Layer 1: 工具输出截断（始终生效）
-                        val truncationResult = toolTruncator.smartTruncate(rawResult, toolCall.name)
-                        val result = truncationResult.text
-
-                        emit(
-                            AgentEvent.ToolCallComplete(
-                                callId = toolCall.id,
-                                toolName = toolCall.name,
-                                output = result.take(config.maxToolOutputLength),
-                                success = !result.startsWith("Error"),
-                                durationMs = duration
-                            )
-                        )
-
-                        // 截断后的结果存入历史（节省后续 token）
-                        addMessage(
-                            LlmMessage.ToolResult(toolCall.id, result)
-                        )
+                        executeToolCallStreaming(toolCall, emit)
                     }
                 }
 
@@ -343,6 +309,115 @@ class ApexAgentEngine(
             )
         }
         return iteration
+    }
+
+    /**
+     * 流式执行单个工具调用。
+     *
+     * 取代旧的 `toolExecutor.execute(...)` 一次性调用。收集
+     * [ToolExecutor.executeStream] 的事件流：
+     * - [ToolStreamEvent.Output] → 追加到 [outputBuilder] 并即时发射
+     *   [AgentEvent.ToolOutputChunk]，让 UI 在工具执行期间就能看到实时输出
+     *   （如 shell 的逐行输出）。
+     * - [ToolStreamEvent.Progress] → 发射 [AgentEvent.ToolProgress]，UI 显示进度条。
+     * - [ToolStreamEvent.Complete] → 仅当此前没有任何 Output（非典型）时才把
+     *   `output` 补发一次，保证 UI 不空；否则忽略（以累积值为准）。
+     * - [ToolStreamEvent.Error] → 追加到 [outputBuilder] 并发射一条 ToolOutputChunk，
+     *   使失败信息也实时可见。
+     *
+     * 收集结束后（或捕获到异常），[outputBuilder] 即为 `rawOutput`，沿用原有的
+     * P7 截断 + ToolCallComplete + 写入 LlmMessage.ToolResult 流程 —— 因此成功
+     * 判定（`!result.startsWith("Error")`）与历史持久化行为与旧实现完全一致。
+     *
+     * [CancellationException] 重抛，使 `abort()` 能沿 `collect` → 工具 Flow →
+     * 底层进程（如 `Process.destroy()`）传播。
+     */
+    private suspend fun executeToolCallStreaming(
+        toolCall: ToolCall,
+        emit: suspend (AgentEvent) -> Unit
+    ) {
+        emit(
+            AgentEvent.ToolCallStart(
+                callId = toolCall.id,
+                toolName = toolCall.name,
+                arguments = toolCall.arguments
+            )
+        )
+
+        val toolStart = System.currentTimeMillis()
+        val outputBuilder = StringBuilder()
+
+        try {
+            toolExecutor.executeStream(toolCall.name, toolCall.arguments).collect { event ->
+                when (event) {
+                    is ToolStreamEvent.Output -> {
+                        outputBuilder.append(event.chunk)
+                        emit(
+                            AgentEvent.ToolOutputChunk(
+                                callId = toolCall.id,
+                                chunk = event.chunk
+                            )
+                        )
+                    }
+                    is ToolStreamEvent.Progress -> {
+                        emit(
+                            AgentEvent.ToolProgress(
+                                callId = toolCall.id,
+                                percent = event.percent,
+                                message = event.message
+                            )
+                        )
+                    }
+                    is ToolStreamEvent.Complete -> {
+                        // 防御：仅当工具只发 Complete 没发 Output（非典型）时补发。
+                        if (outputBuilder.isEmpty() && event.output.isNotEmpty()) {
+                            outputBuilder.append(event.output)
+                            emit(
+                                AgentEvent.ToolOutputChunk(
+                                    callId = toolCall.id,
+                                    chunk = event.output
+                                )
+                            )
+                        }
+                    }
+                    is ToolStreamEvent.Error -> {
+                        outputBuilder.append(event.message)
+                        emit(
+                            AgentEvent.ToolOutputChunk(
+                                callId = toolCall.id,
+                                chunk = event.message
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            outputBuilder.append("Error: ${e.message ?: "tool execution failed"}")
+        }
+
+        val duration = System.currentTimeMillis() - toolStart
+
+        // P7 Layer 1: 工具输出截断（始终生效）
+        val rawOutput = outputBuilder.toString()
+        val truncationResult = toolTruncator.smartTruncate(rawOutput, toolCall.name)
+        val result = truncationResult.text
+
+        emit(
+            AgentEvent.ToolCallComplete(
+                callId = toolCall.id,
+                toolName = toolCall.name,
+                output = result.take(config.maxToolOutputLength),
+                success = !result.startsWith("Error"),
+                durationMs = duration
+            )
+        )
+
+        // 截断后的结果存入历史（节省后续 token）
+        addMessage(
+            LlmMessage.ToolResult(toolCall.id, result)
+        )
     }
 
     // ═══════════════════════════════════════════════════════

@@ -96,14 +96,40 @@ class ApexAgentEngine(
         planConfirmationDeferred?.complete(confirmed)
     }
 
-    override fun execute(input: String): Flow<AgentEvent> = flow {
+    /**
+     * 兼容旧接口：纯文本输入委托给多模态入口。
+     */
+    override fun execute(input: String): Flow<AgentEvent> = execute(UserInput.text(input))
+
+    /**
+     * 多模态执行入口。
+     *
+     * - 把 [UserInput.images] 注入 `LlmMessage.User.images`，让 Vision-capable
+     *   LLM 真正看图（而非把图片当文件路径文本）。
+     * - 内存 `conversationHistory` 保留 base64 图片（当前会话上下文需要）。
+     * - 持久化 [memory] 只存剥离图片的文本副本（避免 base64 撑爆存储）。
+     * - 非图片 [UserInput.files] 作为路径上下文拼入文本，Agent 可用工具读取。
+     */
+    override fun execute(input: UserInput): Flow<AgentEvent> = flow {
         isRunning = true
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
 
         try {
-            addMessage(LlmMessage.User(input))
+            val userText = buildUserText(input)
+            val userMessage = LlmMessage.User(content = userText, images = input.images)
+
+            // 内存历史保留完整图片（当前会话后续轮次需要 Vision 上下文）。
+            conversationHistory.add(userMessage)
+            // 持久化记忆不保存 base64 图片，避免存储爆炸；仅存文本副本 + 提示。
+            memory?.append(
+                userMessage.copy(
+                    images = emptyList(),
+                    content = if (input.images.isEmpty()) userMessage.content
+                    else userMessage.content + "\n[图片已附加，持久化记忆中不保存 base64]"
+                )
+            )
 
             when (config.mode) {
                 AgentMode.BUILD -> {
@@ -116,7 +142,7 @@ class ApexAgentEngine(
                     totalIterations = maxOf(totalIterations, iter)
                 }
                 AgentMode.PLAN -> {
-                    val planIterations = executePlanMode(input) { event ->
+                    val planIterations = executePlanMode(userText) { event ->
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
                             maxOf(totalIterations, event.iteration)
@@ -144,6 +170,30 @@ class ApexAgentEngine(
                     totalDurationMs = System.currentTimeMillis() - startTime
                 )
             )
+        }
+    }
+
+    /**
+     * 构造进入 LLM 的用户文本。
+     *
+     * 无附件时原样返回 [UserInput.text]；有附件时在文本前拼接文件清单上下文
+     * （图片不在此处列出 —— 它们走 `LlmMessage.User.images` 直接 Vision）。
+     */
+    private fun buildUserText(input: UserInput): String {
+        if (input.images.isEmpty() && input.files.isEmpty()) return input.text
+        return buildString {
+            if (input.images.isNotEmpty()) {
+                appendLine("[用户附加了 ${input.images.size} 张图片]")
+            }
+            if (input.files.isNotEmpty()) {
+                appendLine("[用户附加文件]")
+                input.files.forEach { f ->
+                    appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes) path=${f.localPath}")
+                }
+            }
+            appendLine()
+            append("用户消息: ")
+            append(input.text)
         }
     }
 

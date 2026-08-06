@@ -74,8 +74,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ExecutionPlan
-import com.apex.agent.core.engine.ReasoningEffort
 import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.ui.component.AttachButton
 import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachmentPreviewBar

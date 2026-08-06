@@ -82,6 +82,10 @@ dependencies {
     // Security (encrypted SharedPreferences for GitHub token)
     implementation(libs.security.crypto)
 
+    // Shizuku (system privilege access)
+    implementation("dev.rikka.shizuku:api:13.1.0")
+    implementation("dev.rikka.shizuku:provider:13.1.0")
+
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

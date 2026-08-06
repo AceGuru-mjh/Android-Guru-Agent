@@ -13,6 +13,7 @@ import com.apex.agent.core.tools.builtin.HttpRequestTool
 import com.apex.agent.core.tools.builtin.ListFilesTool
 import com.apex.agent.core.tools.builtin.WebFetchTool
 import com.apex.agent.platform.privilege.ShellStreamSource
+import com.apex.agent.tools.DownloadFileTool
 import com.apex.agent.tools.StreamingShellExecuteTool
 import dagger.Module
 import dagger.Provides
@@ -90,9 +91,13 @@ object ToolModule {
         val shellStream: (String) -> kotlinx.coroutines.flow.Flow<com.apex.agent.core.tools.ToolStreamEvent> =
             { command -> ShellStreamSource.executeStream(command) }
 
-        // ═══ 只注册 6 个 MVP 基础工具，全部包 SafeAgentTool ═══
+        // ═══ MVP 基础工具（流式）═══
+        // shell_execute: 逐行 stdout/stderr 流式
+        // download_file: 真实 Progress 生产者（确定性 / 不定进度），补上 PR1 中
+        //   ToolStreamEvent.Progress 无内置工具发出的缺口。
         val tools = listOf(
             StreamingShellExecuteTool(shellStream),
+            DownloadFileTool(httpClient, workspaceDir),
             FileReadTool(workspaceDir),
             FileWriteTool(workspaceDir),
             ListFilesTool(workspaceDir),

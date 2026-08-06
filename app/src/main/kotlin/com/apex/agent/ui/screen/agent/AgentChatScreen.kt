@@ -615,10 +615,18 @@ private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
             }
 
             // ═══ 进度条 + 进度说明（由 ToolProgress 事件驱动）═══
+            // - progress != null        → 确定性进度条（download_file 有 Content-Length）
+            // - progress == null 且有 message → 不定进度条（download_file 无 Content-Length）
+            // - 其他                    → 不显示
             if (toolCall.progress != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { toolCall.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (!toolCall.progressMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth()
                 )
             }

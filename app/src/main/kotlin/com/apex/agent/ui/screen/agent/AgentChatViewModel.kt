@@ -6,8 +6,10 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
+import com.apex.agent.core.llm.ImageContent
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.slash.SlashCommandParser
@@ -22,6 +24,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 /**
@@ -230,13 +233,44 @@ class AgentChatViewModel @Inject constructor(
             )
         }
 
-        // 将附件路径告知 Agent
-        val attachmentContext = if (persistedAttachments.isNotEmpty()) {
-            val fileList = persistedAttachments.joinToString("\n") { "  - ${it.localPath} (${it.name})" }
-            "[用户附加了 ${persistedAttachments.size} 个文件]\n$fileList\n\n用户消息: $text"
-        } else text
+        // ═══ 多模态输入：图片 → ImageContent（Vision），非图片 → FileRef（路径上下文）═══
+        // 图片附件经 ImageAttachmentConverter 压缩成 base64 ImageContent，注入
+        // LlmMessage.User.images 让 Vision-capable LLM 真正看图；非图片附件仍作为
+        // 文件路径上下文（Agent 可用 read_file / search_files 读取）。单次最多 3 张图，
+        // 防止请求体过大 / token 超限。
+        val imageContents = mutableListOf<ImageContent>()
+        val fileRefs = mutableListOf<FileRef>()
 
-        agentEngine.execute(attachmentContext).collect { event ->
+        for (attachment in persistedAttachments) {
+            val localPath = attachment.localPath ?: continue
+            val file = File(localPath)
+            if (!file.exists()) continue
+
+            if (attachment.type == AttachmentType.IMAGE) {
+                val imageContent = ImageAttachmentConverter.fromFile(
+                    file = file,
+                    mimeType = attachment.mimeType
+                )
+                if (imageContent != null) imageContents.add(imageContent)
+            } else {
+                fileRefs.add(
+                    FileRef(
+                        name = attachment.name,
+                        mimeType = attachment.mimeType,
+                        localPath = localPath,
+                        sizeBytes = attachment.sizeBytes
+                    )
+                )
+            }
+        }
+
+        val userInput = UserInput(
+            text = text,
+            images = imageContents.take(3),
+            files = fileRefs
+        )
+
+        agentEngine.execute(userInput).collect { event ->
             handleEvent(event)
         }
     }

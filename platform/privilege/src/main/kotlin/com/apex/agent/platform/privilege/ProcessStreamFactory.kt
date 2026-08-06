@@ -111,4 +111,5 @@ object ProcessStreamFactory {
         // 收集方取消。收集方取消时 invokeOnClose 已注册的清理会销毁进程 + 取消
         // 子协程；completionJob 内部 close() 会让 flow 正常结束。
         completionJob.join()
+    }
 }

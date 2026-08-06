@@ -49,11 +49,6 @@ object ProcessStreamFactory {
             return@callbackFlow
         }
 
-        // 收集方取消时销毁进程，停止所有读取协程。
-        invokeOnClose {
-            runCatching { process.destroy() }
-        }
-
         // 逐行读取 stdout。
         val stdoutJob = launch(Dispatchers.IO) {
             try {
@@ -102,12 +97,18 @@ object ProcessStreamFactory {
             close()
         }
 
-        awaitClose {
-            // 收集方取消：销毁进程 + 取消读取/等待协程。
+        // 收集方取消时销毁进程 + 取消读取/等待协程。
+        // 用 invokeOnClose（ProducerScope 成员，无需 import）替代 awaitClose ——
+        // 后者在 coroutines 1.9.0 + Kotlin 2.0.21 CI 下扩展解析失败。
+        invokeOnClose {
             runCatching { process.destroy() }
             stdoutJob.cancel()
             stderrJob.cancel()
             completionJob.cancel()
         }
-    }
+
+        // 保持 callbackFlow 存活，直到 completionJob（发终端事件 + close）或
+        // 收集方取消。收集方取消时 invokeOnClose 已注册的清理会销毁进程 + 取消
+        // 子协程；completionJob 内部 close() 会让 flow 正常结束。
+        completionJob.join()
 }

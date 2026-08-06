@@ -1,6 +1,7 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
 import dagger.Module
 import dagger.Provides
@@ -17,7 +18,12 @@ object SkillModule {
     @Provides
     @Singleton
     fun provideSkillRegistry(@ApplicationContext context: Context): SkillRegistry {
-        val skillsDir = File(context.filesDir, "skills")
-        return SkillRegistry(skillsDir)
+        return SkillRegistry(File(context.filesDir, "skills"))
+    }
+
+    @Provides
+    @Singleton
+    fun provideSkillMenuProvider(skillRegistry: SkillRegistry): SkillMenuProvider {
+        return SkillMenuProvider(skillRegistry)
     }
 }

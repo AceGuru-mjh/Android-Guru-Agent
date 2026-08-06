@@ -1,20 +1,16 @@
 package com.apex.agent.di
 
 import android.content.Context
-import com.apex.agent.core.tools.DefaultToolExecutor
-import com.apex.agent.core.tools.DefaultToolRegistry
-import com.apex.agent.core.tools.FileMemoryStore
-import com.apex.agent.core.tools.SafeAgentTool
-import com.apex.agent.core.tools.ToolExecutor
-import com.apex.agent.core.tools.ToolRegistry
-import com.apex.agent.core.tools.builtin.FileReadTool
-import com.apex.agent.core.tools.builtin.FileWriteTool
-import com.apex.agent.core.tools.builtin.HttpRequestTool
-import com.apex.agent.core.tools.builtin.ListFilesTool
-import com.apex.agent.core.tools.builtin.WebFetchTool
-import com.apex.agent.platform.privilege.ShellStreamSource
-import com.apex.agent.tools.DownloadFileTool
-import com.apex.agent.tools.StreamingShellExecuteTool
+import com.apex.agent.core.tools.*
+import com.apex.agent.core.tools.builtin.*
+import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.core.tools.skill.SkillToolAdapter
+import com.apex.agent.core.tools.mcp.McpManager
+import com.apex.agent.github.GithubApiService
+import com.apex.agent.github.GithubTokenManager
+import com.apex.agent.github.tools.*
+import com.apex.agent.platform.privilege.PrivilegeDetector
+import com.apex.agent.platform.terminal.TerminalManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,116 +21,135 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
-/**
- * MVP Tool layer DI module.
- *
- * 只注册最基础、最稳定的 6 个工具：
- * - shell_execute
- * - read_file
- * - write_file
- * - list_files
- * - web_fetch
- * - http_request
- *
- * MVP 阶段明确禁用：
- * - Skill 动态工具 + SkillToolAdapter
- * - MCP 工具
- * - Terminal PTY 工具
- * - App/UI/Sensor/Memory 等扩展工具
- *
- * 所有工具都包一层 SafeAgentTool，保证 execute() 永不抛异常。
- */
 @Module
 @InstallIn(SingletonComponent::class)
 object ToolModule {
 
     @Provides
     @Singleton
-    fun provideToolHttpClient(): OkHttpClient {
-        return OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .build()
-    }
-
-    /**
-     * 保留 FileMemoryStore，避免 MemoryScreen 或其他组件注入失败。
-     * MVP 的 ToolRegistry 不注册 memory 工具，但保留该依赖不会造成问题。
-     */
-    @Provides
-    @Singleton
-    fun provideMemoryStore(@ApplicationContext context: Context): FileMemoryStore {
-        val memoryDir = File(context.filesDir, "agent_memory")
-        memoryDir.mkdirs()
-        return FileMemoryStore(memoryDir)
-    }
+    fun provideToolHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
 
     @Provides
     @Singleton
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
-        githubTokenManager: com.apex.agent.github.GithubTokenManager,
-        githubApiService: com.apex.agent.github.GithubApiService
+        terminalManager: TerminalManager,
+        githubTokenManager: GithubTokenManager,
+        githubApiService: GithubApiService
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
-
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
+        val downloadDir = File(context.getExternalFilesDir(null), "Download").apply { mkdirs() }
+        val memoryDir = File(context.filesDir, "agent_memory").apply { mkdirs() }
 
-        // ═══ shell_execute：流式版（逐行 stdout/stderr）═══
-        // 由 ShellStreamSource 逐行发射 ToolStreamEvent，经 StreamingShellExecuteTool
-        // 暴露为 StreamingAgentTool。SafeAgentTool 会透传流式能力（它实现了
-        // StreamingAgentTool）。旧的阻塞式 shellExec lambda 已移除 —— 权限检测与
-        // Root/Shizuku/shell 通道选择下沉到 ShellStreamSource。
-        val shellStream: (String) -> kotlinx.coroutines.flow.Flow<com.apex.agent.core.tools.ToolStreamEvent> =
-            { command -> ShellStreamSource.executeStream(command) }
-
-        // ═══ MVP 基础工具（流式）═══
-        // shell_execute: 逐行 stdout/stderr 流式
-        // download_file: 真实 Progress 生产者（确定性 / 不定进度），补上 PR1 中
-        //   ToolStreamEvent.Progress 无内置工具发出的缺口。
-        val tools = listOf(
-            StreamingShellExecuteTool(shellStream),
-            DownloadFileTool(httpClient, workspaceDir),
-            FileReadTool(workspaceDir),
-            FileWriteTool(workspaceDir),
-            ListFilesTool(workspaceDir),
-            WebFetchTool(httpClient),
-            HttpRequestTool(httpClient)
-        )
-
-        tools.forEach { tool ->
-            registry.register(SafeAgentTool(tool))
-        }
-
-        // ═══ GitHub 工具（7个，仅在已连接时注册）═══
-        if (githubTokenManager.isConnected()) {
-            val githubTools = listOf(
-                com.apex.agent.github.tools.GithubGetUserTool(githubApiService),
-                com.apex.agent.github.tools.GithubListReposTool(githubApiService),
-                com.apex.agent.github.tools.GithubReadFileTool(githubApiService),
-                com.apex.agent.github.tools.GithubWriteFileTool(githubApiService),
-                com.apex.agent.github.tools.GithubCreateIssueTool(githubApiService),
-                com.apex.agent.github.tools.GithubListIssuesTool(githubApiService),
-                com.apex.agent.github.tools.GithubSearchCodeTool(githubApiService)
-            )
-            githubTools.forEach { tool ->
-                registry.register(SafeAgentTool(tool))
+        val shellExec: suspend (String) -> String = { cmd ->
+            try {
+                val result = PrivilegeDetector.executeShell(cmd)
+                if (result.success) {
+                    result.output.ifBlank { "(completed)" }
+                } else {
+                    val lower = result.output.lowercase()
+                    if (lower.contains("permission denied") ||
+                        lower.contains("operation not permitted") ||
+                        lower.contains("access denied")
+                    ) {
+                        "Error: 权限不足，无法执行。当前权限通道：${result.via}。建议用户授予 Root 或 Shizuku，或改用应用沙箱内工具。"
+                    } else {
+                        "Error: 命令执行失败（exit=${result.exitCode}, via=${result.via}）：${result.output}"
+                    }
+                }
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                "Error: 命令执行异常：${e.message}"
             }
         }
 
-        android.util.Log.d("ToolModule",
-            "Registered ${registry.getAllTools().size} MVP tools: " +
-                registry.getAllTools().joinToString { it.id })
+        // ═══ 1. Shell (1) ═══
+        registry.register(SafeAgentTool(ShellExecuteTool(shellExec)))
+
+        // ═══ 2. 文件操作 (7) ═══
+        registry.register(SafeAgentTool(ReadFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(WriteFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(ListFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(DeleteFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(SearchFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(GlobFilesTool(workspaceDir)))
+
+        // ═══ 3. 网络 (4) ═══
+        registry.register(SafeAgentTool(WebFetchTool(httpClient)))
+        registry.register(SafeAgentTool(WebSearchTool(httpClient)))
+        registry.register(SafeAgentTool(HttpRequestTool(httpClient)))
+        registry.register(SafeAgentTool(DownloadFileTool(httpClient, downloadDir)))
+
+        // ═══ 4. 记忆 (3) ═══
+        val memoryStore = FileMemoryStore(memoryDir)
+        registry.register(SafeAgentTool(MemorizeTool(memoryStore)))
+        registry.register(SafeAgentTool(RecallTool(memoryStore)))
+        registry.register(SafeAgentTool(ForgetTool(memoryStore)))
+
+        // ═══ 5. 应用管理 (6) ═══
+        registry.register(SafeAgentTool(AppListTool(shellExec)))
+        registry.register(SafeAgentTool(AppLaunchTool(shellExec)))
+        registry.register(SafeAgentTool(AppInstallTool(shellExec)))
+        registry.register(SafeAgentTool(AppUninstallTool(shellExec)))
+        registry.register(SafeAgentTool(AppForceStopTool(shellExec)))
+        registry.register(SafeAgentTool(AppInfoTool(shellExec)))
+
+        // ═══ 6. 系统控制 (6) ═══
+        registry.register(SafeAgentTool(DeviceInfoTool(shellExec)))
+        registry.register(SafeAgentTool(SettingsTool(shellExec)))
+        registry.register(SafeAgentTool(MediaControlTool(shellExec)))
+        registry.register(SafeAgentTool(ClipboardTool(shellExec)))
+        registry.register(SafeAgentTool(GetTimeTool()))
+        registry.register(SafeAgentTool(LogcatTool(shellExec)))
+
+        // ═══ 7. UI 操作 (5) ═══
+        registry.register(SafeAgentTool(UiTapTool(shellExec)))
+        registry.register(SafeAgentTool(UiSwipeTool(shellExec)))
+        registry.register(SafeAgentTool(UiDumpTool(shellExec)))
+        registry.register(SafeAgentTool(ScreenshotTool(shellExec)))
+        registry.register(SafeAgentTool(InputTextTool(shellExec)))
+
+        // ═══ 8. 传感器 (2) ═══
+        registry.register(SafeAgentTool(GetLocationTool(shellExec)))
+        registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
+
+        // ═══ 9. 实用工具 (2) ═══
+        registry.register(SafeAgentTool(CalculateTool(shellExec)))
+        registry.register(SafeAgentTool(TextTransformTool()))
+
+        // ═══ 10. Terminal PTY (6) ═══
+        registry.register(SafeAgentTool(TerminalCreateTool(terminalManager)))
+        registry.register(SafeAgentTool(TerminalExecTool(terminalManager)))
+        registry.register(SafeAgentTool(TerminalSendTool(terminalManager)))
+        registry.register(SafeAgentTool(TerminalReadTool(terminalManager)))
+        registry.register(SafeAgentTool(TerminalListTool(terminalManager)))
+        registry.register(SafeAgentTool(TerminalCloseTool(terminalManager)))
+
+        // ═══ 11. GitHub (7，条件注册) ═══
+        if (githubTokenManager.isConnected()) {
+            registry.register(SafeAgentTool(GithubGetUserTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubListReposTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubReadFileTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubWriteFileTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubCreateIssueTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
+            registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
+        }
 
         return registry
+        // 总计：44 基础 + 7 GitHub(条件) = 51
     }
 
     @Provides
     @Singleton
-    fun provideToolExecutor(registry: ToolRegistry): ToolExecutor {
-        return DefaultToolExecutor(registry)
-    }
+    fun provideToolExecutor(registry: ToolRegistry): ToolExecutor =
+        DefaultToolExecutor(registry)
 }

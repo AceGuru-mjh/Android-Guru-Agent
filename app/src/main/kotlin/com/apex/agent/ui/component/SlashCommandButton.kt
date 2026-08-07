@@ -43,7 +43,8 @@ import com.apex.agent.core.tools.skill.SkillMenuProvider
 fun SlashCommandButton(
     skillMenuProvider: SkillMenuProvider,
     onCommandSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    menuProvider: SlashMenuProvider? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -80,7 +81,8 @@ fun SlashCommandButton(
             onCommandSelected = { command ->
                 onCommandSelected(command)
                 showMenu = false
-            }
+            },
+            menuProvider = menuProvider
         )
     }
 }
@@ -94,11 +96,11 @@ fun SlashCommandButton(
 private fun DynamicSlashMenuPopup(
     skillMenuProvider: SkillMenuProvider,
     onDismiss: () -> Unit,
-    onCommandSelected: (String) -> Unit
+    onCommandSelected: (String) -> Unit,
+    menuProvider: SlashMenuProvider? = null
 ) {
-    // 实时读取 SkillRegistry
-    val activeSkills by remember { mutableStateOf(skillMenuProvider.getActiveSkills()) }
-    val builtinTemplates by remember { mutableStateOf(skillMenuProvider.getBuiltinTemplates()) }
+    val activeSkills = skillMenuProvider.getActiveSkills()
+    val builtinTemplates = skillMenuProvider.getBuiltinTemplates()
     val allSkillItems = activeSkills + builtinTemplates
 
     var expandedCategory by remember { mutableStateOf<String?>(null) }

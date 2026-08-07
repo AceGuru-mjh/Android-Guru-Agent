@@ -12,9 +12,7 @@ import com.apex.agent.core.engine.*
 import com.apex.agent.core.llm.ImageContent
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
-import com.apex.agent.slash.SlashCommandParser
-import com.apex.agent.slash.SlashCommandRouter
-import com.apex.agent.slash.SlashRouteContext
+import com.apex.agent.ui.component.SlashMenuProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +87,7 @@ class AgentChatViewModel @Inject constructor(
     private val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
     val githubTokenManager: GithubTokenManager,
+    val slashMenuProvider: SlashMenuProvider,
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
     @ApplicationContext private val context: Context

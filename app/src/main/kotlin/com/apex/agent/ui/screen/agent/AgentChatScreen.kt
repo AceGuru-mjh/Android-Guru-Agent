@@ -302,7 +302,8 @@ fun AgentChatScreen(
                             }
                             viewModel.updateInputText(merged)
                         },
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        modifier = Modifier.padding(bottom = 4.dp),
+                        menuProvider = viewModel.slashMenuProvider
                     )
 
                     // ═══ GitHub 连接状态按钮 ═══

@@ -99,31 +99,9 @@ private fun DynamicSlashMenuPopup(
     onCommandSelected: (String) -> Unit,
     menuProvider: SlashMenuProvider? = null
 ) {
-    // 动态加载菜单：优先使用 menuProvider，回退到硬编码 buildSlashMenuData()
-    val menuData by androidx.compose.runtime.produceState(
-        initialValue = listOf<SlashMenuCategoryData>(),
-        menuProvider
-    ) {
-        value = if (menuProvider != null) {
-            menuProvider.buildMenu()
-        } else {
-            buildSlashMenuData()
-        }
-    }
-
-    // 加载中时显示占位
-    if (menuData.isEmpty()) {
-        Box(
-            modifier = Modifier.size(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp
-            )
-        }
-        return
-    }
+    val activeSkills = skillMenuProvider.getActiveSkills()
+    val builtinTemplates = skillMenuProvider.getBuiltinTemplates()
+    val allSkillItems = activeSkills + builtinTemplates
 
     var expandedCategory by remember { mutableStateOf<String?>(null) }
 

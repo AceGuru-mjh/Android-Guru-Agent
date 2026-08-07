@@ -174,3 +174,24 @@ class SlashMenuProvider(
         )
     }
 }
+
+/**
+ * 斜杠菜单分类数据。
+ *
+ * 与 [SlashCommandButton] 中的 [DynamicMenuCategory] 分离，
+ * 供 [SlashMenuProvider] 内部使用（扩展版：含 MCP / Plugin 动态加载）。
+ */
+data class SlashMenuCategoryData(
+    val id: String,
+    val title: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val items: List<SlashMenuItemData>
+)
+
+/**
+ * 斜杠菜单项数据。
+ */
+data class SlashMenuItemData(
+    val label: String,
+    val command: String
+)

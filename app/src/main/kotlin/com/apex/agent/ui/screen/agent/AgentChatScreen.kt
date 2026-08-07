@@ -1,7 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.LinearEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -327,9 +327,13 @@ fun AgentChatScreen(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
-                        placeholder = when (uiState.mode) {
-                            AgentMode.PLAN -> "描述任务，Agent先规划..."
-                            AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                        placeholder = {
+                            Text(
+                                when (uiState.mode) {
+                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
+                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                                }
+                            )
                         }
                     )
 

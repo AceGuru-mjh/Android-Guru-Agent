@@ -71,8 +71,9 @@ class SettingsViewModel @Inject constructor(
                         maxTokens = 10
                     )
                     
-                    if (response.content != null) {
-                        TestResult(true, "✅ 连接成功！模型响应: ${response.content.take(50)}")
+                    val content = response.content
+                    if (content != null) {
+                        TestResult(true, "✅ 连接成功！模型响应: ${content.take(50)}")
                     } else if (response.toolCalls.isNotEmpty()) {
                         TestResult(true, "✅ 连接成功！（模型返回了工具调用）")
                     } else {

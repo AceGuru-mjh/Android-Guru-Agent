@@ -51,9 +51,9 @@ sealed interface AgentUiMessage {
     data class User(
         val text: String,
         val attachments: List<MessageAttachment> = emptyList(),
-        val timestamp: Long = System.currentTimeMillis()
+        val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
-    data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
+    data class Agent(val text: String, val timestamp: Long = java.lang.System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
         val args: String,
@@ -691,7 +691,7 @@ class AgentChatViewModel @Inject constructor(
             }
         } catch (e: Exception) {
             // ContentProvider 可能已失效（如临时权限过期）
-            name = "file_${System.currentTimeMillis()}"
+            name = "file_${java.lang.System.currentTimeMillis()}"
         }
 
         mimeType = try {
@@ -725,7 +725,7 @@ class AgentChatViewModel @Inject constructor(
     ): String = withContext(Dispatchers.IO) {
         val targetDir = java.io.File(context.filesDir, "attachments")
         targetDir.mkdirs()
-        val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$fileName")
+        val targetFile = java.io.File(targetDir, "${java.lang.System.currentTimeMillis()}_$fileName")
 
         context.contentResolver.openInputStream(uri)?.use { input ->
             targetFile.outputStream().use { output ->

@@ -1,8 +1,10 @@
 package com.apex.agent.di
 
 import android.content.Context
-import com.apex.agent.core.tools.skill.SkillMenuProvider
+import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.ui.component.SlashMenuProvider
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,5 +27,17 @@ object SkillModule {
     @Singleton
     fun provideSkillMenuProvider(skillRegistry: SkillRegistry): SkillMenuProvider {
         return SkillMenuProvider(skillRegistry)
+    }
+
+    // PluginManager 已有 @Inject constructor(Context, ToolRegistry)，Hilt 自动提供
+
+    @Provides
+    @Singleton
+    fun provideSlashMenuProvider(
+        skillRegistry: SkillRegistry,
+        mcpManager: McpManager,
+        pluginManager: PluginManager
+    ): SlashMenuProvider {
+        return SlashMenuProvider(skillRegistry, mcpManager, pluginManager)
     }
 }

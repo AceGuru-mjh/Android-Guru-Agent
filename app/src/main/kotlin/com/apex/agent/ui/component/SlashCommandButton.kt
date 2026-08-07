@@ -43,7 +43,8 @@ import com.apex.agent.core.tools.skill.SkillMenuProvider
 fun SlashCommandButton(
     skillMenuProvider: SkillMenuProvider,
     onCommandSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    menuProvider: SlashMenuProvider? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -80,7 +81,8 @@ fun SlashCommandButton(
             onCommandSelected = { command ->
                 onCommandSelected(command)
                 showMenu = false
-            }
+            },
+            menuProvider = menuProvider
         )
     }
 }
@@ -94,12 +96,34 @@ fun SlashCommandButton(
 private fun DynamicSlashMenuPopup(
     skillMenuProvider: SkillMenuProvider,
     onDismiss: () -> Unit,
-    onCommandSelected: (String) -> Unit
+    onCommandSelected: (String) -> Unit,
+    menuProvider: SlashMenuProvider? = null
 ) {
-    // 实时读取 SkillRegistry
-    val activeSkills by remember { mutableStateOf(skillMenuProvider.getActiveSkills()) }
-    val builtinTemplates by remember { mutableStateOf(skillMenuProvider.getBuiltinTemplates()) }
-    val allSkillItems = activeSkills + builtinTemplates
+    // 动态加载菜单：优先使用 menuProvider，回退到硬编码 buildSlashMenuData()
+    val menuData by androidx.compose.runtime.produceState(
+        initialValue = listOf<SlashMenuCategoryData>(),
+        menuProvider
+    ) {
+        value = if (menuProvider != null) {
+            menuProvider.buildMenu()
+        } else {
+            buildSlashMenuData()
+        }
+    }
+
+    // 加载中时显示占位
+    if (menuData.isEmpty()) {
+        Box(
+            modifier = Modifier.size(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp
+            )
+        }
+        return
+    }
 
     var expandedCategory by remember { mutableStateOf<String?>(null) }
 

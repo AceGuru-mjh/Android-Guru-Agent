@@ -17,7 +17,7 @@ import androidx.compose.material.icons.filled.Api
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Puzzle
+import androidx.compose.material.icons.filled.PuzzlePiece
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -138,7 +138,7 @@ private fun DynamicSlashMenuPopup(
             DynamicMenuCategory(
                 id = "plugins",
                 title = "插件",
-                icon = Icons.Default.Puzzle,
+                icon = Icons.Default.PuzzlePiece,
                 items = listOf(
                     DynamicMenuItem("PDF 阅读器", "/plugin:pdf_reader "),
                     DynamicMenuItem("实时翻译", "/plugin:translator "),

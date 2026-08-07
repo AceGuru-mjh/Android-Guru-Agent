@@ -54,11 +54,11 @@ class StreamingShellExecuteTool(
         - Chain commands: "cd /path && ls && cat file.txt"
         - Filter output: "pm list packages | grep chrome"
         - Limit output: "find / -name '*.log' | head -20"
-        - Get exit code: "command; echo EXIT_CODE=$?"
+        - Get exit code: "command; echo EXIT_CODE=${'$'}?"
 
         Examples:
         - {"command": "ls -la /sdcard/Download"}
-        - {"command": "for i in 1 2 3; do echo $i; sleep 1; done"}
+        - {"command": "for i in 1 2 3; do echo ${'$'}i; sleep 1; done"}
         - {"command": "df -h && free -m"}
     """.trimIndent()
 

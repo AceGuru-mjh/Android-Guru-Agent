@@ -29,10 +29,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,15 +74,18 @@ fun ModelScreen(
     var model by remember(settings) { mutableStateOf(settings.model) }
     var temperature by remember(settings) { mutableFloatStateOf(settings.temperature) }
     var selectedPreset by remember { mutableStateOf(-1) }
+    val snackbarHostState = remember { SnackbarHostState() }
     var showSnackbar by remember { mutableStateOf(false) }
+    LaunchedEffect(showSnackbar) {
+        if (showSnackbar) {
+            snackbarHostState.showSnackbar("配置已保存")
+            showSnackbar = false
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("模型配置") }) },
-        snackbarHost = {
-            if (showSnackbar) {
-                Snackbar("配置已保存") { showSnackbar = false }
-            }
-        }
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier

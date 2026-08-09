@@ -55,7 +55,7 @@ object ToolModule {
                 if (result.success) {
                     result.output.ifBlank { "(completed)" }
                 } else {
-                    val lower = result.output.lowercase()
+                    val lower = result.output.toLowerCase()
                     if (lower.contains("permission denied") ||
                         lower.contains("operation not permitted") ||
                         lower.contains("access denied")

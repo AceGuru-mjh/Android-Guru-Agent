@@ -1,7 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,7 +27,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -469,9 +467,6 @@ private fun UserInputDialog(
                     ) { Text("确认") }
                 }
             }
-        }
-    }
-}
             }
         }
     }

@@ -58,7 +58,7 @@ class StreamingShellExecuteTool(
 
         Examples:
         - {"command": "ls -la /sdcard/Download"}
-        - {"command": "for i in 1 2 3; do echo $i; sleep 1; done"}
+        - {"command": "for i in 1 2 3; do echo \$i; sleep 1; done"}
         - {"command": "df -h && free -m"}
     """.trimIndent()
 

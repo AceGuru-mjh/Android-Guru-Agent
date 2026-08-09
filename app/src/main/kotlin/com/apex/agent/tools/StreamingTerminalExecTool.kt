@@ -46,7 +46,7 @@ class StreamingTerminalExecTool(
 
         Examples:
         - {"session": 1, "command": "cd /sdcard && ls -la"}
-        - {"session": 1, "command": "export FOO=bar && echo $FOO"}
+        - {"session": 1, "command": "export FOO=bar && echo \$FOO"}
         - {"session": 1, "command": "python3 script.py", "timeout": 60000}
         - {"session": 1, "command": "top -n 1", "timeout": 5000}
     """.trimIndent()
@@ -113,14 +113,14 @@ class StreamingTerminalExecTool(
     private fun parseArgs(arguments: String): ParsedArgs? {
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
-            val sessionId = json["session"]?.jsonPrimitive?.intOrNull
+            val sessionId = json["session"]?.jsonPrimitive?.int?.toIntOrNull()
             val command = json["command"]?.jsonPrimitive?.contentOrNull
             if (sessionId == null || command.isNullOrBlank()) null
             else ParsedArgs(
                 sessionId = sessionId,
                 command = command,
-                timeout = json["timeout"]?.jsonPrimitive?.longOrNull ?: 30000L,
-                maxOutput = json["max_output"]?.jsonPrimitive?.intOrNull ?: 3000
+                timeout = json["timeout"]?.jsonPrimitive?.long?.toLongOrNull() ?: 30000L,
+                maxOutput = json["max_output"]?.jsonPrimitive?.int?.toIntOrNull() ?: 3000
             )
         } catch (e: Exception) {
             null

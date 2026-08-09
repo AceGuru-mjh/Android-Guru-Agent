@@ -361,7 +361,7 @@ fun AgentChatScreen(
     }
 }
 
-// ═══ UserInputRequired 对话框 ═══
+// ═══ UserInputDialog ═══
 
 @Composable
 private fun UserInputDialog(
@@ -405,7 +405,6 @@ private fun UserInputDialog(
 
                 when (type) {
                     com.apex.agent.core.engine.AgentEvent.InputType.TEXT -> {
-                        // 自由文本输入
                         OutlinedTextField(
                             value = answer,
                             onValueChange = { answer = it },
@@ -417,7 +416,6 @@ private fun UserInputDialog(
                         )
                     }
                     com.apex.agent.core.engine.AgentEvent.InputType.CONFIRMATION -> {
-                        // 是/否选择
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -433,7 +431,6 @@ private fun UserInputDialog(
                         }
                     }
                     com.apex.agent.core.engine.AgentEvent.InputType.CHOICE -> {
-                        // 自由文本（CHOICE 类型暂用文本输入）
                         OutlinedTextField(
                             value = answer,
                             onValueChange = { answer = it },
@@ -467,6 +464,9 @@ private fun UserInputDialog(
                     ) { Text("确认") }
                 }
             }
+        }
+    }
+}
             }
         }
     }

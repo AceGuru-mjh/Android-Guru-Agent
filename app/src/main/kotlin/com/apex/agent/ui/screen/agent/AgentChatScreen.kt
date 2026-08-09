@@ -87,6 +87,7 @@ import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
+import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -366,7 +367,7 @@ fun AgentChatScreen(
 @Composable
 private fun UserInputDialog(
     question: String,
-    type: com.apex.agent.core.engine.AgentEvent.InputType,
+    type: InputType,
     onConfirm: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -404,7 +405,7 @@ private fun UserInputDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 when (type) {
-                    com.apex.agent.core.engine.AgentEvent.InputType.TEXT -> {
+                    InputType.TEXT -> {
                         OutlinedTextField(
                             value = answer,
                             onValueChange = { answer = it },
@@ -415,7 +416,7 @@ private fun UserInputDialog(
                             maxLines = 4
                         )
                     }
-                    com.apex.agent.core.engine.AgentEvent.InputType.CONFIRMATION -> {
+                    InputType.CONFIRMATION -> {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -430,7 +431,7 @@ private fun UserInputDialog(
                             ) { Text("否") }
                         }
                     }
-                    com.apex.agent.core.engine.AgentEvent.InputType.CHOICE -> {
+                    InputType.CHOICE -> {
                         OutlinedTextField(
                             value = answer,
                             onValueChange = { answer = it },
@@ -467,9 +468,6 @@ private fun UserInputDialog(
         }
     }
 }
-            }
-        }
-    }
 
         // ═══ 缺陷 4 修复：回到底部 FAB ═══
         // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮

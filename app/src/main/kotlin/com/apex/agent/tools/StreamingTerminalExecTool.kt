@@ -13,8 +13,10 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /**
  * 支持流式输出的终端执行工具。
@@ -113,14 +115,14 @@ class StreamingTerminalExecTool(
     private fun parseArgs(arguments: String): ParsedArgs? {
         return try {
             val json = Json.parseToJsonElement(arguments).jsonObject
-            val sessionId = json["session"]?.jsonPrimitive?.int?.toIntOrNull()
+            val sessionId = json["session"]?.jsonPrimitive?.intOrNull
             val command = json["command"]?.jsonPrimitive?.contentOrNull
             if (sessionId == null || command.isNullOrBlank()) null
             else ParsedArgs(
                 sessionId = sessionId,
                 command = command,
-                timeout = json["timeout"]?.jsonPrimitive?.long?.toLongOrNull() ?: 30000L,
-                maxOutput = json["max_output"]?.jsonPrimitive?.int?.toIntOrNull() ?: 3000
+                timeout = json["timeout"]?.jsonPrimitive?.longOrNull ?: 30000L,
+                maxOutput = json["max_output"]?.jsonPrimitive?.intOrNull ?: 3000
             )
         } catch (e: Exception) {
             null

@@ -44,7 +44,10 @@ data class AgentChatUiState(
     val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
-    val historyDepth: Int = 0
+    val historyDepth: Int = 0,
+    // UserInputRequired 事件状态
+    val userInputPrompt: String? = null,
+    val userInputType: AgentEvent.InputType? = null
 )
 
 sealed interface AgentUiMessage {
@@ -442,6 +445,18 @@ class AgentChatViewModel @Inject constructor(
                     )
                 }
             }
+            is AgentEvent.UserInputRequired -> {
+                _uiState.update { state ->
+                    state.copy(
+                        userInputPrompt = event.prompt,
+                        userInputType = event.type,
+                        isLoading = false,
+                        messages = state.messages + AgentUiMessage.System(
+                            "🤖 Agent 正在等待您的回答：\"${event.prompt.take(100)}\"..."
+                        )
+                    )
+                }
+            }
 
             else -> {}
         }
@@ -464,6 +479,28 @@ class AgentChatViewModel @Inject constructor(
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
+    }
+
+    /**
+     * 用户响应 UserInputRequired 事件：提交回答。
+     * [answer] 为 null 表示取消（与 confirmPlan(false) 语义相同）。
+     */
+    fun submitUserInput(answer: String) {
+        _uiState.update { it.copy(userInputPrompt = null, userInputType = null) }
+        (agentEngine as? ApexAgentEngine)?.submitUserInput(answer)
+        // 提交后继续执行 Agent 主循环
+        val finalText = answer.trim()
+        if (finalText.isNotEmpty()) {
+            currentJob = viewModelScope.launch {
+                agentEngine.execute(finalText).collect { event -> handleEvent(event) }
+            }
+        }
+    }
+
+    fun cancelUserInput() {
+        _uiState.update { it.copy(userInputPrompt = null, userInputType = null) }
+        (agentEngine as? ApexAgentEngine)?.cancelUserInput()
+        viewModelScope.launch { agentEngine.abort() }
     }
 
     fun abort() {

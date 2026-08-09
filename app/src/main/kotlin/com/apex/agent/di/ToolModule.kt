@@ -11,6 +11,8 @@ import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.github.tools.*
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.terminal.TerminalManager
+import com.apex.agent.tools.AskUserTool
+import com.apex.agent.tools.StreamingTerminalExecTool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -121,13 +123,14 @@ object ToolModule {
         registry.register(SafeAgentTool(GetLocationTool(shellExec)))
         registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
 
-        // ═══ 9. 实用工具 (2) ═══
+        // ═══ 9. 实用工具 (3) ═══
         registry.register(SafeAgentTool(CalculateTool(shellExec)))
         registry.register(SafeAgentTool(TextTransformTool()))
+        registry.register(SafeAgentTool(AskUserTool()))
 
-        // ═══ 10. Terminal PTY (6) ═══
+        // ═══ 10. Terminal PTY (6 → 1 streaming + 5 standard) ═══
+        registry.register(SafeAgentTool(StreamingTerminalExecTool(terminalManager)))
         registry.register(SafeAgentTool(TerminalCreateTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalExecTool(terminalManager)))
         registry.register(SafeAgentTool(TerminalSendTool(terminalManager)))
         registry.register(SafeAgentTool(TerminalReadTool(terminalManager)))
         registry.register(SafeAgentTool(TerminalListTool(terminalManager)))

@@ -345,7 +345,7 @@ class ApexAgentEngine(
                                 kotlinx.serialization.json.Json.parseToJsonElement(toolCall.arguments).jsonObject
                             } catch (_: Exception) { emptyMap<String, String>() }
                             val question = args["question"]?.toString() ?: "Please provide input:"
-                            val inputType = args["type"]?.toString()?.lower() ?: "text"
+                            val inputType = args["type"]?.toString()?.toLowerCase() ?: "text"
                             val eventType = when (inputType) {
                                 "confirmation" -> InputType.CONFIRMATION
                                 "choice" -> InputType.CHOICE

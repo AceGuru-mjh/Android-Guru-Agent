@@ -358,116 +358,12 @@ fun AgentChatScreen(
                             modifier = Modifier.size(44.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
-        }
-    }
-}
-
-// ═══ UserInputDialog ═══
-
-@Composable
-private fun UserInputDialog(
-    question: String,
-    type: InputType,
-    onConfirm: (String) -> Unit,
-    onCancel: () -> Unit
-) {
-    var answer by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-
-    Dialog(onDismissRequest = onCancel) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "🤖 Agent 需要您的输入",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // 问题文本
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = question,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                when (type) {
-                    InputType.TEXT -> {
-                        OutlinedTextField(
-                            value = answer,
-                            onValueChange = { answer = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("请输入...") },
-                            singleLine = false,
-                            minLines = 2,
-                            maxLines = 4
-                        )
-                    }
-                    InputType.CONFIRMATION -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Button(
-                                onClick = { onConfirm("是") },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("是") }
-                            OutlinedButton(
-                                onClick = { onConfirm("否") },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("否") }
                         }
                     }
-                    InputType.CHOICE -> {
-                        OutlinedTextField(
-                            value = answer,
-                            onValueChange = { answer = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("请选择或输入...") },
-                            singleLine = true
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onCancel,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("取消") }
-                    Button(
-                        onClick = {
-                            if (answer.isNotBlank()) {
-                                scope.launch {
-                                    onConfirm(answer)
-                                }
-                            }
-                        },
-                        enabled = answer.isNotBlank(),
-                        modifier = Modifier.weight(1f)
-                    ) { Text("确认") }
                 }
             }
         }
     }
-}
 
         // ═══ 缺陷 4 修复：回到底部 FAB ═══
         // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮
@@ -931,6 +827,112 @@ private fun ReasoningEffortRow(
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null
             )
+        }
+    }
+}
+
+// ═══ UserInputDialog ═══
+
+@Composable
+private fun UserInputDialog(
+    question: String,
+    type: InputType,
+    onConfirm: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var answer by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    Dialog(onDismissRequest = onCancel) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "🤖 Agent 需要您的输入",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = question,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                when (type) {
+                    InputType.TEXT -> {
+                        OutlinedTextField(
+                            value = answer,
+                            onValueChange = { answer = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("请输入...") },
+                            singleLine = false,
+                            minLines = 2,
+                            maxLines = 4
+                        )
+                    }
+                    InputType.CONFIRMATION -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { onConfirm("是") },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("是") }
+                            OutlinedButton(
+                                onClick = { onConfirm("否") },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("否") }
+                        }
+                    }
+                    InputType.CHOICE -> {
+                        OutlinedTextField(
+                            value = answer,
+                            onValueChange = { answer = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("请选择或输入...") },
+                            singleLine = true
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("取消") }
+                    Button(
+                        onClick = {
+                            if (answer.isNotBlank()) {
+                                scope.launch {
+                                    onConfirm(answer)
+                                }
+                            }
+                        },
+                        enabled = answer.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("确认") }
+                }
+            }
         }
     }
 }

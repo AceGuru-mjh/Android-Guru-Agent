@@ -51,9 +51,9 @@ sealed interface AgentUiMessage {
     data class User(
         val text: String,
         val attachments: List<MessageAttachment> = emptyList(),
-        val timestamp: Long = System.currentTimeMillis()
+        val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
-    data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
+    data class Agent(val text: String, val timestamp: Long = java.lang.System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
         val args: String = "",
@@ -61,7 +61,7 @@ sealed interface AgentUiMessage {
         val fullOutput: String? = null,
         val success: Boolean? = null,
         val durationMs: Long = 0,
-        val timestamp: Long = System.currentTimeMillis()
+        val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
     data class System(val text: String) : AgentUiMessage
     data class PlanMessage(val plan: ExecutionPlan) : AgentUiMessage

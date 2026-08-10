@@ -11,6 +11,7 @@ import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.github.tools.*
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.terminal.TerminalManager
+import com.apex.agent.platform.terminal.tools.*
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
@@ -109,13 +110,13 @@ object ToolModule {
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))
 
         // ═══ 2. 文件操作 (7) ═══
-        registry.register(SafeAgentTool(ReadFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(WriteFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileWriteTool(workspaceDir)))
         registry.register(SafeAgentTool(ListFilesTool(workspaceDir)))
         registry.register(SafeAgentTool(DeleteFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(SearchFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileSearchTool(workspaceDir)))
         registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(GlobFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))
@@ -157,7 +158,7 @@ object ToolModule {
         registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
 
         // ═══ 9. 实用工具 (2) ═══
-        registry.register(SafeAgentTool(CalculateTool(shellExec)))
+        registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
         // ═══ 10. Terminal PTY (6) ═══

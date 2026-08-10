@@ -123,7 +123,7 @@ class AskUserChoiceTool(
                     "The user skipped the question. Choose the safest reasonable default or stop."
                 }
 
-                !answer.customText.isNullOrBlank() -> {
+                answer.customText != null && answer.customText.isNotBlank() -> {
                     "User custom answer: ${answer.customText.trim()}"
                 }
 

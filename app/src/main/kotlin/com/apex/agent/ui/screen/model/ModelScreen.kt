@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -78,7 +79,10 @@ fun ModelScreen(
         topBar = { TopAppBar(title = { Text("模型配置") }) },
         snackbarHost = {
             if (showSnackbar) {
-                Snackbar("配置已保存") { showSnackbar = false }
+                Snackbar(
+                    text = { Text("配置已保存") },
+                    action = { TextButton(onClick = { showSnackbar = false }) { Text("关闭") } }
+                )
             }
         }
     ) { padding ->

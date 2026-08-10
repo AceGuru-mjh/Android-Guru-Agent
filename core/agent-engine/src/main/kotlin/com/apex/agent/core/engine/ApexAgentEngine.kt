@@ -458,7 +458,9 @@ class ApexAgentEngine(
             AgentEvent.ToolCallComplete(
                 callId = toolCall.id,
                 toolName = toolCall.name,
+                arguments = toolCall.arguments,
                 output = result.take(config.maxToolOutputLength),
+                fullOutput = rawOutput.take(100_000),
                 success = !result.startsWith("Error"),
                 durationMs = duration
             )
@@ -573,6 +575,8 @@ class ApexAgentEngine(
             appendLine("- Use memorize to save important information (user prefs, project facts) for future use.")
             appendLine("- Use recall to check if you already know something before asking the user.")
             appendLine("- Keep prose concise; let tool output speak for itself.")
+            appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
+            appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")
         }
     }
 

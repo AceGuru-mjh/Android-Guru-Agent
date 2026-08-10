@@ -56,10 +56,12 @@ sealed interface AgentUiMessage {
     data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
-        val args: String,
+        val args: String = "",
         val output: String? = null,
+        val fullOutput: String? = null,
         val success: Boolean? = null,
-        val durationMs: Long = 0
+        val durationMs: Long = 0,
+        val timestamp: Long = System.currentTimeMillis()
     ) : AgentUiMessage
     data class System(val text: String) : AgentUiMessage
     data class PlanMessage(val plan: ExecutionPlan) : AgentUiMessage
@@ -91,6 +93,7 @@ class AgentChatViewModel @Inject constructor(
     val githubTokenManager: GithubTokenManager,
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
+    private val userQuestionBridge: UserQuestionBridge,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -112,6 +115,11 @@ class AgentChatViewModel @Inject constructor(
      */
     private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
+
+    /**
+     * Agent 主动提问时的待处理问题。
+     */
+    val pendingQuestion: StateFlow<AgentQuestion?> = userQuestionBridge.pendingQuestion
 
     /**
      * 输入框草稿持久化（缺陷 3 修复）。
@@ -378,8 +386,9 @@ class AgentChatViewModel @Inject constructor(
                         currentToolCall = null,
                         messages = state.messages + AgentUiMessage.ToolCall(
                             toolName = event.toolName,
-                            args = "",
+                            args = event.arguments,
                             output = event.output.take(500),
+                            fullOutput = event.fullOutput.ifBlank { event.output },
                             success = event.success,
                             durationMs = event.durationMs
                         )
@@ -464,6 +473,54 @@ class AgentChatViewModel @Inject constructor(
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
+    }
+
+    fun answerQuestion(selectedOptionId: String?, customText: String?) {
+        val question = pendingQuestion.value ?: return
+
+        val answer = AgentAnswer(
+            questionId = question.id,
+            selectedOptionId = selectedOptionId,
+            customText = customText?.takeIf { it.isNotBlank() }
+        )
+
+        val displayAnswer = when {
+            !customText.isNullOrBlank() -> customText.trim()
+            selectedOptionId != null -> question.options
+                .firstOrNull { it.id == selectedOptionId }
+                ?.label
+                ?: "未知选项"
+            else -> "跳过"
+        }
+
+        _uiState.update { state ->
+            state.copy(
+                messages = state.messages + AgentUiMessage.System(
+                    "✅ 已回答：$displayAnswer"
+                )
+            )
+        }
+
+        userQuestionBridge.submit(answer)
+    }
+
+    fun cancelQuestion() {
+        val question = pendingQuestion.value ?: return
+
+        _uiState.update { state ->
+            state.copy(
+                messages = state.messages + AgentUiMessage.System(
+                    "⏹ 已跳过 Agent 提问"
+                )
+            )
+        }
+
+        userQuestionBridge.submit(
+            AgentAnswer(
+                questionId = question.id,
+                skipped = true
+            )
+        )
     }
 
     fun abort() {

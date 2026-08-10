@@ -158,11 +158,17 @@ private fun SkillCard(
     onToggle: (Boolean) -> Unit
 ) {
     ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        border = if (skill.enabled)
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-        else null
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (skill.enabled)
+                    Modifier.border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                        RoundedCornerShape(12.dp)
+                    )
+                else Modifier
+            ),
+        shape = RoundedCornerShape(12.dp)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),

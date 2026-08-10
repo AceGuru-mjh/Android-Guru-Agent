@@ -163,11 +163,12 @@ private fun CodeBlock(lang: String, code: String) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant
-        ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                RoundedCornerShape(10.dp)
+            )
     ) {
         Column {
             // 顶栏：语言标签 + 复制

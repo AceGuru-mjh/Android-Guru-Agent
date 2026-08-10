@@ -547,8 +547,12 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.widthIn(max = 340.dp)
+            modifier = Modifier
+                .widthIn(max = 340.dp)
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
+                )
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // 头像 + 角色标识 + 时间戳
@@ -608,8 +612,12 @@ private fun StreamingResponseBubble(text: String) {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.widthIn(max = 340.dp)
+            modifier = Modifier
+                .widthIn(max = 340.dp)
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
+                )
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(
@@ -660,10 +668,13 @@ private fun ThinkingBubble(text: String) {
 
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)),
+                RoundedCornerShape(12.dp)
+            )
             .clickable {
                 expanded = !expanded
             }

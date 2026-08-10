@@ -47,16 +47,16 @@ data class AgentChatUiState(
     val historyDepth: Int = 0,
     // UserInputRequired 事件状态
     val userInputPrompt: String? = null,
-    val userInputType: AgentEvent.InputType? = null
+    val userInputType: InputType? = null
 )
 
 sealed interface AgentUiMessage {
     data class User(
         val text: String,
         val attachments: List<MessageAttachment> = emptyList(),
-        val timestamp: Long = System.currentTimeMillis()
+val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
-    data class Agent(val text: String, val timestamp: Long = System.currentTimeMillis()) : AgentUiMessage
+    data class Agent(val text: String, val timestamp: Long = java.lang.System.currentTimeMillis()) : AgentUiMessage
     data class ToolCall(
         val toolName: String,
         val args: String,

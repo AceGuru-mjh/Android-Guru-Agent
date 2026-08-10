@@ -78,7 +78,11 @@ fun ModelScreen(
         topBar = { TopAppBar(title = { Text("模型配置") }) },
         snackbarHost = {
             if (showSnackbar) {
-                Snackbar("配置已保存") { showSnackbar = false }
+                Snackbar(
+                    action = { showSnackbar = false }
+                ) {
+                    Text("配置已保存")
+                }
             }
         }
     ) { padding ->

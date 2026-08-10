@@ -333,9 +333,13 @@ fun AgentChatScreen(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
-                        placeholder = when (uiState.mode) {
-                            AgentMode.PLAN -> "描述任务，Agent先规划..."
-                            AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                        placeholder = {
+                            Text(
+                                when (uiState.mode) {
+                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
+                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                                }
+                            )
                         }
                     )
 

@@ -76,13 +76,13 @@ object ToolModule {
         registry.register(SafeAgentTool(ShellExecuteTool(shellExec)))
 
         // ═══ 2. 文件操作 (7) ═══
-        registry.register(SafeAgentTool(ReadFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(WriteFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileWriteTool(workspaceDir)))
         registry.register(SafeAgentTool(ListFilesTool(workspaceDir)))
         registry.register(SafeAgentTool(DeleteFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(SearchFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileSearchTool(workspaceDir)))
         registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(GlobFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))
@@ -124,17 +124,13 @@ object ToolModule {
         registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
 
         // ═══ 9. 实用工具 (3) ═══
-        registry.register(SafeAgentTool(CalculateTool(shellExec)))
+        registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
         registry.register(SafeAgentTool(AskUserTool()))
 
-        // ═══ 10. Terminal PTY (6 → 1 streaming + 5 standard) ═══
+        // ═══ 10. Terminal PTY (streaming) ═══
         registry.register(SafeAgentTool(StreamingTerminalExecTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalCreateTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalSendTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalReadTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalListTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalCloseTool(terminalManager)))
+        // 标准 Terminal 工具（Create/Send/Read/List/Close）未实现，暂不注册
 
         // ═══ 11. GitHub (7，条件注册) ═══
         if (githubTokenManager.isConnected()) {

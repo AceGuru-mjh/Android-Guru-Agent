@@ -1,8 +1,7 @@
 package com.apex.agent.ui.component
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border.BorderStroke
-import androidx.compose.foundation.border.border
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

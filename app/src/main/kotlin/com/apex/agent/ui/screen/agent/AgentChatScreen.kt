@@ -1,7 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.LinearEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -29,11 +29,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
@@ -53,6 +55,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.engine.AgentMode
+import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.llm.ReasoningEffort
@@ -97,6 +101,7 @@ fun AgentChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
     val inputText by viewModel.inputText.collectAsStateWithLifecycle()
+    val pendingQuestion by viewModel.pendingQuestion.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scrollScope = rememberCoroutineScope()
@@ -147,7 +152,8 @@ fun AgentChatScreen(
         val total = uiState.messages.size +
             (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
             (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
-            (if (uiState.currentToolCall != null) 1 else 0)
+            (if (uiState.currentToolCall != null) 1 else 0) +
+            (if (pendingQuestion != null) 1 else 0)
         if (total > 0 && (isAtBottom || !userScrolledUp)) {
             listState.animateScrollToItem(total - 1)
             userScrolledUp = false
@@ -251,6 +257,21 @@ fun AgentChatScreen(
                     )
                 }
             }
+
+            // Agent 主动提问
+            pendingQuestion?.let { question ->
+                item {
+                    QuestionCard(
+                        question = question,
+                        onAnswer = { optionId, customText ->
+                            viewModel.answerQuestion(optionId, customText)
+                        },
+                        onCancel = {
+                            viewModel.cancelQuestion()
+                        }
+                    )
+                }
+            }
         }
 
         // ═══ 加载条 ═══
@@ -327,9 +348,14 @@ fun AgentChatScreen(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
-                        placeholder = when (uiState.mode) {
-                            AgentMode.PLAN -> "描述任务，Agent先规划..."
-                            AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                        placeholder = {
+                            Text(
+                                if (uiState.mode == AgentMode.PLAN) {
+                                    "描述任务，Agent先规划..."
+                                } else {
+                                    "输入指令，/ 触发快捷..."
+                                }
+                            )
                         }
                     )
 
@@ -375,7 +401,8 @@ fun AgentChatScreen(
                         val total = uiState.messages.size +
                             (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
                             (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
-                            (if (uiState.currentToolCall != null) 1 else 0)
+                            (if (uiState.currentToolCall != null) 1 else 0) +
+                            (if (pendingQuestion != null) 1 else 0)
                         if (total > 0) {
                             listState.animateScrollToItem(total - 1)
                         }
@@ -503,10 +530,16 @@ private fun StreamingResponseBubble(text: String) {
 
 @Composable
 private fun ThinkingBubble(text: String) {
+    var expanded by remember { mutableStateOf(false) }
+
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                expanded = !expanded
+            }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -515,17 +548,30 @@ private fun ThinkingBubble(text: String) {
             ) {
                 Text("🧠", style = MaterialTheme.typography.bodySmall)
                 Text(
-                    text = "Thinking...",
+                    text = if (expanded) "思考过程" else "Thinking...",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Default.KeyboardArrowUp
+                    } else {
+                        Icons.Default.KeyboardArrowDown
+                    },
+                    contentDescription = if (expanded) "折叠思考内容" else "展开思考内容",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onTertiaryContainer
                 )
             }
+
             Spacer(modifier = Modifier.height(4.dp))
+
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
-                maxLines = 5,
+                maxLines = if (expanded) Int.MAX_VALUE else 5,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -534,8 +580,14 @@ private fun ThinkingBubble(text: String) {
 
 @Composable
 private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
+    var expanded by remember { mutableStateOf(false) }
+
     ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                expanded = !expanded
+            },
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -551,11 +603,14 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
                     },
                     style = MaterialTheme.typography.bodyMedium
                 )
+
                 Text(
                     text = toolCall.toolName,
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
                 )
+
                 if (toolCall.durationMs > 0) {
                     Text(
                         text = "${toolCall.durationMs}ms",
@@ -563,19 +618,73 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+
+                Icon(
+                    imageVector = if (expanded) {
+                        Icons.Default.KeyboardArrowUp
+                    } else {
+                        Icons.Default.KeyboardArrowDown
+                    },
+                    contentDescription = if (expanded) "折叠工具详情" else "展开工具详情",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            toolCall.output?.let { output ->
+
+            if (expanded && toolCall.args.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "参数",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = toolCall.args,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .horizontalScroll(rememberScrollState())
+                    )
+                }
+            }
+
+            val outputText = if (expanded) {
+                toolCall.fullOutput ?: toolCall.output
+            } else {
+                toolCall.output
+            }
+
+            outputText?.let { output ->
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = if (expanded) "完整输出" else "输出摘要",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = output,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(8.dp),
-                        maxLines = 8,
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .heightIn(max = if (expanded) 420.dp else 120.dp)
+                            .verticalScroll(rememberScrollState()),
+                        maxLines = if (expanded) Int.MAX_VALUE else 8,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -795,6 +904,170 @@ private fun ReasoningEffortRow(
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null
             )
+        }
+    }
+}
+
+@Composable
+private fun QuestionCard(
+    question: AgentQuestion,
+    onAnswer: (String?, String?) -> Unit,
+    onCancel: () -> Unit
+) {
+    var selectedOptionId by remember { mutableStateOf<String?>(null) }
+    var customSelected by remember { mutableStateOf(false) }
+    var customText by remember { mutableStateOf("") }
+
+    val canSubmit = selectedOptionId != null ||
+        (customSelected && customText.isNotBlank())
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "🧩 Agent 需要你选择",
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = question.title,
+                style = MaterialTheme.typography.bodyLarge
+            )
+
+            question.description?.let { description ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            question.options.forEach { option ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            selectedOptionId = option.id
+                            customSelected = false
+                        }
+                        .padding(vertical = 4.dp)
+                ) {
+                    RadioButton(
+                        selected = selectedOptionId == option.id,
+                        onClick = {
+                            selectedOptionId = option.id
+                            customSelected = false
+                        }
+                    )
+
+                    Column(modifier = Modifier.padding(start = 4.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+
+                            if (option.recommended) {
+                                Text(
+                                    text = "推荐",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        option.description?.let { description ->
+                            Text(
+                                text = description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (question.allowCustom) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            customSelected = true
+                            selectedOptionId = null
+                        }
+                        .padding(vertical = 4.dp)
+                ) {
+                    RadioButton(
+                        selected = customSelected,
+                        onClick = {
+                            customSelected = true
+                            selectedOptionId = null
+                        }
+                    )
+
+                    Text(
+                        text = "自定义",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+
+                if (customSelected) {
+                    OutlinedTextField(
+                        value = customText,
+                        onValueChange = { customText = it },
+                        placeholder = { Text(question.customPlaceholder) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 6
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (question.allowSkip) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("跳过")
+                    }
+                }
+
+                androidx.compose.material3.Button(
+                    onClick = {
+                        if (customSelected) {
+                            onAnswer(null, customText.trim())
+                        } else {
+                            onAnswer(selectedOptionId, null)
+                        }
+                    },
+                    enabled = canSubmit,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("继续")
+                }
+            }
         }
     }
 }

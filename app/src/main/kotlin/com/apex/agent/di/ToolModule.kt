@@ -11,6 +11,11 @@ import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.github.tools.*
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.terminal.TerminalManager
+import com.apex.agent.platform.terminal.tools.*
+import com.apex.agent.core.engine.CommandPermissionGate
+import com.apex.agent.core.engine.UserQuestionBridge
+import com.apex.agent.core.engine.UserQuestionGateway
+import com.apex.agent.tools.AskUserChoiceTool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -35,12 +40,36 @@ object ToolModule {
 
     @Provides
     @Singleton
+    fun provideUserQuestionBridge(): UserQuestionBridge {
+        return UserQuestionBridge()
+    }
+
+    @Provides
+    @Singleton
+    fun provideUserQuestionGateway(
+        bridge: UserQuestionBridge
+    ): UserQuestionGateway {
+        return bridge
+    }
+
+    @Provides
+    @Singleton
+    fun provideCommandPermissionGate(
+        gateway: UserQuestionGateway
+    ): CommandPermissionGate {
+        return CommandPermissionGate(gateway)
+    }
+
+    @Provides
+    @Singleton
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
         terminalManager: TerminalManager,
         githubTokenManager: GithubTokenManager,
-        githubApiService: GithubApiService
+        githubApiService: GithubApiService,
+        userQuestionGateway: UserQuestionGateway,
+        commandPermissionGate: CommandPermissionGate
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -48,39 +77,46 @@ object ToolModule {
         val memoryDir = File(context.filesDir, "agent_memory").apply { mkdirs() }
 
         val shellExec: suspend (String) -> String = { cmd ->
-            try {
-                val result = PrivilegeDetector.executeShell(cmd)
-                if (result.success) {
-                    result.output.ifBlank { "(completed)" }
-                } else {
-                    val lower = result.output.lowercase()
-                    if (lower.contains("permission denied") ||
-                        lower.contains("operation not permitted") ||
-                        lower.contains("access denied")
-                    ) {
-                        "Error: 权限不足，无法执行。当前权限通道：${result.via}。建议用户授予 Root 或 Shizuku，或改用应用沙箱内工具。"
+            if (!commandPermissionGate.ensureAllowed(cmd)) {
+                "Error: 用户拒绝执行命令。请不要重试相同命令，改用更安全或更低风险的方案，并告知用户原因。"
+            } else {
+                try {
+                    val result = PrivilegeDetector.executeShell(cmd)
+                    if (result.success) {
+                        result.output.ifBlank { "(completed)" }
                     } else {
-                        "Error: 命令执行失败（exit=${result.exitCode}, via=${result.via}）：${result.output}"
+                        val lower = result.output.lowercase()
+                        if (lower.contains("permission denied") ||
+                            lower.contains("operation not permitted") ||
+                            lower.contains("access denied")
+                        ) {
+                            "Error: 权限不足，无法执行。当前权限通道：${result.via}。建议用户授予 Root 或 Shizuku，或改用应用沙箱内工具。"
+                        } else {
+                            "Error: 命令执行失败（exit=${result.exitCode}, via=${result.via}）：${result.output}"
+                        }
                     }
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    "Error: 命令执行异常：${e.message}"
                 }
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                "Error: 命令执行异常：${e.message}"
             }
         }
 
         // ═══ 1. Shell (1) ═══
         registry.register(SafeAgentTool(ShellExecuteTool(shellExec)))
 
+        // ═══ Agent 主动提问工具 ═══
+        registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))
+
         // ═══ 2. 文件操作 (7) ═══
-        registry.register(SafeAgentTool(ReadFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(WriteFileTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileWriteTool(workspaceDir)))
         registry.register(SafeAgentTool(ListFilesTool(workspaceDir)))
         registry.register(SafeAgentTool(DeleteFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(SearchFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileSearchTool(workspaceDir)))
         registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
-        registry.register(SafeAgentTool(GlobFilesTool(workspaceDir)))
+        registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))
@@ -122,7 +158,7 @@ object ToolModule {
         registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
 
         // ═══ 9. 实用工具 (2) ═══
-        registry.register(SafeAgentTool(CalculateTool(shellExec)))
+        registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
         // ═══ 10. Terminal PTY (6) ═══

@@ -79,7 +79,9 @@ sealed interface AgentEvent {
     data class ToolCallComplete(
         val callId: String,
         val toolName: String,
+        val arguments: String = "",
         val output: String,
+        val fullOutput: String = "",
         val success: Boolean,
         val durationMs: Long
     ) : AgentEvent

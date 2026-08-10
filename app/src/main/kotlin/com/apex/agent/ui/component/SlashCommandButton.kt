@@ -138,7 +138,7 @@ private fun DynamicSlashMenuPopup(
             DynamicMenuCategory(
                 id = "plugins",
                 title = "插件",
-                icon = Icons.Default.Puzzle,
+                icon = Icons.Default.Build,
                 items = listOf(
                     DynamicMenuItem("PDF 阅读器", "/plugin:pdf_reader "),
                     DynamicMenuItem("实时翻译", "/plugin:translator "),

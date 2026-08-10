@@ -30,8 +30,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +40,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -74,17 +76,18 @@ fun ModelScreen(
     var temperature by remember(settings) { mutableFloatStateOf(settings.temperature) }
     var selectedPreset by remember { mutableStateOf(-1) }
     var showSnackbar by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(showSnackbar) {
+        if (showSnackbar) {
+            snackbarHostState.showSnackbar(message = "配置已保存")
+            showSnackbar = false
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("模型配置") }) },
-        snackbarHost = {
-            if (showSnackbar) {
-                Snackbar(
-                    text = { Text("配置已保存") },
-                    action = { TextButton(onClick = { showSnackbar = false }) { Text("关闭") } }
-                )
-            }
-        }
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier

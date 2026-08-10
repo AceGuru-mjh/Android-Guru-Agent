@@ -123,8 +123,11 @@ class AskUserChoiceTool(
                     "The user skipped the question. Choose the safest reasonable default or stop."
                 }
 
-                answer.customText != null && answer.customText.isNotBlank() -> {
-                    "User custom answer: ${answer.customText.trim()}"
+                run {
+                    val customText = answer.customText
+                    customText != null && customText.isNotBlank()
+                } -> {
+                    "User custom answer: ${answer.customText?.trim()}"
                 }
 
                 answer.selectedOptionId != null -> {

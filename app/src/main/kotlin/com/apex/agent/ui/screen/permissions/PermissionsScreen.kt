@@ -66,7 +66,7 @@ fun PermissionsScreen() {
                 icon = Icons.Default.AdminPanelSettings,
                 title = "Root",
                 description = "最高权限，可执行所有系统操作（/system、/data、mount、SELinux）",
-                status = if (hasRoot) "✅ 已获得" else "❌ 未获得",
+                status = if (hasRoot) Status.Granted else Status.Denied,
                 actionLabel = "检测"
             )
 
@@ -81,28 +81,28 @@ fun PermissionsScreen() {
                 icon = Icons.Default.Accessibility,
                 title = "无障碍服务",
                 description = "读取UI树、模拟点击、截图（Agent的眼睛和手）",
-                status = "未开启",
+                status = Status.Pending,
                 actionLabel = "开启"
             )
             PermissionCard(
                 icon = Icons.Default.Layers,
                 title = "悬浮窗",
                 description = "在其他应用上方显示内容",
-                status = "未授权",
+                status = Status.Pending,
                 actionLabel = "授权"
             )
             PermissionCard(
                 icon = Icons.Default.Notifications,
                 title = "通知权限",
                 description = "发送前台服务通知、读取通知",
-                status = "未授权",
+                status = Status.Pending,
                 actionLabel = "授权"
             )
             PermissionCard(
                 icon = Icons.Default.Folder,
                 title = "存储权限",
                 description = "读写文件（工作区、下载）",
-                status = "未授权",
+                status = Status.Pending,
                 actionLabel = "授权"
             )
         }
@@ -138,34 +138,43 @@ private fun ShizukuPermissionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                Icons.Default.Shield, null,
-                tint = if (shizukuPermission.value) MaterialTheme.colorScheme.tertiary
-                       else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
-            )
+            val shizukuAccent = when {
+                shizukuPermission.value -> MaterialTheme.colorScheme.primary
+                shizukuRunning.value -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.error
+            }
+            Surface(
+                shape = CircleShape,
+                color = shizukuAccent.copy(alpha = 0.15f),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Shield, null,
+                        tint = shizukuAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
 
             Column(modifier = Modifier.weight(1f)) {
-                Text("Shizuku", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Shizuku", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    val shizukuStatus = when {
+                        shizukuPermission.value -> Status.Granted
+                        shizukuRunning.value -> Status.Running
+                        else -> Status.Denied
+                    }
+                    StatusPill(shizukuStatus, shizukuAccent)
+                }
+                Spacer(Modifier.height(2.dp))
                 Text(
                     "ADB级权限，无需Root即可执行pm/am/settings等系统命令",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                val statusText = when {
-                    shizukuPermission.value -> "✅ 已授权"
-                    shizukuRunning.value -> "⚠️ 运行中，需要授权"
-                    else -> "❌ 未运行"
-                }
-                val statusColor = when {
-                    shizukuPermission.value -> MaterialTheme.colorScheme.tertiary
-                    shizukuRunning.value -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.error
-                }
-                Text(
-                    statusText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor
                 )
             }
 
@@ -213,29 +222,80 @@ private fun ShizukuPermissionCard(
     }
 }
 
+private enum class Status { Granted, Denied, Pending, Running }
+private val Status.label: String
+    get() = when (this) {
+        Status.Granted -> "已获得"
+        Status.Denied -> "未获得"
+        Status.Pending -> "未授权"
+        Status.Running -> "运行中"
+    }
+
 @Composable
 private fun PermissionCard(
     icon: ImageVector,
     title: String,
     description: String,
-    status: String,
-    actionLabel: String
+    status: Status,
+    actionLabel: String,
+    onClick: () -> Unit = {}
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    val accent = when (status) {
+        Status.Granted -> MaterialTheme.colorScheme.primary
+        Status.Running -> MaterialTheme.colorScheme.secondary
+        Status.Denied -> MaterialTheme.colorScheme.error
+        Status.Pending -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp)
+    ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            Surface(
+                shape = CircleShape,
+                color = accent.copy(alpha = 0.15f),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = accent, modifier = Modifier.size(24.dp))
+                }
             }
-            OutlinedButton(onClick = { /* TODO: 跳转对应权限页 */ }) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    StatusPill(status, accent)
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Button(onClick = onClick) {
                 Text(actionLabel)
             }
         }
+    }
+}
+
+@Composable
+private fun StatusPill(status: Status, accent: androidx.compose.ui.graphics.Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = accent.copy(alpha = 0.14f)
+    ) {
+        Text(
+            status.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = accent,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
     }
 }

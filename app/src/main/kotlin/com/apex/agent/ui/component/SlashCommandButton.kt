@@ -52,11 +52,11 @@ fun SlashCommandButton(
             .size(36.dp)
             .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                 shape = RoundedCornerShape(6.dp)
             )
             .background(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(6.dp)
             )
             // TalkBack: announce the button's purpose so screen-reader users
@@ -69,7 +69,7 @@ fun SlashCommandButton(
             text = "/",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.primary
         )
     }
 

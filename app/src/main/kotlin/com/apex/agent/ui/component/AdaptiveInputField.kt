@@ -191,7 +191,12 @@ private fun FullscreenEditorDialog(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface
         ) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // 顶部栏
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -228,8 +233,8 @@ private fun FullscreenEditorDialog(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .heightIn(min = 200.dp),
                     maxLines = Int.MAX_VALUE,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,

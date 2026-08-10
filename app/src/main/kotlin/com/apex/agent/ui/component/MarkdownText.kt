@@ -2,6 +2,7 @@ package com.apex.agent.ui.component
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border.BorderStroke
+import androidx.compose.foundation.border.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,8 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -156,7 +157,7 @@ private fun buildInline(segments: List<InlineSegment>): AnnotatedString {
  */
 @Composable
 private fun CodeBlock(lang: String, code: String) {
-    val clipboard = LocalClipboard.current
+    val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
     Surface(
@@ -193,7 +194,7 @@ private fun CodeBlock(lang: String, code: String) {
                 )
                 IconButton(
                     onClick = {
-                        clipboard.setClipEntry(ClipEntry(AnnotatedString(code)))
+                        clipboardManager.setText(AnnotatedString(code))
                         copied = true
                     },
                     modifier = Modifier.size(28.dp)

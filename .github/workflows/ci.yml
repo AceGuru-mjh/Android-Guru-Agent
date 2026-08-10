@@ -155,6 +155,10 @@ jobs:
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10
 
+      - name: Diagnose foundation dependency
+        run: |
+          ./gradlew :app:dependencies --configuration debugCompileClasspath 2>&1 | grep -iE "foundation|compose-bom|compose-ui|material3" | head -50
+
       - name: Compile app module
         run: |
           ./gradlew :app:compileDebugKotlin \

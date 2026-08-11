@@ -45,7 +45,8 @@ class ApexAgentEngine(
     private val memory: ConversationMemory? = null,
     private val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
-    private val privilegeInfoProvider: PrivilegeInfoProvider? = null
+    private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
+    private val memoryObserver: ExecutionMemoryObserver? = null
 ) : AgentEngine {
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
@@ -118,6 +119,11 @@ class ApexAgentEngine(
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
+        var taskHadFailure = false
+
+        // 隐式记忆采集（报告 P2）：任务开始。
+        // memoryObserver 内部自行处理无障碍未开启等异常，不会阻断主流程。
+        memoryObserver?.onTaskStart(input.text, null)
 
         try {
             val userText = buildUserText(input)
@@ -164,9 +170,13 @@ class ApexAgentEngine(
             emit(AgentEvent.Error("Plan confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: Exception) {
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
+            taskHadFailure = true
             emit(AgentEvent.Error(e.message ?: "Unknown error", recoverable = false))
         } finally {
             isRunning = false
+            // 隐式记忆采集（报告 P2）：任务结束，提交 episode。
+            // 放在 finally 保证无论成功/失败/中止都会关闭会话。
+            memoryObserver?.onTaskFinish(success = !taskHadFailure)
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
             planConfirmationDeferred?.complete(false)
             planConfirmationDeferred = null
@@ -478,6 +488,13 @@ class ApexAgentEngine(
         addMessage(
             LlmMessage.ToolResult(toolCall.id, result)
         )
+
+        // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
+        val actionSuccess = !result.startsWith("Error")
+        if (!actionSuccess) taskHadFailure = true
+        memoryObserver?.onActionExecuted(
+            "${toolCall.name}(${toolCall.arguments.take(120)})"
+        )
     }
 
     // ═══════════════════════════════════════════════════════
@@ -580,8 +597,6 @@ class ApexAgentEngine(
             appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
             appendLine("- Always verify command output before proceeding.")
             appendLine("- If a command fails, analyze the error and try an alternative approach.")
-            appendLine("- Use memorize to save important information (user prefs, project facts) for future use.")
-            appendLine("- Use recall to check if you already know something before asking the user.")
             appendLine("- Keep prose concise; let tool output speak for itself.")
             appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
             appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")

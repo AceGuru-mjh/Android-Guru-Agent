@@ -769,31 +769,31 @@ private fun ThinkingBubble(text: String) {
  */
 private data class ToolKindStyle(
     val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val color: androidx.compose.runtime.Composable () -> androidx.compose.ui.graphics.Color
+    val icon: ImageVector,
+    val color: Color
 )
 
 @Composable
 private fun toolKindStyle(kind: ToolKind): ToolKindStyle = when (kind) {
     ToolKind.LOCAL -> ToolKindStyle(
         "本地工具", Icons.Default.Build,
-        { MaterialTheme.colorScheme.primary }
+        MaterialTheme.colorScheme.primary
     )
     ToolKind.MCP -> ToolKindStyle(
         "MCP", Icons.Default.Hub,
-        { MaterialTheme.colorScheme.tertiary }
+        MaterialTheme.colorScheme.tertiary
     )
     ToolKind.WEB_SEARCH -> ToolKindStyle(
         "联网搜索", Icons.Default.Search,
-        { MaterialTheme.colorScheme.secondary }
+        MaterialTheme.colorScheme.secondary
     )
     ToolKind.WEB_FETCH -> ToolKindStyle(
         "网页抓取", Icons.Default.Language,
-        { MaterialTheme.colorScheme.secondary }
+        MaterialTheme.colorScheme.secondary
     )
     ToolKind.SKILL -> ToolKindStyle(
         "Skill", Icons.Default.AutoAwesome,
-        { MaterialTheme.colorScheme.primary }
+        MaterialTheme.colorScheme.primary
     )
 }
 
@@ -803,7 +803,7 @@ private fun toolKindStyle(kind: ToolKind): ToolKindStyle = when (kind) {
 @Composable
 private fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String? = null) {
     val style = toolKindStyle(kind)
-    val color = style.color()
+    val color = style.color
     val label = when (kind) {
         ToolKind.SKILL -> skill?.let { "Skill: $it" } ?: style.label
         ToolKind.MCP -> server?.let { "MCP · $it" } ?: style.label
@@ -840,7 +840,7 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
     var expanded by remember { mutableStateOf(false) }
     val isError = toolCall.success == false
     val kindStyle = toolKindStyle(toolCall.kind)
-    val accent = if (isError) MaterialTheme.colorScheme.error else kindStyle.color()
+    val accent = if (isError) MaterialTheme.colorScheme.error else kindStyle.color
 
     ElevatedCard(
         modifier = Modifier
@@ -1118,7 +1118,7 @@ private fun WebSearchResultsCard(results: List<WebSearchItem>, query: String?) {
 @Composable
 private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
-    val accent = kindStyle.color()
+    val accent = kindStyle.color
 
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),

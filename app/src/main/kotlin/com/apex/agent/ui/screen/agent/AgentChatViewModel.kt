@@ -137,11 +137,6 @@ fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
     if (toolName.contains("skill", ignoreCase = true)) return ToolKind.SKILL to null
     return ToolKind.LOCAL to null
 }
-    companion object {
-        /** 运行中工具卡片最多保留的实时输出字符数（尾部窗口）。 */
-        const val MAX_LIVE_TOOL_OUTPUT_CHARS = 4000
-    }
-}
 
 @HiltViewModel
 class AgentChatViewModel @Inject constructor(

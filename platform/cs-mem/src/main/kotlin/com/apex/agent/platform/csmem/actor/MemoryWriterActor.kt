@@ -1,5 +1,6 @@
 package com.apex.agent.platform.csmem.actor
 
+import android.util.Log
 import com.apex.agent.platform.csmem.model.GraphDelta
 import com.apex.agent.platform.csmem.model.MemoryGraph
 import com.apex.agent.platform.csmem.model.SemanticNode
@@ -40,6 +41,12 @@ class MemoryWriterActor @Inject constructor(
     private val eventChannel = Channel<WriteEvent>(UNLIMITED)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var actorJob: Job? = null
+
+    companion object {
+        private const val TAG = "MemoryWriterActor"
+        private const val MAX_RETRY = 3
+        private const val RETRY_BACKOFF_MS = 50L
+    }
 
     /** 批量写入大小 */
     var batchSize: Int = 20
@@ -145,13 +152,32 @@ class MemoryWriterActor @Inject constructor(
     private suspend fun flushBatch(events: List<WriteEvent>) {
         if (events.isEmpty()) return
 
-        try {
-            for (event in events) {
-                executeSingle(event)
+        // 单事件级重试：避免某条事件（如瞬时 SQLite 锁）导致整批失败。
+        // 重试后仍失败的计入死信计数，不阻断 Actor 主循环。
+        var deadLetterCount = 0
+        for (event in events) {
+            var attempt = 0
+            var success = false
+            var lastError: Exception? = null
+            while (attempt < MAX_RETRY && !success) {
+                try {
+                    executeSingle(event)
+                    success = true
+                } catch (e: Exception) {
+                    lastError = e
+                    attempt++
+                    if (attempt < MAX_RETRY) {
+                        delay(RETRY_BACKOFF_MS * attempt)
+                    }
+                }
             }
-        } catch (e: Exception) {
-            // 批量写入失败不应导致 Actor 崩溃，记录日志继续
-            e.printStackTrace()
+            if (!success) {
+                deadLetterCount++
+                Log.e(TAG, "Dead-lettered write event after $MAX_RETRY attempts: $event", lastError)
+            }
+        }
+        if (deadLetterCount > 0) {
+            Log.w(TAG, "flushBatch completed with $deadLetterCount dead-lettered event(s) / ${events.size} total")
         }
     }
 

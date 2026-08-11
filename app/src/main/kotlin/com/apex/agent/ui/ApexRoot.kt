@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -59,7 +60,7 @@ sealed class DrawerDestination(
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Psychology)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
-    data object Log : DrawerDestination("log", "运行日志", Icons.Default.Notifications)
+    data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
 }
 

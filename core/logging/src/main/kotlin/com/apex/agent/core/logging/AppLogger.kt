@@ -45,6 +45,13 @@ class AppLogger(
     private val _stats = MutableStateFlow(LogStats.EMPTY)
     val stats = _stats.asStateFlow()
 
+    /**
+     * 全量日志快照流：每次写入、淘汰或清空后重新发布一份最新在前的不可变列表。
+     * 查看器订阅此流即可实时跟随日志增长，无需轮询。重放 1 份保证新订阅者立即拿到当前全量。
+     */
+    private val _records = MutableStateFlow<List<LogRecord>>(emptyList())
+    val recordsFlow = _records.asStateFlow()
+
     /** 当前活跃会话（null 表示未分段）。 */
     private var activeSession: LogSession? = null
 
@@ -156,6 +163,8 @@ class AppLogger(
             byLevel = byLevel,
             errorCount = errorCount
         )
+        // 同步发布最新在前的全量快照，让订阅方（查看器）实时刷新。
+        _records.value = records.toList().asReversed()
     }
 
     // ───────────────────────── 读取 ─────────────────────────

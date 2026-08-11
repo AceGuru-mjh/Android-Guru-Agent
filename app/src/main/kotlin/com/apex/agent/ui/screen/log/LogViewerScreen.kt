@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -23,10 +25,13 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VerticalAlignBottom
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -77,24 +82,35 @@ fun LogViewerScreen() {
     var minLevel by remember { mutableStateOf(LogLevel.VERBOSE) }
     var keyword by remember { mutableStateOf("") }
     var sessionId by remember { mutableStateOf<Long?>(null) }
+    var autoScroll by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
 
-    // 实时刷新：监听流式广播 + 统计快照。
+    // 实时刷新：订阅全量快照流，在 collect 时套用当前过滤条件。
+    // 日志写入/淘汰/清空都会触发，列表随之中枢实时更新，无需轮询。
     LaunchedEffect(selectedCategory, minLevel, keyword, sessionId) {
-        AppLogger.instance.stats.collectLatest { stats = it }
+        AppLogger.instance.recordsFlow.collectLatest { all ->
+            stats = AppLogger.instance.stats.value
+            val kw = keyword.lowercase()
+            val session = sessionId?.let { id -> AppLogger.instance.sessions.firstOrNull { it.id == id } }
+            records = all.filter { r ->
+                r.level.atLeast(minLevel) &&
+                    (selectedCategory == null || r.category == selectedCategory) &&
+                    (session == null || (r.id >= session.startId && r.id <= session.endId)) &&
+                    (kw.isEmpty() || r.message.lowercase().contains(kw) || r.source.lowercase().contains(kw))
+            }
+        }
     }
-    LaunchedEffect(selectedCategory, minLevel, keyword, sessionId) {
-        val list = AppLogger.instance.queryFiltered(
-            minLevel = minLevel,
-            categories = if (selectedCategory == null) null else setOf(selectedCategory!!),
-            keyword = keyword,
-            sessionId = sessionId
-        )
-        records = list
+
+    // 自动滚动：新日志追加且开关开启时，保持停留在最新一条。
+    LaunchedEffect(records, autoScroll) {
+        if (autoScroll && records.isNotEmpty()) {
+            listState.scrollToItem(records.lastIndex)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         // ── 聚合统计条 ──
-        StatsBar(stats)
+        StatsBar(stats, onClickError = { minLevel = LogLevel.ERROR })
 
         // ── 过滤控制区 ──
         FilterControls(
@@ -144,6 +160,19 @@ fun LogViewerScreen() {
                 Text("导出")
             }
             Spacer(Modifier.weight(1f))
+            // 自动滚动开关
+            FilledTonalButton(
+                onClick = { autoScroll = !autoScroll },
+                contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+            ) {
+                Icon(
+                    if (autoScroll) Icons.Default.VerticalAlignBottom else Icons.Default.MoreVert,
+                    contentDescription = null,
+                    modifier = Modifier.width(16.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(if (autoScroll) "跟随" else "已停")
+            }
             Text(
                 "${records.size} 条 · ${(stats.totalBytes / 1024 / 1024)}MB/${stats.maxBytes / 1024 / 1024}MB",
                 style = MaterialTheme.typography.labelSmall,
@@ -154,6 +183,7 @@ fun LogViewerScreen() {
 
         // ── 日志列表 ──
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp),
@@ -168,9 +198,9 @@ fun LogViewerScreen() {
     }
 }
 
-/** 聚合统计条：分类计数 + 错误高亮。 */
+/** 聚合统计条：分类计数 + 错误高亮 + 内存占用进度。 */
 @Composable
-private fun StatsBar(stats: com.apex.agent.core.logging.LogStats) {
+private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: () -> Unit) {
     Surface(
         tonalElevation = 1.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -182,7 +212,12 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 StatChip("总计", "${stats.total}", MaterialTheme.colorScheme.primary)
-                StatChip("错误", "${stats.errorCount}", if (stats.errorCount > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant)
+                StatChip(
+                    "错误",
+                    "${stats.errorCount}",
+                    if (stats.errorCount > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    onClick = onClickError
+                )
                 StatChip("WARN", "${stats.byLevel[LogLevel.WARN] ?: 0}", Color(0xFFFFB74D))
                 StatChip("INFO", "${stats.byLevel[LogLevel.INFO] ?: 0}", Color(0xFF81C784))
             }
@@ -201,16 +236,45 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats) {
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            // 内存占用进度条（相对于 500MB 上限）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "缓冲",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LinearProgressIndicator(
+                    progress = { stats.usageRatio.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (stats.usageRatio > 0.9f) Color(0xFFFFB74D) else MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+                Text(
+                    "${(stats.totalBytes / 1024 / 1024)}/${(stats.maxBytes / 1024 / 1024)}MB",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
 
-/** 单条统计 chip。 */
+/** 单条统计 chip。onClick 为空时仅作展示。 */
 @Composable
-private fun StatChip(label: String, value: String, color: Color) {
+private fun StatChip(label: String, value: String, color: Color, onClick: (() -> Unit)? = null) {
+    val modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -326,46 +390,71 @@ private fun SessionChip(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 单条日志行：级别色条 + 时间 + 分类 + 来源 + 消息 + 标签 + 复制。 */
+/** 单条日志行：级别色条 + 时间 + 分类 + 来源 + 消息 + 标签 + 复制，点击可展开异常堆栈。 */
 @Composable
 private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
-    Row(
+    var expanded by remember { mutableStateOf(false) }
+    val hasTrace = record.throwable != null
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .clickable(enabled = hasTrace) { expanded = !expanded }
             .padding(8.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .width(3.dp)
-                .height(38.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(record.level.colorArgb))
-        )
-        Spacer(Modifier.width(8.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(record.level.shortTag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(record.level.colorArgb))
-                Text(record.category.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(record.source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatTime(record.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(record.message, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
-            if (record.tags.isNotEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(record.level.colorArgb))
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(record.level.shortTag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(record.level.colorArgb))
+                    Text(record.category.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(record.source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(formatTime(record.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
                 Spacer(Modifier.height(2.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    record.tags.take(6).forEach { tag ->
-                        Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-                            Text("#$tag", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                Text(record.message, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurface)
+                if (record.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        record.tags.take(6).forEach { tag ->
+                            Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                                Text("#$tag", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                            }
                         }
                     }
                 }
+                if (hasTrace && expanded) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        record.throwable!!.stackTraceToString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
-        }
-        IconButton(onClick = onCopy, modifier = Modifier.width(28.dp).height(28.dp)) {
-            Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hasTrace) {
+                Text(
+                    if (expanded) "收起" else "堆栈",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+            IconButton(onClick = onCopy, modifier = Modifier.width(28.dp).height(28.dp)) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

@@ -2,6 +2,7 @@ package com.apex.agent.ui
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,6 +142,7 @@ fun ApexDrawerContent(
                         if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                         else MaterialTheme.colorScheme.primary.copy(alpha = 0f)
                     )
+                    .clickable(enabled = !selected) { onDestinationSelected(dest) }
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)

@@ -44,7 +44,16 @@ data class AgentChatUiState(
     val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
+    val pendingUserInput: UserInputRequest? = null,
     val historyDepth: Int = 0
+)
+
+/**
+ * Agent 通过 [AgentEvent.UserInputRequired] 向用户提问时，UI 需要展示的待回答请求。
+ */
+data class UserInputRequest(
+    val prompt: String,
+    val type: InputType
 )
 
 sealed interface AgentUiMessage {
@@ -310,6 +319,9 @@ class AgentChatViewModel @Inject constructor(
             is AgentEvent.PlanAwaitingConfirmation -> {
                 _uiState.update { it.copy(awaitingPlanConfirmation = true) }
             }
+            is AgentEvent.UserInputRequired -> {
+                _uiState.update { it.copy(pendingUserInput = UserInputRequest(event.prompt, event.type)) }
+            }
             is AgentEvent.PlanConfirmed -> {
                 _uiState.update { state ->
                     state.copy(
@@ -475,6 +487,18 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
     }
 
+    /** 用户回答了 Agent 的提问，恢复引擎执行。 */
+    fun submitUserInput(answer: String) {
+        _uiState.update { it.copy(pendingUserInput = null) }
+        (agentEngine as? ApexAgentEngine)?.submitUserInput(answer)
+    }
+
+    /** 用户取消了 Agent 的提问，中止等待。 */
+    fun cancelUserInput() {
+        _uiState.update { it.copy(pendingUserInput = null) }
+        (agentEngine as? ApexAgentEngine)?.cancelUserInput()
+    }
+
     fun answerQuestion(selectedOptionId: String?, customText: String?) {
         val question = pendingQuestion.value ?: return
 
@@ -540,6 +564,7 @@ class AgentChatViewModel @Inject constructor(
                     currentToolCall = null,
                     plan = null,
                     awaitingPlanConfirmation = false,
+                    pendingUserInput = null,
                     isLoading = false,
                     historyDepth = 0
                 )

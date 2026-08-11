@@ -78,6 +78,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
+import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.ui.component.AttachButton
@@ -269,6 +270,17 @@ fun AgentChatScreen(
                         onCancel = {
                             viewModel.cancelQuestion()
                         }
+                    )
+                }
+            }
+
+            // Agent 通过 ask_user 工具主动等待用户输入
+            uiState.pendingUserInput?.let { request ->
+                item {
+                    UserInputDialog(
+                        request = request,
+                        onSubmit = { viewModel.submitUserInput(it) },
+                        onCancel = { viewModel.cancelUserInput() }
                     )
                 }
             }
@@ -1070,4 +1082,60 @@ private fun QuestionCard(
             }
         }
     }
+}
+
+/**
+ * ask_user 工具触发的用户输入对话框。
+ * 用户提交后引擎恢复执行；取消则中止等待。
+ */
+@Composable
+private fun UserInputDialog(
+    request: UserInputRequest,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    val isChoice = request.type == InputType.CHOICE
+    val isConfirmation = request.type == InputType.CONFIRMATION
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        confirmButton = {
+            androidx.compose.material3.Button(
+                onClick = { onSubmit(text) },
+                enabled = !isChoice // 选项类暂以确认框展示，提交默认空串
+            ) {
+                Text("提交")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("取消") }
+        },
+        title = { Text("需要你的输入") },
+        text = {
+            Column {
+                Text(
+                    text = request.prompt,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                if (!isConfirmation) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("你的回答") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 6
+                    )
+                } else {
+                    Text(
+                        text = "点击「提交」以确认，或「取消」拒绝。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    )
 }

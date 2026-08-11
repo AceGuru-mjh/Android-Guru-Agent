@@ -59,7 +59,7 @@ sealed class DrawerDestination(
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Psychology)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
-    data object Log : DrawerDestination("log", "运行日志", Icons.Default.Info)
+    data object Log : DrawerDestination("log", "运行日志", Icons.Default.Notifications)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
 }
 

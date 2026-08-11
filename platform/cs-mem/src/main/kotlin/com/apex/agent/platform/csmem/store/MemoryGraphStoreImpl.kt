@@ -187,6 +187,7 @@ class MemoryGraphStoreImpl @Inject constructor(
             terminalFingerprint = macro.terminalFingerprint,
             transitionsJson = transitionsJson,
             appPackage = macro.appPackage,
+            sourceEpisodeId = null,
             createdAt = System.currentTimeMillis(),
             successCount = macro.successCount,
             failureCount = macro.failureCount,

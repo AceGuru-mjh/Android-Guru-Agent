@@ -127,24 +127,30 @@ object UiTreePruner {
      */
     fun generateSpatialEdges(nodes: List<SemanticNode>): List<GraphEdge> {
         val edges = mutableListOf<GraphEdge>()
-        var edgeCounter = 0
+        val counter = IntCounter()
 
         for (node in nodes) {
-            generateEdgesRecursive(node, edges, ::edgeCounter)
+            generateEdgesRecursive(node, edges, counter)
         }
 
         return edges
     }
 
+    /** 可变计数器（K2 不支持对局部变量的 ::ref 方法引用）。 */
+    private class IntCounter {
+        private var value = 0
+        fun next(): Int = value++
+    }
+
     private fun generateEdgesRecursive(
         node: SemanticNode,
         edges: MutableList<GraphEdge>,
-        counter: () -> Int
+        counter: IntCounter
     ): Int {
         // 父子边
         for (child in node.children) {
             edges.add(GraphEdge(
-                id = "e_${counter()}",
+                id = "e_${counter.next()}",
                 sourceFingerprint = node.fingerprint,
                 targetFingerprint = child.fingerprint,
                 type = EdgeType.SPATIAL,
@@ -166,7 +172,7 @@ object UiTreePruner {
             if (horizontalGap in -50..200 && verticalOverlap > 0) {
                 // 水平相邻
                 edges.add(GraphEdge(
-                    id = "e_${counter()}",
+                    id = "e_${counter.next()}",
                     sourceFingerprint = current.fingerprint,
                     targetFingerprint = next.fingerprint,
                     type = EdgeType.SPATIAL,
@@ -175,7 +181,7 @@ object UiTreePruner {
             } else if (verticalOverlap < 0 && horizontalGap > -50) {
                 // 垂直相邻
                 edges.add(GraphEdge(
-                    id = "e_${counter()}",
+                    id = "e_${counter.next()}",
                     sourceFingerprint = current.fingerprint,
                     targetFingerprint = next.fingerprint,
                     type = EdgeType.SPATIAL,

@@ -49,12 +49,13 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
     Box(
         modifier = modifier
             .size(36.dp)
             .drawBehind {
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                    color = borderColor,
                     style = Stroke(1.dp.toPx()),
                     cornerRadius = CornerRadius(6.dp.toPx())
                 )

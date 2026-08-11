@@ -161,6 +161,7 @@ private fun CodeBlock(lang: String, code: String) {
     val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(10.dp),
@@ -168,7 +169,7 @@ private fun CodeBlock(lang: String, code: String) {
             .fillMaxWidth()
             .drawBehind {
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.outlineVariant,
+                    color = borderColor,
                     style = Stroke(width = 1.dp.toPx()),
                     cornerRadius = CornerRadius(10.dp.toPx())
                 )

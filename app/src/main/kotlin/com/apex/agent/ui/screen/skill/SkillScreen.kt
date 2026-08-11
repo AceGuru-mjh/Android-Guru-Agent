@@ -158,6 +158,7 @@ private fun SkillCard(
     skill: SkillRegistry.InstalledSkill,
     onToggle: (Boolean) -> Unit
 ) {
+    val enabledBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -165,7 +166,7 @@ private fun SkillCard(
                 if (skill.enabled)
                     Modifier.drawBehind {
                         drawRoundRect(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            color = enabledBorderColor,
                             style = Stroke(1.dp.toPx()),
                             cornerRadius = CornerRadius(12.dp.toPx())
                         )

@@ -544,6 +544,7 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
     ) {
+        val outlineVariant = MaterialTheme.colorScheme.outlineVariant
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
@@ -551,7 +552,7 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
                 .widthIn(max = 340.dp)
                 .drawBehind {
                     drawRoundRect(
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        color = outlineVariant,
                         style = Stroke(width = 1.dp.toPx()),
                         cornerRadius = CornerRadius(14.dp.toPx())
                     )
@@ -612,6 +613,7 @@ private fun StreamingResponseBubble(text: String) {
         label = "cursor-alpha"
     )
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        val outlineVariant = MaterialTheme.colorScheme.outlineVariant
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
@@ -619,7 +621,7 @@ private fun StreamingResponseBubble(text: String) {
                 .widthIn(max = 340.dp)
                 .drawBehind {
                     drawRoundRect(
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        color = outlineVariant,
                         style = Stroke(width = 1.dp.toPx()),
                         cornerRadius = CornerRadius(14.dp.toPx())
                     )
@@ -672,6 +674,7 @@ private fun StreamingResponseBubble(text: String) {
 private fun ThinkingBubble(text: String) {
     var expanded by remember { mutableStateOf(false) }
 
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
         shape = RoundedCornerShape(12.dp),
@@ -679,7 +682,7 @@ private fun ThinkingBubble(text: String) {
             .fillMaxWidth()
             .drawBehind {
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f),
+                    color = tertiaryColor,
                     style = Stroke(width = 1.dp.toPx()),
                     cornerRadius = CornerRadius(12.dp.toPx())
                 )

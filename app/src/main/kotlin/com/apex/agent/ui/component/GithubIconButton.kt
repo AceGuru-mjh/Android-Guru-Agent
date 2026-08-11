@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
@@ -19,6 +20,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -58,19 +60,28 @@ fun GithubIconButton(
     val context = LocalContext.current
 
     Box(modifier = modifier) {
-        IconButton(
-            onClick = { showMenu = true },
+        Surface(
+            shape = CircleShape,
+            color = if (connectionState.isConnected)
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            else
+                MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.size(36.dp)
         ) {
-            Icon(
-                imageVector = if (connectionState.isConnected) Icons.Default.Link else Icons.Default.LinkOff,
-                contentDescription = "GitHub",
-                tint = if (connectionState.isConnected)
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
+            IconButton(
+                onClick = { showMenu = true },
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = if (connectionState.isConnected) Icons.Default.Link else Icons.Default.LinkOff,
+                    contentDescription = "GitHub",
+                    tint = if (connectionState.isConnected)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         DropdownMenu(

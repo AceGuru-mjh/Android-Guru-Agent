@@ -4,6 +4,9 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.ToolStreamEvent
@@ -143,6 +146,7 @@ class ApexAgentEngine(
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
                             maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
                         emit(event)
                     }
                     totalIterations = maxOf(totalIterations, iter)
@@ -152,16 +156,20 @@ class ApexAgentEngine(
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
                             maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
                         emit(event)
                     }
                     totalIterations = maxOf(totalIterations, planIterations)
                 }
             }
         } catch (e: CancellationException) {
+            AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "任务被中止 (CancellationException)")
             emit(AgentEvent.Aborted)
         } catch (e: TimeoutCancellationException) {
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
             emit(AgentEvent.Error("Plan confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: Exception) {
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
             emit(AgentEvent.Error(e.message ?: "Unknown error", recoverable = false))
         } finally {
             isRunning = false

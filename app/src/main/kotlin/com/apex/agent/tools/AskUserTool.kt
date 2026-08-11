@@ -20,6 +20,7 @@ class AskUserTool : AgentTool {
     override val id: String = "ask_user"
 
     override val name: String = "ask_user"
+    override val name: String = "Ask User"
 
     override val description: String = """
         Ask the user a question and wait for their response.

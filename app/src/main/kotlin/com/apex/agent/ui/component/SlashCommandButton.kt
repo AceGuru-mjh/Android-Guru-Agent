@@ -6,7 +6,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,8 +22,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -50,16 +52,19 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
     Box(
         modifier = modifier
             .size(36.dp)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(6.dp)
-            )
+            .drawBehind {
+                drawRoundRect(
+                    color = borderColor,
+                    style = Stroke(1.dp.toPx()),
+                    cornerRadius = CornerRadius(6.dp.toPx())
+                )
+            }
             .background(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(6.dp)
             )
             .semantics { contentDescription = "打开斜杠指令菜单" }

@@ -205,11 +205,13 @@ class AppLogger(
         }
     }
 
-    /** 清空缓冲区与统计（不结束会话）。 */
-    suspend fun clear() = mutex.withLock {
-        records.clear()
-        totalBytes.set(0)
-        rebuildStats()
+    /** 清空缓冲区与统计（不结束会话）。非挂起：内部同步执行，可在 UI 回调直接调用。 */
+    fun clear() = kotlinx.coroutines.runBlocking {
+        mutex.withLock {
+            records.clear()
+            totalBytes.set(0)
+            rebuildStats()
+        }
     }
 
     // ───────────────────────── 会话分段 ─────────────────────────

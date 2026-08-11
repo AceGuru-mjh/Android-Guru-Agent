@@ -112,7 +112,6 @@ class ApexApp : Application(), Configuration.Provider {
                 category = LogCategory.SYSTEM,
                 source = "Shizuku",
                 message = "Shizuku not available on this device: ${e.message}",
-                throwable = e,
                 tags = arrayOf("shizuku")
             )
         }

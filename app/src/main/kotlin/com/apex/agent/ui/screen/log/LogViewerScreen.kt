@@ -41,18 +41,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.logging.LogRecord
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -65,7 +68,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun LogViewerScreen() {
     val context = LocalContext.current
-    val clipboard = LocalClipboard.current
+    val clipboard = LocalClipboardManager.current
 
     var records by remember { mutableStateOf<List<LogRecord>>(emptyList()) }
     var stats by remember { mutableStateOf(AppLogger.instance.stats.value) }

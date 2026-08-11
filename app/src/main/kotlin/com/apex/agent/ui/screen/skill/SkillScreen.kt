@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.border.BorderStroke
-import androidx.compose.foundation.border.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -42,6 +40,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -162,10 +163,13 @@ private fun SkillCard(
             .fillMaxWidth()
             .then(
                 if (skill.enabled)
-                    Modifier.border(
-                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                        RoundedCornerShape(12.dp)
-                    )
+                    Modifier.drawBehind {
+                        drawRoundRect(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            style = Stroke(1.dp.toPx()),
+                            cornerRadius = CornerRadius(12.dp.toPx())
+                        )
+                    }
                 else Modifier
             ),
         shape = RoundedCornerShape(12.dp)

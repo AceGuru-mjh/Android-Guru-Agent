@@ -60,8 +60,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.foundation.border.BorderStroke
-import androidx.compose.foundation.border.border
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -73,6 +71,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -548,10 +549,13 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             modifier = Modifier
                 .widthIn(max = 340.dp)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
-                )
+                .drawBehind {
+                    drawRoundRect(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        style = Stroke(width = 1.dp.toPx()),
+                        cornerRadius = CornerRadius(14.dp.toPx())
+                    )
+                }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 // 头像 + 角色标识 + 时间戳
@@ -613,10 +617,13 @@ private fun StreamingResponseBubble(text: String) {
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             modifier = Modifier
                 .widthIn(max = 340.dp)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
-                )
+                .drawBehind {
+                    drawRoundRect(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        style = Stroke(width = 1.dp.toPx()),
+                        cornerRadius = CornerRadius(14.dp.toPx())
+                    )
+                }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(
@@ -670,10 +677,13 @@ private fun ThinkingBubble(text: String) {
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)),
-                RoundedCornerShape(12.dp)
-            )
+            .drawBehind {
+                drawRoundRect(
+                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f),
+                    style = Stroke(width = 1.dp.toPx()),
+                    cornerRadius = CornerRadius(12.dp.toPx())
+                )
+            }
             .clickable {
                 expanded = !expanded
             }

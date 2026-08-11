@@ -60,6 +60,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.tools.skill.SkillImplementation
 import com.apex.agent.core.tools.skill.SkillManifest
+import com.apex.agent.core.tools.skill.SkillToolDef
 import com.apex.agent.core.tools.skill.SkillRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,7 +101,7 @@ class SkillViewModel @Inject constructor(
         return skillRegistry.install(json).fold(
             onSuccess = { m ->
                 refresh()
-                _lastMessage.value = "已安装：${m.name} v${m.version}"
+                _lastMessage.value = "已安装：${m.name}"
                 true
             },
             onFailure = { e ->
@@ -124,10 +125,17 @@ class SkillViewModel @Inject constructor(
         val manifest = SkillManifest(
             id = id,
             name = name.trim().ifBlank { id },
-            version = "1.0.0",
             description = description.trim(),
             author = "agent-created",
-            implementation = SkillImplementation(type = type),
+            tools = listOf(
+                SkillToolDef(
+                    id = id,
+                    name = name.trim().ifBlank { id },
+                    description = description.trim(),
+                    parameters = "{}",
+                    implementation = SkillImplementation(type = type)
+                )
+            ),
             promptInjection = if (type == "prompt") prompt.ifBlank { description } else null
         )
         val json = kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(manifest)
@@ -192,7 +200,8 @@ fun SkillScreen(
             )
         },
         snackbarHost = {
-            if (showToast && message != null) {
+            val msg = message
+            if (showToast && msg != null) {
                 Snackbar(
                     modifier = Modifier.padding(16.dp),
                     action = {
@@ -200,7 +209,7 @@ fun SkillScreen(
                             Text("知道了")
                         }
                     }
-                ) { Text(message) }
+                ) { Text(msg) }
             }
         }
     ) { padding ->
@@ -434,7 +443,7 @@ private fun SkillCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "v${skill.manifest.version} · ${skill.manifest.author}",
+                    "v1.0.0 · ${skill.manifest.author ?: "unknown"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )

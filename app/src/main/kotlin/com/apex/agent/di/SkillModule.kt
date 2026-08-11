@@ -1,8 +1,11 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.ui.component.SlashMenuProvider
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -25,5 +28,15 @@ object SkillModule {
     @Singleton
     fun provideSkillMenuProvider(skillRegistry: SkillRegistry): SkillMenuProvider {
         return SkillMenuProvider(skillRegistry)
+    }
+
+    @Provides
+    @Singleton
+    fun provideSlashMenuProvider(
+        skillMenuProvider: SkillMenuProvider,
+        mcpManager: McpManager,
+        pluginManager: PluginManager
+    ): SlashMenuProvider {
+        return SlashMenuProvider(skillMenuProvider, mcpManager, pluginManager)
     }
 }

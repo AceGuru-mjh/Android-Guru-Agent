@@ -89,14 +89,14 @@ import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
-import com.apex.agent.core.tools.skill.SkillMenuProvider
+import com.apex.agent.ui.component.SlashMenuProvider
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    skillMenuProvider: SkillMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
+    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
@@ -308,7 +308,7 @@ fun AgentChatScreen(
                 ) {
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
-                        skillMenuProvider = skillMenuProvider,
+                        slashMenuProvider = slashMenuProvider,
                         onCommandSelected = { command ->
                             // Insert the command rather than overwriting existing input.
                             // If the user has already typed something (e.g.

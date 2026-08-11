@@ -250,46 +250,6 @@ class AppLogger(
 }
 
 /**
- * 把引擎事件映射为结构化日志并写入中枢。
- *
- * 事件是 UI 流式更新的载体，本身也是极佳的审计轨迹：思考、规划、工具调用、
- * 上下文压缩、错误都被转成对应分类/级别的日志，使"所有日志"涵盖 Agent 运行
- * 的完整生命周期，无需在各处重复打点。
- */
-fun AppLogger.logEvent(event: com.apex.agent.core.engine.AgentEvent) {
-    when (event) {
-        is com.apex.agent.core.engine.AgentEvent.ThinkingStart ->
-            debug(LogCategory.ENGINE, "Engine", "思考开始 #${event.iteration} (level=${event.thinkingLevel})", "thinking")
-        is com.apex.agent.core.engine.AgentEvent.ThinkingComplete ->
-            debug(LogCategory.ENGINE, "Engine", "思考完成 (${event.fullThought.length} 字)", "thinking")
-        is com.apex.agent.core.engine.AgentEvent.PlanGenerated ->
-            info(LogCategory.ENGINE, "Engine", "生成计划: ${event.plan.steps.size} 步, 风险=${event.plan.riskLevel}", "plan")
-        is com.apex.agent.core.engine.AgentEvent.IterationStart ->
-            info(LogCategory.ENGINE, "Engine", "迭代 #${event.iteration} 开始", "iteration")
-        is com.apex.agent.core.engine.AgentEvent.StepStart ->
-            info(LogCategory.ENGINE, "Engine", "执行步骤 #${event.stepIndex}: ${event.description}", "step")
-        is com.apex.agent.core.engine.AgentEvent.ToolCallStart ->
-            info(LogCategory.TOOL, event.toolName, "调用工具 args=${event.arguments.take(200)}", "tool:${event.toolName}", "call-start")
-        is com.apex.agent.core.engine.AgentEvent.ToolCallComplete ->
-            if (event.success)
-                info(LogCategory.TOOL, event.toolName, "完成 (${event.durationMs}ms) out=${event.output.length}字", "tool:${event.toolName}", "call-complete")
-            else
-                error(LogCategory.TOOL, event.toolName, "失败 (${event.durationMs}ms): ${event.output.take(300)}", "tool:${event.toolName}", "call-error")
-        is com.apex.agent.core.engine.AgentEvent.ToolProgress ->
-            debug(LogCategory.TOOL, "Engine", "进度 ${event.percent?.let { "%.0f%%".format(it * 100) } ?: ""} ${event.message ?: ""}", "progress")
-        is com.apex.agent.core.engine.AgentEvent.ContextCompressed ->
-            warn(LogCategory.ENGINE, "Compressor", "上下文压缩 ${event.beforeTokens}→${event.afterTokens} tokens, 策略=${event.strategy}, 移除=${event.messagesRemoved}", "compression")
-        is com.apex.agent.core.engine.AgentEvent.Error ->
-            error(LogCategory.ENGINE, "Engine", event.message, "engine-error")
-        is com.apex.agent.core.engine.AgentEvent.Complete ->
-            info(LogCategory.ENGINE, "Engine", "完成: ${event.totalIterations} 迭代, ${event.totalToolCalls} 工具调用, ${event.totalDurationMs}ms", "complete")
-        is com.apex.agent.core.engine.AgentEvent.Aborted ->
-            warn(LogCategory.ENGINE, "Engine", "任务中止", "aborted")
-        else -> { /* 流式 chunk 类事件不落日志，避免刷屏 */ }
-    }
-}
-
-/**
  * 聚合统计快照。
  */
 data class LogStats(

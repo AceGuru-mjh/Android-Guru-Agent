@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":core:agent-engine"))
     implementation(project(":core:llm-adapter"))
     implementation(project(":core:tool-registry"))
+    implementation(project(":core:logging"))
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
     implementation(project(":platform:terminal"))

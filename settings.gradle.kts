@@ -24,6 +24,7 @@ include(":app")
 include(":core:agent-engine")
 include(":core:llm-adapter")
 include(":core:tool-registry")
+include(":core:logging")
 
 // Android平台层
 include(":platform:privilege")

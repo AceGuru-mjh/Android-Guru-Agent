@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
-    alias(libs.plugins.kotlin.serialization)
 }
 
 java {
@@ -13,9 +12,8 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":core:llm-adapter"))
-    implementation(project(":core:tool-registry"))
-    implementation(project(":core:logging"))
     implementation(libs.coroutines.core)
-    implementation(libs.serialization.json)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

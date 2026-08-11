@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
+import com.apex.agent.ui.component.MarkdownText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode

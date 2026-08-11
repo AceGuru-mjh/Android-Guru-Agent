@@ -1,5 +1,10 @@
 package com.apex.agent.ui.component
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Api
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillMenuProvider

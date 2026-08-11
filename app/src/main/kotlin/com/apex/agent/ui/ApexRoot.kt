@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -40,7 +39,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.log.LogViewerScreen
-import com.apex.agent.ui.screen.memory.MemoryScreen
 import com.apex.agent.ui.screen.model.ModelScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
@@ -57,7 +55,6 @@ sealed class DrawerDestination(
 ) {
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
-    data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Psychology)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
@@ -132,7 +129,6 @@ fun ApexRoot() {
                 when (currentDestination) {
                     DrawerDestination.Agent -> AgentChatScreen()
                     DrawerDestination.Skill -> SkillScreen()
-                    DrawerDestination.Memory -> MemoryScreen()
                     DrawerDestination.Model -> ModelScreen()
                     DrawerDestination.Permissions -> PermissionsScreen()
                     DrawerDestination.Log -> LogViewerScreen()

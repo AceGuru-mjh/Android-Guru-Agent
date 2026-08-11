@@ -119,7 +119,7 @@ fun ApexDrawerContent(
         val destinations = listOf(
             DrawerDestination.Agent,
             DrawerDestination.Skill,
-            DrawerDestination.Memory,
+            // Memory 导航已移除 —— CS-Mem 作为底层引擎运行，无独立 UI
             DrawerDestination.Model,
             DrawerDestination.Permissions,
             DrawerDestination.Log,

@@ -30,6 +30,7 @@ include(":core:logging")
 include(":platform:privilege")
 include(":platform:persistence")
 include(":platform:terminal")
+include(":platform:cs-mem")
 
 // 插件SDK
 include(":plugin-sdk:plugin-api")

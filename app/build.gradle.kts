@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
     implementation(project(":platform:terminal"))
+    implementation(project(":platform:cs-mem"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose

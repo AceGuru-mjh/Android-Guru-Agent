@@ -9,7 +9,9 @@ import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.github.GithubApiService
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.github.tools.*
+import com.apex.agent.platform.PrivilegeUiProvider
 import com.apex.agent.platform.privilege.PrivilegeDetector
+import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.terminal.TerminalManager
 import com.apex.agent.platform.terminal.tools.*
 import com.apex.agent.core.engine.CommandPermissionGate
@@ -69,12 +71,13 @@ object ToolModule {
         githubTokenManager: GithubTokenManager,
         githubApiService: GithubApiService,
         userQuestionGateway: UserQuestionGateway,
-        commandPermissionGate: CommandPermissionGate
+        commandPermissionGate: CommandPermissionGate,
+        privilegeManager: PrivilegeManager,
+        privilegeUiProvider: PrivilegeUiProvider
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
         val downloadDir = File(context.getExternalFilesDir(null), "Download").apply { mkdirs() }
-        val memoryDir = File(context.filesDir, "agent_memory").apply { mkdirs() }
 
         val shellExec: suspend (String) -> String = { cmd ->
             if (!commandPermissionGate.ensureAllowed(cmd)) {
@@ -124,11 +127,12 @@ object ToolModule {
         registry.register(SafeAgentTool(HttpRequestTool(httpClient)))
         registry.register(SafeAgentTool(DownloadFileTool(httpClient, downloadDir)))
 
-        // ═══ 4. 记忆 (3) ═══
-        val memoryStore = FileMemoryStore(memoryDir)
-        registry.register(SafeAgentTool(MemorizeTool(memoryStore)))
-        registry.register(SafeAgentTool(RecallTool(memoryStore)))
-        registry.register(SafeAgentTool(ForgetTool(memoryStore)))
+        // ═══ 4. 记忆 (CS-Mem 已独立为 platform:cs-mem 模块) ═══
+        // 旧 FileMemoryStore/MemorizeTool/RecallTool/ForgetTool 已移除。
+        // 记忆功能现由 CS-Mem (Cognitive-Spatial-State Memory Engine) 提供：
+        //   - MemoryWriterActor: 无锁并发写入管道
+        //   - MemoryGraphStore:   Room 图存储 (Episodes/Nodes/Edges/FSM)
+        //   - UiTreePruner:       UI树→语义交互图降维
 
         // ═══ 5. 应用管理 (6) ═══
         registry.register(SafeAgentTool(AppListTool(shellExec)))
@@ -146,10 +150,10 @@ object ToolModule {
         registry.register(SafeAgentTool(GetTimeTool()))
         registry.register(SafeAgentTool(LogcatTool(shellExec)))
 
-        // ═══ 7. UI 操作 (5) ═══
-        registry.register(SafeAgentTool(UiTapTool(shellExec)))
-        registry.register(SafeAgentTool(UiSwipeTool(shellExec)))
-        registry.register(SafeAgentTool(UiDumpTool(shellExec)))
+        // ═══ 7. UI 操作 (5, 优先 AccessibilityService 语义交互) ═══
+        registry.register(SafeAgentTool(UiTapTool(shellExec, privilegeUiProvider)))
+        registry.register(SafeAgentTool(UiSwipeTool(shellExec, privilegeUiProvider)))
+        registry.register(SafeAgentTool(UiDumpTool(shellExec, privilegeUiProvider)))
         registry.register(SafeAgentTool(ScreenshotTool(shellExec)))
         registry.register(SafeAgentTool(InputTextTool(shellExec)))
 

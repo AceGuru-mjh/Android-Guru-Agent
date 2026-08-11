@@ -165,7 +165,8 @@ private fun Context.openAccessibilitySettings() {
 private fun Context.openOverlaySettings() {
     runCatching {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Intent(Settings.ACTION_MANAGE_APP_OVERLAY_SETTINGS, Uri.parse("package:$packageName"))
+            // ACTION_MANAGE_APP_OVERLAY_SETTINGS 在部分 compileSdk 平台下不可见，使用字面值
+            Intent("android.settings.action.MANAGE_APP_OVERLAY_SETTINGS", Uri.parse("package:$packageName"))
         } else {
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
         }

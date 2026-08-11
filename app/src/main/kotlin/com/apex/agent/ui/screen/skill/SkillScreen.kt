@@ -125,6 +125,7 @@ class SkillViewModel @Inject constructor(
         val manifest = SkillManifest(
             id = id,
             name = name.trim().ifBlank { id },
+            version = "1.0.0",
             description = description.trim(),
             author = "agent-created",
             tools = listOf(
@@ -443,7 +444,7 @@ private fun SkillCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "v1.0.0 · ${skill.manifest.author ?: "unknown"}",
+                    "v${skill.manifest.version} · ${skill.manifest.author}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )

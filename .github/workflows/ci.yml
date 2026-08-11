@@ -43,6 +43,13 @@ jobs:
             curl -sL "https://repo1.maven.org/maven2/$dep" -o "/tmp/apex-libs/$fname"
           done
 
+      - name: Compile core:logging
+        run: |
+          CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
+          kotlinc -cp "$CLASSPATH" -d /tmp/build/logging \
+            $(find core/logging/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
       - name: Compile core:llm-adapter
         run: |
           CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
@@ -59,7 +66,7 @@ jobs:
 
       - name: Compile core:agent-engine
         run: |
-          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter:/tmp/build/tool-registry"
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter:/tmp/build/tool-registry:/tmp/build/logging"
           kotlinc -cp "$CLASSPATH" -d /tmp/build/agent-engine \
             $(find core/agent-engine/src/main/kotlin -name "*.kt") \
             -jvm-target 17

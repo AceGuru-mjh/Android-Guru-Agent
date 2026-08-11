@@ -161,9 +161,10 @@ jobs:
 
       - name: Compile app module
         run: |
-          ./gradlew :app:compileDebugKotlin \
+          ./gradlew :app:clean :app:compileDebugKotlin \
             --no-daemon \
             --no-build-cache \
+            --rerun-tasks \
             --stacktrace \
             2>&1 | tee compile.log
         continue-on-error: true

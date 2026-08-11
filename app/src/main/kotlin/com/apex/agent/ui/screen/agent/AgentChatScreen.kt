@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
+import com.apex.agent.ui.component.MarkdownText
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -68,6 +71,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +82,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.format.DateTimeFormatter
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
@@ -446,7 +454,7 @@ private fun AgentMessageItem(
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
-        is AgentUiMessage.Agent -> AgentBubble(message.text)
+        is AgentUiMessage.Agent -> AgentBubble(message)
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought)
@@ -460,6 +468,13 @@ private fun UserBubble(
     onImageClick: (MessageAttachment) -> Unit = {},
     onFileClick: (MessageAttachment) -> Unit = {}
 ) {
+    val timeStr = remember(message.timestamp) {
+        DateTimeFormatter.ofPattern("HH:mm").format(
+            java.time.Instant.ofEpochMilli(message.timestamp)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDateTime()
+        )
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -467,9 +482,31 @@ private fun UserBubble(
         Surface(
             color = MaterialTheme.colorScheme.primaryContainer,
             shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
-            modifier = Modifier.widthIn(max = 300.dp)
+            modifier = Modifier.widthIn(max = 320.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
+                // 角色标识 + 时间戳
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    Text(
+                        text = "YOU",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = timeStr,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                    )
+                }
+
                 // 附件展示（如果有）
                 if (message.attachments.isNotEmpty()) {
                     MessageAttachmentList(
@@ -482,10 +519,13 @@ private fun UserBubble(
 
                 // 文本内容
                 if (message.text.isNotBlank()) {
-                    Text(
-                        text = message.text,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                    SelectionContainer {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
             }
         }
@@ -493,35 +533,138 @@ private fun UserBubble(
 }
 
 @Composable
-private fun AgentBubble(text: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+private fun AgentBubble(message: AgentUiMessage.Agent) {
+    val timeStr = remember(message.timestamp) {
+        DateTimeFormatter.ofPattern("HH:mm").format(
+            java.time.Instant.ofEpochMilli(message.timestamp)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDateTime()
+        )
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
+    ) {
+        val outlineVariant = MaterialTheme.colorScheme.outlineVariant
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
-            modifier = Modifier.widthIn(max = 320.dp)
+            modifier = Modifier
+                .widthIn(max = 340.dp)
+                .drawBehind {
+                    drawRoundRect(
+                        color = outlineVariant,
+                        style = Stroke(width = 1.dp.toPx()),
+                        cornerRadius = CornerRadius(14.dp.toPx())
+                    )
+                }
         ) {
-            Text(
-                text = text,
-                modifier = Modifier.padding(12.dp),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(modifier = Modifier.padding(12.dp)) {
+                // 头像 + 角色标识 + 时间戳
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = CircleShape,
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "✦",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Text(
+                        text = "AGENT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text(
+                        text = timeStr,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）
+                SelectionContainer {
+                    MarkdownText(markdown = message.text)
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun StreamingResponseBubble(text: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+    val pulse by rememberInfiniteTransition(label = "stream-cursor").animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "cursor-alpha"
+    )
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        val outlineVariant = MaterialTheme.colorScheme.outlineVariant
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
+            modifier = Modifier
+                .widthIn(max = 340.dp)
+                .drawBehind {
+                    drawRoundRect(
+                        color = outlineVariant,
+                        style = Stroke(width = 1.dp.toPx()),
+                        cornerRadius = CornerRadius(14.dp.toPx())
+                    )
+                }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text(text = text, color = MaterialTheme.colorScheme.onSurface)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = CircleShape,
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "✦",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Text(
+                        text = "AGENT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                SelectionContainer {
+                    MarkdownText(markdown = text)
+                }
                 Text(
-                    text = "▊",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 2.dp)
+                    text = "▍",
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = pulse),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 2.dp, start = 1.dp)
                 )
             }
         }
@@ -532,11 +675,19 @@ private fun StreamingResponseBubble(text: String) {
 private fun ThinkingBubble(text: String) {
     var expanded by remember { mutableStateOf(false) }
 
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
     Surface(
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .drawBehind {
+                drawRoundRect(
+                    color = tertiaryColor,
+                    style = Stroke(width = 1.dp.toPx()),
+                    cornerRadius = CornerRadius(12.dp.toPx())
+                )
+            }
             .clickable {
                 expanded = !expanded
             }
@@ -544,11 +695,22 @@ private fun ThinkingBubble(text: String) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("🧠", style = MaterialTheme.typography.bodySmall)
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f),
+                    modifier = Modifier.padding(0.dp)
+                ) {
+                    Text(
+                        text = "THINK",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
                 Text(
-                    text = if (expanded) "思考过程" else "Thinking...",
+                    text = if (expanded) "思考过程" else "推理中…",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.weight(1f)
@@ -565,12 +727,12 @@ private fun ThinkingBubble(text: String) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
                 maxLines = if (expanded) Int.MAX_VALUE else 5,
                 overflow = TextOverflow.Ellipsis
             )
@@ -593,21 +755,26 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = when {
-                        toolCall.success == true -> "✅"
-                        toolCall.success == false -> "❌"
-                        else -> "🔧"
-                    },
-                    style = MaterialTheme.typography.bodyMedium
+                val statusColor = when {
+                    toolCall.success == true -> MaterialTheme.colorScheme.primary
+                    toolCall.success == false -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.secondary
+                }
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
                 )
 
                 Text(
                     text = toolCall.toolName,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f)
                 )
 
@@ -709,12 +876,15 @@ private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
             ) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "⚡ ${toolCall.toolName}",
+                    text = toolCall.toolName,
                     style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = toolCall.args.take(80),

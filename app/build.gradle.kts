@@ -41,9 +41,11 @@ dependencies {
     implementation(project(":core:agent-engine"))
     implementation(project(":core:llm-adapter"))
     implementation(project(":core:tool-registry"))
+    implementation(project(":core:logging"))
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
     implementation(project(":platform:terminal"))
+    implementation(project(":platform:cs-mem"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose
@@ -51,6 +53,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
+    implementation("androidx.compose.foundation:foundation:1.7.6")
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")

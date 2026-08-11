@@ -22,6 +22,14 @@ data class ModelSettings(
     val temperature: Float = 0.7f
 )
 
+/** Agent 运行参数，持久化于 SharedPreferences，供 Chat 启动时读取。 */
+data class AgentSettings(
+    val defaultMode: String = "auto",   // build | chat | auto
+    val thinkLevel: String = "standard", // standard | deep | minimal
+    val maxIterations: Int = 20,
+    val keepAlive: Boolean = true
+)
+
 data class TestResult(
     val success: Boolean,
     val message: String
@@ -36,6 +44,9 @@ class SettingsViewModel @Inject constructor(
     
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<ModelSettings> = _settings.asStateFlow()
+
+    private val _agentSettings = MutableStateFlow(loadAgentSettings())
+    val agentSettings: StateFlow<AgentSettings> = _agentSettings.asStateFlow()
     
     var testResult: TestResult? by mutableStateOf(null)
         private set
@@ -88,12 +99,33 @@ class SettingsViewModel @Inject constructor(
         }
     }
     
+    /** 局部更新 Agent 设置并持久化。 */
+    fun updateAgentSettings(block: AgentSettings.() -> AgentSettings) {
+        val next = _agentSettings.value.block()
+        prefs.edit()
+            .putString("agent_default_mode", next.defaultMode)
+            .putString("agent_think_level", next.thinkLevel)
+            .putInt("agent_max_iterations", next.maxIterations)
+            .putBoolean("agent_keep_alive", next.keepAlive)
+            .apply()
+        _agentSettings.value = next
+    }
+    
     private fun loadSettings(): ModelSettings {
         return ModelSettings(
             baseUrl = prefs.getString("llm_base_url", "") ?: "",
             apiKey = prefs.getString("llm_api_key", "") ?: "",
             model = prefs.getString("llm_model", "") ?: "",
             temperature = prefs.getFloat("llm_temperature", 0.7f)
+        )
+    }
+
+    private fun loadAgentSettings(): AgentSettings {
+        return AgentSettings(
+            defaultMode = prefs.getString("agent_default_mode", "auto") ?: "auto",
+            thinkLevel = prefs.getString("agent_think_level", "standard") ?: "standard",
+            maxIterations = prefs.getInt("agent_max_iterations", 20),
+            keepAlive = prefs.getBoolean("agent_keep_alive", true)
         )
     }
 }

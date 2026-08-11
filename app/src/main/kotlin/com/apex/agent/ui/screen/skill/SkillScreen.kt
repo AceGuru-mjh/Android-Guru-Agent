@@ -139,7 +139,7 @@ class SkillViewModel @Inject constructor(
             ),
             promptInjection = if (type == "prompt") prompt.ifBlank { description } else null
         )
-        val json = kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(manifest)
+        val json = kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(SkillManifest.serializer(), manifest)
         return installFromJson(json).also {
             if (it) _lastMessage.value = "已创建：${manifest.name}"
         }

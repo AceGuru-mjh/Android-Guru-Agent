@@ -28,15 +28,15 @@ fun AppLogger.logEvent(event: AgentEvent) {
             info(LogCategory.TOOL, event.toolName, "调用工具 args=${event.arguments.take(200)}", "tool:${event.toolName}", "call-start")
         is AgentEvent.ToolCallComplete ->
             if (event.success)
-                info(LogCategory.TOOL, event.toolName, "完成 (${event.durationMs}ms) out=${event.output.length}字", "tool:${event.toolName}", "call-complete")
+                info(LogCategory.TOOL, event.toolName, "完成 (${event.durationMs}ms) out=${event.output.length}字", tags = arrayOf("tool:${event.toolName}", "call-complete"))
             else
-                error(LogCategory.TOOL, event.toolName, "失败 (${event.durationMs}ms): ${event.output.take(300)}", "tool:${event.toolName}", "call-error")
+                error(LogCategory.TOOL, event.toolName, "失败 (${event.durationMs}ms): ${event.output.take(300)}", tags = arrayOf("tool:${event.toolName}", "call-error"))
         is AgentEvent.ToolProgress ->
             debug(LogCategory.TOOL, "Engine", "进度 ${event.percent?.let { "%.0f%%".format(it * 100) } ?: ""} ${event.message ?: ""}", "progress")
         is AgentEvent.ContextCompressed ->
             warn(LogCategory.ENGINE, "Compressor", "上下文压缩 ${event.beforeTokens}→${event.afterTokens} tokens, 策略=${event.strategy}, 移除=${event.messagesRemoved}", "compression")
         is AgentEvent.Error ->
-            error(LogCategory.ENGINE, "Engine", event.message, "engine-error")
+            error(LogCategory.ENGINE, "Engine", event.message, tags = arrayOf("engine-error"))
         is AgentEvent.Complete ->
             info(LogCategory.ENGINE, "Engine", "完成: ${event.totalIterations} 迭代, ${event.totalToolCalls} 工具调用, ${event.totalDurationMs}ms", "complete")
         is AgentEvent.Aborted ->

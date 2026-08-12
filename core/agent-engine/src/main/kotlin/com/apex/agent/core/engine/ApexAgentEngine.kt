@@ -60,6 +60,13 @@ class ApexAgentEngine(
     private var isRunning = false
 
     /**
+     * 任务内是否有任何工具动作失败（跨 [executeToolCallStreaming] 调用累计）。
+     * 因为流式工具执行是独立成员函数，无法访问 [execute] 内的局部变量，
+     * 故用实例字段累计，并在每次 [execute] 入口重置。
+     */
+    private var anyActionFailed = false
+
+    /**
      * Channel for the UI to deliver plan-confirmation decisions back to the engine
      * while [executePlanMode] is suspended on [awaitPlanConfirmation].
      *
@@ -116,6 +123,7 @@ class ApexAgentEngine(
      */
     override fun execute(input: UserInput): Flow<AgentEvent> = flow {
         isRunning = true
+        anyActionFailed = false
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
@@ -176,7 +184,7 @@ class ApexAgentEngine(
             isRunning = false
             // 隐式记忆采集（报告 P2）：任务结束，提交 episode。
             // 放在 finally 保证无论成功/失败/中止都会关闭会话。
-            memoryObserver?.onTaskFinish(success = !taskHadFailure)
+            memoryObserver?.onTaskFinish(success = !taskHadFailure && !anyActionFailed)
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
             planConfirmationDeferred?.complete(false)
             planConfirmationDeferred = null
@@ -513,7 +521,7 @@ class ApexAgentEngine(
 
         // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
         val actionSuccess = !result.startsWith("Error")
-        if (!actionSuccess) taskHadFailure = true
+        if (!actionSuccess) anyActionFailed = true
         memoryObserver?.onActionExecuted(
             "${toolCall.name}(${toolCall.arguments.take(120)})"
         )

@@ -74,7 +74,8 @@ fun AdaptiveInputField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     placeholder: @Composable () -> Unit = { Text("输入指令...") },
-    focusRequester: FocusRequester = remember { FocusRequester() }
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    onSend: () -> Unit = {}
 ) {
     var isFullscreen by remember { mutableStateOf(false) }
 
@@ -112,8 +113,13 @@ fun AdaptiveInputField(
             ),
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default
+                imeAction = ImeAction.Send
             ),
+            onKeyboardAction = {
+                if (it == ImeAction.Send) {
+                    onSend()
+                }
+            },
             trailingIcon = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

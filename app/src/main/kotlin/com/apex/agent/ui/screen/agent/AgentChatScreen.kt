@@ -366,18 +366,24 @@ fun AgentChatScreen(
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
 
-                    // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏）═══
+                    // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
                     AdaptiveInputField(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
+                        onSend = {
+                            if (inputText.isNotBlank() && !uiState.isLoading) {
+                                viewModel.sendMessage(inputText.trim())
+                            }
+                        },
                         placeholder = {
                             Text(
                                 if (uiState.mode == AgentMode.PLAN) {
                                     "描述任务，Agent先规划..."
                                 } else {
                                     "输入指令，/ 触发快捷..."
-                                }
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
@@ -386,7 +392,7 @@ fun AgentChatScreen(
                     if (uiState.isLoading) {
                         FilledTonalIconButton(
                             onClick = { viewModel.abort() },
-                            modifier = Modifier.size(44.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = "停止")
                         }
@@ -399,7 +405,7 @@ fun AgentChatScreen(
                                 }
                             },
                             enabled = inputText.isNotBlank(),
-                            modifier = Modifier.size(44.dp)
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
                         }

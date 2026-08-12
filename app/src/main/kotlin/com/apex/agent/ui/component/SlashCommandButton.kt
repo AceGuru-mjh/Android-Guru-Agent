@@ -4,7 +4,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -65,17 +71,16 @@ fun SlashCommandButton(
         )
     }
 
-    if (showMenu) {
-        DynamicSlashMenuPopup(
-            menuFlow = slashMenuProvider.menu,
-            onRefresh = slashMenuProvider::refresh,
-            onDismiss = { showMenu = false },
-            onCommandSelected = { command ->
-                onCommandSelected(command)
-                showMenu = false
-            }
-        )
-    }
+    DynamicSlashMenuPopup(
+        showMenu = showMenu,
+        menuFlow = slashMenuProvider.menu,
+        onRefresh = slashMenuProvider::refresh,
+        onDismiss = { showMenu = false },
+        onCommandSelected = { command ->
+            onCommandSelected(command)
+            showMenu = false
+        }
+    )
 }
 
 /**
@@ -83,6 +88,7 @@ fun SlashCommandButton(
  */
 @Composable
 private fun DynamicSlashMenuPopup(
+    showMenu: Boolean,
     menuFlow: StateFlow<SlashMenuData>,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
@@ -95,17 +101,32 @@ private fun DynamicSlashMenuPopup(
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true)
     ) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            shadowElevation = 8.dp,
-            tonalElevation = 3.dp,
-            modifier = Modifier.width(300.dp)
+        AnimatedVisibility(
+            visible = showMenu,
+            enter = fadeIn(tween(150)) +
+                scaleIn(initialScale = 0.95f, animationSpec = tween(150)) +
+                slideInVertically(
+                    initialOffsetY = { -8 },
+                    animationSpec = tween(150)
+                ),
+            exit = fadeOut(tween(120)) +
+                scaleOut(targetScale = 0.95f, animationSpec = tween(120)) +
+                slideOutVertically(
+                    targetOffsetY = { -8 },
+                    animationSpec = tween(120)
+                )
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState())
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                shadowElevation = 8.dp,
+                tonalElevation = 3.dp,
+                modifier = Modifier.width(300.dp)
             ) {
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -142,6 +163,7 @@ private fun DynamicSlashMenuPopup(
                         onItemClick = { command -> onCommandSelected(command) }
                     )
                 }
+            }
             }
         }
     }

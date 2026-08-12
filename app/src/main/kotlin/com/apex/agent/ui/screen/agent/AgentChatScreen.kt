@@ -5,11 +5,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,6 +88,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -388,11 +392,21 @@ fun AgentChatScreen(
                         }
                     )
 
-                    // ═══ 发送/停止 ═══
+                    // ═══ 发送/停止（带按压缩放反馈）═══
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    val isSendPressed by sendInteraction.collectIsPressedAsState()
+                    val sendScale by animateFloatAsState(
+                        targetValue = if (isSendPressed) 0.88f else 1f,
+                        animationSpec = tween(durationMillis = 100),
+                        label = "send_press_scale"
+                    )
                     if (uiState.isLoading) {
                         FilledTonalIconButton(
                             onClick = { viewModel.abort() },
-                            modifier = Modifier.size(40.dp)
+                            interactionSource = sendInteraction,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .scale(sendScale)
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = "停止")
                         }
@@ -405,7 +419,10 @@ fun AgentChatScreen(
                                 }
                             },
                             enabled = inputText.isNotBlank(),
-                            modifier = Modifier.size(40.dp)
+                            interactionSource = sendInteraction,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .scale(sendScale)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
                         }

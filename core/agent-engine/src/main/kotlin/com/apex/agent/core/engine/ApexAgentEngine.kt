@@ -74,6 +74,12 @@ class ApexAgentEngine(
      */
     private var planConfirmationDeferred: CompletableDeferred<Boolean>? = null
 
+    /**
+     * Channel for the UI to deliver user-input answers back to the engine
+     * while [executeBuildLoop] is suspended on [awaitUserInput].
+     */
+    private var userInputDeferred: CompletableDeferred<String>? = null
+
     fun updateConfig(newConfig: AgentConfig) {
         config = newConfig
     }
@@ -381,6 +387,36 @@ class ApexAgentEngine(
                     )
 
                     for (toolCall in toolCalls) {
+                        // ask_user 工具：暂停执行，等待用户输入
+                        if (toolCall.name == "ask_user") {
+                            val args = try {
+                                kotlinx.serialization.json.Json.parseToJsonElement(toolCall.arguments).jsonObject
+                            } catch (_: Exception) {
+                                emptyMap<String, String>()
+                            }
+                            val question = args["question"]?.toString()?.trim('"') ?: "Please provide input:"
+                            val inputType = args["type"]?.toString()?.trim('"')?.lowercase() ?: "text"
+                            val eventType = when (inputType) {
+                                "confirmation" -> InputType.CONFIRMATION
+                                "choice" -> InputType.CHOICE
+                                else -> InputType.TEXT
+                            }
+                            emit(AgentEvent.UserInputRequired(question, eventType))
+                            val answer = awaitUserInput()
+                            addMessage(LlmMessage.ToolResult(toolCall.id, "User answered: $answer"))
+                            emit(
+                                AgentEvent.ToolCallComplete(
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    arguments = toolCall.arguments,
+                                    output = "User answered: $answer",
+                                    success = true,
+                                    durationMs = 0
+                                )
+                            )
+                            continue
+                        }
+
                         executeToolCallStreaming(toolCall, emit)
                     }
                 }
@@ -774,6 +810,27 @@ class ApexAgentEngine(
     override suspend fun abort() {
         isRunning = false
         planConfirmationDeferred?.complete(false)
+        planConfirmationDeferred = null
+        userInputDeferred?.complete("")
+        userInputDeferred = null
+    }
+
+    override fun submitUserInput(answer: String) {
+        userInputDeferred?.complete(answer)
+    }
+
+    override fun cancelUserInput() {
+        userInputDeferred?.complete("")
+    }
+
+    private suspend fun awaitUserInput(): String {
+        val deferred = CompletableDeferred<String>()
+        userInputDeferred = deferred
+        return try {
+            deferred.await()
+        } finally {
+            userInputDeferred = null
+        }
     }
 
     // ═══════════════════════════════════════════════════════

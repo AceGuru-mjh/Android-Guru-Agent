@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -115,11 +116,9 @@ fun AdaptiveInputField(
                 capitalization = KeyboardCapitalization.Sentences,
                 imeAction = ImeAction.Send
             ),
-            onKeyboardAction = { _, action ->
-                if (action == ImeAction.Send) {
-                    onSend()
-                }
-            },
+            keyboardActions = KeyboardActions(
+                onSend = { onSend() }
+            ),
             trailingIcon = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -5,9 +5,12 @@ import com.apex.agent.platform.csmem.diff.DifferentialIngestor
 import com.apex.agent.platform.csmem.distill.TraceDistiller
 import com.apex.agent.platform.csmem.model.*
 import com.apex.agent.platform.csmem.prune.UiTreePruner
+import com.apex.agent.platform.csmem.immune.MemoryImmuneSystem
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.UiNode
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,7 +36,8 @@ import javax.inject.Singleton
 class CsMemSessionManager @Inject constructor(
     private val privilegeManager: PrivilegeManager,
     private val store: MemoryGraphStore,
-    private val writerActor: MemoryWriterActor
+    private val writerActor: MemoryWriterActor,
+    private val immuneSystem: MemoryImmuneSystem
 ) {
     /** 当前活跃的 Episode ID */
     private var activeEpisodeId: String? = null
@@ -118,6 +122,17 @@ class CsMemSessionManager @Inject constructor(
 
         val rawNodes = uiTreeResult.nodes
         val now = System.currentTimeMillis()
+
+        // 1.5 免疫检查（报告 P5 闭环）：检出高危/恶意 UI 则隔离，跳过本次记忆写入，
+        // 防止悬浮窗/钓鱼界面等被写入长期记忆（记忆中毒防御）。
+        val immune = immuneSystem.validateUiTree(rawNodes, appPackage)
+        if (!immune.safe) {
+            AppLogger.instance.warn(
+                LogCategory.CS_MEM, "CsMemSession",
+                "免疫检查拦截写入[${immune.threatLevel}]: ${immune.issues.joinToString("; ")}"
+            )
+            return
+        }
 
         // 2. 修剪：物理 UI 树 → 语义交互图
         val currentSemanticNodes = UiTreePruner.prune(rawNodes, appPackage, activityName)
@@ -211,6 +226,16 @@ class CsMemSessionManager @Inject constructor(
     private suspend fun captureInitialState(appPackage: String?, activityName: String?) {
         val uiTreeResult = privilegeManager.getUiTree()
         if (!uiTreeResult.success) return
+
+        // 初始状态同样过免疫检查，避免首帧即写入可疑 UI（报告 P5 闭环）。
+        val immune = immuneSystem.validateUiTree(uiTreeResult.nodes, appPackage)
+        if (!immune.safe) {
+            AppLogger.instance.warn(
+                LogCategory.ENGINE, "CsMemSession",
+                "初始状态免疫检查拦截[${immune.threatLevel}]: ${immune.issues.joinToString("; ")}"
+            )
+            return
+        }
 
         val currentSemanticNodes = UiTreePruner.prune(uiTreeResult.nodes, appPackage, activityName)
         val spatialEdges = UiTreePruner.generateSpatialEdges(currentSemanticNodes)

@@ -1227,6 +1227,7 @@ private fun ErrorBlock(
     canRetry: Boolean = false,
     onRetry: () -> Unit = {}
 ) {
+    val errorColor = MaterialTheme.colorScheme.error
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
         shape = RoundedCornerShape(12.dp),
@@ -1234,7 +1235,7 @@ private fun ErrorBlock(
             .fillMaxWidth()
             .drawBehind {
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.error,
+                    color = errorColor,
                     style = Stroke(width = 1.5.dp.toPx()),
                     cornerRadius = CornerRadius(12.dp.toPx())
                 )

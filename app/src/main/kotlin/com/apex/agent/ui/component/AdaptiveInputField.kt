@@ -1,11 +1,16 @@
 package com.apex.agent.ui.component
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -86,15 +91,28 @@ fun AdaptiveInputField(
         lineCount.coerceIn(1, 5)
     }
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val fieldBackground by animateColorAsState(
+        targetValue = if (isFocused)
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
+        else
+            Color.Transparent,
+        animationSpec = tween(durationMillis = 200),
+        label = "field_focus_background"
+    )
+
     Column(modifier = modifier) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
+            interactionSource = interactionSource,
             modifier = Modifier
                 .fillMaxWidth()
+                .background(fieldBackground, RoundedCornerShape(8.dp))
                 .focusRequester(focusRequester)
                 .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
+                    interactionSource = interactionSource,
                     indication = null,
                     onClick = {},
                     onDoubleClick = {

@@ -18,11 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -48,20 +45,12 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
     Box(
         modifier = modifier
-            .size(36.dp)
-            .drawBehind {
-                drawRoundRect(
-                    color = borderColor,
-                    style = Stroke(1.dp.toPx()),
-                    cornerRadius = CornerRadius(6.dp.toPx())
-                )
-            }
+            .size(40.dp)
             .background(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(6.dp)
+                shape = CircleShape
             )
             .semantics { contentDescription = "打开斜杠指令菜单" }
             .clickable { showMenu = true },

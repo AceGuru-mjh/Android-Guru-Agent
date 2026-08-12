@@ -66,11 +66,11 @@ fun GithubIconButton(
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
             else
                 MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.size(36.dp)
+            modifier = Modifier.size(40.dp)
         ) {
             IconButton(
                 onClick = { showMenu = true },
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     imageVector = if (connectionState.isConnected) Icons.Default.Link else Icons.Default.LinkOff,

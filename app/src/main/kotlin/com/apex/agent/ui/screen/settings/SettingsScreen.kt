@@ -1,5 +1,11 @@
 package com.apex.agent.ui.screen.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,8 +31,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -35,10 +39,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -63,10 +67,17 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Agent 设置
-            SettingsSection(
-                icon = Icons.Default.Settings,
-                title = "Agent"
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(animationSpec = tween(220)) + slideInVertically(
+                    animationSpec = tween(220),
+                    initialOffsetY = { it / 6 }
+                )
             ) {
+                SettingsSection(
+                    icon = Icons.Default.Settings,
+                    title = "Agent"
+                ) {
                 // 默认模式（单选段）
                 SegmentedChoice(
                     label = "默认模式",
@@ -104,20 +115,28 @@ fun SettingsScreen(
                     )
                 }
                 SettingsRow("上下文窗口", "128K tokens")
+                }
             }
 
             // 持久化
-            SettingsSection(
-                icon = Icons.Default.Storage,
-                title = "后台持久化"
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(animationSpec = tween(260, delayMillis = 60)) + slideInVertically(
+                    animationSpec = tween(260, delayMillis = 60),
+                    initialOffsetY = { it / 6 }
+                )
             ) {
+                SettingsSection(
+                    icon = Icons.Default.Storage,
+                    title = "后台持久化"
+                ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("保持后台运行", style = MaterialTheme.typography.bodyLarge)
+                        Text("保持后台运行", style = MaterialTheme.typography.bodyMedium)
                         Text(
                             "Agent 在后台持续待命，随时响应",
                             style = MaterialTheme.typography.bodySmall,
@@ -133,26 +152,35 @@ fun SettingsScreen(
                         )
                     )
                 }
+                }
             }
 
             // 关于
-            SettingsSection(
-                icon = Icons.Default.Info,
-                title = "关于"
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(animationSpec = tween(300, delayMillis = 120)) + slideInVertically(
+                    animationSpec = tween(300, delayMillis = 120),
+                    initialOffsetY = { it / 6 }
+                )
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                SettingsSection(
+                    icon = Icons.Default.Info,
+                    title = "关于"
                 ) {
-                    SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
-                    Column {
-                        Text("Apex Agent v1.0.0", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                        Text(
-                            "全能AI助手 · Android",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
+                        Column {
+                            Text("Apex Agent v1.0.0", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(
+                                "全能AI助手 · Android",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -252,32 +280,39 @@ private fun SegmentedChoice(
         ) {
             options.forEach { (value, text) ->
                 val isSel = value == selected
+                val containerColor by animateColorAsState(
+                    targetValue = if (isSel) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainer,
+                    animationSpec = tween(220)
+                )
+                val contentColor by animateColorAsState(
+                    targetValue = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(220)
+                )
+                val scale by animateFloatAsState(
+                    targetValue = if (isSel) 1f else 0.96f,
+                    animationSpec = spring(dampingRatio = 0.7f, stiffness = 600f)
+                )
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    color = containerColor,
                     modifier = Modifier
                         .weight(1f)
+                        .scale(scale)
                         .clickable { onSelect(value) }
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        RadioButton(
-                            selected = isSel,
-                            onClick = { onSelect(value) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = MaterialTheme.colorScheme.primary
-                            ),
-                            modifier = Modifier.size(18.dp)
-                        )
                         Text(
                             text,
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal,
+                            color = contentColor
                         )
                     }
                 }

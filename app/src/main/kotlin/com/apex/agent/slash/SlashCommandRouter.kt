@@ -45,7 +45,9 @@ data class SlashRouteContext(
 data class SlashCommandRoute(
     val systemMessage: String,
     val agentPrompt: String,
-    val requestGithubConnect: Boolean = false
+    val requestGithubConnect: Boolean = false,
+    /** 当路由来自 Skill 指令时携带 skill 名称，供 UI 标记后续工具调用来源。 */
+    val skillName: String? = null
 )
 
 /**
@@ -91,7 +93,8 @@ object SlashCommandRouter {
             agentPrompt = command.buildAgentPrompt(
                 verb = "请根据此指令执行对应操作，通过 skill 相关工具执行",
                 toolHint = "skill"
-            )
+            ),
+            skillName = command.id
         )
 
         is SlashCommand.Mcp -> routeMcp(command, context)

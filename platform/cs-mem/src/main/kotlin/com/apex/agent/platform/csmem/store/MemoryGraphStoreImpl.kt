@@ -1,6 +1,7 @@
 package com.apex.agent.platform.csmem.store
 
 import android.graphics.Rect
+import androidx.room.withTransaction
 import com.apex.agent.platform.csmem.model.*
 import com.apex.agent.platform.csmem.store.dao.*
 import com.apex.agent.platform.csmem.store.entity.*
@@ -147,31 +148,49 @@ class MemoryGraphStoreImpl @Inject constructor(
     }
 
     override suspend fun getEdgesByEpisode(episodeId: String): List<GraphEdge> {
-        return db.edgeDao().getByEpisode(episodeId).map { it.toDomain() }
+        return db.edgeDao().getByEpisode(episodeId).mapNotNull { it.toDomainWithFingerprints() }
     }
 
     override suspend fun getEdgesByFingerprint(fingerprint: String): List<GraphEdge> {
         val nodeId = db.nodeDao().getIdByFingerprint(fingerprint) ?: return emptyList()
-        return db.edgeDao().getByNodeId(nodeId).map { it.toDomain() }
+        return db.edgeDao().getByNodeId(nodeId).mapNotNull { it.toDomainWithFingerprints() }
     }
 
     // ==================== Delta ====================
 
     override suspend fun ingestDelta(delta: GraphDelta, appPackage: String?) {
-        // 新增节点
-        ingestNodes(delta.addedNodes, appPackage)
+        // 整段差分写入包在 Room 事务中，保证节点/边/位移/tombstone 要么全成功要么全回滚，
+        // 避免批量写入部分成功导致图数据不一致（修复 flushBatch 缺乏事务保护的缺口）。
+        db.withTransaction {
+            // 新增节点
+            ingestNodes(delta.addedNodes, appPackage)
 
-        // 新增边
-        ingestEdges(delta.newEdges, delta.episodeId)
+            // 新增边
+            ingestEdges(delta.newEdges, delta.episodeId)
 
-        // 删除边
-        if (delta.removedEdgeIds.isNotEmpty()) {
-            db.edgeDao().deleteByLabels(delta.removedEdgeIds)
-        }
+            // 删除边
+            if (delta.removedEdgeIds.isNotEmpty()) {
+                db.edgeDao().deleteByLabels(delta.removedEdgeIds)
+            }
 
-        // 更新位移节点
-        for (moved in delta.movedNodes) {
-            db.nodeDao().updateLastSeen(moved.fingerprint, delta.toTimestamp)
+            // 位移节点：持久化新坐标，避免空间记忆漂移（修复仅更新 lastSeen 的缺口）
+            for (moved in delta.movedNodes) {
+                db.nodeDao().updateBounds(
+                    fingerprint = moved.fingerprint,
+                    boundsJson = boundsToJson(moved.newBounds),
+                    timestamp = delta.toTimestamp
+                )
+            }
+
+            // 消失节点：tombstone 标记（压低能量 + 刷新 lastSeen），交由低能剪枝回收，
+            // 不立即硬删，避免空间拓扑瞬间失真（修复 removedFingerprints 未处理的缺口）
+            for (removedFp in delta.removedFingerprints) {
+                db.nodeDao().tombstone(
+                    fingerprint = removedFp,
+                    tombstoneEnergy = 0.01f,
+                    timestamp = delta.toTimestamp
+                )
+            }
         }
     }
 
@@ -264,11 +283,15 @@ class MemoryGraphStoreImpl @Inject constructor(
         )
     }
 
-    private fun EdgeEntity.toDomain(): GraphEdge {
+    private suspend fun EdgeEntity.toDomainWithFingerprints(): GraphEdge? {
+        // 通过 source/target node id 反查指纹，补全 GraphEdge（修复空字符串缺口）
+        val sourceFp = db.nodeDao().getFingerprintById(sourceNodeId)
+        val targetFp = db.nodeDao().getFingerprintById(targetNodeId)
+        if (sourceFp == null || targetFp == null) return null
         return GraphEdge(
             id = edgeLabel,
-            sourceFingerprint = "",  // 需要额外查询
-            targetFingerprint = "",  // 需要额外查询
+            sourceFingerprint = sourceFp,
+            targetFingerprint = targetFp,
             type = try { EdgeType.valueOf(type) } catch (_: Exception) { EdgeType.SPATIAL },
             metadata = metadata
         )

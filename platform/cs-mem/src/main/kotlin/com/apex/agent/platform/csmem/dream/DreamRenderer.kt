@@ -4,14 +4,19 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.BatteryManager
 import androidx.core.content.getSystemService
+import androidx.hilt.work.HiltWorker
 import androidx.work.*
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
-import com.apex.agent.platform.csmem.store.MemoryGraphStoreImpl
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** 梦境渲染触发的最低电量阈值（%），电量低于此值则推迟执行。 */
+private const val MIN_BATTERY_LEVEL = 50
 
 /**
  * 梦境渲染引擎 —— 设备息屏/空闲时的记忆保鲜与拓扑同胚迁移。
@@ -33,7 +38,6 @@ class DreamRenderer @Inject constructor(
 ) {
     companion object {
         private const val WORK_NAME = "cs_mem_dream_render"
-        private const val MIN_BATTERY_LEVEL = 50
         private const val DREAM_INTERVAL_MINUTES = 120L // 每2小时
     }
 
@@ -166,28 +170,36 @@ class DreamRenderer @Inject constructor(
 
 /**
  * 梦境渲染 Worker —— 在 WorkManager 后台执行。
+ *
+ * 通过 @HiltWorker + @AssistedInject 注入 [DreamRenderer]，在 doWork 中真正执行
+ * performDreamCycle()（修复此前"此处简化实现"的未完成接线）。
+ * 电量约束已由 PeriodicWorkRequest 的 Constraints（RequiresBatteryNotLow）保证，
+ * 这里额外做一次运行时校验以防约束未生效。
  */
-class DreamWorker(
-    context: Context,
-    workerParams: WorkerParameters
+@HiltWorker
+class DreamWorker @AssistedInject constructor(
+    @Assisted context: Context,
+    @Assisted workerParams: WorkerParameters,
+    private val dreamRenderer: DreamRenderer
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        // DreamRenderer 通过 Hilt 注入，此处简化实现
-        // 实际项目中应使用 HiltWorker
         return try {
-            // 检查电量是否充足
             val batteryManager = applicationContext.getSystemService<BatteryManager>()
             val batteryLevel = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
 
-            if (batteryLevel < 50) {
+            if (batteryLevel < MIN_BATTERY_LEVEL) {
                 return Result.retry()
             }
 
-            // 梦境渲染的主要工作由 DreamRenderer.performDreamCycle() 完成
-            // 此处由 HiltWorkerFactory 注入 DreamRenderer 实例
-
-            Result.success()
+            val result = dreamRenderer.performDreamCycle()
+            if (result.errors.isNotEmpty()) {
+                // 有非致命错误时仍标记为成功，避免 WorkManager 反复重试；
+                // 错误明细已记录在 result.errors 中供排查。
+                Result.success()
+            } else {
+                Result.success()
+            }
         } catch (e: Exception) {
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }

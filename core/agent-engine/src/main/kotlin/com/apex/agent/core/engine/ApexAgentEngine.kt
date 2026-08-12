@@ -316,6 +316,28 @@ class ApexAgentEngine(
                 thinkingEmittedForIteration = true
             }
 
+            // 隐式记忆旁路：在 LLM 推理前尝试"肌肉记忆"执行（报告 P3/P4 闭环）。
+            // 若记忆中存在匹配当前 UI 的 FSM 宏且验证通过，直接执行并跳过本轮 LLM，
+            // 节省数百毫秒~数秒延迟与 Token；不匹配/失败则照常走 LLM。
+            when (val bypass = memoryObserver?.tryBypass()) {
+                is BypassOutcome.Executed -> {
+                    emit(
+                        AgentEvent.ResponseChunk(
+                            "⚡ 肌肉记忆旁路执行完成（${bypass.actionCount} 步，已跳过 LLM 推理）。"
+                        )
+                    )
+                    continue
+                }
+                is BypassOutcome.Failed -> {
+                    // 旁路执行偏离/异常，回退到 LLM 接管（日志已由 BypassEngine 记录）。
+                    AppLogger.instance.warn(
+                        LogCategory.ENGINE, "ApexAgentEngine",
+                        "Bypass failed, falling back to LLM: ${bypass.reason}"
+                    )
+                }
+                else -> { /* NotAttempted / NotMatched → 照常走 LLM */ }
+            }
+
             val messages = buildMessages()
             val tools = toolRegistry.getToolDefinitions()
 

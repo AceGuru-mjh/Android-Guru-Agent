@@ -42,4 +42,31 @@ interface ExecutionMemoryObserver {
     suspend fun onTaskFinish(success: Boolean) {
         // 默认空实现
     }
+
+    /**
+     * 在每轮 LLM 推理前尝试"肌肉记忆"旁路执行（报告 P3/P4 闭环）。
+     *
+     * 若记忆中存在匹配当前 UI 的 FSM 宏技能且验证通过，直接执行并跳过 LLM；
+     * 若不匹配或执行失败，返回对应状态由引擎照常走 LLM 决策。
+     *
+     * 默认返回 [BypassOutcome.NotAttempted]（观察者未注入时静默跳过）。
+     */
+    suspend fun tryBypass(): BypassOutcome = BypassOutcome.NotAttempted
+}
+
+/**
+ * 旁路执行结果 —— 引擎据此决定是否跳过本轮 LLM。
+ */
+sealed class BypassOutcome {
+    /** 未尝试（观察者未注入/不可用），引擎照常走 LLM */
+    object NotAttempted : BypassOutcome()
+
+    /** 无匹配的宏技能，引擎照常走 LLM */
+    object NotMatched : BypassOutcome()
+
+    /** 旁路执行成功，已跳过 LLM；[actionCount] 为执行的动作数 */
+    data class Executed(val actionCount: Int) : BypassOutcome()
+
+    /** 旁路执行失败（偏离/异常），引擎应回退到 LLM 接管 */
+    data class Failed(val reason: String) : BypassOutcome()
 }

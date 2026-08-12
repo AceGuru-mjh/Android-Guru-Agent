@@ -25,6 +25,7 @@ android {
 
 dependencies {
     implementation(project(":platform:privilege"))
+    implementation(project(":core:tool-registry"))
 
     // Room
     implementation(libs.room.runtime)

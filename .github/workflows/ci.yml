@@ -158,6 +158,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10'
+          # 关闭 ~/.gradle/caches 缓存恢复，避免 stale 的 core:logging 转换产物
+          # （不含 CS_MEM）被 cs-mem 复用，导致非确定性 Unresolved reference 'CS_MEM'
+          cache-disabled: true
 
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10

@@ -245,7 +245,7 @@ fun AgentChatScreen(
             itemsIndexed(uiState.messages, key = { index, _ -> index }) { _, message ->
                 AgentMessageItem(
                     message = message,
-                    vm = vm,
+                    vm = viewModel,
                     onImageClick = { att ->
                         lightboxImage = att.thumbnailUri ?: att.localPath
                     },
@@ -477,7 +477,7 @@ private fun AgentMessageItem(
             message = message.message,
             canRetry = message.canRetry,
             onRetry = {
-                val lastUser = messages.lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
+                val lastUser = vm.uiState.messages.lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
                 lastUser?.let { vm.retry(it.text, it.attachments) }
             }
         )

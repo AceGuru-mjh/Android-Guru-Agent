@@ -477,7 +477,7 @@ private fun AgentMessageItem(
             message = message.message,
             canRetry = message.canRetry,
             onRetry = {
-                val lastUser = vm.uiState.messages.lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
+                val lastUser = vm.uiState.value.messages.lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
                 lastUser?.let { vm.retry(it.text, it.attachments) }
             }
         )

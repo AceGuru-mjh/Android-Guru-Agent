@@ -57,6 +57,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
+    implementation("com.composables:icons-lucide-android:2.2.1")
     debugImplementation(libs.compose.ui.tooling)
 
     // AndroidX

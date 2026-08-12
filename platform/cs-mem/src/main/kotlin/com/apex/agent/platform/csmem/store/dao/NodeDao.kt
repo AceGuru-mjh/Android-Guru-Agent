@@ -51,4 +51,21 @@ interface NodeDao {
 
     @Query("UPDATE nodes SET last_seen_at = :timestamp WHERE fingerprint = :fingerprint")
     suspend fun updateLastSeen(fingerprint: String, timestamp: Long)
+
+    /** 批量按 id 查询指纹（用于 Edge 反序列化补全 source/target fingerprint） */
+    @Query("SELECT fingerprint FROM nodes WHERE id = :id LIMIT 1")
+    suspend fun getFingerprintById(id: Long): String?
+
+    /**
+     * 更新节点坐标（位移节点持久化，修复 GraphDelta.movedNodes 仅更新 lastSeen 的缺口）。
+     */
+    @Query("UPDATE nodes SET bounds_json = :boundsJson, last_seen_at = :timestamp WHERE fingerprint = :fingerprint")
+    suspend fun updateBounds(fingerprint: String, boundsJson: String, timestamp: Long)
+
+    /**
+     * 对消失节点做 tombstone 标记：不硬删，而是压低能量并刷新 lastSeen，
+     * 交由 EntropyManager 的低能剪枝最终回收（避免空间记忆瞬间失真）。
+     */
+    @Query("UPDATE nodes SET energy = MIN(energy, :tombstoneEnergy), last_seen_at = :timestamp WHERE fingerprint = :fingerprint")
+    suspend fun tombstone(fingerprint: String, tombstoneEnergy: Float, timestamp: Long)
 }

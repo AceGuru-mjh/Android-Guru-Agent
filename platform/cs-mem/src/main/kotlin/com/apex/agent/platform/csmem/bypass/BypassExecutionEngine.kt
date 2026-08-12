@@ -2,6 +2,7 @@ package com.apex.agent.platform.csmem.bypass
 
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.model.SemanticNode
+import com.apex.agent.platform.csmem.prune.UiTreePruner
 import com.apex.agent.platform.csmem.store.FSMMacro
 import com.apex.agent.platform.csmem.store.FSMTransition
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
@@ -72,13 +73,13 @@ class BypassExecutionEngine @Inject constructor(
         }
 
         // 2. 执行 FSM 转移表
-        return executeMacro(bestMatch)
+        return executeMacro(bestMatch, appPackage)
     }
 
     /**
      * 执行一个 FSM 宏技能的完整转移表。
      */
-    private suspend fun executeMacro(macro: FSMMacro): BypassResult {
+    private suspend fun executeMacro(macro: FSMMacro, appPackage: String): BypassResult {
         var actionCount = 0
 
         for (transition in macro.transitions) {
@@ -103,11 +104,26 @@ class BypassExecutionEngine @Inject constructor(
                 delay(actionIntervalMs)
             }
 
-            // 验证：当前状态是否到达预期的 toState
+            // 验证：当前 UI 是否到达预期的 toState 指纹。
+            // 修复此前"验证仅为占位"的缺口——若执行后屏幕未出现预期的下一个状态节点，
+            // 说明遇到了弹窗/广告/页面变体等偏离，立即失败交还 LLM 接管。
             val currentUi = privilegeManager.getUiTree()
             if (currentUi.success && currentUi.nodes.isNotEmpty()) {
-                // 简单验证：检查是否有节点匹配 toState 指纹
-                // （完整验证需要重建 SemanticNode 并比较指纹——Phase 5）
+                val currentFingerprints = UiTreePruner
+                    .prune(currentUi.nodes, appPackage)
+                    .map { it.fingerprint }
+                    .toSet()
+                if (transition.toState !in currentFingerprints) {
+                    writerActor.recordMacro(macro.skillId, success = false)
+                    return BypassResult.Failed(
+                        "State deviation after '${transition.actionType} ${transition.actionParams}': " +
+                            "expected toState ${transition.toState.take(12)} not found on screen"
+                    )
+                }
+            } else {
+                // 无法获取 UI 树（无障碍未运行等），保守失败交还 LLM。
+                writerActor.recordMacro(macro.skillId, success = false)
+                return BypassResult.Failed("Cannot read UI tree after transition; aborting bypass")
             }
         }
 

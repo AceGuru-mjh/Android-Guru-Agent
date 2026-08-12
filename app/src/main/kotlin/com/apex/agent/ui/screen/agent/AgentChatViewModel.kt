@@ -56,6 +56,15 @@ data class UserInputRequest(
     val type: InputType
 )
 
+/**
+ * 工具调用来源分类，用于 UI 差异化呈现（图标 / 颜色 / 标签）。
+ *
+ * 引擎事件本身没有"类型"字段，ViewModel 在 [classifyTool] 中根据
+ * toolName 前缀与已知 id 推断。这样用户能一眼区分本地工具 / MCP /
+ * 联网搜索 / 网页抓取 / Skill 调用。
+ */
+enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL }
+
 sealed interface AgentUiMessage {
     data class User(
         val text: String,
@@ -70,9 +79,23 @@ sealed interface AgentUiMessage {
         val fullOutput: String? = null,
         val success: Boolean? = null,
         val durationMs: Long = 0,
+        /** 调用来源分类（本地 / MCP / 搜索 / 抓取 / Skill）。 */
+        val kind: ToolKind = ToolKind.LOCAL,
+        /** MCP server 名称（仅 KIND=MCP 时有意义）。 */
+        val server: String? = null,
+        /** Skill 名称（仅 KIND=SKILL 时有意义）。 */
+        val skill: String? = null,
         val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
     data class System(val text: String) : AgentUiMessage
+    /**
+     * 错误提示块（区别于灰色 System 行）：红色高亮 + 可重试标记。
+     */
+    data class Error(
+        val message: String,
+        val canRetry: Boolean = false,
+        val timestamp: Long = java.lang.System.currentTimeMillis()
+    ) : AgentUiMessage
     data class PlanMessage(val plan: ExecutionPlan) : AgentUiMessage
     data class ThinkingMessage(val thought: String) : AgentUiMessage
 }
@@ -87,12 +110,41 @@ data class AgentToolCallUi(
     val progress: Float? = null,
     /** 进度说明文本，由 ToolProgress 事件更新。 */
     val progressMessage: String? = null,
-    val isRunning: Boolean = true
+    val isRunning: Boolean = true,
+    /** 调用来源分类，逐帧流式卡片也使用。 */
+    val kind: ToolKind = ToolKind.LOCAL,
+    /** MCP server 名称。 */
+    val server: String? = null,
+    /** Skill 名称。 */
+    val skill: String? = null
 ) {
+
     companion object {
         /** 运行中工具卡片最多保留的实时输出字符数（尾部窗口）。 */
         const val MAX_LIVE_TOOL_OUTPUT_CHARS = 4000
     }
+}
+
+/**
+ * 根据工具名推断调用来源分类，用于 UI 差异化呈现。
+ *
+ * 规则（按优先级）：
+ * - `mcp_call` / `mcp_call_<server>_<tool>` → MCP，并从参数中解析 server；
+ * - `web_search` → 联网搜索；`web_fetch` → 网页抓取；
+ * - `/skill:` 路由触发的工具 → Skill（toolName 含 `:skill` 或来自 skill 上下文）；
+ * - 其余 → 本地工具。
+ */
+fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
+    if (toolName.startsWith("mcp_call")) {
+        // RouterMcpTool 通过 arguments 的 "server" 字段传入 server 名。
+        val server = Regex("""(?i)"server"\s*:\s*"([^"]+)"""").find(args)
+            ?.groupValues?.getOrNull(1)
+        return ToolKind.MCP to server
+    }
+    if (toolName == "web_search") return ToolKind.WEB_SEARCH to null
+    if (toolName == "web_fetch") return ToolKind.WEB_FETCH to null
+    if (toolName.contains("skill", ignoreCase = true)) return ToolKind.SKILL to null
+    return ToolKind.LOCAL to null
 }
 
 @HiltViewModel
@@ -157,6 +209,13 @@ class AgentChatViewModel @Inject constructor(
     private var toolFlushJob: Job? = null
 
     /**
+     * 当前 Slash 指令触发的 Skill 名称（若来自 `/skill:xxx`）。
+     * 在该 Skill 的 agent 循环中产生的工具调用会被标记为 SKILL 来源，
+     * 便于 UI 区分"这是一个 Skill 调用"。循环结束后清空。
+     */
+    private var skillContext: String? = null
+
+    /**
      * 附件处理 Job 追踪，支持取消（缺陷 1 修复）。
      */
     private val attachmentJobs = mutableMapOf<Int, Job>()
@@ -206,6 +265,22 @@ class AgentChatViewModel @Inject constructor(
 
         currentJob = viewModelScope.launch {
             executeNormalMessage(trimmedText, currentAttachments)
+        }
+    }
+
+    /**
+     * 错误重试：重新执行上一条用户消息。
+     *
+     * 附件已在历史气泡中保留，重试聚焦"重新发起文本指令"触发 AgentEngine 重跑，
+     * 不再重新落盘附件（其本地路径在 [executeNormalMessage] 中通过 FileRef 复用）。
+     */
+    fun retry(text: String, attachments: List<MessageAttachment>) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        currentJob?.cancel()
+        updateInputText("")
+        currentJob = viewModelScope.launch {
+            executeNormalMessage(trimmed, emptyList())
         }
     }
 
@@ -339,6 +414,9 @@ class AgentChatViewModel @Inject constructor(
                 toolFlushJob?.cancel()
                 toolFlushJob = null
 
+                val (kind, server) = classifyTool(event.toolName, event.arguments)
+                val skill = if (kind == ToolKind.SKILL) skillContext else null
+
                 _uiState.update { state ->
                     state.copy(
                         currentToolCall = AgentToolCallUi(
@@ -348,7 +426,10 @@ class AgentChatViewModel @Inject constructor(
                             output = "",
                             progress = null,
                             progressMessage = null,
-                            isRunning = true
+                            isRunning = true,
+                            kind = kind,
+                            server = server,
+                            skill = skill
                         )
                     )
                 }
@@ -393,6 +474,9 @@ class AgentChatViewModel @Inject constructor(
                 activeToolCallId = null
                 toolOutputBuffer.clear()
 
+                val (kind, server) = classifyTool(event.toolName, event.arguments)
+                val skill = if (kind == ToolKind.SKILL) skillContext else null
+
                 _uiState.update { state ->
                     state.copy(
                         currentToolCall = null,
@@ -402,7 +486,10 @@ class AgentChatViewModel @Inject constructor(
                             output = event.output.take(500),
                             fullOutput = event.fullOutput.ifBlank { event.output },
                             success = event.success,
-                            durationMs = event.durationMs
+                            durationMs = event.durationMs,
+                            kind = kind,
+                            server = server,
+                            skill = skill
                         )
                     )
                 }
@@ -442,7 +529,10 @@ class AgentChatViewModel @Inject constructor(
             is AgentEvent.Error -> {
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + AgentUiMessage.System("❌ ${event.message}"),
+                        messages = state.messages + AgentUiMessage.Error(
+                            message = event.message,
+                            canRetry = event.recoverable
+                        ),
                         isLoading = false
                     )
                 }
@@ -742,8 +832,13 @@ class AgentChatViewModel @Inject constructor(
             return
         }
 
+        // 记录 Skill 上下文，循环内产生的工具调用会被标为 SKILL 来源。
+        skillContext = route.skillName
+
         currentJob = viewModelScope.launch {
             agentEngine.execute(route.agentPrompt).collect { event -> handleEvent(event) }
+        }.apply {
+            invokeOnCompletion { skillContext = null }
         }
     }
 

@@ -2,11 +2,15 @@ package com.apex.agent.platform.csmem.session
 
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.diff.DifferentialIngestor
+import com.apex.agent.platform.csmem.distill.TraceDistiller
 import com.apex.agent.platform.csmem.model.*
 import com.apex.agent.platform.csmem.prune.UiTreePruner
+import com.apex.agent.platform.csmem.immune.MemoryImmuneSystem
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.UiNode
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,7 +36,8 @@ import javax.inject.Singleton
 class CsMemSessionManager @Inject constructor(
     private val privilegeManager: PrivilegeManager,
     private val store: MemoryGraphStore,
-    private val writerActor: MemoryWriterActor
+    private val writerActor: MemoryWriterActor,
+    private val immuneSystem: MemoryImmuneSystem
 ) {
     /** 当前活跃的 Episode ID */
     private var activeEpisodeId: String? = null
@@ -45,6 +50,19 @@ class CsMemSessionManager @Inject constructor(
 
     /** 上一帧的原始 UiNode 列表（用于空间拓扑边计算时的兄弟邻接分析） */
     private var previousNodes: List<UiNode>? = null
+
+    /** 当前任务目标（用于蒸馏时命名 macro） */
+    private var currentGoal: String = ""
+
+    /** 当前前台 App 包名（用于蒸馏时归属 macro） */
+    private var currentAppPackage: String? = null
+
+    /**
+     * 本次会话的动作轨迹缓冲（报告 P3：TraceDistiller 的 trace 生产者）。
+     * 此前 TraceDistiller 是"有炉无米"——蒸馏器已实现但无人喂 trace。
+     * 这里利用 afterAction 已有的前后帧图，自动累积 TraceStep，任务成功时蒸馏为 FSMMacro。
+     */
+    private val traceBuffer = mutableListOf<TraceDistiller.TraceStep>()
 
     /**
      * 开始一个新的记忆会话。
@@ -63,6 +81,9 @@ class CsMemSessionManager @Inject constructor(
         previousGraph = null
         previousNodes = null
         actionCount = 0
+        currentGoal = goal
+        currentAppPackage = appPackage
+        traceBuffer.clear()
 
         store.startEpisode(
             episodeId = episodeId,
@@ -102,6 +123,17 @@ class CsMemSessionManager @Inject constructor(
         val rawNodes = uiTreeResult.nodes
         val now = System.currentTimeMillis()
 
+        // 1.5 免疫检查（报告 P5 闭环）：检出高危/恶意 UI 则隔离，跳过本次记忆写入，
+        // 防止悬浮窗/钓鱼界面等被写入长期记忆（记忆中毒防御）。
+        val immune = immuneSystem.validateUiTree(rawNodes, appPackage)
+        if (!immune.safe) {
+            AppLogger.instance.warn(
+                LogCategory.CS_MEM, "CsMemSession",
+                "免疫检查拦截写入[${immune.threatLevel}]: ${immune.issues.joinToString("; ")}"
+            )
+            return
+        }
+
         // 2. 修剪：物理 UI 树 → 语义交互图
         val currentSemanticNodes = UiTreePruner.prune(rawNodes, appPackage, activityName)
 
@@ -134,7 +166,23 @@ class CsMemSessionManager @Inject constructor(
             writerActor.ingestGraph(currentGraph)
         }
 
-        // 6. 更新状态
+        // 6. 记录动作轨迹（前后帧指纹），供任务成功时蒸馏为 FSMMacro（报告 P3）。
+        // previousGraph 为 null 表示这是首帧快照，无 before 状态，跳过。
+        previousGraph?.let { prev ->
+            traceBuffer.add(
+                TraceDistiller.TraceStep(
+                    stepIndex = traceBuffer.size,
+                    actionType = actionDescription,
+                    actionDescription = actionDescription,
+                    actionResult = "ok",
+                    beforeFingerprints = prev.nodes.map { it.fingerprint },
+                    afterFingerprints = currentGraph.nodes.map { it.fingerprint },
+                    isLlmThinking = false
+                )
+            )
+        }
+
+        // 7. 更新状态
         previousGraph = currentGraph
         previousNodes = rawNodes
     }
@@ -148,6 +196,18 @@ class CsMemSessionManager @Inject constructor(
         val episodeId = activeEpisodeId ?: return
 
         store.finishEpisode(episodeId, status)
+
+        // 任务成功时，将本次轨迹蒸馏为可复用的 FSM 宏技能（报告 P3：补 trace 生产者）。
+        // 蒸馏失败/不足（如步数过少）时 TraceDistiller 返回 null，安全跳过。
+        if (status == "SUCCEEDED") {
+            runCatching {
+                TraceDistiller.distill(traceBuffer, currentGoal, currentAppPackage)
+            }.getOrNull()?.let { macro ->
+                store.saveMacro(macro)
+            }
+        }
+        traceBuffer.clear()
+
         writerActor.emergencyFlush()
 
         previousGraph = null
@@ -166,6 +226,16 @@ class CsMemSessionManager @Inject constructor(
     private suspend fun captureInitialState(appPackage: String?, activityName: String?) {
         val uiTreeResult = privilegeManager.getUiTree()
         if (!uiTreeResult.success) return
+
+        // 初始状态同样过免疫检查，避免首帧即写入可疑 UI（报告 P5 闭环）。
+        val immune = immuneSystem.validateUiTree(uiTreeResult.nodes, appPackage)
+        if (!immune.safe) {
+            AppLogger.instance.warn(
+                LogCategory.ENGINE, "CsMemSession",
+                "初始状态免疫检查拦截[${immune.threatLevel}]: ${immune.issues.joinToString("; ")}"
+            )
+            return
+        }
 
         val currentSemanticNodes = UiTreePruner.prune(uiTreeResult.nodes, appPackage, activityName)
         val spatialEdges = UiTreePruner.generateSpatialEdges(currentSemanticNodes)

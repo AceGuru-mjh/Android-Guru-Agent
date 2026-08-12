@@ -38,31 +38,38 @@ enum class ThinkingLevel(val level: Int, val description: String) {
     MAXIMUM(4, "完整推理链+自我反思+多轮验证");
     
     /**
-     * 转换为system prompt中的思考指令
+     * 转换为 system prompt 中的思考指令。
+     *
+     * 推理框架参考自失败项目 [Apex-agent] 的 ChainOfThoughtSkill / TreeOfThoughtsSkill /
+     * ReActSkill：将其中"分解-逐步推理-综合"与"多路径探索评估"的结构化骨架提炼为
+     * 思考提示词，融入本项目的思考深度控制。仅调提示词文本，不改引擎主循环。
      */
     fun toPromptInstruction(): String = when (this) {
         NONE -> ""
         LIGHT -> "Briefly think about what to do next in 1-2 sentences, then act."
-        STANDARD -> "Think step by step about the task. Analyze what needs to be done, choose the best tool, then execute."
+        STANDARD -> """
+            Use Chain-of-Thought before acting:
+            1. Break the task into clear sub-steps.
+            2. For the current step, reason step by step what to do and which tool to use.
+            3. Execute, then observe the result before the next step.
+        """.trimIndent()
         DEEP -> """
-            Think deeply before acting:
-            1. Analyze the current situation
-            2. Consider at least 2-3 possible approaches
-            3. Compare pros and cons of each
-            4. Assess risks
-            5. Choose the best approach and explain why
-            Then execute.
+            Reason carefully using a multi-path approach before acting:
+            1. Decompose the task into sequential sub-problems.
+            2. For the key decision, generate at least 2-3 candidate approaches (branch out, do not commit early).
+            3. Evaluate each on feasibility, efficiency, risk, and side effects.
+            4. Critique: "What could go wrong? What am I missing?"
+            5. Pick the best approach, explain why, then execute the first step and observe.
         """.trimIndent()
         MAXIMUM -> """
             Perform exhaustive reasoning before any action:
-            1. Fully understand the task and its requirements
-            2. Break down into sub-problems
-            3. For each sub-problem, enumerate ALL possible solutions
-            4. Evaluate each solution on: feasibility, efficiency, risk, side effects
-            5. Consider edge cases and failure modes
-            6. Self-critique: "What could go wrong? Am I missing something?"
-            7. Formulate the optimal execution plan
-            8. Only then, execute the first step
+            1. Fully understand the task and constraints.
+            2. Decompose into sub-problems; for each, enumerate ALL plausible solution paths (Tree-of-Thoughts style).
+            3. Score each path on feasibility, efficiency, risk, and side effects.
+            4. Consider edge cases and failure modes.
+            5. Self-critique: "What could go wrong? Am I missing something?"
+            6. Synthesize the optimal execution plan from the best path.
+            7. Only then, execute the first step, observe, and re-evaluate if the outcome diverges.
         """.trimIndent()
     }
     

@@ -15,6 +15,9 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** 梦境渲染触发的最低电量阈值（%），电量低于此值则推迟执行。 */
+private const val MIN_BATTERY_LEVEL = 50
+
 /**
  * 梦境渲染引擎 —— 设备息屏/空闲时的记忆保鲜与拓扑同胚迁移。
  *
@@ -35,7 +38,6 @@ class DreamRenderer @Inject constructor(
 ) {
     companion object {
         private const val WORK_NAME = "cs_mem_dream_render"
-        private const val MIN_BATTERY_LEVEL = 50
         private const val DREAM_INTERVAL_MINUTES = 120L // 每2小时
     }
 

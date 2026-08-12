@@ -91,7 +91,7 @@ class MemorySearchNodesTool @Inject constructor(
         return buildString {
             appendLine("Matched UI nodes (${nodes.size}):")
             nodes.forEach { n ->
-                appendLine("- ${n.role} '${n.textHint ?: ""}' [${n.resourceId ?: "no-id"}] pkg=${n.appPackage ?: "?"}")
+                appendLine("- ${n.role} '${n.textHint ?: ""}' [${n.resourceId ?: "no-id"}]")
             }
         }
     }

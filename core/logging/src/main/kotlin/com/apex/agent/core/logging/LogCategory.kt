@@ -35,7 +35,10 @@ enum class LogCategory(
     SYSTEM("系统", "SYS"),
 
     /** 插件与技能：plugin-sdk、插件加载、Skill 注册。 */
-    PLUGIN("插件", "PLG");
+    PLUGIN("插件", "PLG"),
+
+    /** CS-Mem 认知空间记忆：感知、差分、蒸馏、免疫隔离、梦境遗忘。 */
+    CS_MEM("记忆", "MEM");
 
     companion object {
         /** 由短码反查（用于反序列化/外部接入）。找不到返回 [SYSTEM]。 */

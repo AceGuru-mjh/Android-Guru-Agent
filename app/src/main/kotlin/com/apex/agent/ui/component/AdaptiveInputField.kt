@@ -115,8 +115,8 @@ fun AdaptiveInputField(
                 capitalization = KeyboardCapitalization.Sentences,
                 imeAction = ImeAction.Send
             ),
-            onKeyboardAction = {
-                if (it == ImeAction.Send) {
+            onKeyboardAction = { _, action ->
+                if (action == ImeAction.Send) {
                     onSend()
                 }
             },

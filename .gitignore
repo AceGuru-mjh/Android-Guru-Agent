@@ -86,6 +86,10 @@ Thumbs.db
 # KSP
 .ksp/
 
+# Local CI/temp scratch files (do not commit)
+ci_*.txt
+commit_msg.txt
+
 # Misc
 *.swp
 *.swo

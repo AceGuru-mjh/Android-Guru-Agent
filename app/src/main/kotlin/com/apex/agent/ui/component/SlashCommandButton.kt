@@ -15,7 +15,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,7 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -52,23 +53,31 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    val slashGradient = Brush.linearGradient(
+        colors = listOf(Color(0xFF00E5FF), Color(0xFFFF4081))
+    )
+
     Box(
         modifier = modifier
             .size(40.dp)
             .background(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                shape = CircleShape
+                shape = RoundedCornerShape(10.dp)
             )
             .semantics { contentDescription = "打开斜杠指令菜单" }
             .clickable { showMenu = true },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "/",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        Canvas(modifier = Modifier.size(22.dp)) {
+            val strokeWidth = size.width * 0.18f
+            drawLine(
+                brush = slashGradient,
+                start = Offset(size.width * 0.78f, size.height * 0.18f),
+                end = Offset(size.width * 0.22f, size.height * 0.82f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
+        }
     }
 
     DynamicSlashMenuPopup(

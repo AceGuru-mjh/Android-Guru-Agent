@@ -3,6 +3,7 @@ package com.apex.agent.di
 import android.content.Context
 import com.apex.agent.core.engine.*
 import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.engine.ExecutionMemoryObserver
 import com.apex.agent.core.engine.compression.HybridCompressor
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmClient
@@ -71,7 +72,8 @@ object AgentModule {
         memory: ConversationMemory,
         contextCompressor: ContextCompressor,
         privilegeInfoProvider: PrivilegeInfoProvider,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        memoryObserver: ExecutionMemoryObserver
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -81,7 +83,8 @@ object AgentModule {
             memory = memory,
             contextCompressor = contextCompressor,
             skillRegistry = skillRegistry,
-            privilegeInfoProvider = privilegeInfoProvider
+            privilegeInfoProvider = privilegeInfoProvider,
+            memoryObserver = memoryObserver
         )
     }
 }

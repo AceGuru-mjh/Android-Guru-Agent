@@ -1,6 +1,9 @@
 package com.apex.agent.ui.screen.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,25 +11,47 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
+    val agent by viewModel.agentSettings.collectAsStateWithLifecycle()
     Scaffold(
         topBar = { TopAppBar(title = { Text("设置") }) }
     ) { padding ->
@@ -38,46 +63,97 @@ fun SettingsScreen() {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Agent 设置
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Agent", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    SettingsRow("默认模式", "Build")
-                    SettingsRow("默认思考深度", "Standard")
-                    SettingsRow("最大迭代次数", "20")
-                    SettingsRow("上下文窗口", "128K tokens")
+            SettingsSection(
+                icon = Icons.Default.Settings,
+                title = "Agent"
+            ) {
+                // 默认模式（单选段）
+                SegmentedChoice(
+                    label = "默认模式",
+                    options = listOf("build" to "构建", "chat" to "对话", "auto" to "自动"),
+                    selected = agent.defaultMode,
+                    onSelect = { viewModel.updateAgentSettings { copy(defaultMode = it) } }
+                )
+                // 思考深度（单选段）
+                SegmentedChoice(
+                    label = "思考深度",
+                    options = listOf("standard" to "标准", "deep" to "深入", "minimal" to "精简"),
+                    selected = agent.thinkLevel,
+                    onSelect = { viewModel.updateAgentSettings { copy(thinkLevel = it) } }
+                )
+                // 最大迭代次数（数字输入）
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("最大迭代次数", style = MaterialTheme.typography.bodyMedium)
+                        Text("单次任务Agent最多推理轮数", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OutlinedTextField(
+                        value = agent.maxIterations.toString(),
+                        onValueChange = { txt ->
+                            val v = txt.toIntOrNull()?.coerceIn(1, 200) ?: return@OutlinedTextField
+                            viewModel.updateAgentSettings { copy(maxIterations = v) }
+                        },
+                        modifier = Modifier.width(88.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
                 }
+                SettingsRow("上下文窗口", "128K tokens")
             }
 
             // 持久化
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("后台持久化", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-
-                    var keepAlive by remember { mutableStateOf(true) }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("保持后台运行", style = MaterialTheme.typography.bodyMedium)
-                        Switch(checked = keepAlive, onCheckedChange = { keepAlive = it })
+            SettingsSection(
+                icon = Icons.Default.Storage,
+                title = "后台持久化"
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("保持后台运行", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Agent 在后台持续待命，随时响应",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                    Switch(
+                        checked = agent.keepAlive,
+                        onCheckedChange = { viewModel.updateAgentSettings { copy(keepAlive = it) } },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    )
                 }
             }
 
             // 关于
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("关于", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Apex Agent v1.0.0", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "全能AI助手 · Android",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            SettingsSection(
+                icon = Icons.Default.Info,
+                title = "关于"
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
+                    Column {
+                        Text("Apex Agent v1.0.0", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(
+                            "全能AI助手 · Android",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -85,12 +161,127 @@ fun SettingsScreen() {
 }
 
 @Composable
+private fun SettingsSection(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    content: @Composable () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SurfaceBadge(icon, MaterialTheme.colorScheme.primary)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SurfaceBadge(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: androidx.compose.ui.graphics.Color
+) {
+    Surface(
+        shape = CircleShape,
+        color = tint.copy(alpha = 0.15f),
+        modifier = Modifier.size(36.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, null, modifier = Modifier.size(20.dp), tint = tint)
+        }
+    }
+}
+
+@Composable
 private fun SettingsRow(label: String, value: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 单选段控件：在一行内展示若干互选项（value,label），点击即选中并回调。
+ * 用于模式/思考深度等有限枚举的偏好设置。
+ */
+@Composable
+private fun SegmentedChoice(
+    label: String,
+    options: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (value, text) ->
+                val isSel = value == selected
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelect(value) }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isSel,
+                            onClick = { onSelect(value) },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
     }
 }

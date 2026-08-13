@@ -7,8 +7,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,7 +137,12 @@ private fun OptimizedFileChip(attachment: Attachment, onRemove: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(getFileEmoji(attachment.mimeType), style = MaterialTheme.typography.bodyMedium)
+            Icon(
+                imageVector = getFileIcon(attachment.mimeType),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(attachment.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -165,14 +180,14 @@ private fun OptimizedFileChip(attachment: Attachment, onRemove: () -> Unit) {
     }
 }
 
-private fun getFileEmoji(mimeType: String): String = when {
-    mimeType.contains("pdf") -> "📕"
-    mimeType.contains("word") || mimeType.contains("document") -> "📘"
-    mimeType.contains("excel") || mimeType.contains("spreadsheet") -> "📗"
-    mimeType.contains("text") -> "📄"
-    mimeType.contains("json") || mimeType.contains("xml") -> "📋"
-    mimeType.contains("zip") || mimeType.contains("tar") -> "📦"
-    mimeType.contains("audio") -> "🎵"
-    mimeType.contains("video") -> "🎬"
-    else -> "📄"
+private fun getFileIcon(mimeType: String): ImageVector = when {
+    mimeType.contains("pdf") -> Icons.Filled.PictureAsPdf
+    mimeType.contains("word") || mimeType.contains("document") -> Icons.Filled.Description
+    mimeType.contains("excel") || mimeType.contains("spreadsheet") -> Icons.Filled.TableChart
+    mimeType.contains("text") -> Icons.Filled.Article
+    mimeType.contains("json") || mimeType.contains("xml") -> Icons.Filled.Code
+    mimeType.contains("zip") || mimeType.contains("tar") -> Icons.Filled.FolderZip
+    mimeType.contains("audio") -> Icons.Filled.Audiotrack
+    mimeType.contains("video") -> Icons.Filled.Movie
+    else -> Icons.Filled.InsertDriveFile
 }

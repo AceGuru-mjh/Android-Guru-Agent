@@ -1,14 +1,24 @@
 package com.apex.agent.ui.screen.permissions
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.AdminPanelSettings
@@ -23,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -35,20 +46,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PermissionsScreen() {
+    val context = LocalContext.current
     var hasRoot by remember { mutableStateOf(false) }
     var hasShizuku by remember { mutableStateOf(false) }
+
+    // 系统级权限的实时状态
+    var accessibilityGranted by remember { mutableStateOf(false) }
+    var overlayGranted by remember { mutableStateOf(false) }
+    var notifGranted by remember { mutableStateOf(false) }
+    var storageGranted by remember { mutableStateOf(false) }
 
     // 在后台检测权限
     LaunchedEffect(Unit) {
         hasRoot = PrivilegeDetector.detectRoot()
         hasShizuku = PrivilegeDetector.detectShizuku()
+        accessibilityGranted = context.isAccessibilityServiceEnabled()
+        overlayGranted = Settings.canDrawOverlays(context)
+        notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     Scaffold(
@@ -66,8 +94,19 @@ fun PermissionsScreen() {
                 icon = Icons.Default.AdminPanelSettings,
                 title = "Root",
                 description = "最高权限，可执行所有系统操作（/system、/data、mount、SELinux）",
-                status = if (hasRoot) "✅ 已获得" else "❌ 未获得",
-                actionLabel = "检测"
+                status = if (hasRoot) Status.Granted else Status.Denied,
+                actionLabel = "检测",
+                onClick = {
+                    hasRoot = PrivilegeDetector.detectRoot()
+                    storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        android.os.Environment.isExternalStorageManager()
+                    } else {
+                        context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                    }
+                    overlayGranted = Settings.canDrawOverlays(context)
+                    notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                    accessibilityGranted = context.isAccessibilityServiceEnabled()
+                }
             )
 
             // Shizuku — 专用卡片，带安装/授权引导
@@ -81,32 +120,94 @@ fun PermissionsScreen() {
                 icon = Icons.Default.Accessibility,
                 title = "无障碍服务",
                 description = "读取UI树、模拟点击、截图（Agent的眼睛和手）",
-                status = "未开启",
-                actionLabel = "开启"
+                status = if (accessibilityGranted) Status.Granted else Status.Denied,
+                actionLabel = if (accessibilityGranted) "已开启" else "开启",
+                onClick = { context.openAccessibilitySettings() }
             )
             PermissionCard(
                 icon = Icons.Default.Layers,
                 title = "悬浮窗",
                 description = "在其他应用上方显示内容",
-                status = "未授权",
-                actionLabel = "授权"
+                status = if (overlayGranted) Status.Granted else Status.Denied,
+                actionLabel = if (overlayGranted) "已授权" else "授权",
+                onClick = { context.openOverlaySettings() }
             )
             PermissionCard(
                 icon = Icons.Default.Notifications,
                 title = "通知权限",
                 description = "发送前台服务通知、读取通知",
-                status = "未授权",
-                actionLabel = "授权"
+                status = if (notifGranted) Status.Granted else Status.Denied,
+                actionLabel = if (notifGranted) "已授权" else "授权",
+                onClick = { context.openNotificationSettings() }
             )
             PermissionCard(
                 icon = Icons.Default.Folder,
                 title = "存储权限",
                 description = "读写文件（工作区、下载）",
-                status = "未授权",
-                actionLabel = "授权"
+                status = if (storageGranted) Status.Granted else Status.Denied,
+                actionLabel = if (storageGranted) "已授权" else "授权",
+                onClick = { context.openStorageSettings() }
             )
         }
     }
+}
+
+/** 打开本应用的无障碍设置页。 */
+private fun Context.openAccessibilitySettings() {
+    runCatching {
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+}
+
+/** 打开本应用的悬浮窗设置页。 */
+private fun Context.openOverlaySettings() {
+    runCatching {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // ACTION_MANAGE_APP_OVERLAY_SETTINGS 在部分 compileSdk 平台下不可见，使用字面值
+            Intent("android.settings.action.MANAGE_APP_OVERLAY_SETTINGS", Uri.parse("package:$packageName"))
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+}
+
+/** 打开本应用的通知设置页。 */
+private fun Context.openNotificationSettings() {
+    runCatching {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            }
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+}
+
+/** 打开本应用的存储(所有文件访问)设置页。 */
+private fun Context.openStorageSettings() {
+    runCatching {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
+}
+
+/** 检测本应用的无障碍服务是否已启用。 */
+private fun Context.isAccessibilityServiceEnabled(): Boolean {
+    val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
+    val enabled = am.getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+    return enabled.any { it.resolveInfo?.serviceInfo?.packageName == packageName }
 }
 
 /**
@@ -138,34 +239,43 @@ private fun ShizukuPermissionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                Icons.Default.Shield, null,
-                tint = if (shizukuPermission.value) MaterialTheme.colorScheme.tertiary
-                       else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(28.dp)
-            )
+            val shizukuAccent = when {
+                shizukuPermission.value -> MaterialTheme.colorScheme.primary
+                shizukuRunning.value -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.error
+            }
+            Surface(
+                shape = CircleShape,
+                color = shizukuAccent.copy(alpha = 0.15f),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Shield, null,
+                        tint = shizukuAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
 
             Column(modifier = Modifier.weight(1f)) {
-                Text("Shizuku", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Shizuku", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    val shizukuStatus = when {
+                        shizukuPermission.value -> Status.Granted
+                        shizukuRunning.value -> Status.Running
+                        else -> Status.Denied
+                    }
+                    StatusPill(shizukuStatus, shizukuAccent)
+                }
+                Spacer(Modifier.height(2.dp))
                 Text(
                     "ADB级权限，无需Root即可执行pm/am/settings等系统命令",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                val statusText = when {
-                    shizukuPermission.value -> "✅ 已授权"
-                    shizukuRunning.value -> "⚠️ 运行中，需要授权"
-                    else -> "❌ 未运行"
-                }
-                val statusColor = when {
-                    shizukuPermission.value -> MaterialTheme.colorScheme.tertiary
-                    shizukuRunning.value -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.error
-                }
-                Text(
-                    statusText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor
                 )
             }
 
@@ -213,29 +323,80 @@ private fun ShizukuPermissionCard(
     }
 }
 
+private enum class Status { Granted, Denied, Pending, Running }
+private val Status.label: String
+    get() = when (this) {
+        Status.Granted -> "已获得"
+        Status.Denied -> "未获得"
+        Status.Pending -> "未授权"
+        Status.Running -> "运行中"
+    }
+
 @Composable
 private fun PermissionCard(
     icon: ImageVector,
     title: String,
     description: String,
-    status: String,
-    actionLabel: String
+    status: Status,
+    actionLabel: String,
+    onClick: () -> Unit = {}
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    val accent = when (status) {
+        Status.Granted -> MaterialTheme.colorScheme.primary
+        Status.Running -> MaterialTheme.colorScheme.secondary
+        Status.Denied -> MaterialTheme.colorScheme.error
+        Status.Pending -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp)
+    ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            Surface(
+                shape = CircleShape,
+                color = accent.copy(alpha = 0.15f),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = accent, modifier = Modifier.size(24.dp))
+                }
             }
-            OutlinedButton(onClick = { /* TODO: 跳转对应权限页 */ }) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    StatusPill(status, accent)
+                }
+                Spacer(Modifier.height(2.dp))
+                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Button(onClick = onClick) {
                 Text(actionLabel)
             }
         }
+    }
+}
+
+@Composable
+private fun StatusPill(status: Status, accent: androidx.compose.ui.graphics.Color) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = accent.copy(alpha = 0.14f)
+    ) {
+        Text(
+            status.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = accent,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
     }
 }

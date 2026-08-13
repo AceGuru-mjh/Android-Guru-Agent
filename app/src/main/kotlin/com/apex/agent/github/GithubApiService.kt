@@ -11,6 +11,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 
 @Singleton
 class GithubApiService @Inject constructor(
@@ -89,6 +91,11 @@ class GithubApiService @Inject constructor(
                 "DELETE" -> builder.delete()
             }
 
+            AppLogger.instance.info(
+                LogCategory.NETWORK, "GithubApi", "$method $path",
+                tags = arrayOf("http", method.lowercase(), "request")
+            )
+
             val response = client.newCall(builder.build()).execute()
             val responseBody = response.body?.string() ?: ""
 
@@ -96,9 +103,17 @@ class GithubApiService @Inject constructor(
                 val msg = try {
                     Json.parseToJsonElement(responseBody).jsonObject["message"]?.jsonPrimitive?.content ?: responseBody.take(200)
                 } catch (e: Exception) { responseBody.take(200) }
+                AppLogger.instance.error(
+                    LogCategory.NETWORK, "GithubApi", "HTTP ${response.code} $method $path: $msg",
+                    tags = arrayOf("http", method.lowercase(), "error", "code:${response.code}")
+                )
                 throw GithubApiException("GitHub API ${response.code}: $msg")
             }
 
+            AppLogger.instance.debug(
+                LogCategory.NETWORK, "GithubApi", "HTTP ${response.code} $method $path (${responseBody.length} bytes)",
+                tags = arrayOf("http", method.lowercase(), "response")
+            )
             json.decodeFromString<T>(responseBody)
         }
 }

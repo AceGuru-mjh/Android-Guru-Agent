@@ -1,12 +1,16 @@
 package com.apex.agent.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -18,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -28,10 +33,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.screen.agent.AgentChatScreen
-import com.apex.agent.ui.screen.memory.MemoryScreen
+import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.model.ModelScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
@@ -48,9 +55,9 @@ sealed class DrawerDestination(
 ) {
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
-    data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Psychology)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
+    data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
 }
 
@@ -77,18 +84,43 @@ fun ApexRoot() {
             topBar = {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = currentDestination.label,
-                            style = MaterialTheme.typography.titleLarge
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        currentDestination.icon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Text(
+                                text = currentDestination.label,
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "打开导航")
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = "打开导航",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.primary
                     )
                 )
             }
@@ -97,9 +129,9 @@ fun ApexRoot() {
                 when (currentDestination) {
                     DrawerDestination.Agent -> AgentChatScreen()
                     DrawerDestination.Skill -> SkillScreen()
-                    DrawerDestination.Memory -> MemoryScreen()
                     DrawerDestination.Model -> ModelScreen()
                     DrawerDestination.Permissions -> PermissionsScreen()
+                    DrawerDestination.Log -> LogViewerScreen()
                     DrawerDestination.Settings -> SettingsScreen()
                 }
             }

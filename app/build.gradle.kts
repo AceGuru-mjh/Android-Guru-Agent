@@ -41,9 +41,11 @@ dependencies {
     implementation(project(":core:agent-engine"))
     implementation(project(":core:llm-adapter"))
     implementation(project(":core:tool-registry"))
+    implementation(project(":core:logging"))
     implementation(project(":platform:privilege"))
     implementation(project(":platform:persistence"))
     implementation(project(":platform:terminal"))
+    implementation(project(":platform:cs-mem"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose
@@ -51,9 +53,13 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
+    implementation("androidx.compose.foundation:foundation:1.7.6")
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
+    // 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
+    implementation("com.composables:icons-lucide-android:1.1.0")
     debugImplementation(libs.compose.ui.tooling)
 
     // AndroidX

@@ -29,4 +29,15 @@ interface AgentEngine {
      * 停止当前执行
      */
     suspend fun abort()
+
+    /**
+     * 用户响应了 [AgentEvent.UserInputRequired] 事件，提交回答后恢复执行。
+     * 无 pending 请求时调用为 no-op。
+     */
+    fun submitUserInput(answer: String)
+
+    /**
+     * 用户取消了 [AgentEvent.UserInputRequired] 事件，中止等待。
+     */
+    fun cancelUserInput()
 }

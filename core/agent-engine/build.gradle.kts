@@ -15,6 +15,7 @@ kotlin {
 dependencies {
     implementation(project(":core:llm-adapter"))
     implementation(project(":core:tool-registry"))
+    implementation(project(":core:logging"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
 }

@@ -4,6 +4,9 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.ToolStreamEvent
@@ -42,7 +45,8 @@ class ApexAgentEngine(
     private val memory: ConversationMemory? = null,
     private val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
-    private val privilegeInfoProvider: PrivilegeInfoProvider? = null
+    private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
+    private val memoryObserver: ExecutionMemoryObserver? = null
 ) : AgentEngine {
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
@@ -56,12 +60,25 @@ class ApexAgentEngine(
     private var isRunning = false
 
     /**
+     * 任务内是否有任何工具动作失败（跨 [executeToolCallStreaming] 调用累计）。
+     * 因为流式工具执行是独立成员函数，无法访问 [execute] 内的局部变量，
+     * 故用实例字段累计，并在每次 [execute] 入口重置。
+     */
+    private var anyActionFailed = false
+
+    /**
      * Channel for the UI to deliver plan-confirmation decisions back to the engine
      * while [executePlanMode] is suspended on [awaitPlanConfirmation].
      *
      * Reset to a fresh [CompletableDeferred] every time a new plan is awaiting confirmation.
      */
     private var planConfirmationDeferred: CompletableDeferred<Boolean>? = null
+
+    /**
+     * Channel for the UI to deliver user-input answers back to the engine
+     * while [executeBuildLoop] is suspended on [awaitUserInput].
+     */
+    private var userInputDeferred: CompletableDeferred<String>? = null
 
     fun updateConfig(newConfig: AgentConfig) {
         config = newConfig
@@ -112,9 +129,15 @@ class ApexAgentEngine(
      */
     override fun execute(input: UserInput): Flow<AgentEvent> = flow {
         isRunning = true
+        anyActionFailed = false
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
+        var taskHadFailure = false
+
+        // 隐式记忆采集（报告 P2）：任务开始。
+        // memoryObserver 内部自行处理无障碍未开启等异常，不会阻断主流程。
+        memoryObserver?.onTaskStart(input.text, null)
 
         try {
             val userText = buildUserText(input)
@@ -137,6 +160,7 @@ class ApexAgentEngine(
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
                             maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
                         emit(event)
                     }
                     totalIterations = maxOf(totalIterations, iter)
@@ -146,19 +170,27 @@ class ApexAgentEngine(
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
                             maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
                         emit(event)
                     }
                     totalIterations = maxOf(totalIterations, planIterations)
                 }
             }
         } catch (e: CancellationException) {
+            AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "任务被中止 (CancellationException)")
             emit(AgentEvent.Aborted)
         } catch (e: TimeoutCancellationException) {
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
             emit(AgentEvent.Error("Plan confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: Exception) {
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
+            taskHadFailure = true
             emit(AgentEvent.Error(e.message ?: "Unknown error", recoverable = false))
         } finally {
             isRunning = false
+            // 隐式记忆采集（报告 P2）：任务结束，提交 episode。
+            // 放在 finally 保证无论成功/失败/中止都会关闭会话。
+            memoryObserver?.onTaskFinish(success = !taskHadFailure && !anyActionFailed)
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
             planConfirmationDeferred?.complete(false)
             planConfirmationDeferred = null
@@ -298,6 +330,28 @@ class ApexAgentEngine(
                 thinkingEmittedForIteration = true
             }
 
+            // 隐式记忆旁路：在 LLM 推理前尝试"肌肉记忆"执行（报告 P3/P4 闭环）。
+            // 若记忆中存在匹配当前 UI 的 FSM 宏且验证通过，直接执行并跳过本轮 LLM，
+            // 节省数百毫秒~数秒延迟与 Token；不匹配/失败则照常走 LLM。
+            when (val bypass = memoryObserver?.tryBypass()) {
+                is BypassOutcome.Executed -> {
+                    emit(
+                        AgentEvent.ResponseChunk(
+                            "⚡ 肌肉记忆旁路执行完成（${bypass.actionCount} 步，已跳过 LLM 推理）。"
+                        )
+                    )
+                    continue
+                }
+                is BypassOutcome.Failed -> {
+                    // 旁路执行偏离/异常，回退到 LLM 接管（日志已由 BypassEngine 记录）。
+                    AppLogger.instance.warn(
+                        LogCategory.ENGINE, "ApexAgentEngine",
+                        "Bypass failed, falling back to LLM: ${bypass.reason}"
+                    )
+                }
+                else -> { /* NotAttempted / NotMatched → 照常走 LLM */ }
+            }
+
             val messages = buildMessages()
             val tools = toolRegistry.getToolDefinitions()
 
@@ -333,6 +387,36 @@ class ApexAgentEngine(
                     )
 
                     for (toolCall in toolCalls) {
+                        // ask_user 工具：暂停执行，等待用户输入
+                        if (toolCall.name == "ask_user") {
+                            val args = try {
+                                kotlinx.serialization.json.Json.parseToJsonElement(toolCall.arguments).jsonObject
+                            } catch (_: Exception) {
+                                emptyMap<String, String>()
+                            }
+                            val question = args["question"]?.toString()?.trim('"') ?: "Please provide input:"
+                            val inputType = args["type"]?.toString()?.trim('"')?.lowercase() ?: "text"
+                            val eventType = when (inputType) {
+                                "confirmation" -> InputType.CONFIRMATION
+                                "choice" -> InputType.CHOICE
+                                else -> InputType.TEXT
+                            }
+                            emit(AgentEvent.UserInputRequired(question, eventType))
+                            val answer = awaitUserInput()
+                            addMessage(LlmMessage.ToolResult(toolCall.id, "User answered: $answer"))
+                            emit(
+                                AgentEvent.ToolCallComplete(
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    arguments = toolCall.arguments,
+                                    output = "User answered: $answer",
+                                    success = true,
+                                    durationMs = 0
+                                )
+                            )
+                            continue
+                        }
+
                         executeToolCallStreaming(toolCall, emit)
                     }
                 }
@@ -470,6 +554,13 @@ class ApexAgentEngine(
         addMessage(
             LlmMessage.ToolResult(toolCall.id, result)
         )
+
+        // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
+        val actionSuccess = !result.startsWith("Error")
+        if (!actionSuccess) anyActionFailed = true
+        memoryObserver?.onActionExecuted(
+            "${toolCall.name}(${toolCall.arguments.take(120)})"
+        )
     }
 
     // ═══════════════════════════════════════════════════════
@@ -572,8 +663,6 @@ class ApexAgentEngine(
             appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
             appendLine("- Always verify command output before proceeding.")
             appendLine("- If a command fails, analyze the error and try an alternative approach.")
-            appendLine("- Use memorize to save important information (user prefs, project facts) for future use.")
-            appendLine("- Use recall to check if you already know something before asking the user.")
             appendLine("- Keep prose concise; let tool output speak for itself.")
             appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
             appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")
@@ -721,6 +810,27 @@ class ApexAgentEngine(
     override suspend fun abort() {
         isRunning = false
         planConfirmationDeferred?.complete(false)
+        planConfirmationDeferred = null
+        userInputDeferred?.complete("")
+        userInputDeferred = null
+    }
+
+    override fun submitUserInput(answer: String) {
+        userInputDeferred?.complete(answer)
+    }
+
+    override fun cancelUserInput() {
+        userInputDeferred?.complete("")
+    }
+
+    private suspend fun awaitUserInput(): String {
+        val deferred = CompletableDeferred<String>()
+        userInputDeferred = deferred
+        return try {
+            deferred.await()
+        } finally {
+            userInputDeferred = null
+        }
     }
 
     // ═══════════════════════════════════════════════════════

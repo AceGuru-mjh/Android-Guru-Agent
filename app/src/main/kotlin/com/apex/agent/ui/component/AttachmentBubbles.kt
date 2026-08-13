@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,7 +45,13 @@ private fun FileBubble(attachment: MessageAttachment, onClick: () -> Unit) {
         Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Surface(modifier = Modifier.size(38.dp), shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(getFileEmoji(attachment.mimeType), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        getFileTag(attachment.mimeType, attachment.name),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -74,12 +81,23 @@ private fun ImageBubble(attachment: MessageAttachment, onClick: () -> Unit) {
     }
 }
 
-private fun getFileEmoji(mimeType: String): String = when {
-    mimeType.contains("pdf") -> "📕"; mimeType.contains("word") -> "📘"
-    mimeType.contains("excel") -> "📗"; mimeType.contains("text") -> "📄"
-    mimeType.contains("json") -> "📋"; mimeType.contains("zip") -> "📦"
-    mimeType.contains("audio") -> "🎵"; mimeType.contains("video") -> "🎬"
-    else -> "📄"
+/** 文件类型 → 等宽 3 字母标签，替代彩色 emoji，统一终端原生审美。 */
+private fun getFileTag(mimeType: String, name: String): String {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    if (ext.isNotBlank()) {
+        return ext.take(3).uppercase()
+    }
+    return when {
+        mimeType.contains("pdf") -> "PDF"
+        mimeType.contains("word") -> "DOC"
+        mimeType.contains("excel") -> "XLS"
+        mimeType.contains("text") -> "TXT"
+        mimeType.contains("json") -> "JSON"
+        mimeType.contains("zip") || mimeType.contains("compressed") -> "ZIP"
+        mimeType.contains("audio") -> "AUD"
+        mimeType.contains("video") -> "VID"
+        else -> "FILE"
+    }
 }
 private fun getTypeLabel(mimeType: String): String = when {
     mimeType.contains("pdf") -> "PDF"; mimeType.contains("word") -> "Word"

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'feat/**']
 
 jobs:
   static-analysis:
@@ -43,6 +43,13 @@ jobs:
             curl -sL "https://repo1.maven.org/maven2/$dep" -o "/tmp/apex-libs/$fname"
           done
 
+      - name: Compile core:logging
+        run: |
+          CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
+          kotlinc -cp "$CLASSPATH" -d /tmp/build/logging \
+            $(find core/logging/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
       - name: Compile core:llm-adapter
         run: |
           CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
@@ -59,7 +66,7 @@ jobs:
 
       - name: Compile core:agent-engine
         run: |
-          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter:/tmp/build/tool-registry"
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter:/tmp/build/tool-registry:/tmp/build/logging"
           kotlinc -cp "$CLASSPATH" -d /tmp/build/agent-engine \
             $(find core/agent-engine/src/main/kotlin -name "*.kt") \
             -jvm-target 17
@@ -155,11 +162,17 @@ jobs:
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10
 
+      - name: Diagnose foundation dependency
+        run: |
+          ./gradlew :app:dependencies --configuration debugCompileClasspath 2>&1 | grep -iE "foundation|compose-bom|compose-ui|material3" | head -50
+
       - name: Compile app module
         run: |
-          ./gradlew :app:compileDebugKotlin \
+          ./gradlew :core:logging:clean :app:clean :app:compileDebugKotlin \
             --no-daemon \
             --no-build-cache \
+            --rerun-tasks \
+            -Pkotlin.incremental=false \
             --stacktrace \
             2>&1 | tee compile.log
         continue-on-error: true

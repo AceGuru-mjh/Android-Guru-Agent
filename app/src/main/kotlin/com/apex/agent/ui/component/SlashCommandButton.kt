@@ -70,11 +70,12 @@ fun SlashCommandButton(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.size(22.dp)) {
-            val strokeWidth = size.width * 0.18f
+            val canvasSize = size
+            val strokeWidth = canvasSize.width * 0.18f
             drawLine(
                 brush = slashGradient,
-                start = Offset(size.width * 0.78f, size.height * 0.18f),
-                end = Offset(size.width * 0.22f, size.height * 0.82f),
+                start = Offset(canvasSize.width * 0.78f, canvasSize.height * 0.18f),
+                end = Offset(canvasSize.width * 0.22f, canvasSize.height * 0.82f),
                 strokeWidth = strokeWidth,
                 cap = StrokeCap.Round
             )

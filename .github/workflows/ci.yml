@@ -166,14 +166,6 @@ jobs:
         run: |
           ./gradlew :app:dependencies --configuration debugCompileClasspath 2>&1 | grep -iE "foundation|compose-bom|compose-ui|material3" | head -50
 
-      - name: Diagnose CS_MEM checkout + clear gradle caches
-        run: |
-          echo "=== checkout 出的 LogCategory.kt 是否含 CS_MEM ==="
-          grep -n "CS_MEM" core/logging/src/main/kotlin/com/apex/agent/core/logging/LogCategory.kt || echo "NOT FOUND in checkout"
-          echo "=== 清掉 ~/.gradle/caches 排除 stale 产物干扰 ==="
-          rm -rf "$HOME/.gradle/caches" || true
-          echo "done"
-
       - name: Compile app module
         run: |
           ./gradlew :core:logging:clean :app:clean :app:compileDebugKotlin \

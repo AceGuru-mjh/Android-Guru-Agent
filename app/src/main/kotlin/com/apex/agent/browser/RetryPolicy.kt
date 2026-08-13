@@ -1,7 +1,8 @@
 package com.apex.agent.browser
 
-import kotlinx.coroutines.delay
 import kotlin.math.min
+import kotlin.math.pow
+import kotlinx.coroutines.delay
 
 /**
  * 浏览器原子操作的错误恢复策略（P1 #7）。

@@ -77,9 +77,10 @@ object ToolModule {
     @Provides
     @Singleton
     fun provideBrowserAgentTools(
+        @ApplicationContext context: Context,
         engine: BrowserEngine,
         tracer: BrowserTracer,
-    ): BrowserAgentTools = BrowserAgentTools(engine, tracer)
+    ): BrowserAgentTools = BrowserAgentTools(context, engine, tracer)
 
     @Provides
     @Singleton

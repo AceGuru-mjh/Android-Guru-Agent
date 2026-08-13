@@ -26,6 +26,9 @@ import androidx.compose.ui.unit.sp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 内置浏览器浮窗（对标 Operit 的浮窗 + 显式握手控制条）。
@@ -117,7 +120,7 @@ class BrowserOverlay @Inject constructor(
             setContent {
                 OverlayContent(
                     state = uiState,
-                    onCompleteHandoff = { mainHandler.post { engine.completeHandoff() } },
+                    onCompleteHandoff = { mainHandler.post { CoroutineScope(Dispatchers.Main).launch { engine.completeHandoff() } } },
                     onCollapseToggle = { mainHandler.post { toggleCollapse() } },
                     onClose = { mainHandler.post { doHide() } },
                 )

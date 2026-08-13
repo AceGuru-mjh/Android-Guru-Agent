@@ -28,6 +28,9 @@ import com.lzf.easyfloat.enums.SidePattern
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 赛博极客·霓虹环流球（常驻收缩态浮窗枢纽）。
@@ -82,9 +85,11 @@ class CyberNeonBallManager @Inject constructor(
 
     /** 点击球 toggle 显式握手 */
     private fun onBallClick() {
-        when (engine.currentState) {
-            BrowserEngine.BrowserSessionState.WAITING_HUMAN -> engine.completeHandoff()
-            else -> engine.enterHandoffMode()
+        CoroutineScope(Dispatchers.Main).launch {
+            when (engine.currentState) {
+                BrowserEngine.BrowserSessionState.WAITING_HUMAN -> engine.completeHandoff()
+                else -> engine.enterHandoffMode()
+            }
         }
     }
 

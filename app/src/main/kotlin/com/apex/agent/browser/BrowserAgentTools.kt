@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import javax.inject.Inject
 
 /**
  * 浏览器自动化工具集（对标 Operit 的 BrowserTools）。
@@ -300,7 +301,7 @@ class BrowserAgentTools @Inject constructor(
         }"""
         override suspend fun execute(arguments: String): String {
             val expand = argBool(arguments, "expand", true)
-            if (expand) {
+            return if (expand) {
                 engine.enterHandoffMode()
                 "已展开浮窗并进入人工接管。Agent 自动化工具已锁定，等待人类点击「我已完成操作」。"
             } else {
@@ -421,7 +422,8 @@ class BrowserAgentTools @Inject constructor(
      * - browser_select 的 value、browser_file_upload 的 path（路径含用户名等）
      * 仅替换值，保留字段名与结构，便于排障又不泄露敏感信息。
      */
-    private fun sanitizeParams(toolId: String, args: String): String {
+    companion object {
+        private fun sanitizeParams(toolId: String, args: String): String {
         val redact = { key: String ->
             args.replace(Regex("\"$key\"\\s*:\\s*\"[^\"]*\""), "\"$key\":\"***\"")
         }
@@ -431,6 +433,7 @@ class BrowserAgentTools @Inject constructor(
             "browser_file_upload" -> redact("path")
             else -> args
         }.take(200)
+        }
     }
 
     fun all(): List<AgentTool> = listOf(

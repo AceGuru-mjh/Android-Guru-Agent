@@ -48,7 +48,7 @@ class BrowserTracer(private val capacity: Int = 100) {
     }
 
     /** 最近 limit 条完整 trace（用于调试导出） */
-    fun recent(limit: Int = 20): List<Entry> = buffer.takeLast(min(limit, buffer.size))
+    fun recent(limit: Int = 20): List<Entry> = buffer.toList().takeLast(min(limit, buffer.size))
 
     /**
      * 生成压缩的上下文进度摘要（P1 #8 轻量版）：

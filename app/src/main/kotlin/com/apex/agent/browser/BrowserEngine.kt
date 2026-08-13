@@ -19,6 +19,7 @@ import android.webkit.WebSettings
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.GeolocationPermissions
 import androidx.core.os.postDelayed
 import com.apex.agent.core.tools.builtin.browser.BrowserScript
 import com.apex.agent.core.tools.builtin.browser.DomParser
@@ -32,8 +33,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
@@ -81,7 +84,7 @@ class BrowserEngine @Inject constructor(
     }
 
     @Volatile
-    private val uiCallbacks = mutableSetOf<BrowserUiCallback>()
+    private var uiCallbacks = mutableSetOf<BrowserUiCallback>()
 
     /** 浮窗注册自己为状态订阅者（支持多订阅者：霓虹球 + 接管面板） */
     fun addUiCallback(cb: BrowserUiCallback) {
@@ -252,8 +255,7 @@ class BrowserEngine @Inject constructor(
                 val resources = request.resources
                 val isSensitive = resources.any {
                     it == PermissionRequest.RESOURCE_VIDEO_CAPTURE ||
-                    it == PermissionRequest.RESOURCE_AUDIO_CAPTURE ||
-                    it == PermissionRequest.RESOURCE_GEOLOCATION
+                    it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
                 }
                 if (isSensitive) {
                     lastDialog = "permission: 网页请求敏感权限(摄像头/麦克风/地理)，已默认拒绝并进入人工接管；" +
@@ -626,14 +628,14 @@ class BrowserEngine @Inject constructor(
     suspend fun scroll(deltaY: Int, waitForNewContent: Boolean = false, maxWaitMs: Long = 3000): ScrollResult =
         withContext(Dispatchers.Main) {
             val wv = activeTab()?.webView ?: return@withContext ScrollResult(scrolled = false)
-            val before = probePage(wv).interactiveCount
+            val before = probePage(wv).newElementsCount
             wv.evaluateJavascript("window.scrollBy(0, $deltaY); true;", null)
             if (waitForNewContent) {
                 val start = SystemClock.uptimeMillis()
                 var max = before
                 while (SystemClock.uptimeMillis() - start < maxWaitMs) {
                     delay(300)
-                    val now = probePage(wv).interactiveCount
+                    val now = probePage(wv).newElementsCount
                     max = maxOf(max, now)
                     if (now > before) break
                 }
@@ -753,7 +755,7 @@ class BrowserEngine @Inject constructor(
          * 反检测隐身 JS（#13 轻量版）：隐藏自动化痕迹，降低被反爬识别概率。
          * 注意：仅做基础痕迹抹除，不过度伪装（避免破坏页面功能）。
          */
-        private const val STEALTH_JS = """
+        private val STEALTH_JS = """
             (function(){
                 try {
                     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });

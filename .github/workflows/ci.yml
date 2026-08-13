@@ -113,8 +113,38 @@ jobs:
         run: |
           FAIL=0
           for f in $(find . -name "*.kt" -not -path "./.git/*" -not -path "./build/*"); do
-            OPENS=$(grep -o '(' "$f" | wc -l)
-            CLOSES=$(grep -o ')' "$f" | wc -l)
+            # 用状态机正确计数（识别字符串/注释，避开 JS 字符串内的括号误报）
+            read OPENS CLOSES < <(python3 - "$f" <<'PY'
+          import sys
+          s = open(sys.argv[1], encoding='utf-8').read()
+          opens = closes = 0
+          i, n, st = 0, len(s), 0
+          while i < n:
+              c = s[i]; nx = s[i+1] if i+1 < n else ''
+              if st == 0:
+                  if c == '/' and nx == '/': st = 1; i += 2; continue
+                  if c == '/' and nx == '*': st = 2; i += 2; continue
+                  if c == '"' and nx == '"': st = 5; i += 2; continue
+                  if c == '"': st = 3; i += 1; continue
+                  if c == "'": st = 4; i += 1; continue
+                  if c == '(': opens += 1
+                  elif c == ')': closes += 1
+              elif st == 1:
+                  if c == '\n': st = 0
+              elif st == 2:
+                  if c == '*' and nx == '/': st = 0; i += 2; continue
+              elif st == 3:
+                  if c == '\\': i += 2; continue
+                  if c == '"': st = 0
+              elif st == 4:
+                  if c == '\\': i += 2; continue
+                  if c == "'": st = 0
+              elif st == 5:
+                  if c == '"' and nx == '"': st = 0; i += 2; continue
+              i += 1
+          print(opens, closes)
+          PY
+          )
             if [ "$OPENS" != "$CLOSES" ]; then
               echo "❌ $f: $OPENS ( vs $CLOSES )"
               FAIL=1

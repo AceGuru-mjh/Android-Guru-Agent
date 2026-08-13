@@ -14,6 +14,7 @@ import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserOverlay
 import com.apex.agent.browser.CyberNeonBallManager
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.*
 
 @AndroidEntryPoint

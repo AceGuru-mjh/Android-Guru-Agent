@@ -102,7 +102,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.format.DateTimeFormatter
 import com.apex.agent.core.engine.AgentMode
@@ -110,7 +114,6 @@ import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.ThinkingLevel
-import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.ui.component.AttachButton
 import com.apex.agent.ui.component.AdaptiveInputField
@@ -121,14 +124,14 @@ import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
-import com.apex.agent.core.tools.skill.SkillMenuProvider
+import com.apex.agent.ui.component.SlashMenuProvider
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    skillMenuProvider: SkillMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
+    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
@@ -363,7 +366,7 @@ fun AgentChatScreen(
                 ) {
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
-                        skillMenuProvider = skillMenuProvider,
+                        slashMenuProvider = slashMenuProvider,
                         onCommandSelected = { command ->
                             // Insert the command rather than overwriting existing input.
                             // If the user has already typed something (e.g.
@@ -524,7 +527,7 @@ private fun AgentMessageItem(
         is AgentUiMessage.Agent -> AgentBubble(
             message = message,
             onOrganize = { text ->
-                Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
+                Toast.makeText(LocalContext.current, "已整理到记忆", Toast.LENGTH_SHORT).show()
                 vm.organizeToMemory(text)
             }
         )

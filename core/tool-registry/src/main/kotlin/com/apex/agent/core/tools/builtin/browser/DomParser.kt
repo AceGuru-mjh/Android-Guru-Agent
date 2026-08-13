@@ -71,7 +71,7 @@ object DomParser {
             val isInteractive = r.isInteractive || isInteractiveByTagOrRole(r)
             if (!isInteractive && strategy == SnapshotStrategy.INTERACTIVE_ONLY) continue
             if (strategy == SnapshotStrategy.INTERACTIVE_ONLY &&
-                r.text.isBlank() && !hasMeaningfulAttr(r)) continue
+                (r.text ?: "").isBlank() && !hasMeaningfulAttr(r)) continue
             bid++
             val ref = r.attributes["data-apex-hash"] ?: "r$bid"
             interactive += DomElement(

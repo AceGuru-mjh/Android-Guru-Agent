@@ -29,4 +29,15 @@ interface AgentEngine {
      * 停止当前执行
      */
     suspend fun abort()
+
+    /**
+     * 响应用户对 [AgentEvent.UserInputRequired] 事件的提交，恢复挂起的执行。
+     * 无 pending 请求时视为 no-op。
+     */
+    fun submitUserInput(answer: String)
+
+    /**
+     * 用户取消对 [AgentEvent.UserInputRequired] 事件的等待，终止挂起。
+     */
+    fun cancelUserInput()
 }

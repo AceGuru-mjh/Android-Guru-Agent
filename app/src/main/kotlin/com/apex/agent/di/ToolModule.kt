@@ -21,6 +21,8 @@ import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
+import com.apex.agent.tools.AskUserTool
+import com.apex.agent.tools.StreamingTerminalExecTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -132,6 +134,8 @@ object ToolModule {
 
         // ═══ Agent 主动提问工具 ═══
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))
+        registry.register(SafeAgentTool(AskUserTool()))
+        registry.register(SafeAgentTool(StreamingTerminalExecTool(terminalManager)))
 
         // ═══ 2. 文件操作 (7) ═══
         registry.register(SafeAgentTool(FileReadTool(workspaceDir)))

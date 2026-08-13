@@ -71,11 +71,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -106,6 +108,7 @@ import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.ui.component.AttachButton
 import com.apex.agent.ui.component.AdaptiveInputField
@@ -282,6 +285,17 @@ fun AgentChatScreen(
                         plan = uiState.plan!!,
                         onConfirm = { viewModel.confirmPlan(true) },
                         onReject = { viewModel.confirmPlan(false) }
+                    )
+                }
+            }
+
+            // Agent 通过 ask_user 请求用户输入，等待用户回答
+            uiState.pendingUserInput?.let { request ->
+                item {
+                    UserInputDialog(
+                        request = request,
+                        onSubmit = { viewModel.submitUserInput(it) },
+                        onCancel = { viewModel.cancelUserInput() }
                     )
                 }
             }
@@ -1659,4 +1673,60 @@ private fun QuestionCard(
             }
         }
     }
+}
+
+/**
+ * ask_user 工具触发的用户输入对话框。
+ * 用户提交回答则恢复执行，取消则终止等待。
+ */
+@Composable
+private fun UserInputDialog(
+    request: UserInputRequest,
+    onSubmit: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    val isChoice = request.type == InputType.CHOICE
+    val isConfirmation = request.type == InputType.CONFIRMATION
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        confirmButton = {
+            androidx.compose.material3.Button(
+                onClick = { onSubmit(text) },
+                enabled = !isChoice // 选择题/确认以选项按钮提交，文本框默认收起
+            ) {
+                Text("提交")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("取消") }
+        },
+        title = { Text("Agent 需要你的输入") },
+        text = {
+            Column {
+                Text(
+                    text = request.prompt,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                if (!isConfirmation) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("你的回答") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 6
+                    )
+                } else {
+                    Text(
+                        text = "点击「提交」确认，或「取消」拒绝。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    )
 }

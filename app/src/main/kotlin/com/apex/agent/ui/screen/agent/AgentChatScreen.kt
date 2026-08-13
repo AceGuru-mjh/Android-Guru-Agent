@@ -525,10 +525,7 @@ private fun AgentMessageItem(
         is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
         is AgentUiMessage.Agent -> AgentBubble(
             message = message,
-            onOrganize = { text ->
-                Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
-                vm.organizeToMemory(text)
-            }
+            onOrganize = { text -> vm.organizeToMemory(text) }
         )
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
@@ -713,6 +710,7 @@ private fun AgentBubble(
                     }
                     IconButton(
                         onClick = {
+                            Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
                             onOrganize(message.text)
                         },
                         modifier = Modifier.size(32.dp)

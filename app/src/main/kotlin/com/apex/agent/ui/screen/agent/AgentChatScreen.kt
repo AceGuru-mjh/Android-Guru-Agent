@@ -91,6 +91,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Stroke
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -115,14 +116,14 @@ import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
-import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.core.tools.skill.SkillMenuProvider
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
+    skillMenuProvider: SkillMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
@@ -335,7 +336,7 @@ fun AgentChatScreen(
                 ) {
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
-                        slashMenuProvider = slashMenuProvider,
+                        skillMenuProvider = skillMenuProvider,
                         onCommandSelected = { command ->
                             // Insert the command rather than overwriting existing input.
                             // If the user has already typed something (e.g.
@@ -493,7 +494,13 @@ private fun AgentMessageItem(
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
-        is AgentUiMessage.Agent -> AgentBubble(message)
+        is AgentUiMessage.Agent -> AgentBubble(
+            message = message,
+            onOrganize = { text ->
+                Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
+                vm.organizeToMemory(text)
+            }
+        )
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.Error -> ErrorBlock(
@@ -580,7 +587,12 @@ private fun UserBubble(
 }
 
 @Composable
-private fun AgentBubble(message: AgentUiMessage.Agent) {
+private fun AgentBubble(
+    message: AgentUiMessage.Agent,
+    onOrganize: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val timeStr = remember(message.timestamp) {
         DateTimeFormatter.ofPattern("HH:mm").format(
             java.time.Instant.ofEpochMilli(message.timestamp)
@@ -646,6 +658,43 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
                 // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）
                 SelectionContainer {
                     MarkdownText(markdown = message.text)
+                }
+
+                // 操作行：复制 / 整理到记忆（UI 占位，暂未接入 CS-Mem 后端）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(message.text))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "复制",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            onOrganize(message.text)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "整理到记忆",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

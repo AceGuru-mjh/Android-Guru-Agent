@@ -37,7 +37,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.screen.agent.AgentChatScreen
+import com.apex.agent.ui.screen.agent.AgentChatViewModel
 import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.model.ModelScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
@@ -67,6 +71,10 @@ fun ApexRoot() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var currentDestination by remember { mutableStateOf<DrawerDestination>(DrawerDestination.Agent) }
+
+    // 上下文仪表盘数据源（单例作用域 VM，全局共享）
+    val agentVm: AgentChatViewModel = hiltViewModel()
+    val agentState by agentVm.uiState.collectAsStateWithLifecycle()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -125,14 +133,23 @@ fun ApexRoot() {
                 )
             }
         ) { padding ->
-            Box(modifier = Modifier.padding(padding)) {
-                when (currentDestination) {
-                    DrawerDestination.Agent -> AgentChatScreen()
-                    DrawerDestination.Skill -> SkillScreen()
-                    DrawerDestination.Model -> ModelScreen()
-                    DrawerDestination.Permissions -> PermissionsScreen()
-                    DrawerDestination.Log -> LogViewerScreen()
-                    DrawerDestination.Settings -> SettingsScreen()
+            Column(modifier = Modifier.padding(padding)) {
+                // ═══ 顶部上下文仪表盘长条（全局）═══
+                ContextMeterBar(
+                    usedTokens = agentState.contextUsedTokens,
+                    maxTokens = agentState.contextMaxTokens,
+                    onCompress = { agentVm.compressNow() }
+                )
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (currentDestination) {
+                        DrawerDestination.Agent -> AgentChatScreen()
+                        DrawerDestination.Skill -> SkillScreen()
+                        DrawerDestination.Model -> ModelScreen()
+                        DrawerDestination.Permissions -> PermissionsScreen()
+                        DrawerDestination.Log -> LogViewerScreen()
+                        DrawerDestination.Settings -> SettingsScreen()
+                    }
                 }
             }
         }

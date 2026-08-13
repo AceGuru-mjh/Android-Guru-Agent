@@ -1,6 +1,7 @@
 package com.apex.agent.core.engine
 
 import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
@@ -90,6 +91,41 @@ class ApexAgentEngine(
      * 当前持久化的消息条数（用于 UI 显示历史深度）。
      */
     fun historyCount(): Int = memory?.count() ?: conversationHistory.size
+
+    /**
+     * 当前上下文的估算 token 数（用于 UI 顶部仪表盘实时显示占用）。
+     * 基于 [TokenEstimator.estimateHistory]，与自动压缩阈值计算同源。
+     */
+    fun currentTokenCount(): Int = TokenEstimator.estimateHistory(conversationHistory)
+
+    /**
+     * 上下文 token 上限（分母，用于计算占用百分比）。
+     */
+    fun maxContextTokens(): Int = config.maxContextTokens
+
+    /**
+     * 主动压缩上下文（由 UI 仪表盘的"压缩上下文"按钮触发）。
+     *
+     * 与自动压缩 [maybeCompressContext] 共用同一 [ContextCompressor]，
+     * 但不依赖 [execute] 流的 emit：直接返回 [CompressionReport] 供 ViewModel
+     * 自行决定如何呈现（Toast / 系统消息）。compressor 未注入时返回 null。
+     *
+     * 设计要点：手动压缩不受 [AgentConfig.compressionThreshold] 限制，
+     * 用户可随时触发（如长任务中途释放上下文窗口）。
+     */
+    suspend fun compressNow(): CompressionReport? {
+        val compressor = contextCompressor ?: return null
+        val report = runCatching {
+            compressor.compress(
+                history = conversationHistory,
+                preserveRecent = config.preserveRecentTurns
+            )
+        }.getOrNull() ?: return null
+
+        // 同步到持久化记忆（如果存在）
+        memory?.save(conversationHistory)
+        return report
+    }
 
     /**
      * 把消息加入内存历史，同时持久化到 [memory]（如果存在）。

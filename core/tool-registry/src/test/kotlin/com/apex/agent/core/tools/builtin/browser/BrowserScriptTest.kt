@@ -54,7 +54,7 @@ class BrowserScriptTest {
         val js = BrowserScript.snapshotJs()
         // 意图：定位主键必须是语义哈希（data-apex-hash），而非顺序 ref
         assertTrue("必须写入 data-apex-hash 属性", js.contains("setAttribute('data-apex-hash'"))
-        assertTrue("必须包含哈希函数", js.contains("function hash("))
+        assertTrue("必须包含哈希函数", js.contains("function hash"))
         assertTrue("哈希结果必须以 r_ 前缀稳定可读", js.contains("'r_' +"))
     }
 

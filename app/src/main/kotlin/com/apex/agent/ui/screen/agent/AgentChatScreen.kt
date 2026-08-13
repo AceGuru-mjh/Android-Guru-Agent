@@ -526,7 +526,7 @@ private fun AgentMessageItem(
         is AgentUiMessage.Agent -> AgentBubble(
             message = message,
             onOrganize = { text ->
-                Toast.makeText(LocalContext.current, "已整理到记忆", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
                 vm.organizeToMemory(text)
             }
         )

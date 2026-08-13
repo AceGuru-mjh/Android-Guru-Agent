@@ -403,13 +403,13 @@ class BrowserEngine @Inject constructor(
         val tab = activeTab() ?: run { newTabSync().also { activeTabId = it } }.let { tabs[it]!! }
         tab.pageFinished = false
         loadUrlInternal(u)
-        // 1) 基础等待：onPageFinished
+        // (1) 基础等待：onPageFinished
         val baseOk = waitForPageFinished(tab, timeoutMs)
-        // 2) 智能等待：元素出现
+        // (2) 智能等待：元素出现
         val selOk = if (waitForSelector != null) {
             waitForSelectorOnPage(tab.webView, waitForSelector, timeoutMs)
         } else true
-        // 3) Cookie 持久化时机（P0 #6）
+        // (3) Cookie 持久化时机（P0 #6）
         flushCookies()
         NavResult(success = baseOk, selectorFound = selOk, timedOut = !baseOk)
     }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 状态 Badge 背景：琥珀金实心圆，中央放「!」 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFB800" />
+    <stroke
+        android:width="1dp"
+        android:color="#1A1206" />
+</shape>

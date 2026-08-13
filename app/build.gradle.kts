@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation("androidx.compose.foundation:foundation:1.7.6")
+    implementation(libs.compose.animation)
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
@@ -92,6 +93,13 @@ dependencies {
     // Shizuku (system privilege access)
     implementation("dev.rikka.shizuku:api:13.1.0")
     implementation("dev.rikka.shizuku:provider:13.1.0")
+
+    // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理
+    implementation("com.github.princekin-f:EasyFloat:2.0.4")
+    // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
+    implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+    // 矢量精致动效库（霓虹环流可选 Lottie 资源，默认回退到代码绘制的 NeonRingView）
+    implementation("com.airbnb.android:lottie:6.4.0")
 
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)

@@ -75,6 +75,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -107,6 +108,7 @@ import java.time.format.DateTimeFormatter
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
+import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.llm.ReasoningEffort
@@ -311,6 +313,17 @@ fun AgentChatScreen(
                         onCancel = {
                             viewModel.cancelQuestion()
                         }
+                    )
+                }
+            }
+
+            // Agent 通过 ask_user 工具主动等待用户输入
+            uiState.pendingUserInput?.let { request ->
+                item {
+                    UserInputDialog(
+                        request = request,
+                        onSubmit = { viewModel.submitUserInput(it) },
+                        onCancel = { viewModel.cancelUserInput() }
                     )
                 }
             }
@@ -1677,7 +1690,7 @@ private fun QuestionCard(
 
 /**
  * ask_user 工具触发的用户输入对话框。
- * 用户提交回答则恢复执行，取消则终止等待。
+ * 用户提交后引擎恢复执行；取消则中止等待。
  */
 @Composable
 private fun UserInputDialog(
@@ -1694,7 +1707,7 @@ private fun UserInputDialog(
         confirmButton = {
             androidx.compose.material3.Button(
                 onClick = { onSubmit(text) },
-                enabled = !isChoice // 选择题/确认以选项按钮提交，文本框默认收起
+                enabled = !isChoice // 选项类暂以确认框展示，提交默认空串
             ) {
                 Text("提交")
             }
@@ -1702,7 +1715,7 @@ private fun UserInputDialog(
         dismissButton = {
             TextButton(onClick = onCancel) { Text("取消") }
         },
-        title = { Text("Agent 需要你的输入") },
+        title = { Text("需要你的输入") },
         text = {
             Column {
                 Text(
@@ -1721,7 +1734,7 @@ private fun UserInputDialog(
                     )
                 } else {
                     Text(
-                        text = "点击「提交」确认，或「取消」拒绝。",
+                        text = "点击「提交」以确认，或「取消」拒绝。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

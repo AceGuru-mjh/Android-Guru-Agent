@@ -52,7 +52,7 @@ data class AgentChatUiState(
 )
 
 /**
- * Agent 通过 [AgentEvent.UserInputRequired] 请求用户输入时，UI 需要展示的回答请求。
+ * Agent 通过 [AgentEvent.UserInputRequired] 向用户提问时，UI 需要展示的待回答请求。
  */
 data class UserInputRequest(
     val prompt: String,
@@ -625,13 +625,13 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
     }
 
-    /** 用户回答 Agent 的提问，回传引擎并恢复执行。 */
+    /** 用户回答了 Agent 的提问，恢复引擎执行。 */
     fun submitUserInput(answer: String) {
         _uiState.update { it.copy(pendingUserInput = null) }
         (agentEngine as? ApexAgentEngine)?.submitUserInput(answer)
     }
 
-    /** 用户取消 Agent 的提问，终止等待。 */
+    /** 用户取消了 Agent 的提问，中止等待。 */
     fun cancelUserInput() {
         _uiState.update { it.copy(pendingUserInput = null) }
         (agentEngine as? ApexAgentEngine)?.cancelUserInput()

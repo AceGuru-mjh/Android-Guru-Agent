@@ -96,3 +96,18 @@ is AgentEvent.Error -> {
 ## 四、一句话总结
 UI 已覆盖工具调用、思考、Plan、系统事件的基础呈现，但 **(a) 所有调用类型外观雷同、无 skill/MCP/Web 区分，
 (b) 错误处理只是灰色小字、缺乏红色高亮与重试**，这两块是最该补的设计缺口。
+
+---
+
+## 五、后续更新记录（2026-08-13）
+
+| 原缺口 | 状态 | 落地位置 |
+|--------|------|---------|
+| 缺口 1 工具类型未区分 | ✅ 已实现 | `ToolKind` + `ToolKindBadge`（本地 🔧 / MCP 🔌 / 搜索 🔍 / 抓取 🌐 / Skill ✨），运行卡与完成卡共用 |
+| 缺口 2 错误提示太弱 | ✅ 已实现 | `AgentUiMessage.Error` + `ErrorBlock`（红底 + 红边框 + ⚠ 图标 + 重试 + 复制） |
+| 缺口 3 Skill 调用无专门 UI | ✅ 已实现 | `AgentUiMessage.SkillStart` + `SkillBannerCard`（脉冲圆点执行中横幅）；Skill 内工具调用带 SKILL 徽章 |
+| 缺口 4 MCP 失败无独立 UI | ✅ 部分实现 | MCP 卡片展示 server 名徽章；失败卡复用错误色 + 重试 |
+| 缺口 5 Web 搜索无结构化呈现 | ✅ 已实现 | `parseWebSearchResults` + `WebSearchResultsCard`（标题 + 域名 + 摘要 + 外链） |
+| P3 失败可恢复 | ✅ 部分实现 | `RetryChip`：ErrorBlock 与失败 ToolCallCard 均可"重试上一条指令"（按 callId 重放留待引擎支持） |
+| — | 🐛 修复 | 移除 LazyColumn 中重复渲染的 `UserInputDialog` 条目 |
+| — | ✨ 打磨 | 思考完成气泡改为"思考完成 · 点击查看"（不再误标"推理中"）；System 行改为居中浅色胶囊 |

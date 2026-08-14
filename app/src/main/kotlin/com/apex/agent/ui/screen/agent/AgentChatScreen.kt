@@ -319,17 +319,6 @@ fun AgentChatScreen(
                     )
                 }
             }
-
-            // Agent 通过 ask_user 工具主动等待用户输入
-            uiState.pendingUserInput?.let { request ->
-                item {
-                    UserInputDialog(
-                        request = request,
-                        onSubmit = { viewModel.submitUserInput(it) },
-                        onCancel = { viewModel.cancelUserInput() }
-                    )
-                }
-            }
         }
 
         // ═══ 加载条 ═══
@@ -528,19 +517,30 @@ private fun AgentMessageItem(
             message = message,
             onOrganize = { text -> vm.organizeToMemory(text) }
         )
-        is AgentUiMessage.ToolCall -> ToolCallCard(message)
+        is AgentUiMessage.ToolCall -> ToolCallCard(
+            toolCall = message,
+            onRetry = retryLastUser(vm)
+        )
         is AgentUiMessage.System -> SystemMessage(message.text)
+        is AgentUiMessage.SkillStart -> SkillBannerCard(message.skill)
         is AgentUiMessage.Error -> ErrorBlock(
             message = message.message,
             canRetry = message.canRetry,
-            onRetry = {
-                val lastUser = vm.uiState.value.messages.lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
-                lastUser?.let { vm.retry(it.text, it.attachments) }
-            }
+            onRetry = retryLastUser(vm)
         )
-        is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought)
+        is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought, finished = true)
         is AgentUiMessage.PlanMessage -> PlanCard(message.plan)
     }
+}
+
+/**
+ * 重试上一条用户消息（ErrorBlock 与失败 ToolCallCard 共用）。
+ * 找到最近一条 User 气泡后重新发起其文本指令；没有用户消息时为空操作。
+ */
+private fun retryLastUser(vm: AgentChatViewModel): () -> Unit = {
+    val lastUser = vm.uiState.value.messages
+        .lastOrNull { it is AgentUiMessage.User } as? AgentUiMessage.User
+    lastUser?.let { vm.retry(it.text, it.attachments) }
 }
 
 @Composable
@@ -796,8 +796,8 @@ private fun StreamingResponseBubble(text: String) {
 }
 
 @Composable
-private fun ThinkingBubble(text: String) {
-    var expanded by remember { mutableStateOf(false) }
+private fun ThinkingBubble(text: String, finished: Boolean = false) {
+    var expanded by remember { mutableStateOf(finished) }
 
     val tertiaryColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
     Surface(
@@ -834,7 +834,11 @@ private fun ThinkingBubble(text: String) {
                     )
                 }
                 Text(
-                    text = if (expanded) "思考过程" else "推理中…",
+                    text = when {
+                        expanded -> "思考过程"
+                        finished -> "思考完成 · 点击查看"
+                        else -> "推理中…"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.weight(1f)
@@ -937,7 +941,10 @@ private fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String?
 }
 
 @Composable
-private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
+private fun ToolCallCard(
+    toolCall: AgentUiMessage.ToolCall,
+    onRetry: (() -> Unit)? = null
+) {
     var expanded by remember { mutableStateOf(false) }
     val isError = toolCall.success == false
     val kindStyle = toolKindStyle(toolCall.kind)
@@ -1083,6 +1090,48 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
                     PlainOutputBlock(output, expanded, if (expanded) "完整输出" else "输出摘要")
                 }
             }
+
+            // 失败工具卡：提供"重试上一条指令"入口（与 ErrorBlock 行为一致）。
+            if (isError && onRetry != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    RetryChip(onRetry = onRetry)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 重试按钮（ErrorBlock 与失败 ToolCallCard 共用）：错误色底 + 刷新图标。
+ */
+@Composable
+private fun RetryChip(onRetry: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.error,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.clickable { onRetry() }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onError,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "重试",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onError
+            )
         }
     }
 }
@@ -1466,6 +1515,8 @@ private fun ErrorBlock(
     onRetry: () -> Unit = {}
 ) {
     val errorColor = MaterialTheme.colorScheme.error
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
         shape = RoundedCornerShape(12.dp),
@@ -1497,31 +1548,23 @@ private fun ErrorBlock(
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                // 复制错误信息（便于粘贴给模型 / 提 Issue）
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(message))
+                        Toast.makeText(context, "已复制错误信息", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "复制错误信息",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
                 if (canRetry) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.error,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.clickable { onRetry() }
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onError,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "重试",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onError
-                            )
-                        }
-                    }
+                    RetryChip(onRetry = onRetry)
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
@@ -1534,14 +1577,89 @@ private fun ErrorBlock(
     }
 }
 
+/**
+ * Skill 执行横幅：`/skill:xxx` 启动 Skill 时的专用卡片。
+ *
+ * 与工具卡片 SKILL 徽章同色系（primary + AutoAwesome 图标），标题注明
+ * "正在执行 Skill"，右侧脉冲圆点表示 Agent 循环仍在运行。其后该 Skill
+ * 产生的工具调用会以 SKILL 来源徽章展示，形成完整的执行链路视觉。
+ */
+@Composable
+private fun SkillBannerCard(skill: String) {
+    val color = MaterialTheme.colorScheme.primary
+    val pulse by rememberInfiniteTransition(label = "skill-banner-pulse").animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label = "skill-banner-alpha"
+    )
+    Surface(
+        color = color.copy(alpha = 0.10f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Surface(
+                color = color.copy(alpha = 0.18f),
+                shape = CircleShape,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "正在执行 Skill",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = color
+                )
+                Text(
+                    text = skill,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(color.copy(alpha = pulse), CircleShape)
+            )
+        }
+    }
+}
+
 @Composable
 private fun SystemMessage(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(vertical = 4.dp)
-    )
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.07f),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+    }
 }
 
 @Composable

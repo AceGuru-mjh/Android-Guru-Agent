@@ -89,6 +89,8 @@ sealed interface AgentUiMessage {
         val server: String? = null,
         /** Skill 名称（仅 KIND=SKILL 时有意义）。 */
         val skill: String? = null,
+        /** 逐步执行过程（带时间戳的步骤序列），用于"执行过程"时间线渲染。 */
+        val steps: List<ToolStep> = emptyList(),
         val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
     data class System(val text: String) : AgentUiMessage
@@ -110,6 +112,8 @@ data class AgentToolCallUi(
     val args: String,
     /** 实时输出（由 ToolOutputChunk 逐段累积，节流后刷新；尾部窗口 4000 字符）。 */
     val output: String = "",
+    /** 逐步执行过程（带时间戳的步骤序列），实时追加。 */
+    val steps: List<ToolStep> = emptyList(),
     /** 进度（0..1），由 ToolProgress 事件更新；null 表示工具无进度信息。 */
     val progress: Float? = null,
     /** 进度说明文本，由 ToolProgress 事件更新。 */
@@ -126,8 +130,30 @@ data class AgentToolCallUi(
     companion object {
         /** 运行中工具卡片最多保留的实时输出字符数（尾部窗口）。 */
         const val MAX_LIVE_TOOL_OUTPUT_CHARS = 4000
+        /** 运行中步骤流最多保留的条目数（尾部窗口），避免重组膨胀。 */
+        const val MAX_LIVE_TOOL_STEPS = 200
     }
 }
+
+/**
+ * 工具执行过程的单步记录，承载逐步可视化（区别于 harness 的"挂起→完成"两态卡片）。
+ *
+ * 每一步对应一条引擎事件：
+ * - [StepPhase.START]    ← [AgentEvent.ToolCallStart]（工具名 + 参数摘要）
+ * - [StepPhase.OUTPUT]   ← [AgentEvent.ToolOutputChunk]（节流后整段原始输出）
+ * - [StepPhase.PROGRESS] ← [AgentEvent.ToolProgress]（进度说明 / 百分比）
+ * - [StepPhase.COMPLETE] ← [AgentEvent.ToolCallComplete]（成功时的输出摘要）
+ * - [StepPhase.ERROR]    ← [AgentEvent.ToolCallComplete] 且 success=false
+ */
+enum class StepPhase { START, OUTPUT, PROGRESS, COMPLETE, ERROR }
+
+data class ToolStep(
+    val phase: StepPhase,
+    val text: String,
+    val timestamp: Long = java.lang.System.currentTimeMillis(),
+    /** 进度百分比（仅 PROGRESS 阶段有意义），范围 0..1。 */
+    val percent: Float? = null
+)
 
 /**
  * 根据工具名推断调用来源分类，用于 UI 差异化呈现。
@@ -265,6 +291,12 @@ class AgentChatViewModel @Inject constructor(
     private val toolOutputBuffer = StringBuilder()
     private var activeToolCallId: String? = null
     private var toolFlushJob: Job? = null
+    /**
+     * 运行期工具步骤流的单一事实源（带时间戳的步骤序列）。
+     * [ToolCallStart] 时重置，[ToolOutputChunk]/[ToolProgress] 追加；
+     * [ToolCallComplete] 读取它构造最终过程流，避免反复从 StateFlow 派生。
+     */
+    private var currentToolCallSteps: List<ToolStep>? = null
 
     /**
      * 当前 Slash 指令触发的 Skill 名称（若来自 `/skill:xxx`）。
@@ -471,6 +503,13 @@ class AgentChatViewModel @Inject constructor(
                 toolOutputBuffer.clear()
                 toolFlushJob?.cancel()
                 toolFlushJob = null
+                // 重置运行期步骤流（START 步）。
+                currentToolCallSteps = listOf(
+                    ToolStep(
+                        phase = StepPhase.START,
+                        text = "调用 ${event.toolName}，参数：\n${event.arguments}"
+                    )
+                )
 
                 val (kind, server) = classifyTool(event.toolName, event.arguments)
                 val skill = if (kind == ToolKind.SKILL) skillContext else null
@@ -482,6 +521,7 @@ class AgentChatViewModel @Inject constructor(
                             toolName = event.toolName,
                             args = event.arguments,
                             output = "",
+                            steps = currentToolCallSteps ?: emptyList(),
                             progress = null,
                             progressMessage = null,
                             isRunning = true,
@@ -504,9 +544,19 @@ class AgentChatViewModel @Inject constructor(
                         delay(FLUSH_INTERVAL_MS)
                         val snapshot = toolOutputBuffer.toString()
                             .takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
+                        // 累积的 chunk 作为一条 OUTPUT 步骤追加到运行期步骤流。
+                        currentToolCallSteps = (currentToolCallSteps
+                            ?: emptyList()) + ToolStep(phase = StepPhase.OUTPUT, text = snapshot)
                         _uiState.update { state ->
+                            val tc = state.currentToolCall ?: return@update state
                             state.copy(
-                                currentToolCall = state.currentToolCall?.copy(output = snapshot)
+                                currentToolCall = tc.copy(
+                                    output = snapshot,
+                                    steps = (tc.steps + ToolStep(
+                                        phase = StepPhase.OUTPUT,
+                                        text = snapshot
+                                    )).takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
+                                )
                             )
                         }
                         toolFlushJob = null
@@ -516,24 +566,51 @@ class AgentChatViewModel @Inject constructor(
             is AgentEvent.ToolProgress -> {
                 if (event.callId != activeToolCallId) return
                 _uiState.update { state ->
+                    val tc = state.currentToolCall ?: return@update state
+                    val msg = event.message ?: "进度 ${((event.percent ?: 0f) * 100).toInt()}%"
+                    val progressStep = ToolStep(
+                        phase = StepPhase.PROGRESS,
+                        text = msg,
+                        percent = event.percent
+                    )
+                    // 同步写入运行期步骤流单一事实源。
+                    currentToolCallSteps = (currentToolCallSteps ?: emptyList()) +
+                        progressStep
                     state.copy(
-                        currentToolCall = state.currentToolCall?.copy(
+                        currentToolCall = tc.copy(
                             progress = event.percent,
-                            progressMessage = event.message
+                            progressMessage = event.message,
+                            steps = (tc.steps + progressStep)
+                                .takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
                         )
                     )
                 }
             }
             is AgentEvent.ToolCallComplete -> {
-                // 取消尚未刷新的 flush Job，并把剩余缓冲区一次性写入历史消息输出
-                // （ToolCallComplete.output 已是 engine 截断后的完整输出，直接用即可）。
+                // 取消尚未刷新的 flush Job，并把剩余缓冲区作为最后一段 OUTPUT 步骤保留。
                 toolFlushJob?.cancel()
                 toolFlushJob = null
                 activeToolCallId = null
+                val remaining = toolOutputBuffer.toString()
                 toolOutputBuffer.clear()
 
                 val (kind, server) = classifyTool(event.toolName, event.arguments)
                 val skill = if (kind == ToolKind.SKILL) skillContext else null
+
+                // 由运行期累积的 steps 构造最终过程流（全量，不再截断 500 字）。
+                val runningSteps = (currentToolCallSteps ?: emptyList())
+                val tailSteps = if (remaining.isNotBlank()) {
+                    runningSteps + ToolStep(phase = StepPhase.OUTPUT, text = remaining)
+                } else {
+                    runningSteps
+                }
+                val finalSteps = (tailSteps + ToolStep(
+                    phase = if (event.success) StepPhase.COMPLETE else StepPhase.ERROR,
+                    text = if (event.success)
+                        "完成（${event.durationMs}ms）：${event.output}"
+                    else
+                        "失败（${event.durationMs}ms）：${event.output}"
+                )).takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
 
                 _uiState.update { state ->
                     state.copy(
@@ -541,16 +618,19 @@ class AgentChatViewModel @Inject constructor(
                         messages = state.messages + AgentUiMessage.ToolCall(
                             toolName = event.toolName,
                             args = event.arguments,
-                            output = event.output.take(500),
+                            output = event.output,
                             fullOutput = event.fullOutput.ifBlank { event.output },
                             success = event.success,
                             durationMs = event.durationMs,
                             kind = kind,
                             server = server,
-                            skill = skill
+                            skill = skill,
+                            steps = finalSteps
                         )
                     )
                 }
+                // 清理运行期步骤缓存（已被写入完成卡）。
+                currentToolCallSteps = null
             }
 
             // ═══ 流式回复 ═══

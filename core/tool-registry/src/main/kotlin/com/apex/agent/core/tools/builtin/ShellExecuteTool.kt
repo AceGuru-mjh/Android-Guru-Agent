@@ -1,6 +1,10 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.StreamingAgentTool
+import com.apex.agent.core.tools.ToolStreamEvent
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -18,7 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class ShellExecuteTool(
     private val executor: suspend (String) -> String
-) : AgentTool {
+) : StreamingAgentTool {
 
     override val id = "shell_execute"
     override val name = "Run Command"
@@ -109,6 +113,26 @@ class ShellExecuteTool(
             }
         } catch (e: Exception) {
             "❌ Execution error: ${e.message}"
+        }
+    }
+
+    /**
+     * 流式入口：在同步执行前后补发 PROGRESS 阶段（命令开始 / 完成），
+     * 让 UI 的工具步骤时间线能看到执行过程。executor 是黑盒闭包、无法逐行回流，
+     * 因此只能给出"开始→完成"两阶段提示，而非逐行进度。
+     */
+    override fun executeStream(arguments: String): Flow<ToolStreamEvent> = flow {
+        val cmd = runCatching {
+            Json.parseToJsonElement(arguments).jsonObject["command"]?.jsonPrimitive?.content
+        }.getOrNull()
+        emit(ToolStreamEvent.Progress(percent = 0.2f, message = "执行命令: ${cmd ?: "(未知)"}"))
+        val result = execute(arguments)
+        emit(ToolStreamEvent.Progress(percent = 1f, message = "命令执行完成"))
+        if (result.startsWith("Error") || result.startsWith("❌")) {
+            emit(ToolStreamEvent.Error(result))
+        } else {
+            emit(ToolStreamEvent.Output(result))
+            emit(ToolStreamEvent.Complete(result))
         }
     }
 }

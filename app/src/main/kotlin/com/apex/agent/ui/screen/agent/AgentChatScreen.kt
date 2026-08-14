@@ -75,7 +75,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -108,6 +107,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
@@ -1050,6 +1051,22 @@ private fun ToolCallCard(toolCall: AgentUiMessage.ToolCall) {
                 }
             }
 
+            // ═══ 执行过程时间线（展开可见，全量保留步骤与原始输出）═══
+            if (expanded && toolCall.steps.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "执行过程",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                ToolStepTimeline(
+                    steps = toolCall.steps,
+                    accent = accent,
+                    maxHeight = 360.dp
+                )
+            }
+
             val outputText = if (expanded) toolCall.fullOutput ?: toolCall.output else toolCall.output
 
             outputText?.let { output ->
@@ -1215,7 +1232,117 @@ private fun WebSearchResultsCard(results: List<WebSearchItem>, query: String?) {
     }
 }
 
+/**
+ * 工具执行过程的垂直时间线（与 harness 的"挂起→完成"两态卡片形成差异）。
+ *
+ * 渲染带时间戳的步骤流：左轴圆点（按阶段着色）+ 竖向连线 + 右侧（时间戳 + 阶段标签 + 等宽原始输出）。
+ * 运行卡与完成卡共用此组件。
+ *
+ * @param steps       步骤序列（[ToolStep]）。
+ * @param accent      主色（取 [ToolKind] 对应色），用于 START/COMPLETE 圆点。
+ * @param autoScroll  运行态时是否自动滚动到底部（跟随流式输出）。
+ * @param maxHeight   时间线最大高度（完成后整卡可滚动，运行态限制高度）。
+ */
 @Composable
+private fun ToolStepTimeline(
+    steps: List<ToolStep>,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    autoScroll: Boolean = false,
+    maxHeight: androidx.compose.ui.unit.Dp = androidx.compose.ui.unit.Dp.Unspecified
+) {
+    if (steps.isEmpty()) return
+    val listState = rememberLazyListState()
+    val dateFmt = remember { SimpleDateFormat("HH:mm:ss", java.util.Locale.US) }
+
+    // 运行态：有新步骤时自动滚到底部。
+    if (autoScroll) {
+        LaunchedEffect(steps.size) {
+            if (steps.isNotEmpty()) listState.animateScrollToItem(steps.lastIndex)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .then(if (maxHeight != androidx.compose.ui.unit.Dp.Unspecified)
+                Modifier.heightIn(max = maxHeight) else Modifier)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        itemsIndexed(steps) { index, step ->
+            val dotColor = when (step.phase) {
+                StepPhase.START -> accent
+                StepPhase.OUTPUT -> MaterialTheme.colorScheme.outline
+                StepPhase.PROGRESS -> MaterialTheme.colorScheme.primary
+                StepPhase.COMPLETE -> Color(0xFF22C55E)
+                StepPhase.ERROR -> MaterialTheme.colorScheme.error
+            }
+            val phaseLabel = when (step.phase) {
+                StepPhase.START -> "START"
+                StepPhase.OUTPUT -> "OUTPUT"
+                StepPhase.PROGRESS -> if (step.percent != null)
+                    "PROGRESS ${(step.percent * 100).toInt()}%" else "PROGRESS"
+                StepPhase.COMPLETE -> "DONE"
+                StepPhase.ERROR -> "ERROR"
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                // ═══ 左轴：圆点 + 竖向连线 ═══
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.width(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(dotColor, CircleShape)
+                    )
+                    if (index < steps.lastIndex) {
+                        Box(
+                            modifier = Modifier
+                                .width(1.5.dp)
+                                .weight(1f)
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                // ═══ 右栏：时间戳 + 阶段标签 + 文本 ═══
+                Column(modifier = Modifier.weight(1f).padding(bottom = 8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = dateFmt.format(Date(step.timestamp)),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = phaseLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = dotColor
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = step.text,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (step.phase == StepPhase.ERROR)
+                            MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                    )
+                }
+            }
+        }
+    }
+}
+
 private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
@@ -1295,8 +1422,19 @@ private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
                 )
             }
 
-            // ═══ 工具实时输出（流式）═══
-            if (toolCall.output.isNotEmpty()) {
+            // ═══ 工具执行过程时间线（流式，自动滚到底部）═══
+            if (toolCall.steps.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(8.dp))
+                ToolStepTimeline(
+                    steps = toolCall.steps,
+                    accent = accent,
+                    autoScroll = true,
+                    maxHeight = 240.dp
+                )
+            } else if (toolCall.output.isNotEmpty()) {
+                // 兜底：无步骤但已有输出（理论上 START 步始终存在，此处为安全占位）。
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(8.dp))

@@ -307,7 +307,7 @@ private fun NodeCard(node: SemanticNode) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "role=${node.role} · ${node.appPackage ?: "—"}",
+                    "role=${node.role}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

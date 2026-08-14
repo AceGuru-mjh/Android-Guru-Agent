@@ -1,5 +1,6 @@
 package com.apex.agent.browser
 
+import com.apex.agent.R
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.annotation.SuppressLint

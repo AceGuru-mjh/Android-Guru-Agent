@@ -371,9 +371,9 @@ private fun DepRow(item: TerminalViewModel.DepItem, installing: Boolean, onInsta
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(
-                if (item.group == TerminalViewModel.DepItem.DepGroup.ANDROID) Icons.Default.Android else Icons.Default.CheckCircle,
+                if (item.group == TerminalViewModel.DepGroup.ANDROID) Icons.Default.Android else Icons.Default.CheckCircle,
                 null, Modifier.size(16.dp),
-                tint = if (item.group == TerminalViewModel.DepItem.DepGroup.ANDROID) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                tint = if (item.group == TerminalViewModel.DepGroup.ANDROID) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
             )
             Text(item.name, style = MaterialTheme.typography.bodyMedium)
         }

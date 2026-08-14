@@ -207,11 +207,12 @@ fun MemoryScreen(
 
 @Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
     Surface(
         modifier = modifier
             .drawBehind {
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    color = borderColor,
                     style = Stroke(1.dp.toPx()),
                     cornerRadius = CornerRadius(12.dp.toPx())
                 )

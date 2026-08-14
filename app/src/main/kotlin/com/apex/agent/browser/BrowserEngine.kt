@@ -388,15 +388,11 @@ class BrowserEngine @Inject constructor(
 
     // ═════════ 导航 + 加载等待（P0 #1） ═════════
 
-    /** 导航到 URL，支持 waitForSelector（元素等待）与超时兜底。
-     *  @param onProgress 可选进度回调（百分比 0..100 + 阶段文案），用于把等待过程推给 UI。
-     *         不传则与原行为完全一致（向后兼容既有调用方）。
-     */
+    /** 导航到 URL，支持 waitForSelector（元素等待）与超时兜底 */
     suspend fun navigate(
         url: String,
         waitForSelector: String? = null,
         timeoutMs: Long = 15000,
-        onProgress: ((percent: Int, phase: String) -> Unit)? = null,
     ): NavResult = withContext(Dispatchers.Main) {
         val u = if (url.startsWith("http")) url else "https://$url"
         // P2 #15：长会话内存维护——导航次数超阈值时重建当前 WebView
@@ -405,19 +401,16 @@ class BrowserEngine @Inject constructor(
             rebuildActiveWebView()
         }
         val tab = activeTab() ?: run { newTabSync().also { activeTabId = it } }.let { tabs[it]!! }
-        onProgress?.invoke(10, "正在加载 $u")
         tab.pageFinished = false
         loadUrlInternal(u)
         // (1) 基础等待：onPageFinished
-        val baseOk = waitForPageFinished(tab, timeoutMs, onProgress)
+        val baseOk = waitForPageFinished(tab, timeoutMs)
         // (2) 智能等待：元素出现
         val selOk = if (waitForSelector != null) {
-            onProgress?.invoke(80, "等待元素 $waitForSelector 出现")
             waitForSelectorOnPage(tab.webView, waitForSelector, timeoutMs)
         } else true
         // (3) Cookie 持久化时机（P0 #6）
         flushCookies()
-        onProgress?.invoke(100, if (baseOk) "页面加载完成" else "页面加载超时（已兜底返回当前状态）")
         NavResult(success = baseOk, selectorFound = selOk, timedOut = !baseOk)
     }
 
@@ -427,18 +420,10 @@ class BrowserEngine @Inject constructor(
         activeTab()?.webView?.loadUrl(u)
     }
 
-    private suspend fun waitForPageFinished(
-        tab: Tab,
-        timeoutMs: Long,
-        onProgress: ((percent: Int, phase: String) -> Unit)? = null,
-    ): Boolean {
+    private suspend fun waitForPageFinished(tab: Tab, timeoutMs: Long): Boolean {
         val start = SystemClock.uptimeMillis()
         while (SystemClock.uptimeMillis() - start < timeoutMs) {
             if (tab.pageFinished) return true
-            val elapsed = SystemClock.uptimeMillis() - start
-            // 10→75 映射到加载等待阶段，留出余量给后续元素等待
-            val percent = 10 + ((elapsed.toDouble() / timeoutMs) * 65).toInt().coerceIn(0, 65)
-            onProgress?.invoke(percent, "等待页面加载完成…")
             delay(100)
         }
         // 超时兜底：仍返回当前状态（页面可能已在加载，只是未触发 finish）
@@ -640,52 +625,38 @@ class BrowserEngine @Inject constructor(
 
     // ═════════ 滚动（含无限滚动检测，P0 #10 增强） ═════════
 
-    suspend fun scroll(
-        deltaY: Int,
-        waitForNewContent: Boolean = false,
-        maxWaitMs: Long = 3000,
-        onProgress: ((percent: Int, phase: String) -> Unit)? = null,
-    ): ScrollResult = withContext(Dispatchers.Main) {
-        val wv = activeTab()?.webView ?: return@withContext ScrollResult(scrolled = false)
-        onProgress?.invoke(10, "已滚动 ${if (deltaY >= 0) "+" else ""}$deltaY px${if (waitForNewContent) "，等待新内容…" else ""}")
-        val before = probePage(wv).newElementsCount
-        wv.evaluateJavascript("window.scrollBy(0, $deltaY); true;", null)
-        if (waitForNewContent) {
-            val start = SystemClock.uptimeMillis()
-            var max = before
-            while (SystemClock.uptimeMillis() - start < maxWaitMs) {
-                delay(300)
-                val now = probePage(wv).newElementsCount
-                max = maxOf(max, now)
-                val elapsed = SystemClock.uptimeMillis() - start
-                val percent = 20 + ((elapsed.toDouble() / maxWaitMs) * 70).toInt().coerceIn(0, 70)
-                onProgress?.invoke(percent, "等待新内容加载…")
-                if (now > before) break
+    suspend fun scroll(deltaY: Int, waitForNewContent: Boolean = false, maxWaitMs: Long = 3000): ScrollResult =
+        withContext(Dispatchers.Main) {
+            val wv = activeTab()?.webView ?: return@withContext ScrollResult(scrolled = false)
+            val before = probePage(wv).newElementsCount
+            wv.evaluateJavascript("window.scrollBy(0, $deltaY); true;", null)
+            if (waitForNewContent) {
+                val start = SystemClock.uptimeMillis()
+                var max = before
+                while (SystemClock.uptimeMillis() - start < maxWaitMs) {
+                    delay(300)
+                    val now = probePage(wv).newElementsCount
+                    max = maxOf(max, now)
+                    if (now > before) break
+                }
+                ScrollResult(scrolled = true, newElementsDetected = max - before)
+            } else {
+                ScrollResult(scrolled = true)
             }
-            onProgress?.invoke(100, "新内容检测完成（新增 ${max - before} 个元素）")
-            ScrollResult(scrolled = true, newElementsDetected = max - before)
-        } else {
-            onProgress?.invoke(100, "滚动完成")
-            ScrollResult(scrolled = true)
         }
-    }
 
     data class ScrollResult(val scrolled: Boolean, val newElementsDetected: Int = 0)
 
     // ═════════ 截图（视口，P0 #6 路线图） ═════════
 
-    suspend fun screenshot(
-        onProgress: ((percent: Int, phase: String) -> Unit)? = null,
-    ): ByteArray? = withContext(Dispatchers.Main) {
+    suspend fun screenshot(): ByteArray? = withContext(Dispatchers.Main) {
         val wv = activeTab()?.webView ?: return@withContext null
-        onProgress?.invoke(50, "正在渲染视口截图…")
         val bmp = Bitmap.createBitmap(wv.width, wv.height, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         wv.draw(canvas)
         val stream = java.io.ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.PNG, 90, stream)
         bmp.recycle()
-        onProgress?.invoke(100, "截图完成")
         stream.toByteArray()
     }
 

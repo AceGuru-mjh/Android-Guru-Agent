@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -67,7 +68,7 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Agent 设置
+            // 运行参数
             AnimatedVisibility(
                 visible = true,
                 enter = fadeIn(animationSpec = tween(220)) + slideInVertically(
@@ -76,8 +77,8 @@ fun SettingsScreen(
                 )
             ) {
                 SettingsSection(
-                    icon = Icons.Default.Settings,
-                    title = "Agent"
+                    icon = Icons.Default.Tune,
+                    title = "运行参数"
                 ) {
                 // 默认模式（单选段）
                 SegmentedChoice(
@@ -115,11 +116,10 @@ fun SettingsScreen(
                         textStyle = MaterialTheme.typography.bodyMedium
                     )
                 }
-                SettingsRow("上下文窗口", "128K tokens")
                 }
             }
 
-            // 持久化
+            // 后台持久化
             AnimatedVisibility(
                 visible = true,
                 enter = fadeIn(animationSpec = tween(260, delayMillis = 60)) + slideInVertically(
@@ -156,7 +156,7 @@ fun SettingsScreen(
                 }
             }
 
-            // 关于
+            // 关于与系统
             AnimatedVisibility(
                 visible = true,
                 enter = fadeIn(animationSpec = tween(300, delayMillis = 120)) + slideInVertically(
@@ -183,6 +183,16 @@ fun SettingsScreen(
                             )
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    // 系统信息（只读）
+                    Text(
+                        "系统信息",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    SettingsRow("上下文窗口", "128K tokens")
                 }
             }
         }

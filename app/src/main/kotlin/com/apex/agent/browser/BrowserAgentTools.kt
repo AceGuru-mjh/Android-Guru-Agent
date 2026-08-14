@@ -2,9 +2,14 @@ package com.apex.agent.browser
 
 import android.content.Context
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.StreamingAgentTool
+import com.apex.agent.core.tools.ToolStreamEvent
 import com.apex.agent.core.tools.builtin.browser.DomParser
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -68,7 +73,7 @@ class BrowserAgentTools @Inject constructor(
     }
 
     /** 跳转到 URL（支持 wait_for 元素等待 + 超时兜底） */
-    val navigate = object : AgentTool {
+    val navigate = object : StreamingAgentTool {
         override val id = "browser_navigate"
         override val name = "browser_navigate"
         override val description =
@@ -99,6 +104,27 @@ class BrowserAgentTools @Inject constructor(
             val snap = engine.snapshot()
             val warn = if (nav.timedOut) "\n⚠ 页面加载超时（15s），以下为当前已渲染状态。" else ""
             return "已打开 $url${warn}\n${snap.domSummary}"
+        }
+
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
+            val guardMsg = guard(engine)
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
+            val url = argStr(arguments, "url")
+            if (url == null) { send(ToolStreamEvent.Error("Error: 缺少 url 参数")); close(); return@callbackFlow }
+            val newTab = argBool(arguments, "new_tab")
+            val waitFor = argStr(arguments, "wait_for")
+            val timeout = argInt(arguments, "timeout_ms", 15000)
+            if (newTab) engine.newTab(null)
+            val nav = engine.navigate(url, waitFor, timeout.toLong()) { p, phase ->
+                trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase))
+            }
+            val snap = engine.snapshot()
+            val warn = if (nav.timedOut) "\n⚠ 页面加载超时（15s），以下为当前已渲染状态。" else ""
+            val result = "已打开 $url${warn}\n${snap.domSummary}"
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
         }
     }
 
@@ -253,7 +279,7 @@ class BrowserAgentTools @Inject constructor(
     }
 
     /** 滚动页面（支持无限滚动检测） */
-    val scroll = object : AgentTool {
+    val scroll = object : StreamingAgentTool {
         override val id = "browser_scroll"
         override val name = "browser_scroll"
         override val description = "在页面内滚动，delta_y 为正向下、为负向上。wait_for_new=true 时检测无限滚动新内容加载。"
@@ -272,10 +298,24 @@ class BrowserAgentTools @Inject constructor(
             return if (r.newElementsDetected > 0) "已滚动 $dy 像素，检测到新增 ${r.newElementsDetected} 个元素，建议重新 snapshot"
             else "已滚动 $dy 像素"
         }
+
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
+            val guardMsg = guard(engine)
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
+            val dy = argInt(arguments, "delta_y", 400)
+            val waitNew = argBool(arguments, "wait_for_new")
+            val r = engine.scroll(dy, waitNew) { p, phase -> trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
+            val result = if (r.newElementsDetected > 0) "已滚动 $dy 像素，检测到新增 ${r.newElementsDetected} 个元素，建议重新 snapshot"
+            else "已滚动 $dy 像素"
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
+        }
     }
 
     /** 整页/视口截图（PNG base64） */
-    val screenshot = object : AgentTool {
+    val screenshot = object : StreamingAgentTool {
         override val id = "browser_screenshot"
         override val name = "browser_screenshot"
         override val description =
@@ -286,6 +326,19 @@ class BrowserAgentTools @Inject constructor(
             val bytes = engine.screenshot() ?: return "Error: 无法截图（无激活页面）"
             val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
             return "data:image/png;base64,$b64"
+        }
+
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
+            val guardMsg = guard(engine)
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
+            val bytes = engine.screenshot { p, phase -> trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
+                ?: run { send(ToolStreamEvent.Error("Error: 无法截图（无激活页面）")); close(); return@callbackFlow }
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val result = "data:image/png;base64,$b64"
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
         }
     }
 

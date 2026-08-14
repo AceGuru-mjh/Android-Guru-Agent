@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -112,7 +113,9 @@ import java.util.Date
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.ExecutionPlan
+import com.apex.agent.core.engine.ExecutionSpec
 import com.apex.agent.core.engine.InputType
+import com.apex.agent.core.engine.RiskLevel
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.ui.component.AttachButton
@@ -143,6 +146,10 @@ fun AgentChatScreen(
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
+
+    // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
+    var showCustomInstructionDialog by remember { mutableStateOf(false) }
+    val customInstruction by viewModel.customInstruction.collectAsStateWithLifecycle()
 
     // ═══ /mcp:github 未连接时的连接对话框 ═══
     // ViewModel 在路由 /mcp:github 时若发现 GitHub 未连接，会发射 requestGithubConnect
@@ -209,17 +216,27 @@ fun AgentChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 模式切换
-                FilterChip(
-                    selected = uiState.mode == AgentMode.BUILD,
-                    onClick = { viewModel.setMode(AgentMode.BUILD) },
-                    label = { Text("Build") }
-                )
-                FilterChip(
-                    selected = uiState.mode == AgentMode.PLAN,
-                    onClick = { viewModel.setMode(AgentMode.PLAN) },
-                    label = { Text("Plan") }
-                )
+                // ═══ 模式切换（6 种模式，横向滚动）═══
+                Row(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AgentMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = uiState.mode == mode,
+                            onClick = {
+                                viewModel.setMode(mode)
+                                // Custom 模式：弹出指令编辑对话框（可反复点击修改）
+                                if (mode == AgentMode.CUSTOM) {
+                                    showCustomInstructionDialog = true
+                                }
+                            },
+                            label = { Text(mode.displayName) }
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.width(4.dp))
 
@@ -290,6 +307,17 @@ fun AgentChatScreen(
                         plan = uiState.plan!!,
                         onConfirm = { viewModel.confirmPlan(true) },
                         onReject = { viewModel.confirmPlan(false) }
+                    )
+                }
+            }
+
+            // Spec 确认
+            if (uiState.awaitingSpecConfirmation && uiState.spec != null) {
+                item {
+                    SpecConfirmationCard(
+                        spec = uiState.spec!!,
+                        onConfirm = { viewModel.submitSpecConfirmation(true) },
+                        onReject = { viewModel.submitSpecConfirmation(false) }
                     )
                 }
             }
@@ -402,10 +430,13 @@ fun AgentChatScreen(
                         },
                         placeholder = {
                             Text(
-                                if (uiState.mode == AgentMode.PLAN) {
-                                    "描述任务，Agent先规划..."
-                                } else {
-                                    "输入指令，/ 触发快捷..."
+                                text = when (uiState.mode) {
+                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
+                                    AgentMode.SPEC -> "描述需求，Agent先产出规格..."
+                                    AgentMode.REFLECTION -> "描述任务，Agent生成→评审→修正..."
+                                    AgentMode.HUMAN_ASSIST -> "描述任务，有选择时Agent弹出选项菜单..."
+                                    AgentMode.CUSTOM -> "输入指令（自定义模式生效）..."
+                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
                                 },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -500,6 +531,22 @@ fun AgentChatScreen(
             }
         )
     }
+
+    // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
+    if (showCustomInstructionDialog) {
+        CustomInstructionDialog(
+            initial = customInstruction,
+            onDismiss = { showCustomInstructionDialog = false },
+            onSave = { text ->
+                viewModel.setCustomInstruction(text)
+                showCustomInstructionDialog = false
+            },
+            onClear = {
+                viewModel.setCustomInstruction("")
+                showCustomInstructionDialog = false
+            }
+        )
+    }
 }
 
 // ═══ 消息组件 ═══
@@ -530,6 +577,8 @@ private fun AgentMessageItem(
         )
         is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought, finished = true)
         is AgentUiMessage.PlanMessage -> PlanCard(message.plan)
+        is AgentUiMessage.SpecMessage -> SpecCard(message.spec)
+        is AgentUiMessage.ReflectionReviewMessage -> ReflectionReviewBlock(message.text)
     }
 }
 
@@ -1707,6 +1756,259 @@ private fun PlanConfirmationCard(
     }
 }
 
+// ═══ Spec 模式组件 ═══
+
+/**
+ * 风险等级 → 颜色（Spec / Plan 卡片通用）。
+ */
+@Composable
+private fun riskColor(level: RiskLevel): Color = when (level) {
+    RiskLevel.LOW -> Color(0xFF22C55E)
+    RiskLevel.MEDIUM -> Color(0xFFF59E0B)
+    RiskLevel.HIGH -> Color(0xFFF97316)
+    RiskLevel.CRITICAL -> MaterialTheme.colorScheme.error
+}
+
+/**
+ * 需求规格卡片（Spec 模式确认通过后展示）：
+ * 目标 / 需求 / 约束 / 验收标准 / 交付物，分节呈现。
+ */
+@Composable
+private fun SpecCard(spec: ExecutionSpec) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(26.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                Text("📐 需求规格", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.weight(1f))
+                // 风险徽章
+                val risk = riskColor(spec.riskLevel)
+                Surface(
+                    color = risk.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = "风险 ${spec.riskLevel.name}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = risk,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "目标",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = spec.goal,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            SpecSection("需求", spec.requirements)
+            SpecSection("约束", spec.constraints)
+            SpecSection("验收标准", spec.acceptanceCriteria)
+            SpecSection("交付物", spec.deliverables)
+        }
+    }
+}
+
+/**
+ * Spec 分节列表（空列表自动隐藏）。
+ */
+@Composable
+private fun SpecSection(title: String, items: List<String>) {
+    if (items.isEmpty()) return
+    Spacer(modifier = Modifier.height(10.dp))
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(2.dp))
+    items.forEach { item ->
+        Row(
+            modifier = Modifier.padding(vertical = 1.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "•",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = item,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/**
+ * Spec 确认卡：展示规格要点，等待用户确认/驳回。
+ */
+@Composable
+private fun SpecConfirmationCard(
+    spec: ExecutionSpec,
+    onConfirm: () -> Unit,
+    onReject: () -> Unit
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("确认此规格并开始执行？", style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "目标：${spec.goal}",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (spec.deliverables.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "交付物：${spec.deliverables.joinToString("、")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onReject) { Text("驳回") }
+                androidx.compose.material3.Button(onClick = onConfirm) { Text("确认执行") }
+            }
+        }
+    }
+}
+
+// ═══ 反思模式组件 ═══
+
+/**
+ * 反思模式评审卡片："生成 → 评审 → 修正"循环中的评审意见。
+ * 视觉与思考卡片同族（tertiary），REVIEW 徽章区分"这是对草稿的评审"。
+ */
+@Composable
+private fun ReflectionReviewBlock(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)
+                ) {
+                    Text(
+                        text = "REVIEW",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+                Text(
+                    text = "评审意见",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            SelectionContainer {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                )
+            }
+        }
+    }
+}
+
+// ═══ 自定义模式组件 ═══
+
+/**
+ * 自定义模式指令编辑对话框：输入将持久化并拼入 system prompt。
+ */
+@Composable
+private fun CustomInstructionDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自定义模式指令") },
+        text = {
+            Column {
+                Text(
+                    text = "该指令会拼入 system prompt，指导 Agent 行为（如输出格式、语言、步骤约束）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = { Text("例如：始终用中文回答，先给结论再给细节") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 8
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.Button(onClick = { onSave(text) }) { Text("保存") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onClear) { Text("清除") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
+}
+
 // ═══ 思考深度选择器 ═══
 
 @Composable
@@ -1784,15 +2086,32 @@ private fun ReasoningEffortRow(
 @Composable
 private fun QuestionCard(
     question: AgentQuestion,
-    onAnswer: (String?, String?) -> Unit,
+    onAnswer: (List<String>, String?) -> Unit,
     onCancel: () -> Unit
 ) {
+    // 多选（allowMultiSelect）用集合状态；单选沿用单值状态。
+    val multiSelect = question.allowMultiSelect
+    var selectedOptionIds by remember { mutableStateOf(setOf<String>()) }
     var selectedOptionId by remember { mutableStateOf<String?>(null) }
     var customSelected by remember { mutableStateOf(false) }
     var customText by remember { mutableStateOf("") }
 
-    val canSubmit = selectedOptionId != null ||
-        (customSelected && customText.isNotBlank())
+    val canSubmit = if (multiSelect) {
+        selectedOptionIds.isNotEmpty() || (customSelected && customText.isNotBlank())
+    } else {
+        selectedOptionId != null || (customSelected && customText.isNotBlank())
+    }
+
+    fun toggleOption(id: String) {
+        if (multiSelect) {
+            selectedOptionIds = if (id in selectedOptionIds) selectedOptionIds - id
+            else selectedOptionIds + id
+            customSelected = false
+        } else {
+            selectedOptionId = id
+            customSelected = false
+        }
+    }
 
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
@@ -1802,10 +2121,28 @@ private fun QuestionCard(
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "🧩 Agent 需要你选择",
-                style = MaterialTheme.typography.titleSmall
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "🧩 Agent 需要你选择",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                if (multiSelect) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "可多选",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -1830,19 +2167,20 @@ private fun QuestionCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            selectedOptionId = option.id
-                            customSelected = false
-                        }
+                        .clickable { toggleOption(option.id) }
                         .padding(vertical = 4.dp)
                 ) {
-                    RadioButton(
-                        selected = selectedOptionId == option.id,
-                        onClick = {
-                            selectedOptionId = option.id
-                            customSelected = false
-                        }
-                    )
+                    if (multiSelect) {
+                        Checkbox(
+                            checked = option.id in selectedOptionIds,
+                            onCheckedChange = { toggleOption(option.id) }
+                        )
+                    } else {
+                        RadioButton(
+                            selected = selectedOptionId == option.id,
+                            onClick = { toggleOption(option.id) }
+                        )
+                    }
 
                     Column(modifier = Modifier.padding(start = 4.dp)) {
                         Row(
@@ -1881,17 +2219,31 @@ private fun QuestionCard(
                         .fillMaxWidth()
                         .clickable {
                             customSelected = true
+                            selectedOptionIds = emptySet()
                             selectedOptionId = null
                         }
                         .padding(vertical = 4.dp)
                 ) {
-                    RadioButton(
-                        selected = customSelected,
-                        onClick = {
-                            customSelected = true
-                            selectedOptionId = null
-                        }
-                    )
+                    if (multiSelect) {
+                        Checkbox(
+                            checked = customSelected,
+                            onCheckedChange = {
+                                customSelected = it
+                                if (it) {
+                                    selectedOptionIds = emptySet()
+                                    selectedOptionId = null
+                                }
+                            }
+                        )
+                    } else {
+                        RadioButton(
+                            selected = customSelected,
+                            onClick = {
+                                customSelected = true
+                                selectedOptionId = null
+                            }
+                        )
+                    }
 
                     Text(
                         text = "自定义",
@@ -1930,9 +2282,11 @@ private fun QuestionCard(
                 androidx.compose.material3.Button(
                     onClick = {
                         if (customSelected) {
-                            onAnswer(null, customText.trim())
+                            onAnswer(emptyList(), customText.trim())
+                        } else if (multiSelect) {
+                            onAnswer(selectedOptionIds.toList(), null)
                         } else {
-                            onAnswer(selectedOptionId, null)
+                            onAnswer(listOfNotNull(selectedOptionId), null)
                         }
                     },
                     enabled = canSubmit,

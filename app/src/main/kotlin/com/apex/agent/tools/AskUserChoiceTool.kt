@@ -81,6 +81,10 @@ class AskUserChoiceTool(
             "custom_placeholder": {
               "type": "string",
               "description": "Placeholder for custom input"
+            },
+            "multi_select": {
+              "type": "boolean",
+              "description": "Whether the user may select MULTIPLE options (checkbox list)"
             }
           },
           "required": ["question", "options"]
@@ -101,6 +105,7 @@ class AskUserChoiceTool(
 
             val descriptions = json["option_descriptions"].asStringArray()
             val allowCustom = json["allow_custom"].asBoolean(default = true)
+            val multiSelect = json["multi_select"].asBoolean(default = false)
 
             val question = AgentQuestion(
                 title = questionText,
@@ -113,7 +118,8 @@ class AskUserChoiceTool(
                     )
                 },
                 allowCustom = allowCustom,
-                customPlaceholder = json["custom_placeholder"].asString() ?: "自定义输入"
+                customPlaceholder = json["custom_placeholder"].asString() ?: "自定义输入",
+                allowMultiSelect = multiSelect
             )
 
             val answer: AgentAnswer = gateway.ask(question)
@@ -130,20 +136,20 @@ class AskUserChoiceTool(
                     "User custom answer: ${answer.customText?.trim()}"
                 }
 
-                answer.selectedOptionId != null -> {
-                    val selected = question.options.firstOrNull {
-                        it.id == answer.selectedOptionId
-                    }
-
-                    if (selected != null) {
-                        "User selected: ${selected.label}"
-                    } else {
-                        "Error: user selected an unknown option"
-                    }
-                }
-
                 else -> {
-                    "Error: no answer received"
+                    // 多选走 selectedOptionIds；单选兼容旧字段 selectedOptionId。
+                    val selectedIds = answer.selectedOptionIds.ifEmpty {
+                        listOfNotNull(answer.selectedOptionId)
+                    }
+                    val selectedLabels = selectedIds.mapNotNull { id ->
+                        question.options.firstOrNull { it.id == id }?.label
+                    }
+
+                    if (selectedLabels.isNotEmpty()) {
+                        "User selected: ${selectedLabels.joinToString(", ")}"
+                    } else {
+                        "Error: no answer received"
+                    }
                 }
             }
         } catch (e: Exception) {

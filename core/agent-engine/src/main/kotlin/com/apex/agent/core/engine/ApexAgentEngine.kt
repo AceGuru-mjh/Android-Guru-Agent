@@ -28,12 +28,21 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Apex Agent Engine — production implementation.
  *
- * Two execution modes:
+ * Execution modes:
  * - [AgentMode.BUILD]: streaming ReAct loop (Think → Act → Observe → repeat → Done).
  * - [AgentMode.PLAN]: Think → Plan → stream plan to UI → await user confirmation
  *   → execute each [PlanStep] in sequence → emit a final reflection.
+ * - [AgentMode.SPEC]: Think → Spec → stream [ExecutionSpec] to UI → await user
+ *   confirmation → execute each deliverable in sequence → emit a final summary.
+ * - [AgentMode.REFLECTION]: Build loop + "generate → review → revise" cycle on the
+ *   final text turn ([AgentConfig.reflectionRounds] rounds), emitting
+ *   [AgentEvent.ReflectionReview] between passes.
+ * - [AgentMode.HUMAN_ASSIST]: Build loop with a system prompt that mandates
+ *   ask_user_choice whenever multiple options exist (human-in-the-loop).
+ * - [AgentMode.CUSTOM]: Build loop with a user-supplied custom instruction
+ *   appended to the system prompt.
  *
- * Both modes:
+ * All modes:
  * - Stream every LLM response token-by-token via [AgentEvent.ResponseChunk] / [AgentEvent.ThinkingChunk].
  * - Honor [AgentConfig.thinkingLevel] by injecting [ThinkingLevel.toPromptInstruction] into the system prompt.
  * - Accumulate streamed tool-call argument fragments via [ToolCallAccumulator].
@@ -74,6 +83,12 @@ class ApexAgentEngine(
      * Reset to a fresh [CompletableDeferred] every time a new plan is awaiting confirmation.
      */
     private var planConfirmationDeferred: CompletableDeferred<Boolean>? = null
+
+    /**
+     * Channel for the UI to deliver spec-confirmation decisions back to the engine
+     * while [executeSpecMode] is suspended on [awaitSpecConfirmation].
+     */
+    private var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
 
     /**
      * Channel for the UI to deliver user-input answers back to the engine
@@ -150,6 +165,14 @@ class ApexAgentEngine(
     }
 
     /**
+     * Called from the UI (e.g. `ChatViewModel.submitSpecConfirmation`) to resume the
+     * suspended spec-mode execution. No-op if no spec is currently awaiting confirmation.
+     */
+    fun submitSpecConfirmation(confirmed: Boolean) {
+        specConfirmationDeferred?.complete(confirmed)
+    }
+
+    /**
      * 兼容旧接口：纯文本输入委托给多模态入口。
      */
     override fun execute(input: String): Flow<AgentEvent> = execute(UserInput.text(input))
@@ -211,13 +234,36 @@ class ApexAgentEngine(
                     }
                     totalIterations = maxOf(totalIterations, planIterations)
                 }
+                AgentMode.SPEC -> {
+                    val specIterations = executeSpecMode(userText) { event ->
+                        if (event is AgentEvent.ToolCallComplete) totalToolCalls++
+                        if (event is AgentEvent.IterationStart) totalIterations =
+                            maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
+                        emit(event)
+                    }
+                    totalIterations = maxOf(totalIterations, specIterations)
+                }
+                // REFLECTION / HUMAN_ASSIST / CUSTOM 共享 ReAct 主循环：
+                // 行为差异全部由 buildSystemPrompt 注入的 Mode 段落驱动；
+                // REFLECTION 另在最终纯文本轮次触发"生成→评审→修正"循环。
+                AgentMode.REFLECTION, AgentMode.HUMAN_ASSIST, AgentMode.CUSTOM -> {
+                    val iter = executeBuildLoop { event ->
+                        if (event is AgentEvent.ToolCallComplete) totalToolCalls++
+                        if (event is AgentEvent.IterationStart) totalIterations =
+                            maxOf(totalIterations, event.iteration)
+                        AppLogger.instance.logEvent(event)
+                        emit(event)
+                    }
+                    totalIterations = maxOf(totalIterations, iter)
+                }
             }
         } catch (e: CancellationException) {
             AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "任务被中止 (CancellationException)")
             emit(AgentEvent.Aborted)
         } catch (e: TimeoutCancellationException) {
-            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
-            emit(AgentEvent.Error("Plan confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
+            emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: Exception) {
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
             taskHadFailure = true
@@ -230,6 +276,8 @@ class ApexAgentEngine(
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
             planConfirmationDeferred?.complete(false)
             planConfirmationDeferred = null
+            specConfirmationDeferred?.complete(false)
+            specConfirmationDeferred = null
             emit(
                 AgentEvent.Complete(
                     summary = "Task completed",
@@ -347,6 +395,96 @@ class ApexAgentEngine(
     }
 
     // ═══════════════════════════════════════════════════════
+    // SPEC mode
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * 规格模式：Think → 生成需求规格（流式）→ 解析 → 用户确认 →
+     * 按交付物逐项执行（复用 Build 循环）→ 总结。
+     *
+     * 与 [executePlanMode] 的区别：产物是 [ExecutionSpec]（目标 / 需求 /
+     * 约束 / 验收标准 / 交付物），执行阶段的每一步都携带完整规格上下文，
+     * 让模型明确"要交付什么、做成什么样才算完成"。
+     */
+    private suspend fun executeSpecMode(
+        input: String,
+        emit: suspend (AgentEvent) -> Unit
+    ): Int {
+        // Phase 1: think + generate spec (streamed as ThinkingChunk)
+        emit(AgentEvent.ThinkingStart(0, config.thinkingLevel))
+
+        val specPrompt = buildSpecPrompt(input)
+        val specResponseBuilder = StringBuilder()
+
+        llmClient.chatStream(
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt),
+            temperature = config.temperature
+        ).collect { chunk ->
+            chunk.content?.let {
+                specResponseBuilder.append(it)
+                emit(AgentEvent.ThinkingChunk(it))
+            }
+        }
+
+        val specResponse = specResponseBuilder.toString()
+        emit(AgentEvent.ThinkingComplete(specResponse))
+
+        // Phase 2: parse spec
+        val spec = parseExecutionSpec(specResponse, input)
+        emit(AgentEvent.SpecGenerated(spec))
+
+        // Phase 3: await user confirmation
+        emit(AgentEvent.SpecAwaitingConfirmation(spec))
+        val confirmed = awaitSpecConfirmation()
+        if (!confirmed) {
+            emit(AgentEvent.Aborted)
+            return 0
+        }
+        emit(AgentEvent.SpecConfirmed(spec))
+
+        // Phase 4: execute each deliverable sequentially (Build loop per deliverable).
+        // 无交付物时回退到需求清单；两者皆空则直接执行目标。
+        val steps = spec.deliverables.ifEmpty { spec.requirements }.ifEmpty { listOf(spec.goal) }
+        var iterations = 0
+        for ((index, stepText) in steps.withIndex()) {
+            if (!isRunning) break
+            emit(AgentEvent.StepStart(index, stepText))
+
+            val stepPrompt = buildSpecStepPrompt(spec, stepText, index)
+            addMessage(LlmMessage.User(stepPrompt))
+
+            val stepIters = executeBuildLoop { event -> emit(event) }
+            iterations += stepIters
+        }
+
+        // Phase 5: reflection
+        val reflectPrompt = buildSpecReflectionPrompt(spec)
+        val reflectionBuilder = StringBuilder()
+        llmClient.chatStream(
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
+            temperature = config.temperature
+        ).collect { chunk ->
+            chunk.content?.let {
+                reflectionBuilder.append(it)
+                emit(AgentEvent.ResponseChunk(it))
+            }
+        }
+        emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
+
+        return iterations
+    }
+
+    private suspend fun awaitSpecConfirmation(): Boolean {
+        val deferred = CompletableDeferred<Boolean>()
+        specConfirmationDeferred = deferred
+        return try {
+            withTimeout(PLAN_CONFIRMATION_TIMEOUT_MS) { deferred.await() }
+        } finally {
+            specConfirmationDeferred = null
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
     // BUILD mode (ReAct loop)
     // ═══════════════════════════════════════════════════════
 
@@ -458,6 +596,50 @@ class ApexAgentEngine(
                 }
 
                 contentBuilder.isNotEmpty() -> {
+                    // ═══ Reflection 模式：生成 → 评审 → 修正 ═══
+                    // 最终纯文本轮次时，草稿已作为 ResponseChunk 流式呈现（UI 显示"生成"），
+                    // 随后执行 config.reflectionRounds 轮"评审 + 修正"：
+                    // - 评审：调用 LLM 审视草稿（不流式，完成后整段发射 ReflectionReview）；
+                    // - 修正：调用 LLM 依据评审意见重写，流式发射 ResponseChunk；
+                    // 修正产物为最终回复（ResponseComplete），并写入历史。
+                    if (config.mode == AgentMode.REFLECTION && config.reflectionRounds > 0) {
+                        var draft = contentBuilder.toString()
+                        addMessage(LlmMessage.Assistant(draft))
+
+                        repeat(config.reflectionRounds) { round ->
+                            // 评审
+                            val reviewBuilder = StringBuilder()
+                            llmClient.chatStream(
+                                messages = listOf(LlmMessage.System(buildSystemPrompt())) +
+                                    LlmMessage.User(buildReviewPrompt(draft)),
+                                temperature = config.temperature
+                            ).collect { chunk ->
+                                chunk.content?.let { reviewBuilder.append(it) }
+                            }
+                            val review = reviewBuilder.toString().ifBlank { "评审未返回内容，保留草稿。" }
+                            emit(AgentEvent.ReflectionReview(review))
+
+                            // 修正
+                            val reviseBuilder = StringBuilder()
+                            llmClient.chatStream(
+                                messages = listOf(LlmMessage.System(buildSystemPrompt())) +
+                                    LlmMessage.User(buildRevisePrompt(draft, review, round + 1)),
+                                temperature = config.temperature
+                            ).collect { chunk ->
+                                chunk.content?.let {
+                                    reviseBuilder.append(it)
+                                    emit(AgentEvent.ResponseChunk(it))
+                                }
+                            }
+                            val revised = reviseBuilder.toString().ifBlank { draft }
+                            addMessage(LlmMessage.Assistant(revised))
+                            draft = revised
+                        }
+
+                        emit(AgentEvent.ResponseComplete(draft))
+                        return iteration
+                    }
+
                     addMessage(LlmMessage.Assistant(contentBuilder.toString()))
                     emit(AgentEvent.ResponseComplete(contentBuilder.toString()))
                     return iteration
@@ -646,11 +828,43 @@ class ApexAgentEngine(
                     appendLine("You are in planning mode. Analyze the task and produce a detailed execution plan.")
                     appendLine("Do NOT execute any tools yet. Only output the plan as JSON.")
                 }
+                AgentMode.SPEC -> {
+                    appendLine("## Mode: SPEC")
+                    appendLine("You are in spec mode. Analyze the task and produce a detailed requirement specification")
+                    appendLine("(goal, requirements, constraints, acceptance criteria, deliverables).")
+                    appendLine("Do NOT execute any tools yet. Only output the spec as JSON.")
+                }
+                AgentMode.REFLECTION -> {
+                    appendLine("## Mode: REFLECTION")
+                    appendLine("You are in reflection mode. Quality matters more than speed: after drafting an answer,")
+                    appendLine("the engine will ask you to review it critically, then revise it into the final output.")
+                    appendLine("When drafting, aim for completeness, correctness, and clarity.")
+                }
+                AgentMode.HUMAN_ASSIST -> {
+                    appendLine("## Mode: HUMAN_ASSIST (human-in-the-loop)")
+                    appendLine("You are in human-assisted mode. Whenever the task involves MULTIPLE viable options —")
+                    appendLine("different approaches, multiple targets/apps/files, ambiguous intent, risky or irreversible")
+                    appendLine("actions, or user preference — you MUST call ask_user_choice BEFORE proceeding and wait")
+                    appendLine("for the user's selection. NEVER guess when the choice materially changes the result.")
+                    appendLine("Keep questions short and provide 2-6 clear options. If the user skips, pick the safest")
+                    appendLine("reasonable default or stop and explain.")
+                }
+                AgentMode.CUSTOM -> {
+                    appendLine("## Mode: CUSTOM")
+                    appendLine("You are in custom mode. Follow the user's custom instructions below in addition to the")
+                    appendLine("general rules. Custom instructions take priority over generic behavior guidance.")
+                }
                 AgentMode.BUILD -> {
                     appendLine("## Mode: BUILD")
                     appendLine("You are in build mode. Act directly. Use tools when needed.")
                     appendLine("Be efficient: prefer fewer steps, verify results between calls.")
                 }
+            }
+            // 自定义模式：附加用户指令（拼入 system prompt）。
+            if (config.mode == AgentMode.CUSTOM && !config.customInstruction.isNullOrBlank()) {
+                appendLine()
+                appendLine("## Custom Instructions")
+                appendLine(config.customInstruction)
             }
             if (thinking.isNotBlank()) {
                 appendLine()
@@ -770,6 +984,115 @@ class ApexAgentEngine(
     }
 
     // ═══════════════════════════════════════════════════════
+    // SPEC mode prompt builders
+    // ═══════════════════════════════════════════════════════
+
+    private fun buildSpecPrompt(input: String): String = buildString {
+        appendLine("Analyze this task and create a detailed requirement specification:")
+        appendLine()
+        appendLine("Task: $input")
+        appendLine()
+        appendLine("Available tools:")
+        toolRegistry.getAllTools().forEach { tool ->
+            appendLine("- ${tool.id}: ${tool.description.take(120)}")
+        }
+        appendLine()
+        appendLine("Output a JSON spec with EXACTLY this structure (no prose, no markdown fences):")
+        appendLine(
+            """
+            {
+              "goal": "<one-sentence goal>",
+              "reasoning": "<why this approach / key design decisions>",
+              "risk_level": "low|medium|high|critical",
+              "estimated_tool_calls": <int>,
+              "requirements": ["<functional requirement 1>", "..."],
+              "constraints": ["<constraint 1>", "..."],
+              "acceptance_criteria": ["<how to verify success 1>", "..."],
+              "deliverables": ["<concrete deliverable 1>", "..."]
+            }
+            """.trimIndent()
+        )
+        appendLine()
+        appendLine("Be specific: each requirement/criterion must be verifiable. Empty arrays are allowed but avoid them when possible.")
+    }
+
+    private fun buildSpecStepPrompt(
+        spec: ExecutionSpec,
+        stepText: String,
+        stepIndex: Int
+    ): String = buildString {
+        appendLine("Execute deliverable ${stepIndex + 1} of the spec:")
+        appendLine("Deliverable: $stepText")
+        appendLine()
+        appendLine("Full spec context:")
+        appendLine("Goal: ${spec.goal}")
+        if (spec.requirements.isNotEmpty()) {
+            appendLine("Requirements:")
+            spec.requirements.forEach { appendLine("  - $it") }
+        }
+        if (spec.constraints.isNotEmpty()) {
+            appendLine("Constraints:")
+            spec.constraints.forEach { appendLine("  - $it") }
+        }
+        if (spec.acceptanceCriteria.isNotEmpty()) {
+            appendLine("Acceptance criteria:")
+            spec.acceptanceCriteria.forEach { appendLine("  - $it") }
+        }
+        appendLine()
+        appendLine("Deliver this item now using the appropriate tools. Verify against the acceptance criteria. Be concise.")
+    }
+
+    private fun buildSpecReflectionPrompt(spec: ExecutionSpec): String = buildString {
+        appendLine("The following spec has been executed:")
+        appendLine("Goal: ${spec.goal}")
+        spec.deliverables.forEachIndexed { index, d ->
+            appendLine("  ${index + 1}. $d")
+        }
+        appendLine()
+        appendLine(
+            "Summarize what was delivered in 2-4 sentences. Report any unmet acceptance " +
+                "criteria, issues, or follow-ups the user should know about."
+        )
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Reflection mode prompt builders
+    // ═══════════════════════════════════════════════════════
+
+    private fun buildReviewPrompt(draft: String): String = buildString {
+        appendLine("You are a strict reviewer. Critically evaluate the following draft answer:")
+        appendLine()
+        appendLine("--- DRAFT START ---")
+        appendLine(draft)
+        appendLine("--- DRAFT END ---")
+        appendLine()
+        appendLine(
+            "Check for: factual errors, logical gaps, incomplete steps, unclear or ambiguous " +
+                "wording, missing edge cases, and deviations from the user's request. " +
+                "Output ONLY the review: a concise list of concrete, actionable issues " +
+                "(max 6 items). Do not rewrite the answer here."
+        )
+    }
+
+    private fun buildRevisePrompt(draft: String, review: String, round: Int): String = buildString {
+        appendLine("Revise the draft answer below to address the reviewer's issues.")
+        appendLine("Round $round revision.")
+        appendLine()
+        appendLine("--- DRAFT START ---")
+        appendLine(draft)
+        appendLine("--- DRAFT END ---")
+        appendLine()
+        appendLine("--- REVIEW START ---")
+        appendLine(review)
+        appendLine("--- REVIEW END ---")
+        appendLine()
+        appendLine(
+            "Output ONLY the final revised answer (complete, self-contained, no meta commentary). " +
+                "Fix every actionable issue in the review while preserving what was already good."
+        )
+    }
+
+    // ═══════════════════════════════════════════════════════
     // Plan parsing
     // ═══════════════════════════════════════════════════════
 
@@ -843,10 +1166,68 @@ class ApexAgentEngine(
             "Raw LLM response kept for reference in the engine log.\n\n$response".take(500)
     )
 
+    // ═══════════════════════════════════════════════════════
+    // Spec parsing
+    // ═══════════════════════════════════════════════════════
+
+    private fun parseExecutionSpec(response: String, originalTask: String): ExecutionSpec {
+        val jsonStr = extractJsonFromResponse(response) ?: return fallbackSpec(response, originalTask)
+        return try {
+            val json = Json.parseToJsonElement(jsonStr).jsonObject
+
+            val goal = json["goal"]?.jsonPrimitive?.contentOrNull ?: originalTask
+            val reasoning = json["reasoning"]?.jsonPrimitive?.contentOrNull
+                ?: "Auto-generated spec (LLM did not provide reasoning)."
+            val estimatedToolCalls = json["estimated_tool_calls"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                ?: 1
+            val riskLevel = json["risk_level"]?.jsonPrimitive?.contentOrNull
+                ?.let { parseRiskLevel(it) } ?: RiskLevel.MEDIUM
+
+            fun parseList(key: String): List<String> = (json[key] as? JsonArray)
+                ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { s -> s.isNotBlank() } }
+                ?: emptyList()
+
+            val requirements = parseList("requirements")
+            val constraints = parseList("constraints")
+            val acceptanceCriteria = parseList("acceptance_criteria")
+            val deliverables = parseList("deliverables")
+
+            if (requirements.isEmpty() && acceptanceCriteria.isEmpty() && deliverables.isEmpty()) {
+                return fallbackSpec(response, originalTask)
+            }
+
+            ExecutionSpec(
+                goal = goal,
+                requirements = requirements,
+                constraints = constraints,
+                acceptanceCriteria = acceptanceCriteria,
+                deliverables = deliverables,
+                estimatedToolCalls = estimatedToolCalls,
+                riskLevel = riskLevel,
+                reasoning = reasoning
+            )
+        } catch (e: Exception) {
+            fallbackSpec(response, originalTask)
+        }
+    }
+
+    private fun fallbackSpec(response: String, originalTask: String): ExecutionSpec = ExecutionSpec(
+        goal = originalTask,
+        requirements = listOf("完成：$originalTask"),
+        acceptanceCriteria = listOf("任务目标达成，结果可直接使用或验证。"),
+        deliverables = listOf(originalTask),
+        estimatedToolCalls = 1,
+        riskLevel = RiskLevel.MEDIUM,
+        reasoning = "Could not parse LLM's spec JSON; falling back to goal-only execution. " +
+            "Raw LLM response kept for reference in the engine log.\n\n$response".take(500)
+    )
+
     override suspend fun abort() {
         isRunning = false
         planConfirmationDeferred?.complete(false)
         planConfirmationDeferred = null
+        specConfirmationDeferred?.complete(false)
+        specConfirmationDeferred = null
         userInputDeferred?.complete("")
         userInputDeferred = null
     }

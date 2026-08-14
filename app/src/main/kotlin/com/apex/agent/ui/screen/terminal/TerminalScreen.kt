@@ -401,7 +401,7 @@ private fun ActionButton(label: String, loading: Boolean, modifier: Modifier = M
     }
 }
 
-// 轻量 clickable 包装，避免重复 import 冲突
+// 轻量 clickable 包装，复用已 import 的 androidx.compose.foundation.clickable
 @Composable
 private fun Modifier.clickableSafe(enabled: Boolean, onClick: () -> Unit): Modifier =
-    this.then(androidx.compose.foundation.clickable(enabled = enabled, onClick = onClick))
+    this.then(this.clickable(enabled = enabled, onClick = onClick))

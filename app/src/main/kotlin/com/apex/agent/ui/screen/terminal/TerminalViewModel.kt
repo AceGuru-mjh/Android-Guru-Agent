@@ -212,7 +212,7 @@ class TerminalViewModel @Inject constructor(
     /** Android 开发依赖一键装（仅 ANDROID 分组）。 */
     fun installAndroidOnly(onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
-            val items = depItems.filter { it.group == DepItem.DepGroup.ANDROID }
+            val items = depItems.filter { it.group == DepGroup.ANDROID }
             _install.update { it.copy(runningId = "__android__", log = "▶ 开始安装 Android 开发依赖（镜像=${_useMirror.value}）…\n") }
             items.forEachIndexed { index, item ->
                 onProgress(index, items.size)

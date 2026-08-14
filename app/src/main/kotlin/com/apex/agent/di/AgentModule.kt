@@ -10,7 +10,6 @@ import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
-import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,15 +19,8 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class AgentModule {
+object AgentModule {
 
-    @Binds
-    @Singleton
-    abstract fun bindExecutionMemoryObserver(
-        impl: CsMemSessionObserver
-    ): ExecutionMemoryObserver
-
-    @Provides
     @Singleton
     fun providePrivilegeInfoProvider(): PrivilegeInfoProvider {
         return AndroidPrivilegeInfoProvider()

@@ -21,6 +21,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AgentModule {
 
+    @Provides
     @Singleton
     fun providePrivilegeInfoProvider(): PrivilegeInfoProvider {
         return AndroidPrivilegeInfoProvider()

@@ -95,6 +95,14 @@ sealed interface AgentUiMessage {
     ) : AgentUiMessage
     data class System(val text: String) : AgentUiMessage
     /**
+     * Skill 开始执行横幅（区别于普通 System 行）：`/skill:xxx` 路由触发时展示，
+     * 让用户一眼看出"当前正在执行哪个 Skill"，并为其后 SKILL 来源的工具调用提供上下文。
+     */
+    data class SkillStart(
+        val skill: String,
+        val timestamp: Long = java.lang.System.currentTimeMillis()
+    ) : AgentUiMessage
+    /**
      * 错误提示块（区别于灰色 System 行）：红色高亮 + 可重试标记。
      */
     data class Error(
@@ -955,10 +963,15 @@ class AgentChatViewModel @Inject constructor(
         )
         val route = SlashCommandRouter.route(parsed, context)
 
-        // 始终追加系统消息，让用户看到指令被识别 + 当前状态。
+        // 始终追加反馈消息，让用户看到指令被识别 + 当前状态：
+        // Skill 指令使用专用横幅（SkillStart），其余指令用 System 行。
+        val skillName = route.skillName
         _uiState.update { s ->
             s.copy(
-                messages = s.messages + AgentUiMessage.System(route.systemMessage),
+                messages = s.messages + (
+                    if (skillName != null) AgentUiMessage.SkillStart(skillName)
+                    else AgentUiMessage.System(route.systemMessage)
+                    ),
                 isLoading = !route.requestGithubConnect,
                 currentThinking = "",
                 currentResponse = ""
@@ -974,7 +987,7 @@ class AgentChatViewModel @Inject constructor(
         }
 
         // 记录 Skill 上下文，循环内产生的工具调用会被标为 SKILL 来源。
-        skillContext = route.skillName
+        skillContext = skillName
 
         currentJob = viewModelScope.launch {
             agentEngine.execute(route.agentPrompt).collect { event -> handleEvent(event) }

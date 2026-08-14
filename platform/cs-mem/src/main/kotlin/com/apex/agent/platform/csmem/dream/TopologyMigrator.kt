@@ -29,7 +29,7 @@ object TopologyMigrator {
     /**
      * 生成旧→新版本的节点映射。
      *
-     * @param oldNodes 上一已知版本的全部节点（已按 appPackage 归属）
+     * @param oldNodes 上一已知版本的全部节点
      * @param newNodes 当前新版本的全部节点
      * @param fromVersion 旧版本号
      * @param toVersion 新版本号
@@ -44,9 +44,9 @@ object TopologyMigrator {
         if (oldNodes.isEmpty() || newNodes.isEmpty()) return emptyList()
 
         return oldNodes.mapNotNull { old ->
-            // 候选限定：同 appPackage + 同 role（跨包/跨角色无意义）
+            // 候选限定：同 role（跨角色无意义；SemanticNode 不携带包名，包级隔离无需比较）
             val candidates = newNodes.filter {
-                it.appPackage == old.appPackage && it.role == old.role
+                it.role == old.role
             }
             if (candidates.isEmpty()) return@mapNotNull null
 

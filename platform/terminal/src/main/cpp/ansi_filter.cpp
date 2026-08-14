@@ -44,11 +44,11 @@ std::string AnsiFilter::strip(const std::string& input) {
             break;
 
         case State::OSC:
-            // OSC序列直到 BEL(\007) 或 ESC \
+            // OSC序列直到 BEL(\007) 或 ESC
             if (c == '\007') {
                 state = State::NORMAL;
             } else if (c == '\033' && i + 1 < input.size() && input[i + 1] == '\\') {
-                i++; // 跳过 \
+                i++; // 跳过反斜杠
                 state = State::NORMAL;
             }
             break;

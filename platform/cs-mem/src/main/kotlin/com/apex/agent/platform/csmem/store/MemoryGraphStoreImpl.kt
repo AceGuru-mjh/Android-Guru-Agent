@@ -82,7 +82,7 @@ class MemoryGraphStoreImpl @Inject constructor(
         val newNodes = nodes.filter { it.fingerprint !in existingFps }
         val existingNodes = nodes.filter { it.fingerprint in existingFps }
 
-        // 插入新节点
+        // 插入新节点（appVersion 由调用方透传，落库以供跨版本迁移分组）
         if (newNodes.isNotEmpty()) {
             val entities = newNodes.map { node ->
                 NodeEntity(
@@ -94,6 +94,7 @@ class MemoryGraphStoreImpl @Inject constructor(
                     boundsJson = boundsToJson(node.bounds),
                     interactiveFlags = encodeInteractiveFlags(node),
                     appPackage = appPackage,
+                    appVersion = node.appVersion,
                     firstSeenAt = now,
                     lastSeenAt = now,
                     occurrenceCount = 1
@@ -122,6 +123,10 @@ class MemoryGraphStoreImpl @Inject constructor(
 
     override suspend fun searchNodesByText(query: String, limit: Int): List<SemanticNode> {
         return db.nodeDao().searchByText(query, limit).map { it.toDomain() }
+    }
+
+    override suspend fun getNodesByVersion(version: String): List<SemanticNode> {
+        return db.nodeDao().getByVersion(version).map { it.toDomain() }
     }
 
     // ==================== Edges ====================
@@ -259,6 +264,63 @@ class MemoryGraphStoreImpl @Inject constructor(
         return total
     }
 
+    // ==================== 拓扑同胚迁移 ====================
+
+    override suspend fun recordMigration(maps: List<MigrationMap>) {
+        if (maps.isEmpty()) return
+        val entities = maps.map { m ->
+            MigrationMapEntity(
+                oldFingerprint = m.oldFingerprint,
+                newFingerprint = m.newFingerprint,
+                matchScore = m.matchScore,
+                fromVersion = m.fromVersion,
+                toVersion = m.toVersion,
+                createdAt = System.currentTimeMillis()
+            )
+        }
+        db.migrationDao().upsertAll(entities)
+    }
+
+    override suspend fun resolveMigration(oldFingerprint: String): String? {
+        return db.migrationDao().getByOldFingerprint(oldFingerprint)?.newFingerprint
+    }
+
+    override suspend fun getMigrationMaps(): List<MigrationMap> {
+        return db.migrationDao().getAll().map {
+            MigrationMap(
+                oldFingerprint = it.oldFingerprint,
+                newFingerprint = it.newFingerprint,
+                matchScore = it.matchScore,
+                fromVersion = it.fromVersion,
+                toVersion = it.toVersion
+            )
+        }
+    }
+
+    override suspend fun latestKnownVersion(): String? {
+        return db.migrationDao().latestToVersion()
+    }
+
+    // ==================== 记忆可视化 ====================
+
+    override suspend fun deleteEpisode(episodeId: String): Int {
+        // 节点为跨 Episode 共享字典，不随 Episode 删除而硬删（仅相关边清理）；
+        // 删除在与 episodeDao 同事务内完成，保证 Episode + 边要么全删要么回滚。
+        return db.withTransaction {
+            db.edgeDao().deleteByEpisode(episodeId)
+            db.episodeDao().delete(episodeId)
+            1
+        }
+    }
+
+    override suspend fun countNodes(): Int {
+        return db.nodeDao().countAll()
+    }
+
+    override suspend fun countMacros(): Int {
+        return db.fsmMacroDao().countAll()
+    }
+
     // ==================== Private Helpers ====================
 
     private fun boundsToJson(bounds: Rect): String {
@@ -279,7 +341,8 @@ class MemoryGraphStoreImpl @Inject constructor(
             className = className,
             bounds = bounds,
             domDepth = 0,  // 从存储层无法精确还原 domDepth
-            isInteractive = interactiveFlags > 0
+            isInteractive = interactiveFlags > 0,
+            appVersion = appVersion
         )
     }
 

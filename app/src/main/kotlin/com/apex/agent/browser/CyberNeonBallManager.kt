@@ -15,10 +15,6 @@ import android.view.View
 import android.view.animation.CycleInterpolator
 import android.widget.ImageView
 import android.widget.TextView
-import com.airbnb.android.lottie.LottieAnimationView
-import com.airbnb.android.lottie.LottieProperty
-import com.airbnb.android.lottie.model.KeyPath
-import com.airbnb.android.lottie.value.LottieValueCallback
 import androidx.dynamicanimation.animation.DynamicAnimation
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
@@ -113,7 +109,6 @@ class CyberNeonBallManager @Inject constructor(
         currentState = next
         val view = ballView ?: return
         val neonRing = view.findViewById<NeonRingView>(R.id.neonRing)
-        val lottieRing = view.findViewById<LottieAnimationView>(R.id.lottieRing)
         val imgCoreIcon = view.findViewById<ImageView>(R.id.imgCoreIcon)
         val pulseRing = view.findViewById<View>(R.id.pulseRing)
         val badgeAlert = view.findViewById<TextView>(R.id.badgeAlert)
@@ -121,49 +116,26 @@ class CyberNeonBallManager @Inject constructor(
         val color: Int
         val showBadge: Boolean
         val showPulse: Boolean
-        val rawName: String
         when (next) {
             CyberState.RUNNING -> {
                 color = 0xFF00F0FF.toInt(); showBadge = false; showPulse = false
-                rawName = "anim_neon_running"
             }
             CyberState.NEED_HUMAN -> {
                 color = 0xFFFFB800.toInt(); showBadge = true; showPulse = true
-                rawName = "anim_neon_warning"
             }
             CyberState.ERROR -> {
                 color = 0xFFFF2A55.toInt(); showBadge = false; showPulse = false
-                rawName = "anim_neon_error"
             }
             CyberState.SUCCESS -> {
                 color = 0xFF00FF87.toInt(); showBadge = false; showPulse = false
-                rawName = "anim_neon_success"
             }
         }
         imgCoreIcon.setColorFilter(color)
         badgeAlert.visibility = if (showBadge) View.VISIBLE else View.GONE
 
-        // 优先加载 res/raw/<rawName>.json（真实 Lottie 资源），不存在则回退到代码绘制霓虹环
-        val rawId = appContext.resources.getIdentifier(rawName, "raw", appContext.packageName)
-        if (rawId != 0) {
-            lottieRing.visibility = View.VISIBLE
-            neonRing.visibility = View.GONE
-            lottieRing.setAnimation(rawId)
-            // 运行时改色为赛博色（仅对纯色图层生效；渐变图层保持原样）
-            lottieRing.addValueCallback(
-                KeyPath("**"),
-                LottieProperty.COLOR,
-                LottieValueCallback(color),
-            )
-            lottieRing.speed = if (next == CyberState.NEED_HUMAN) 1.5f else 1.2f
-            lottieRing.repeatCount = if (next == CyberState.ERROR || next == CyberState.SUCCESS) 0 else LottieAnimationView.INFINITE
-            lottieRing.playAnimation()
-        } else {
-            lottieRing.visibility = View.GONE
-            lottieRing.cancelAnimation()
-            neonRing.visibility = View.VISIBLE
-            neonRing.setStateColor(color)
-        }
+        // 霓虹环始终由代码绘制（NeonRingView），不依赖 Lottie 二进制资源，零额外包体
+        neonRing.visibility = View.VISIBLE
+        neonRing.setStateColor(color)
 
         if (showPulse) {
             pulseRing.visibility = View.VISIBLE

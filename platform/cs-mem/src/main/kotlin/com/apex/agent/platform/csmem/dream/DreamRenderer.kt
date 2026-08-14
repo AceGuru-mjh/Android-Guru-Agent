@@ -121,8 +121,7 @@ class DreamRenderer @Inject constructor(
             result.errors.add("Macro validation failed: ${e.message}")
         }
 
-        // 4. 拓扑同胚迁移（占位 - 完整 VF2 实现见 Phase 5 后续）
-        // 检查是否有 App 版本号变化 → 尝试图同胚映射
+        // 4. 拓扑同胚迁移：检测 App 版本变化 → 轻量属性相似度映射旧→新节点
         try {
             checkVersionMigration()?.let {
                 result.migrationNotes = it
@@ -136,27 +135,60 @@ class DreamRenderer @Inject constructor(
     }
 
     /**
-     * 检查是否有 App 版本更新，尝试拓扑同胚迁移。
-     * 完整 VF2 子图同构匹配留给后续迭代。
+     * 检查宿主 App 版本是否较"上次已知版本"发生变化；若变化则调用 [TopologyMigrator]
+     * 生成旧→新节点映射并落库，使跨版本记忆与 FSM 宏仍能复用。
+     *
+     * 实现说明：
+     * - 版本来源：宿主自身 [Context.getPackageName] 的 versionName（记忆系统服务的对象主要是本 App UI）；
+     * - 上一已知版本：store 中最近一条迁移的 toVersion（首跑为 null，跳过迁移）；
+     * - 节点集：按版本分组从 store 取全部节点（旧版本组 vs 当前版本组）；
+     * - 采用轻量属性相似度（非完整 VF2），分数 ≥ 0.7 才建别名桥，低置信度安全跳过。
+     *
+     * @return 可读的迁移摘要（审计用），无变化/首跑返回 null
      */
-    private fun checkVersionMigration(): String? {
+    private suspend fun checkVersionMigration(): String? {
         val pm = context.packageManager
-        val notes = mutableListOf<String>()
-
-        // 检查已安装的"关键 App"版本变化（通过数据库中记录的包名）
-        // 当前为占位实现：检查是否有系统 WebView 更新
-        try {
-            val webViewInfo = pm.getPackageInfo(
-                "com.google.android.webview", 0
-            )
-            notes.add("WebView version: ${webViewInfo.versionName}")
+        val packageName = context.packageName
+        val currentVersion = try {
+            pm.getPackageInfo(packageName, 0).versionName ?: return null
         } catch (_: PackageManager.NameNotFoundException) {
-            // WebView 未安装
+            return null
         }
 
-        return if (notes.isNotEmpty()) {
-            notes.joinToString("\n")
-        } else null
+        val lastKnown = store.latestKnownVersion()
+        if (lastKnown == null) {
+            // 首跑：无历史基线，写一条自映射（old==new==currentVersion）作为基线，
+            // 使 latestKnownVersion 后续能取到当前版本，且不产生任何跨版本别名。
+            store.recordMigration(listOf(
+                com.apex.agent.platform.csmem.store.MigrationMap(
+                    oldFingerprint = "__baseline__",
+                    newFingerprint = "__baseline__",
+                    matchScore = 1f,
+                    fromVersion = currentVersion,
+                    toVersion = currentVersion
+                )
+            ))
+            return "baseline version recorded: $currentVersion (no migration)"
+        }
+        if (lastKnown == currentVersion) {
+            return null // 版本未变，无需迁移
+        }
+
+        // 取旧版本组（lastKnown）与当前版本组（currentVersion）节点
+        val oldNodes = store.getNodesByVersion(lastKnown)
+        val newNodes = store.getNodesByVersion(currentVersion)
+        if (oldNodes.isEmpty() || newNodes.isEmpty()) {
+            return "version changed $lastKnown→$currentVersion but no comparable nodes"
+        }
+
+        val maps = TopologyMigrator.migrate(oldNodes, newNodes, lastKnown, currentVersion)
+        store.recordMigration(maps)
+        return if (maps.isEmpty()) {
+            "version changed $lastKnown→$currentVersion: no isomorphic nodes found"
+        } else {
+            "migrated ${maps.size} nodes ($lastKnown→$currentVersion), " +
+                "avg score=${"%.2f".format(maps.map { it.matchScore }.average())}"
+        }
     }
 
     /**

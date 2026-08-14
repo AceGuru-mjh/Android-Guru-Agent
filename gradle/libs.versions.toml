@@ -18,6 +18,8 @@ coil = "2.6.0"
 security-crypto = "1.1.0-alpha06"
 junit = "4.13.2"
 room = "2.6.1"
+# 赛博霓虹悬浮球（JitPack；仅允许该 group 走 jitpack 仓库，版本固定避免动态解析）
+easyfloat = "2.0.4"
 
 [libraries]
 # Compose
@@ -68,6 +70,9 @@ coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coi
 
 # Security
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
+
+# 赛博霓虹悬浮球（JitPack 发布，坐标 group 为 com.github.princekin-f）
+easyfloat = { group = "com.github.princekin-f", name = "EasyFloat", version.ref = "easyfloat" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

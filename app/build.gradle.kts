@@ -94,14 +94,17 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.0")
     implementation("dev.rikka.shizuku:provider:13.1.0")
 
-    // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理
-    implementation("com.github.princekin-f:EasyFloat:2.0.4")
+    // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
+    implementation(libs.easyfloat)
     // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
     implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
-    // 矢量精致动效库（霓虹环流可选 Lottie 资源，默认回退到代码绘制的 NeonRingView）
-    implementation("com.airbnb.android:lottie:6.4.0")
 
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+}
+
+// 依赖锁定：固定已解析版本，避免 JitPack/EasyFloat 在不同时刻解析到不同工件，提升 CI 复现性
+dependencyLocking {
+    lockAllConfigurations()
 }

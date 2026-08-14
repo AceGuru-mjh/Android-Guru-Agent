@@ -15,6 +15,7 @@ import com.apex.agent.platform.csmem.fingerprint.NodeFingerprint
  * @param domDepth 修剪后在语义树中的深度（根为 0）
  * @param isInteractive 是否可交互（可点击/可编辑/可滚动等）
  * @param children 修剪后的子节点列表
+ * @param appVersion 采集时所属 App 版本号（versionName），用于跨版本拓扑迁移；无则 null
  */
 data class SemanticNode(
     val fingerprint: String,
@@ -25,7 +26,8 @@ data class SemanticNode(
     val bounds: Rect,
     val domDepth: Int,
     val isInteractive: Boolean,
-    val children: List<SemanticNode> = emptyList()
+    val children: List<SemanticNode> = emptyList(),
+    val appVersion: String? = null
 ) {
     companion object {
         /**
@@ -42,7 +44,8 @@ data class SemanticNode(
             isEditable: Boolean = false,
             isVisibleToUser: Boolean = true,
             parentFingerprint: String? = null,
-            domDepth: Int = 0
+            domDepth: Int = 0,
+            appVersion: String? = null
         ): SemanticNode? {
             // 基础过滤：不可见节点直接丢弃
             if (!isVisibleToUser) return null
@@ -78,7 +81,8 @@ data class SemanticNode(
                 className = className.ifBlank { null },
                 bounds = boundsRect,
                 domDepth = domDepth,
-                isInteractive = clickable || scrollable || isEditable
+                isInteractive = clickable || scrollable || isEditable,
+                appVersion = appVersion
             )
         }
 

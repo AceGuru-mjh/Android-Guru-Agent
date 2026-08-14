@@ -11,7 +11,15 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://jitpack.io")
+        // 仅允许 EasyFloat 所在 group 走 JitPack，避免其它依赖误查 JitPack（按需构建不稳定源）
+        exclusiveContent {
+            forRepository {
+                maven("https://jitpack.io")
+            }
+            filter {
+                includeGroup("com.github.princekin-f")
+            }
+        }
     }
 }
 

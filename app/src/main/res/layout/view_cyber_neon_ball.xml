@@ -23,22 +23,12 @@
         android:layout_gravity="center"
         android:background="@drawable/bg_obsidian_glossy" />
 
-    <!-- Layer 2a: 动态霓虹等离子光环 (代码绘制，默认显示；放入 res/raw/anim_neon_*.json 时自动让位给 Lottie) -->
+    <!-- Layer 2a: 动态霓虹等离子光环 (代码绘制 NeonRingView，始终显示，无 Lottie 依赖) -->
     <com.apex.agent.browser.NeonRingView
         android:id="@+id/neonRing"
         android:layout_width="68dp"
         android:layout_height="68dp"
         android:layout_gravity="center" />
-
-    <!-- Layer 2b: 可选 Lottie 流光环 (默认隐藏；当 res/raw/anim_neon_<state>.json 存在时显示并改色) -->
-    <com.airbnb.android.lottie.LottieAnimationView
-        android:id="@+id/lottieRing"
-        android:layout_width="68dp"
-        android:layout_height="68dp"
-        android:layout_gravity="center"
-        android:visibility="gone"
-        app:lottie_autoPlay="true"
-        app:lottie_loop="true" />
 
     <!-- Layer 3: 中心 web 图标 -->
     <ImageView

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
+import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.core.llm.ImageContent
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
@@ -154,6 +155,7 @@ fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
 class AgentChatViewModel @Inject constructor(
     private val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
+    private val csMemSessionManager: CsMemSessionManager,
     val githubTokenManager: GithubTokenManager,
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
@@ -207,9 +209,20 @@ class AgentChatViewModel @Inject constructor(
      * 使本次对话可被后续任务通过 memory_recall_* 工具召回。
      * Toast 提示由调用方（AgentBubble）负责，本方法保持纯业务占位。
      */
+    /**
+     * 将一条 Agent 回复整理进记忆（接 CS-Mem 显式整理入口）。
+     *
+     * 委托 [CsMemSessionManager.organizeText] 把文本按行切片为语义节点写入长期记忆，
+     * 使其可被 memory_search_nodes 按关键词召回。整理主题取文本前 40 字符。
+     */
     fun organizeToMemory(text: String) {
-        // TODO: 接入 CsMemSessionManager 显式整理 API（当前为 UI 占位）
-        android.util.Log.d("AgentChatViewModel", "organizeToMemory placeholder: ${text.take(80)}")
+        val goal = text.take(40).trim().ifBlank { "对话整理" }
+        viewModelScope.launch {
+            runCatching { csMemSessionManager.organizeText(goal, text) }
+                .onFailure { e ->
+                    android.util.Log.e("AgentChatViewModel", "organizeToMemory failed", e)
+                }
+        }
     }
 
     /**

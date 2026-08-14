@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation("androidx.compose.foundation:foundation:1.7.6")
+    implementation(libs.compose.animation)
     implementation(libs.compose.material3)
     implementation("androidx.compose.material:material-icons-core:1.7.8")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
@@ -93,7 +94,17 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.0")
     implementation("dev.rikka.shizuku:provider:13.1.0")
 
+    // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
+    implementation(libs.easyfloat)
+    // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
+    implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+}
+
+// 依赖锁定：固定已解析版本，避免 JitPack/EasyFloat 在不同时刻解析到不同工件，提升 CI 复现性
+dependencyLocking {
+    lockAllConfigurations()
 }

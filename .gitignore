@@ -86,6 +86,35 @@ Thumbs.db
 # KSP
 .ksp/
 
+# Local CI/temp scratch files (do not commit)
+ci_*.txt
+commit_msg.txt
+
+# Session/CI debug scratch dumps at repo root (do not commit)
+/_check_all.py
+/apexroot_diff.txt
+/brdiff.txt
+/commit*.txt
+/dep_local.txt
+/diff_stat.txt
+/gitdiff.txt
+/gitlog.txt
+/gradle_diff.txt
+/gstatus.txt
+/lastlog.txt
+/main_app_build.txt
+/mainruns.txt
+/origlog.txt
+/pr37_status.json
+/pr40_final.json
+/pr40_runs.json
+/pr40_status.json
+/push*.txt
+/runs*.txt
+/runstatus.txt
+/submit_pr.cmd
+/.codebuddy/plans/
+
 # Misc
 *.swp
 *.swo

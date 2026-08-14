@@ -23,6 +23,9 @@ import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.StreamingTerminalExecTool
+import com.apex.agent.browser.BrowserEngine
+import com.apex.agent.browser.BrowserAgentTools
+import com.apex.agent.browser.BrowserTracer
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -69,6 +72,18 @@ object ToolModule {
 
     @Provides
     @Singleton
+    fun provideBrowserTracer(): BrowserTracer = BrowserTracer(capacity = 100)
+
+    @Provides
+    @Singleton
+    fun provideBrowserAgentTools(
+        @ApplicationContext context: Context,
+        engine: BrowserEngine,
+        tracer: BrowserTracer,
+    ): BrowserAgentTools = BrowserAgentTools(context, engine, tracer)
+
+    @Provides
+    @Singleton
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
@@ -81,7 +96,8 @@ object ToolModule {
         privilegeUiProvider: PrivilegeUiProvider,
         memoryRecentEpisodesTool: MemoryRecentEpisodesTool,
         memorySearchNodesTool: MemorySearchNodesTool,
-        memoryRecallMacroTool: MemoryRecallMacroTool
+        memoryRecallMacroTool: MemoryRecallMacroTool,
+        browserAgentTools: BrowserAgentTools
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -136,6 +152,11 @@ object ToolModule {
         registry.register(SafeAgentTool(WebSearchTool(httpClient)))
         registry.register(SafeAgentTool(HttpRequestTool(httpClient)))
         registry.register(SafeAgentTool(DownloadFileTool(httpClient, downloadDir)))
+
+        // ═══ 3.5 内置浏览器自动化 (10) ═══
+        // 对标 Operit 的 BrowserAgent：DOM 级网页操控，带语义哈希稳定 ref（抗 SPA 刷新），
+        // 物理触摸注入点击、显式握手人工接管、动作后验证。工具内已含 WAITING_HUMAN 守卫。
+        browserAgentTools.all().forEach { registry.register(SafeAgentTool(it)) }
 
         // ═══ 4. 记忆 (CS-Mem 已独立为 platform:cs-mem 模块) ═══
         // 旧 FileMemoryStore/MemorizeTool/RecallTool/ForgetTool 已移除。

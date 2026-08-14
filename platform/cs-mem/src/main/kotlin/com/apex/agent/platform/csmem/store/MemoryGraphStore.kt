@@ -5,6 +5,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
 /**
+ * 拓扑同胚迁移映射（存储模型）。
+ *
+ * 旧版本节点指纹 → 新版本等价节点指纹的别名桥，供召回/宏匹配做指纹解析，
+ * 使长期记忆与 FSM 宏在 App 版本演进后仍能复用。
+ */
+@Serializable
+data class MigrationMap(
+    val oldFingerprint: String,
+    val newFingerprint: String,
+    val matchScore: Float,
+    val fromVersion: String,
+    val toVersion: String
+)
+
+/**
  * 记忆图存储抽象接口。
  *
  * 解耦存储具体实现（Room/RocksDB/InMemory），方便测试和替换。
@@ -41,6 +56,9 @@ interface MemoryGraphStore {
     /** 按文本搜索节点 */
     suspend fun searchNodesByText(query: String, limit: Int = 20): List<SemanticNode>
 
+    /** 按所属 App 版本号取全部节点（供跨版本拓扑迁移分组比对） */
+    suspend fun getNodesByVersion(version: String): List<SemanticNode>
+
     // ---- Edge 操作 ----
 
     /** 批量写入边 */
@@ -67,6 +85,31 @@ interface MemoryGraphStore {
     suspend fun getTopMacros(limit: Int = 20): List<FSMMacro>
     suspend fun recordMacroSuccess(skillId: String)
     suspend fun recordMacroFailure(skillId: String)
+
+    // ---- 拓扑同胚迁移（跨版本记忆保鲜） ----
+
+    /** 记录一组指纹别名映射（幂等 upsert，旧指纹唯一） */
+    suspend fun recordMigration(maps: List<MigrationMap>)
+
+    /** 解析旧指纹到新指纹；无映射返回 null */
+    suspend fun resolveMigration(oldFingerprint: String): String?
+
+    /** 取全部迁移映射（供可视化/审计） */
+    suspend fun getMigrationMaps(): List<MigrationMap>
+
+    /** 推断"上一次已知 App 版本"（最近一条迁移的 toVersion），无记录返回 null */
+    suspend fun latestKnownVersion(): String?
+
+    // ---- 记忆可视化（MemoryScreen） ----
+
+    /** 删除 Episode 及其关联边（节点为跨 Episode 共享字典，不随删而硬删） */
+    suspend fun deleteEpisode(episodeId: String): Int
+
+    /** 节点字典总数（供概览计数） */
+    suspend fun countNodes(): Int
+
+    /** 宏技能总数（供概览计数） */
+    suspend fun countMacros(): Int
 
     // ---- 熵增遗忘 ----
 

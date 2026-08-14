@@ -2,7 +2,9 @@ package com.apex.agent.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +16,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,12 +41,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.screen.agent.AgentChatScreen
+import com.apex.agent.ui.screen.agent.AgentChatViewModel
 import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.model.ModelScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
 import com.apex.agent.ui.screen.skill.SkillScreen
+import com.apex.agent.ui.screen.memory.MemoryScreen
+import com.apex.agent.ui.screen.terminal.TerminalScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -54,7 +64,9 @@ sealed class DrawerDestination(
     val icon: ImageVector
 ) {
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
+    data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
+    data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
@@ -67,6 +79,10 @@ fun ApexRoot() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var currentDestination by remember { mutableStateOf<DrawerDestination>(DrawerDestination.Agent) }
+
+    // 上下文仪表盘数据源（单例作用域 VM，全局共享）
+    val agentVm: AgentChatViewModel = hiltViewModel()
+    val agentState by agentVm.uiState.collectAsStateWithLifecycle()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -125,14 +141,25 @@ fun ApexRoot() {
                 )
             }
         ) { padding ->
-            Box(modifier = Modifier.padding(padding)) {
-                when (currentDestination) {
-                    DrawerDestination.Agent -> AgentChatScreen()
-                    DrawerDestination.Skill -> SkillScreen()
-                    DrawerDestination.Model -> ModelScreen()
-                    DrawerDestination.Permissions -> PermissionsScreen()
-                    DrawerDestination.Log -> LogViewerScreen()
-                    DrawerDestination.Settings -> SettingsScreen()
+            Column(modifier = Modifier.padding(padding)) {
+                // ═══ 顶部上下文仪表盘长条（全局）═══
+                ContextMeterBar(
+                    usedTokens = agentState.contextUsedTokens,
+                    maxTokens = agentState.contextMaxTokens,
+                    onCompress = { agentVm.compressNow() }
+                )
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (currentDestination) {
+                        DrawerDestination.Agent -> AgentChatScreen()
+                        DrawerDestination.Terminal -> TerminalScreen()
+                        DrawerDestination.Skill -> SkillScreen()
+                        DrawerDestination.Memory -> MemoryScreen()
+                        DrawerDestination.Model -> ModelScreen()
+                        DrawerDestination.Permissions -> PermissionsScreen()
+                        DrawerDestination.Log -> LogViewerScreen()
+                        DrawerDestination.Settings -> SettingsScreen()
+                    }
                 }
             }
         }

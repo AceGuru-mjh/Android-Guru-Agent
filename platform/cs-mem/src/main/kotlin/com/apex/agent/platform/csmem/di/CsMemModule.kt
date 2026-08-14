@@ -33,7 +33,8 @@ object CsMemModule {
             MemoryGraphDatabase::class.java,
             "cs_mem_graph.db"
         )
-        .fallbackToDestructiveMigration() // 开发期：schema 变更时重建
+        .addMigrations(MemoryGraphDatabase.MIGRATION_1_2) // v1→v2 保留旧数据
+        .fallbackToDestructiveMigration() // 未知版本跃迁时降级重建（开发期）
         .build()
     }
 

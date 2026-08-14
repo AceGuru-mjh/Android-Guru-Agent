@@ -22,6 +22,7 @@ data class SkillManifest(
     val description: String,
     val author: String = "",
     val license: String = "MIT",
+    val dependencies: List<String> = emptyList(),  // 依赖的其他 Skill id（按安装顺序先于本 Skill 加载）
     val requirements: SkillRequirements = SkillRequirements(),
     val tools: List<SkillToolDef> = emptyList(),
     val configuration: SkillConfiguration = SkillConfiguration(),
@@ -109,7 +110,7 @@ class SkillRegistry(
     )
 
     /**
-     * 安装 Skill（从 JSON 字符串）
+     * 安装 Skill（从 JSON 字符串）。会先校验依赖是否齐备，缺失依赖则拒绝安装。
      */
     fun install(manifestJson: String): Result<SkillManifest> {
         return try {
@@ -117,6 +118,12 @@ class SkillRegistry(
 
             if (manifest.id.isBlank()) return Result.failure(Exception("Skill ID is empty"))
             if (manifest.name.isBlank()) return Result.failure(Exception("Skill name is empty"))
+
+            // 依赖校验：所有依赖必须已安装
+            val missing = SkillDependencyResolver.validateDependencies(manifest, installedSkills.keys)
+            if (missing.isNotEmpty()) {
+                return Result.failure(Exception("Missing dependencies: ${missing.joinToString(", ")}"))
+            }
 
             val skillFile = File(skillsDir, "${manifest.id}.json")
             skillFile.writeText(manifestJson)
@@ -128,6 +135,49 @@ class SkillRegistry(
             Result.success(manifest)
         } catch (e: Exception) {
             Result.failure(Exception("Skill install failed: ${e.message}"))
+        }
+    }
+
+    /**
+     * 从 ZIP 包安装 Skill。
+     * 包内需含一个 `<skillId>.json`（apex-skill-v1 manifest），其余文件为 Skill 资源。
+     * 解压走 [SafeZipExtractor]（路径穿越防御 + zip bomb 防护）。
+     */
+    fun installFromZip(zipFile: File): Result<SkillManifest> {
+        val tmpDir = File(skillsDir, ".tmp-${zipFile.nameWithoutExtension}-${System.nanoTime()}")
+        return try {
+            SafeZipExtractor.extract(zipFile, tmpDir)
+
+            val manifestFile = tmpDir.listFiles()
+                ?.firstOrNull { it.extension == "json" && it.name != "installed.json" }
+                ?: return Result.failure(Exception("No skill manifest .json found in zip"))
+
+            val manifest = json.decodeFromString<SkillManifest>(manifestFile.readText())
+
+            // 依赖校验
+            val missing = SkillDependencyResolver.validateDependencies(manifest, installedSkills.keys)
+            if (missing.isNotEmpty()) {
+                return Result.failure(Exception("Missing dependencies: ${missing.joinToString(", ")}"))
+            }
+
+            // 资源目录：将 zip 内除 manifest 外的所有文件并入 skillsDir/<id>/，
+            // manifest 只作为顶层索引 <id>.json 保存（避免重复存储）。
+            val skillHome = File(skillsDir, manifest.id).apply { mkdirs() }
+            tmpDir.listFiles()
+                ?.filter { it != manifestFile }
+                ?.forEach { it.copyRecursively(File(skillHome, it.name), overwrite = true) }
+
+            val skillFile = File(skillsDir, "${manifest.id}.json")
+            skillFile.writeText(manifestFile.readText())
+
+            installedSkills[manifest.id] = InstalledSkill(manifest)
+            executeAutoSetup(manifest)
+
+            Result.success(manifest)
+        } catch (e: Exception) {
+            Result.failure(Exception("Skill zip install failed: ${e.message}"))
+        } finally {
+            tmpDir.deleteRecursively()
         }
     }
 

@@ -34,11 +34,12 @@ object UiTreePruner {
     fun prune(
         rootNodes: List<UiNode>,
         appPackage: String? = null,
-        activityName: String? = null
+        activityName: String? = null,
+        appVersion: String? = null
     ): List<SemanticNode> {
         val result = mutableListOf<SemanticNode>()
         for (node in rootNodes) {
-            pruneRecursive(node, result, parentFingerprint = null, depth = 0, consecutivePassThrough = 0)
+            pruneRecursive(node, result, parentFingerprint = null, depth = 0, consecutivePassThrough = 0, appVersion = appVersion)
         }
         return result
     }
@@ -51,14 +52,15 @@ object UiTreePruner {
         result: MutableList<SemanticNode>,
         parentFingerprint: String?,
         depth: Int,
-        consecutivePassThrough: Int
+        consecutivePassThrough: Int,
+        appVersion: String? = null
     ): Boolean {
         if (depth > MAX_DEPTH) return false
 
         // 先递归处理子节点
         val childResults = mutableListOf<SemanticNode>()
         for (child in raw.children) {
-            pruneRecursive(child, childResults, parentFingerprint = null, depth + 1, consecutivePassThrough = 0)
+            pruneRecursive(child, childResults, parentFingerprint = null, depth + 1, consecutivePassThrough = 0, appVersion = appVersion)
         }
 
         // 尝试从原始数据创建 SemanticNode
@@ -71,7 +73,8 @@ object UiTreePruner {
             clickable = raw.clickable,
             scrollable = raw.scrollable,
             parentFingerprint = parentFingerprint,
-            domDepth = depth
+            domDepth = depth,
+            appVersion = appVersion
         )
 
         if (semantic == null) {

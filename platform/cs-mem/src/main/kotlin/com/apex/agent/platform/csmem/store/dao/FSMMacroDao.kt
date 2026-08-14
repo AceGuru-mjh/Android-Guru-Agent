@@ -65,4 +65,7 @@ interface FSMMacroDao {
 
     @Query("DELETE FROM fsm_macros WHERE skill_id = :skillId AND is_crystallized = 0")
     suspend fun delete(skillId: String)
+
+    @Query("SELECT COUNT(*) FROM fsm_macros")
+    suspend fun countAll(): Int
 }

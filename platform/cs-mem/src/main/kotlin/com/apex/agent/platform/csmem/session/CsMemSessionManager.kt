@@ -3,6 +3,7 @@ package com.apex.agent.platform.csmem.session
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.diff.DifferentialIngestor
 import com.apex.agent.platform.csmem.distill.TraceDistiller
+import com.apex.agent.platform.csmem.fingerprint.NodeFingerprint
 import com.apex.agent.platform.csmem.model.*
 import com.apex.agent.platform.csmem.prune.UiTreePruner
 import com.apex.agent.platform.csmem.immune.MemoryImmuneSystem
@@ -11,6 +12,10 @@ import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.UiNode
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Rect
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,6 +39,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class CsMemSessionManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val privilegeManager: PrivilegeManager,
     private val store: MemoryGraphStore,
     private val writerActor: MemoryWriterActor,
@@ -135,7 +141,7 @@ class CsMemSessionManager @Inject constructor(
         }
 
         // 2. 修剪：物理 UI 树 → 语义交互图
-        val currentSemanticNodes = UiTreePruner.prune(rawNodes, appPackage, activityName)
+        val currentSemanticNodes = UiTreePruner.prune(rawNodes, appPackage, activityName, currentAppVersion())
 
         // 3. 生成空间拓扑边
         val spatialEdges = UiTreePruner.generateSpatialEdges(currentSemanticNodes)
@@ -221,7 +227,85 @@ class CsMemSessionManager @Inject constructor(
      */
     fun getActiveEpisodeId(): String? = activeEpisodeId
 
+    /**
+     * 显式整理：把一段现成对话/笔记文本写入长期记忆（手动整理入口）。
+     *
+     * 与自动采集（startSession/afterAction/finishSession）不同，这里没有 UI 快照，
+     * 仅把文本按行切片为语义节点（role=TEXT），存入一个独立 MANUAL Episode，
+     * 使其可被 [com.apex.agent.platform.csmem.tools.MemorySearchNodesTool]
+     * 按关键词召回。每条文本用基于内容的稳定指纹，天然去重。
+     *
+     * 设计要点：
+     * - 不占用 activeEpisodeId（与自动任务会话隔离，避免污染轨迹蒸馏）；
+     * - 经 writerActor 异步管道写入，与自动采集共用同一健壮写入路径；
+     * - 空文本/纯空白直接跳过，不创建空 Episode。
+     *
+     * @param goal 整理主题（如 "Kotlin 协程取消的最佳实践"）
+     * @param text 待整理的对话/笔记正文
+     * @return 写入的节点数（0 表示无有效内容）
+     */
+    suspend fun organizeText(goal: String, text: String): Int {
+        val lines = text.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return 0
+
+        val episodeId = "manual_${System.currentTimeMillis()}_${goal.hashCode()}"
+        val now = System.currentTimeMillis()
+
+        store.startEpisode(episodeId, goal, null, "chat_organize")
+
+        val nodes = lines.map { line ->
+            val fp = NodeFingerprint.compute(
+                className = "manual.note",
+                resourceId = "note",
+                textHint = line,
+                role = NodeRole.TEXT,
+                parentHash = episodeId
+            )
+            SemanticNode(
+                fingerprint = fp,
+                role = NodeRole.TEXT,
+                textHint = line,
+                resourceId = "note",
+                className = "manual.note",
+                bounds = Rect(0, 0, 0, 0),
+                domDepth = 0,
+                isInteractive = false
+            )
+        }
+
+        // 经异步写入管道落库（与自动采集同源，保证写入健壮性）
+        writerActor.ingestGraph(
+            MemoryGraph(
+                episodeId = episodeId,
+                timestamp = now,
+                nodes = nodes,
+                edges = emptyList(),
+                appPackage = null,
+                activityName = "chat_organize"
+            )
+        )
+        store.finishEpisode(episodeId, "MANUAL")
+        writerActor.emergencyFlush()
+
+        AppLogger.instance.info(LogCategory.CS_MEM, "CsMemSession",
+            "手动整理[$goal] 写入 ${nodes.size} 个语义节点 (ep=$episodeId)")
+        return nodes.size
+    }
+
     // ==================== Private ====================
+
+    /**
+     * 取宿主自身 App 版本号（versionName），用于给采集节点打 appVersion 标记，
+     * 供跨版本拓扑同胚迁移（TopologyMigrator）按版本分组比对。
+     * 取不到时返回 null（节点不标记版本，迁移时跳过）。
+     */
+    private fun currentAppVersion(): String? {
+        return try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
+        }
+    }
 
     private suspend fun captureInitialState(appPackage: String?, activityName: String?) {
         val uiTreeResult = privilegeManager.getUiTree()
@@ -237,7 +321,7 @@ class CsMemSessionManager @Inject constructor(
             return
         }
 
-        val currentSemanticNodes = UiTreePruner.prune(uiTreeResult.nodes, appPackage, activityName)
+        val currentSemanticNodes = UiTreePruner.prune(uiTreeResult.nodes, appPackage, activityName, currentAppVersion())
         val spatialEdges = UiTreePruner.generateSpatialEdges(currentSemanticNodes)
 
         val initialGraph = MemoryGraph(

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
+import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.core.llm.ImageContent
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.github.GithubTokenManager
@@ -45,7 +46,10 @@ data class AgentChatUiState(
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
     val pendingUserInput: UserInputRequest? = null,
-    val historyDepth: Int = 0
+    val historyDepth: Int = 0,
+    /** 上下文仪表盘：当前占用 token 数与上限（分子/分母） */
+    val contextUsedTokens: Int = 0,
+    val contextMaxTokens: Int = 1
 )
 
 /**
@@ -151,6 +155,7 @@ fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
 class AgentChatViewModel @Inject constructor(
     private val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
+    private val csMemSessionManager: CsMemSessionManager,
     val githubTokenManager: GithubTokenManager,
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
@@ -194,6 +199,59 @@ class AgentChatViewModel @Inject constructor(
 
     fun updateInputText(text: String) {
         savedStateHandle[KEY_DRAFT_INPUT] = text
+    }
+
+    /**
+     * 将一条 Agent 回复整理进记忆（UI 占位实现）。
+     *
+     * 当前仅记录日志与埋点占位，尚未接入 CS-Mem 后端：
+     * 后续版本会把 [text] 交给 CsMemSessionManager 做显式整理/蒸馏，
+     * 使本次对话可被后续任务通过 memory_recall_* 工具召回。
+     * Toast 提示由调用方（AgentBubble）负责，本方法保持纯业务占位。
+     */
+    /**
+     * 将一条 Agent 回复整理进记忆（接 CS-Mem 显式整理入口）。
+     *
+     * 委托 [CsMemSessionManager.organizeText] 把文本按行切片为语义节点写入长期记忆，
+     * 使其可被 memory_search_nodes 按关键词召回。整理主题取文本前 40 字符。
+     */
+    fun organizeToMemory(text: String) {
+        val goal = text.take(40).trim().ifBlank { "对话整理" }
+        viewModelScope.launch {
+            runCatching { csMemSessionManager.organizeText(goal, text) }
+                .onFailure { e ->
+                    android.util.Log.e("AgentChatViewModel", "organizeToMemory failed", e)
+                }
+        }
+    }
+
+    /**
+     * 主动压缩上下文（顶部仪表盘"压缩上下文"按钮触发）。
+     *
+     * 委托 [ApexAgentEngine.compressNow] 执行真实压缩，并把结果以系统消息呈现，
+     * 同时刷新顶部仪表盘的 token 统计。compressor 未注入时提示"压缩不可用"。
+     */
+    fun compressNow() {
+        val engine = agentEngine as? ApexAgentEngine ?: return
+        viewModelScope.launch {
+            val report = runCatching { engine.compressNow() }.getOrNull()
+            if (report == null) {
+                _uiState.update { s ->
+                    s.copy(messages = s.messages + AgentUiMessage.System("⚠️ 压缩不可用（未启用压缩引擎）"))
+                }
+                return@launch
+            }
+            _uiState.update { s ->
+                s.copy(
+                    messages = s.messages + AgentUiMessage.System(
+                        "📦 已压缩上下文：${report.beforeTokens}→${report.afterTokens} tokens " +
+                            "(策略=${report.strategy}, 移除 ${report.messagesRemoved} 条)"
+                    ),
+                    contextUsedTokens = engine.currentTokenCount(),
+                    contextMaxTokens = engine.maxContextTokens()
+                )
+            }
+        }
     }
 
     private var currentJob: Job? = null
@@ -539,9 +597,12 @@ class AgentChatViewModel @Inject constructor(
             }
             is AgentEvent.Complete -> {
                 _uiState.update {
+                    val engine = agentEngine as? ApexAgentEngine
                     it.copy(
                         isLoading = false,
-                        historyDepth = (agentEngine as? ApexAgentEngine)?.historyCount() ?: it.historyDepth
+                        historyDepth = engine?.historyCount() ?: it.historyDepth,
+                        contextUsedTokens = engine?.currentTokenCount() ?: it.contextUsedTokens,
+                        contextMaxTokens = engine?.maxContextTokens() ?: it.contextMaxTokens
                     )
                 }
             }

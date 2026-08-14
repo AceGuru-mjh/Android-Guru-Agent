@@ -4,7 +4,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,11 +25,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -48,44 +55,44 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    val borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+    val slashGradient = Brush.linearGradient(
+        colors = listOf(Color(0xFF00E5FF), Color(0xFFFF4081))
+    )
+
     Box(
         modifier = modifier
-            .size(36.dp)
-            .drawBehind {
-                drawRoundRect(
-                    color = borderColor,
-                    style = Stroke(1.dp.toPx()),
-                    cornerRadius = CornerRadius(6.dp.toPx())
-                )
-            }
+            .size(40.dp)
             .background(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(6.dp)
+                shape = RoundedCornerShape(10.dp)
             )
             .semantics { contentDescription = "打开斜杠指令菜单" }
             .clickable { showMenu = true },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "/",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+        Canvas(modifier = Modifier.size(22.dp)) {
+            val canvasSize = size
+            val strokeWidth = canvasSize.width * 0.18f
+            drawLine(
+                brush = slashGradient,
+                start = Offset(canvasSize.width * 0.78f, canvasSize.height * 0.18f),
+                end = Offset(canvasSize.width * 0.22f, canvasSize.height * 0.82f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
+        }
     }
 
-    if (showMenu) {
-        DynamicSlashMenuPopup(
-            menuFlow = slashMenuProvider.menu,
-            onRefresh = slashMenuProvider::refresh,
-            onDismiss = { showMenu = false },
-            onCommandSelected = { command ->
-                onCommandSelected(command)
-                showMenu = false
-            }
-        )
-    }
+    DynamicSlashMenuPopup(
+        showMenu = showMenu,
+        menuFlow = slashMenuProvider.menu,
+        onRefresh = slashMenuProvider::refresh,
+        onDismiss = { showMenu = false },
+        onCommandSelected = { command ->
+            onCommandSelected(command)
+            showMenu = false
+        }
+    )
 }
 
 /**
@@ -93,6 +100,7 @@ fun SlashCommandButton(
  */
 @Composable
 private fun DynamicSlashMenuPopup(
+    showMenu: Boolean,
     menuFlow: StateFlow<SlashMenuData>,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
@@ -105,17 +113,32 @@ private fun DynamicSlashMenuPopup(
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true)
     ) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            shadowElevation = 8.dp,
-            tonalElevation = 3.dp,
-            modifier = Modifier.width(300.dp)
+        AnimatedVisibility(
+            visible = showMenu,
+            enter = fadeIn(tween(150)) +
+                scaleIn(initialScale = 0.95f, animationSpec = tween(150)) +
+                slideInVertically(
+                    initialOffsetY = { -8 },
+                    animationSpec = tween(150)
+                ),
+            exit = fadeOut(tween(120)) +
+                scaleOut(targetScale = 0.95f, animationSpec = tween(120)) +
+                slideOutVertically(
+                    targetOffsetY = { -8 },
+                    animationSpec = tween(120)
+                )
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(8.dp)
-                    .verticalScroll(rememberScrollState())
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                shadowElevation = 8.dp,
+                tonalElevation = 3.dp,
+                modifier = Modifier.width(300.dp)
             ) {
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -152,6 +175,7 @@ private fun DynamicSlashMenuPopup(
                         onItemClick = { command -> onCommandSelected(command) }
                     )
                 }
+            }
             }
         }
     }

@@ -51,6 +51,14 @@ data class NodeEntity(
     @ColumnInfo(name = "app_package")
     val appPackage: String?,
 
+    /**
+     * 首次发现此节点时的 App 版本号（versionName）。
+     * 用于跨版本拓扑同胚迁移（TopologyMigrator）按版本分组比对旧/新节点。
+     * 由采集层（CsMemSessionManager）透传，Store 不依赖 PackageManager，保持纯净。
+     */
+    @ColumnInfo(name = "app_version")
+    val appVersion: String? = null,
+
     /** 首次发现时间戳 */
     @ColumnInfo(name = "first_seen_at")
     val firstSeenAt: Long,

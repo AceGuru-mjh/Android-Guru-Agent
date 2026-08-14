@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- AI 核心符号：外环三角 + 中心实心点 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,3 L20,19 L4,19 Z" />
+    <path
+        android:fillColor="#0F1218"
+        android:pathData="M12,8 L16.2,17 L7.8,17 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,12.5 m-2.2,0 a2.2,2.2 0 1,1 4.4,0 a2.2,2.2 0 1,1 -4.4,0" />
+</vector>

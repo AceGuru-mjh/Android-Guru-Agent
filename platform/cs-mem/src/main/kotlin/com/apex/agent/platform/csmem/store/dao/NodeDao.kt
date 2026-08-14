@@ -31,6 +31,9 @@ interface NodeDao {
     @Query("SELECT * FROM nodes WHERE app_package = :packageName ORDER BY last_seen_at DESC")
     suspend fun getByAppPackage(packageName: String): List<NodeEntity>
 
+    @Query("SELECT * FROM nodes WHERE app_version = :version ORDER BY last_seen_at DESC")
+    suspend fun getByVersion(version: String): List<NodeEntity>
+
     @Query("""
         UPDATE nodes SET 
             occurrence_count = occurrence_count + 1,
@@ -68,4 +71,7 @@ interface NodeDao {
      */
     @Query("UPDATE nodes SET energy = MIN(energy, :tombstoneEnergy), last_seen_at = :timestamp WHERE fingerprint = :fingerprint")
     suspend fun tombstone(fingerprint: String, tombstoneEnergy: Float, timestamp: Long)
+
+    @Query("SELECT COUNT(*) FROM nodes")
+    suspend fun countAll(): Int
 }

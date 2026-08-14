@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 人工接入时的琥珀金外扩散脉冲光环（默认隐藏，由代码做缩放+淡出循环） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <stroke
+        android:width="3dp"
+        android:color="#FFB800" />
+    <solid android:color="#1AFFB800" />
+</shape>

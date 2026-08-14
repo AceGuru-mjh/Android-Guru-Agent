@@ -5,11 +5,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +71,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
@@ -87,6 +91,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -96,7 +101,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.format.DateTimeFormatter
 import com.apex.agent.core.engine.AgentMode
@@ -284,6 +293,17 @@ fun AgentChatScreen(
                 }
             }
 
+            // Agent 通过 ask_user 请求用户输入，等待用户回答
+            uiState.pendingUserInput?.let { request ->
+                item {
+                    UserInputDialog(
+                        request = request,
+                        onSubmit = { viewModel.submitUserInput(it) },
+                        onCancel = { viewModel.cancelUserInput() }
+                    )
+                }
+            }
+
             // Agent 主动提问
             pendingQuestion?.let { question ->
                 item {
@@ -380,27 +400,43 @@ fun AgentChatScreen(
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
 
-                    // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏）═══
+                    // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
                     AdaptiveInputField(
                         value = inputText,
                         onValueChange = { viewModel.updateInputText(it) },
                         modifier = Modifier.weight(1f),
+                        onSend = {
+                            if (inputText.isNotBlank() && !uiState.isLoading) {
+                                viewModel.sendMessage(inputText.trim())
+                            }
+                        },
                         placeholder = {
                             Text(
                                 if (uiState.mode == AgentMode.PLAN) {
                                     "描述任务，Agent先规划..."
                                 } else {
                                     "输入指令，/ 触发快捷..."
-                                }
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     )
 
-                    // ═══ 发送/停止 ═══
+                    // ═══ 发送/停止（带按压缩放反馈）═══
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    val isSendPressed by sendInteraction.collectIsPressedAsState()
+                    val sendScale by animateFloatAsState(
+                        targetValue = if (isSendPressed) 0.88f else 1f,
+                        animationSpec = tween(durationMillis = 100),
+                        label = "send_press_scale"
+                    )
                     if (uiState.isLoading) {
                         FilledTonalIconButton(
                             onClick = { viewModel.abort() },
-                            modifier = Modifier.size(44.dp)
+                            interactionSource = sendInteraction,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .scale(sendScale)
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = "停止")
                         }
@@ -413,7 +449,10 @@ fun AgentChatScreen(
                                 }
                             },
                             enabled = inputText.isNotBlank(),
-                            modifier = Modifier.size(44.dp)
+                            interactionSource = sendInteraction,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .scale(sendScale)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
                         }
@@ -484,7 +523,10 @@ private fun AgentMessageItem(
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
-        is AgentUiMessage.Agent -> AgentBubble(message)
+        is AgentUiMessage.Agent -> AgentBubble(
+            message = message,
+            onOrganize = { text -> vm.organizeToMemory(text) }
+        )
         is AgentUiMessage.ToolCall -> ToolCallCard(message)
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.Error -> ErrorBlock(
@@ -571,7 +613,12 @@ private fun UserBubble(
 }
 
 @Composable
-private fun AgentBubble(message: AgentUiMessage.Agent) {
+private fun AgentBubble(
+    message: AgentUiMessage.Agent,
+    onOrganize: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val timeStr = remember(message.timestamp) {
         DateTimeFormatter.ofPattern("HH:mm").format(
             java.time.Instant.ofEpochMilli(message.timestamp)
@@ -637,6 +684,44 @@ private fun AgentBubble(message: AgentUiMessage.Agent) {
                 // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）
                 SelectionContainer {
                     MarkdownText(markdown = message.text)
+                }
+
+                // 操作行：复制 / 整理到记忆（UI 占位，暂未接入 CS-Mem 后端）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(message.text))
+                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "复制",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
+                            onOrganize(message.text)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "整理到记忆",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

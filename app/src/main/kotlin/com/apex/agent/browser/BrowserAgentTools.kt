@@ -6,9 +6,10 @@ import com.apex.agent.core.tools.StreamingAgentTool
 import com.apex.agent.core.tools.ToolStreamEvent
 import com.apex.agent.core.tools.builtin.browser.DomParser
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -105,23 +106,25 @@ class BrowserAgentTools @Inject constructor(
             return "已打开 $url${warn}\n${snap.domSummary}"
         }
 
-        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = flow {
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
             val guardMsg = guard(engine)
-            if (guardMsg != null) { emit(ToolStreamEvent.Error(guardMsg)); return@flow }
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
             val url = argStr(arguments, "url")
-            if (url == null) { emit(ToolStreamEvent.Error("Error: 缺少 url 参数")); return@flow }
+            if (url == null) { send(ToolStreamEvent.Error("Error: 缺少 url 参数")); close(); return@callbackFlow }
             val newTab = argBool(arguments, "new_tab")
             val waitFor = argStr(arguments, "wait_for")
             val timeout = argInt(arguments, "timeout_ms", 15000)
             if (newTab) engine.newTab(null)
             val nav = engine.navigate(url, waitFor, timeout.toLong()) { p, phase ->
-                emit(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase))
+                trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase))
             }
             val snap = engine.snapshot()
             val warn = if (nav.timedOut) "\n⚠ 页面加载超时（15s），以下为当前已渲染状态。" else ""
             val result = "已打开 $url${warn}\n${snap.domSummary}"
-            emit(ToolStreamEvent.Output(result))
-            emit(ToolStreamEvent.Complete(result))
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
         }
     }
 
@@ -296,16 +299,18 @@ class BrowserAgentTools @Inject constructor(
             else "已滚动 $dy 像素"
         }
 
-        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = flow {
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
             val guardMsg = guard(engine)
-            if (guardMsg != null) { emit(ToolStreamEvent.Error(guardMsg)); return@flow }
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
             val dy = argInt(arguments, "delta_y", 400)
             val waitNew = argBool(arguments, "wait_for_new")
-            val r = engine.scroll(dy, waitNew) { p, phase -> emit(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
+            val r = engine.scroll(dy, waitNew) { p, phase -> trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
             val result = if (r.newElementsDetected > 0) "已滚动 $dy 像素，检测到新增 ${r.newElementsDetected} 个元素，建议重新 snapshot"
             else "已滚动 $dy 像素"
-            emit(ToolStreamEvent.Output(result))
-            emit(ToolStreamEvent.Complete(result))
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
         }
     }
 
@@ -323,15 +328,17 @@ class BrowserAgentTools @Inject constructor(
             return "data:image/png;base64,$b64"
         }
 
-        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = flow {
+        override fun executeStream(arguments: String): Flow<ToolStreamEvent> = callbackFlow {
             val guardMsg = guard(engine)
-            if (guardMsg != null) { emit(ToolStreamEvent.Error(guardMsg)); return@flow }
-            val bytes = engine.screenshot { p, phase -> emit(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
-                ?: run { emit(ToolStreamEvent.Error("Error: 无法截图（无激活页面）")); return@flow }
+            if (guardMsg != null) { send(ToolStreamEvent.Error(guardMsg)); close(); return@callbackFlow }
+            val bytes = engine.screenshot { p, phase -> trySend(ToolStreamEvent.Progress(percent = p.toFloat(), message = phase)) }
+                ?: run { send(ToolStreamEvent.Error("Error: 无法截图（无激活页面）")); close(); return@callbackFlow }
             val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
             val result = "data:image/png;base64,$b64"
-            emit(ToolStreamEvent.Output(result))
-            emit(ToolStreamEvent.Complete(result))
+            send(ToolStreamEvent.Output(result))
+            send(ToolStreamEvent.Complete(result))
+            close()
+            awaitClose {}
         }
     }
 

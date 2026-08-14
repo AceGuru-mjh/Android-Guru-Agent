@@ -1343,7 +1343,8 @@ private fun ToolStepTimeline(
     }
 }
 
-private fun RunningToolCallCard(toolCall: AgentToolCallUi) {
+private @Composable
+fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
 

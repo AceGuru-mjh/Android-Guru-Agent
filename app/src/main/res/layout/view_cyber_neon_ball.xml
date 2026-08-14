@@ -37,7 +37,7 @@
         android:layout_height="24dp"
         android:layout_gravity="center"
         android:src="@drawable/ic_web_core"
-        app:tint="#00F0FF" />
+        android:tint="#00F0FF" />
 
     <!-- Layer 4: NEED_HUMAN 状态下的闪耀 Badge -->
     <TextView

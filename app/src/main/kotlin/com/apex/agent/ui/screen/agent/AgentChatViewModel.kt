@@ -45,6 +45,9 @@ data class AgentChatUiState(
     val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
+    /** Spec 模式的当前规格与确认状态。 */
+    val spec: ExecutionSpec? = null,
+    val awaitingSpecConfirmation: Boolean = false,
     val pendingUserInput: UserInputRequest? = null,
     val historyDepth: Int = 0,
     /** 上下文仪表盘：当前占用 token 数与上限（分子/分母） */
@@ -111,6 +114,10 @@ sealed interface AgentUiMessage {
         val timestamp: Long = java.lang.System.currentTimeMillis()
     ) : AgentUiMessage
     data class PlanMessage(val plan: ExecutionPlan) : AgentUiMessage
+    /** Spec 模式的规格卡片（确认通过后展示）。 */
+    data class SpecMessage(val spec: ExecutionSpec) : AgentUiMessage
+    /** 反思模式的评审意见卡片（生成 → 评审 → 修正 中的评审产物）。 */
+    data class ReflectionReviewMessage(val text: String) : AgentUiMessage
     data class ThinkingMessage(val thought: String) : AgentUiMessage
 }
 
@@ -233,6 +240,37 @@ class AgentChatViewModel @Inject constructor(
 
     fun updateInputText(text: String) {
         savedStateHandle[KEY_DRAFT_INPUT] = text
+    }
+
+    /**
+     * 自定义模式指令（持久化到 SharedPreferences）。
+     *
+     * CUSTOM 模式选中时，该指令会随 [setMode] 一起写入引擎配置，
+     * 拼入 system prompt 的 "## Custom Instructions" 段落。
+     */
+    private val _customInstruction = MutableStateFlow(
+        context.getSharedPreferences(KEY_SETTINGS, Context.MODE_PRIVATE)
+            .getString(KEY_CUSTOM_INSTRUCTION, "") ?: ""
+    )
+    val customInstruction: StateFlow<String> = _customInstruction.asStateFlow()
+
+    fun setCustomInstruction(text: String) {
+        val trimmed = text.trim()
+        _customInstruction.value = trimmed
+        context.getSharedPreferences(KEY_SETTINGS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CUSTOM_INSTRUCTION, trimmed)
+            .apply()
+        // CUSTOM 模式运行时立即生效；非 CUSTOM 模式在下次切换时携带。
+        if (_uiState.value.mode == AgentMode.CUSTOM) {
+            (agentEngine as? ApexAgentEngine)?.updateConfig(
+                AgentConfig(
+                    mode = AgentMode.CUSTOM,
+                    thinkingLevel = _uiState.value.thinkingLevel,
+                    customInstruction = trimmed
+                )
+            )
+        }
     }
 
     /**
@@ -504,6 +542,22 @@ class AgentChatViewModel @Inject constructor(
                 }
             }
 
+            // ═══ Spec 模式 ═══
+            is AgentEvent.SpecGenerated -> {
+                _uiState.update { it.copy(spec = event.spec) }
+            }
+            is AgentEvent.SpecAwaitingConfirmation -> {
+                _uiState.update { it.copy(awaitingSpecConfirmation = true) }
+            }
+            is AgentEvent.SpecConfirmed -> {
+                _uiState.update { state ->
+                    state.copy(
+                        awaitingSpecConfirmation = false,
+                        messages = state.messages + AgentUiMessage.SpecMessage(event.spec)
+                    )
+                }
+            }
+
             // ═══ 工具调用（流式）═══
             is AgentEvent.ToolCallStart -> {
                 // 重置缓冲区 + 节流状态，记录当前活跃工具 callId 用于 chunk 路由。
@@ -641,6 +695,22 @@ class AgentChatViewModel @Inject constructor(
                 currentToolCallSteps = null
             }
 
+            // ═══ 反思模式：评审意见 ═══
+            // 引擎在草稿流式结束后发射本事件。草稿已在 currentResponse 中流式累积，
+            // 这里先把草稿落为一条 Agent 消息（"生成"），再追加评审卡片；
+            // 随后引擎流式发射修正后的最终回复（ResponseChunk → ResponseComplete）。
+            is AgentEvent.ReflectionReview -> {
+                _uiState.update { state ->
+                    val draft = state.currentResponse
+                    state.copy(
+                        messages = state.messages +
+                            (if (draft.isNotBlank()) listOf(AgentUiMessage.Agent(draft)) else emptyList()) +
+                            listOf(AgentUiMessage.ReflectionReviewMessage(event.reviewText)),
+                        currentResponse = ""
+                    )
+                }
+            }
+
             // ═══ 流式回复 ═══
             is AgentEvent.ResponseChunk -> {
                 _uiState.update {
@@ -710,8 +780,18 @@ class AgentChatViewModel @Inject constructor(
     fun setMode(mode: AgentMode) {
         _uiState.update { it.copy(mode = mode) }
         (agentEngine as? ApexAgentEngine)?.updateConfig(
-            AgentConfig(mode = mode, thinkingLevel = _uiState.value.thinkingLevel)
+            AgentConfig(
+                mode = mode,
+                thinkingLevel = _uiState.value.thinkingLevel,
+                customInstruction = if (mode == AgentMode.CUSTOM) _customInstruction.value else null
+            )
         )
+    }
+
+    /** 用户确认/驳回了 Spec 模式的规格，恢复引擎执行。 */
+    fun submitSpecConfirmation(confirmed: Boolean) {
+        _uiState.update { it.copy(awaitingSpecConfirmation = false) }
+        (agentEngine as? ApexAgentEngine)?.submitSpecConfirmation(confirmed)
     }
 
     fun setThinkingLevel(level: ThinkingLevel) {
@@ -738,21 +818,22 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.cancelUserInput()
     }
 
-    fun answerQuestion(selectedOptionId: String?, customText: String?) {
+    fun answerQuestion(selectedIds: List<String>, customText: String?) {
         val question = pendingQuestion.value ?: return
 
         val answer = AgentAnswer(
             questionId = question.id,
-            selectedOptionId = selectedOptionId,
+            selectedOptionId = selectedIds.firstOrNull(),
+            selectedOptionIds = selectedIds,
             customText = customText?.takeIf { it.isNotBlank() }
         )
 
         val displayAnswer = when {
             !customText.isNullOrBlank() -> customText.trim()
-            selectedOptionId != null -> question.options
-                .firstOrNull { it.id == selectedOptionId }
-                ?.label
-                ?: "未知选项"
+            selectedIds.isNotEmpty() -> question.options
+                .filter { it.id in selectedIds }
+                .joinToString("、") { it.label }
+                .ifBlank { "未知选项" }
             else -> "跳过"
         }
 
@@ -803,6 +884,8 @@ class AgentChatViewModel @Inject constructor(
                     currentToolCall = null,
                     plan = null,
                     awaitingPlanConfirmation = false,
+                    spec = null,
+                    awaitingSpecConfirmation = false,
                     pendingUserInput = null,
                     isLoading = false,
                     historyDepth = 0
@@ -1076,6 +1159,8 @@ class AgentChatViewModel @Inject constructor(
 
     companion object {
         private const val KEY_DRAFT_INPUT = "draft_input"
+        private const val KEY_SETTINGS = "apex_settings"
+        private const val KEY_CUSTOM_INSTRUCTION = "custom_mode_instruction"
 
         /** 工具输出 UI 刷新节流间隔（≈1 帧 = 16ms）。 */
         private const val FLUSH_INTERVAL_MS = 16L

@@ -20,6 +20,9 @@ data class AgentQuestionOption(
 
 /**
  * Agent 主动提问的结构化问题。
+ *
+ * [allowMultiSelect] 为 true 时 UI 展示多选（Checkbox），用户可同时选择
+ * 多个选项，回答经 [AgentAnswer.selectedOptionIds] 返回。
  */
 data class AgentQuestion(
     val id: String = UUID.randomUUID().toString(),
@@ -29,15 +32,22 @@ data class AgentQuestion(
     val allowCustom: Boolean = true,
     val customPlaceholder: String = "自定义输入",
     val allowSkip: Boolean = true,
+    val allowMultiSelect: Boolean = false,
     val timeoutMs: Long = 5 * 60 * 1000L
 )
 
 /**
  * 用户对 Agent 提问的回答。
+ *
+ * - 单选：使用 [selectedOptionId]（兼容旧字段，同时写入 [selectedOptionIds]）；
+ * - 多选：使用 [selectedOptionIds]；
+ * - 自定义输入：使用 [customText]；
+ * - 跳过：置 [skipped] = true。
  */
 data class AgentAnswer(
     val questionId: String,
     val selectedOptionId: String? = null,
+    val selectedOptionIds: List<String> = emptyList(),
     val customText: String? = null,
     val skipped: Boolean = false
 )

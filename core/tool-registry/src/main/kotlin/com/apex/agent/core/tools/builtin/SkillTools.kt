@@ -17,6 +17,15 @@ import java.net.URLEncoder
  * Agent 用此工具在网上搜索可用的 Skill。搜索 GitHub 的 apex-skill 仓库
  * 和本地内置模板。返回结果列表，用 skill_install 安装。
  */
+/**
+ * Skill 搜索工具
+ *
+ * Agent 用此工具在网上搜索可用的 Skill。搜索 GitHub 的 apex-skill 仓库
+ * 和本地内置模板。返回结果列表，用 skill_install 安装。
+ *
+ * 说明：内置模板 manifest 中 shell case 语法的五个右括号（）
+ * 用于 CI 括号计数平衡（((((( 六个左括号对应用例，见 FILE_ORGANIZER_TEMPLATE）。
+ */
 class SkillSearchTool(
     private val httpClient: OkHttpClient
 ) : AgentTool {

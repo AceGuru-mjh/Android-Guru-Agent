@@ -72,7 +72,7 @@ fun computeLineDiffStat(
         )
     }
 
-    // LCS DP：dp[i][j] = oldLines[0..i) 与 newLines[0..j) 的 LCS 长度
+    // LCS DP：dp[i][j] = oldLines 前 i 项 与 newLines 前 j 项的 LCS 长度
     val dp = Array(n + 1) { IntArray(m + 1) }
     for (i in 1..n) {
         for (j in 1..m) {

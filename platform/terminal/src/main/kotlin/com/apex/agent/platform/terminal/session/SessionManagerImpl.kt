@@ -1,0 +1,222 @@
+package com.apex.agent.platform.terminal.session
+
+import com.apex.agent.platform.terminal.buffer.RingTerminalBuffer
+import com.apex.agent.platform.terminal.errors.TerminalError
+import com.apex.agent.platform.terminal.events.CloseCause
+import com.apex.agent.platform.terminal.events.Confidence
+import com.apex.agent.platform.terminal.events.ExitCause
+import com.apex.agent.platform.terminal.events.TerminalEvent
+import com.apex.agent.platform.terminal.events.TerminalEventBus
+import com.apex.agent.platform.terminal.events.TerminalEventLog
+import com.apex.agent.platform.terminal.events.TerminalEventLogImpl
+import com.apex.agent.platform.terminal.events.TerminalEventBusImpl
+import com.apex.agent.platform.terminal.io.InputManagerImpl
+import com.apex.agent.platform.terminal.io.PtyOutputPumpImpl
+import com.apex.agent.platform.terminal.native.NativePty
+import com.apex.agent.platform.terminal.policy.PrivilegeLevel
+import com.apex.agent.platform.terminal.policy.TerminalCapability
+import com.apex.agent.platform.terminal.policy.TerminalPolicy
+import com.apex.agent.platform.terminal.screen.VirtualTerminal
+import com.apex.agent.platform.terminal.state.SemanticStateReducer
+import com.apex.agent.platform.terminal.wait.WaitEngineImpl
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * Concrete SessionManager. Owns the full per-session assembly.
+ *
+ * Spec ref: ATR 2.0 Final Spec §6.2 / §9 / §16 (concurrency: single reader / single writer / state actor)
+ *
+ * On create():
+ *   1. allocate sessionId (monotonic Long) + nativeSessionId (Int from NativePty)
+ *   2. forkpty via NativePty.nativeCreateSession
+ *   3. assemble per-session deps: RingBuffer, EventLog shard, VirtualTerminal, SemanticStateReducer
+ *   4. start PtyOutputPump (single reader coroutine)
+ *   5. start exit watcher coroutine (polls nativeIsAlive / nativeWaitExit)
+ *   6. emit SessionCreated event
+ *
+ * The nativeSessionId (Int) is stored alongside the Long sessionId because the Runtime API uses
+ * Long ids (future-proof) while the JNI NativePty uses Int ids (legacy). Phase 1 maps them 1:1;
+ * Phase 2 may decouple them.
+ */
+class SessionManagerImpl(
+    private val native: NativePty,
+    private val eventLog: TerminalEventLog,
+    private val eventBus: TerminalEventBus,
+    private val waitEngine: WaitEngineImpl,
+    private val inputManager: InputManagerImpl,
+    private val virtualTerminalFactory: (Int, Int) -> VirtualTerminal,
+    private val policy: TerminalPolicy,
+    private val inputDetector: com.apex.agent.platform.terminal.state.InputWaitingDetector? = null,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+) : SessionManager {
+
+    /** Per-session assembled state. */
+    data class SessionAssembly(
+        val session: TerminalSession,
+        val nativeSessionId: Int,
+        val ringBuffer: RingTerminalBuffer,
+        val virtualTerminal: VirtualTerminal,
+        val semanticReducer: SemanticStateReducer,
+        val pump: PtyOutputPumpImpl
+    )
+
+    private val assemblies = ConcurrentHashMap<Long, SessionAssembly>()
+    private val idCounter = AtomicLong(0)
+    private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<SessionState>>()
+    private val mutex = Mutex()
+
+    override suspend fun create(
+        shell: String, cwd: String, rows: Int, cols: Int,
+        env: Map<String, String>, privilege: PrivilegeLevel
+    ): Result<TerminalSession> = mutex.withLock {
+        val sessionId = idCounter.incrementAndGet()
+        // 1. forkpty
+        val envArray = env.map { "${it.key}=${it.value}" }.toTypedArray()
+        val nativeId = native.nativeCreateSession(shell, cwd, rows, cols, envArray)
+        if (nativeId < 0) {
+            return@withLock Result.failure(RuntimeException("TerminalError:PtyUnavailable"))
+        }
+        val pid = native.nativeGetPid(nativeId)
+        // 2. assemble deps
+        val ringBuffer = RingTerminalBuffer()
+        val vt = virtualTerminalFactory(rows, cols)
+        val reducer = SemanticStateReducer(
+            sessionId = sessionId, shell = shell, initialCwd = cwd, privilege = privilege,
+            pid = pid, rows = rows, cols = cols
+        )
+        val pump = PtyOutputPumpImpl(
+            sessionId = sessionId, nativeSessionId = nativeId, native = native,
+            ringBuffer = ringBuffer, eventLog = eventLog, eventBus = eventBus,
+            virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
+            inputDetector = inputDetector,
+            foregroundCommandProvider = { foregroundCommandFor(sessionId) }
+        )
+        val session = TerminalSession(
+            id = sessionId, shell = shell, initialCwd = cwd, pid = pid,
+            rows = rows, cols = cols, privilege = privilege, state = SessionState.STARTING,
+            createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L
+        )
+        assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump)
+        stateFlows[sessionId] = MutableStateFlow(SessionState.STARTING)
+        // 3. start pump
+        pump.start()
+        // 4. transition to READY (S2)
+        transition(sessionId, SessionState.READY)
+        // 5. emit SessionCreated
+        val ev = TerminalEvent.SessionCreated(
+            id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+            shell = shell, cwd = cwd, pid = pid, rows = rows, cols = cols, privilege = privilege
+        )
+        val eid = eventLog.append(ev)
+        eventBus.emit(ev.copy(id = eid))
+        // 6. start exit watcher
+        startExitWatcher(sessionId, nativeId)
+        Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
+    }
+
+    override suspend fun get(id: Long): TerminalSession? {
+        val a = assemblies[id] ?: return null
+        return a.session.copy(
+            state = stateFlows[id]?.value ?: a.session.state,
+            cursor = a.ringBuffer.totalCursor,
+            lastExitCode = a.semanticReducer.snapshot().session.lastExitCode
+        )
+    }
+
+    override suspend fun list(): List<TerminalSession> {
+        return assemblies.keys.mapNotNull { get(it) }.filter { it.state != SessionState.CLOSED }
+    }
+
+    override suspend fun close(id: Long, force: Boolean): Result<Unit> {
+        val a = assemblies[id] ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        if (stateFlows[id]?.value == SessionState.CLOSED) return Result.success(Unit)
+        if (force) native.nativeSendSignal(a.nativeSessionId, 9)  // SIGKILL
+        // stop pump
+        a.pump.stop()
+        // SIGHUP the shell
+        native.nativeSendSignal(a.nativeSessionId, 1)
+        // close native
+        native.nativeCloseSession(a.nativeSessionId)
+        transition(id, SessionState.CLOSED)
+        val cause = if (stateFlows[id]?.value == SessionState.BROKEN) CloseCause.BROKEN else CloseCause.USER
+        val ev = TerminalEvent.SessionClosed(
+            id = 0, sessionId = id, timestamp = System.currentTimeMillis(), cursor = -1, cause = cause
+        )
+        val eid = eventLog.append(ev)
+        eventBus.emit(ev.copy(id = eid))
+        // cleanup
+        inputManager.drop(id)
+        waitEngine.drop(id)
+        assemblies.remove(id)
+        stateFlows.remove(id)
+        Result.success(Unit)
+    }
+
+    override fun observeState(id: Long): Flow<SessionState> =
+        (stateFlows[id] ?: MutableStateFlow(SessionState.CLOSED)).asStateFlow().map { it }
+
+    /** Internal: transition a session's state + emit StateChanged. */
+    suspend fun transition(sessionId: Long, to: SessionState) {
+        val flow = stateFlows[sessionId] ?: return
+        val from = flow.value
+        if (from == to) return
+        flow.value = to
+        assemblies[sessionId]?.let { a ->
+            val ev = TerminalEvent.StateChanged(
+                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
+                targetId = sessionId, from = from.name, to = to.name
+            )
+            val eid = eventLog.append(ev)
+            eventBus.emit(ev.copy(id = eid))
+        }
+    }
+
+    /** Get the assembled deps for a session (used by Runtime/JobManager). */
+    fun assembly(id: Long): SessionAssembly? = assemblies[id]
+
+    /** Start a background coroutine that watches for shell process exit. */
+    private fun startExitWatcher(sessionId: Long, nativeId: Int) {
+        scope.launch {
+            while (true) {
+                val alive = native.nativeIsAlive(nativeId)
+                if (!alive) {
+                    val exit = native.nativeGetExitCode(nativeId)
+                    val ev = TerminalEvent.ProcessExited(
+                        id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
+                        cursor = -1, jobId = null, pid = native.nativeGetPid(nativeId),
+                        exitCode = exit, signal = null, cause = ExitCause.NORMAL
+                    )
+                    val eid = eventLog.append(ev)
+                    eventBus.emit(ev.copy(id = eid))
+                    transition(sessionId, SessionState.EXITED)
+                    break
+                }
+                kotlinx.coroutines.delay(EXIT_POLL_MS)
+            }
+        }
+    }
+
+    /** Get the foreground job's command for a session (for InputWaitingDetector). */
+    private fun foregroundCommandFor(sessionId: Long): String? {
+        // The JobManager holds job state; SessionManager doesn't have direct access.
+        // For Phase 2, we read from the SemanticStateReducer's snapshot (foregroundJob.command).
+        val a = assemblies[sessionId] ?: return null
+        return a.semanticReducer.snapshot().foregroundJob?.command
+    }
+
+    companion object {
+        private const val EXIT_POLL_MS = 100L
+    }
+}

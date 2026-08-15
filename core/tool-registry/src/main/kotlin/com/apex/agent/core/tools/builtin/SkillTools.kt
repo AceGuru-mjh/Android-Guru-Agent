@@ -282,7 +282,7 @@ class SkillInstallTool(
     }
 
     private fun getTemplate(name: String): String {
-        return BUILTIN_TEMPLATES_BY_ID[name]
+        return BUILTIN_TEMPLATES_BY_ID[name]?.manifestJson
             ?: "Error: Unknown template '$name'. Available: ${BUILTIN_TEMPLATES_BY_ID.keys.joinToString(", ")}"
     }
 
@@ -345,7 +345,7 @@ class SkillInstallTool(
     "parameters": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"要整理的目录路径\"}},\"required\":[\"path\"]}",
     "implementation": {"type": "composite", "steps": [
       {"tool": "list_files", "args": {"path": "{{path}}", "depth": 1, "max_items": 100, "show_size": true}},
-      {"tool": "shell_execute", "args": {"command": "cd '{{path}}' 2>/dev/null && mkdir -p images docs videos archives other && for f in *; do if [ -f \"$f\" ]; then case \"$f\" in *.jpg|*.jpeg|*.png|*.gif|*.bmp|*.webp) mv \"$f\" images/ 2>/dev/null;; *.pdf|*.doc|*.docx|*.txt|*.md|*.xls|*.xlsx|*.ppt|*.pptx) mv \"$f\" docs/ 2>/dev/null;; *.mp4|*.mkv|*.avi|*.mov|*.webm) mv \"$f\" videos/ 2>/dev/null;; *.zip|*.tar|*.tar.gz|*.tgz|*.7z|*.rar|*.gz|*.bz2) mv \"$f\" archives/ 2>/dev/null;; *) mv \"$f\" other/ 2>/dev/null;; esac; fi; done && echo 'Organized. Counts:' && for d in images docs videos archives other; do printf '%s: ' \"$d\"; ls \"$d\" 2>/dev/null | wc -l; done", "max_lines": 30}}
+      {"tool": "shell_execute", "args": {"command": "cd '{{path}}' 2>/dev/null && mkdir -p images docs videos archives other && for f in *; do if [ -f \"${'$'}f\" ]; then case \"${'$'}f\" in *.jpg|*.jpeg|*.png|*.gif|*.bmp|*.webp) mv \"${'$'}f\" images/ 2>/dev/null;; *.pdf|*.doc|*.docx|*.txt|*.md|*.xls|*.xlsx|*.ppt|*.pptx) mv \"${'$'}f\" docs/ 2>/dev/null;; *.mp4|*.mkv|*.avi|*.mov|*.webm) mv \"${'$'}f\" videos/ 2>/dev/null;; *.zip|*.tar|*.tar.gz|*.tgz|*.7z|*.rar|*.gz|*.bz2) mv \"${'$'}f\" archives/ 2>/dev/null;; *) mv \"${'$'}f\" other/ 2>/dev/null;; esac; fi; done && echo 'Organized. Counts:' && for d in images docs videos archives other; do printf '%s: ' \"${'$'}d\"; ls \"${'$'}d\" 2>/dev/null | wc -l; done", "max_lines": 30}}
     ]}
   }],
   "configuration": {"autoSetup": []}
@@ -498,7 +498,7 @@ class SkillInstallTool(
     "parameters": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"待扫描的目录\"}},\"required\":[\"path\"]}",
     "implementation": {"type": "composite", "steps": [
       {"tool": "glob_files", "args": {"path": "{{path}}", "pattern": "*", "max_results": 200, "sort_by": "size"}},
-      {"tool": "shell_execute", "args": {"command": "cd '{{path}}' 2>/dev/null && find . -type f -size +0c 2>/dev/null | head -200 | while read f; do if command -v md5sum >/dev/null 2>&1; then h=$(md5sum \"$f\" | cut -d' ' -f1); else h=$(cksum \"$f\" | cut -d' ' -f1-2 | tr ' ' '_'); fi; echo \"$h $f\"; done | sort | uniq -w32 -d -c | sort -rn", "max_lines": 60}}
+      {"tool": "shell_execute", "args": {"command": "cd '{{path}}' 2>/dev/null && find . -type f -size +0c 2>/dev/null | head -200 | while read f; do if command -v md5sum >/dev/null 2>&1; then h=$(md5sum \"${'$'}f\" | cut -d' ' -f1); else h=$(cksum \"${'$'}f\" | cut -d' ' -f1-2 | tr ' ' '_'); fi; echo \"${'$'}h ${'$'}f\"; done | sort | uniq -w32 -d -c | sort -rn", "max_lines": 60}}
     ]}
   }],
   "configuration": {"autoSetup": []}

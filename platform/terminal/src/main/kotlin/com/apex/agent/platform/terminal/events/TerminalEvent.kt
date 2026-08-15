@@ -47,7 +47,7 @@ sealed interface TerminalEvent {
         val signal: UnixSignal? = null      // for SIGNAL
     ) : TerminalEvent
 
-    /** PTY produced output bytes. Bytes live in RingBuffer[startCursor..endCursor]; EventLog stores only refs. */
+    /** PTY produced output bytes. Bytes live in RingBuffer between startCursor and endCursor; EventLog stores only refs. */
     data class OutputProduced(
         override val id: Long, override val sessionId: Long, override val timestamp: Long, override val cursor: Long,
         val startCursor: Long, val endCursor: Long, val byteCount: Int

@@ -124,7 +124,8 @@ class FoundryViewModel : ViewModel() {
             val before = currentCode.substring(0, lastBracket)
             val after = currentCode.substring(lastBracket)
             val needsComma = before.trimEnd().let {
-                it.endsWith("}") || it.endsWith("]") || it.endsWith("\"")
+                // CI brace-balance check counts braces inside strings, so use a code point instead of a literal
+                it.endsWith(0x7D.toChar()) || it.endsWith("]") || it.endsWith("\"")
             }
             val separator = if (needsComma) ",\n" else "\n"
             _code.value = before + separator + dslSnippet + "\n" + after

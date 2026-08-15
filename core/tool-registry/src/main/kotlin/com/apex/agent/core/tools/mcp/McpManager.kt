@@ -105,6 +105,20 @@ class McpManager(
     fun getConfigs(): List<McpServerConfig> = configs.values.toList()
 
     /**
+     * 启用的服务器配置（市场开关接线：仅启用的 MCP 出现在 "/" 菜单）
+     */
+    fun getEnabledConfigs(): List<McpServerConfig> = configs.values.filter { it.enabled }.toList()
+
+    /**
+     * 启用/禁用服务器（enabled 已持久化到 mcp_servers.json）
+     */
+    fun setEnabled(name: String, enabled: Boolean) {
+        val config = configs[name] ?: return
+        configs[name] = config.copy(enabled = enabled)
+        saveConfigs()
+    }
+
+    /**
      * 删除配置
      */
     suspend fun removeServer(name: String) = mutex.withLock {

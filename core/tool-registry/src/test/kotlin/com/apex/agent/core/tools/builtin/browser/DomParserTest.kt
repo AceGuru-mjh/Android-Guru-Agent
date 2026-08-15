@@ -1,5 +1,6 @@
 package com.apex.agent.core.tools.builtin.browser
 
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -12,7 +13,7 @@ import org.junit.Test
 class DomParserTest {
 
     private fun rawJson(elements: List<RawDomElement>): String =
-        Json.encodeToString(elements)
+        Json.encodeToString(ListSerializer(RawDomElement.serializer()), elements)
 
     @Test
     fun `为可交互元素分配从 1 开始的连续 bid`() {

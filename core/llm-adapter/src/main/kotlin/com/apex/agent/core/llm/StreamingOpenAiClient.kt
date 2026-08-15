@@ -1,6 +1,7 @@
 package com.apex.agent.core.llm
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -14,6 +15,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -33,17 +35,32 @@ class StreamingOpenAiClient(
         temperature: Float,
         maxTokens: Int
     ): LlmResponse {
-        val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = false)
-        
-        val request = buildRequest(body)
-        val response = httpClient.newCall(request).await()
-        val responseBody = response.body?.string() ?: throw LlmException("Empty response")
-        
-        if (!response.isSuccessful) {
-            throw LlmException("API error ${response.code}: $responseBody")
+        var attempt = 0
+        while (true) {
+            attempt++
+            val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = false)
+            val request = buildRequest(body)
+            try {
+                val response = httpClient.newCall(request).await()
+                val responseBody = response.body?.string() ?: throw LlmException("Empty response")
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    if (attempt <= config.maxRetries && isRetryableStatus(code)) {
+                        delay(backoffDelayMs(attempt))
+                        continue
+                    }
+                    throw LlmException("API error $code: $responseBody", retryable = isRetryableStatus(code))
+                }
+                return parseNonStreamResponse(responseBody)
+            } catch (e: IOException) {
+                // 网络层瞬时错误（连接重置/超时/DNS 等）可重试
+                if (attempt <= config.maxRetries) {
+                    delay(backoffDelayMs(attempt))
+                    continue
+                }
+                throw e
+            }
         }
-        
-        return parseNonStreamResponse(responseBody)
     }
 
     override fun chatStream(
@@ -52,39 +69,74 @@ class StreamingOpenAiClient(
         temperature: Float,
         maxTokens: Int
     ): Flow<LlmStreamChunk> = flow {
-        val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = true)
-        val request = buildRequest(body)
-        
-        val response = httpClient.newCall(request).await()
-        
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: "Unknown error"
-            throw LlmException("API error ${response.code}: $errorBody")
-        }
-        
-        val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), Charsets.UTF_8))
-        
-        try {
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val currentLine = line ?: break
-                if (!currentLine.startsWith("data: ")) continue
-                
-                val data = currentLine.removePrefix("data: ").trim()
-                if (data == "[DONE]") {
-                    emit(LlmStreamChunk(isFinish = true))
-                    break
+        var attempt = 0
+        while (true) {
+            attempt++
+            val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = true)
+            val request = buildRequest(body)
+
+            // 请求建立阶段失败（连接错误 / 非成功状态码）→ 可整体重试；
+            // 一旦进入 SSE 读取阶段，中断不再重试（无法安全续传，避免重复 token）。
+            val response = try {
+                httpClient.newCall(request).await()
+            } catch (e: IOException) {
+                if (attempt <= config.maxRetries) {
+                    delay(backoffDelayMs(attempt))
+                    continue
                 }
-                
-                parseStreamChunk(data)?.let { emit(it) }
+                throw e
             }
-        } finally {
-            reader.close()
-            response.close()
+
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: "Unknown error"
+                val code = response.code
+                if (attempt <= config.maxRetries && isRetryableStatus(code)) {
+                    delay(backoffDelayMs(attempt))
+                    continue
+                }
+                throw LlmException("API error $code: $errorBody", retryable = isRetryableStatus(code))
+            }
+
+            val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), Charsets.UTF_8))
+
+            try {
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val currentLine = line ?: break
+                    if (!currentLine.startsWith("data: ")) continue
+
+                    val data = currentLine.removePrefix("data: ").trim()
+                    if (data == "[DONE]") {
+                        emit(LlmStreamChunk(isFinish = true))
+                        break
+                    }
+
+                    parseStreamChunk(data)?.let { emit(it) }
+                }
+            } finally {
+                reader.close()
+                response.close()
+            }
+            break
         }
     }.flowOn(Dispatchers.IO)
 
     // ═══ 内部方法 ═══
+
+    /** 瞬时故障状态码：408（超时）、429（限流）、5xx（服务端） */
+    private fun isRetryableStatus(code: Int): Boolean =
+        code == 408 || code == 429 || code in 500..599
+
+    /**
+     * 指数退避 + 随机抖动：base × 2^(attempt-1)，上限 8 秒。
+     * 抖动用于避免多个请求同时重试造成的"惊群"。
+     */
+    private suspend fun backoffDelayMs(attempt: Int): Long {
+        val base = config.retryBaseDelayMs.coerceAtLeast(100L)
+        val exp = base * (1L shl (attempt - 1).coerceAtMost(5))
+        val jitter = kotlin.random.Random.nextLong(0, (exp / 4).coerceAtLeast(1L))
+        return (exp + jitter).coerceAtMost(8_000L)
+    }
     
     private fun buildRequest(body: JsonObject): Request {
         val builder = Request.Builder()
@@ -284,4 +336,4 @@ class StreamingOpenAiClient(
     }
 }
 
-class LlmException(message: String) : Exception(message)
+class LlmException(message: String, val retryable: Boolean = false) : Exception(message)

@@ -491,6 +491,7 @@ class ApexAgentEngine(
     private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
         var thinkingEmittedForIteration = false
+        var emptyResponses = 0
 
         while (isRunning && iteration < config.maxIterations) {
             iteration++
@@ -591,7 +592,44 @@ class ApexAgentEngine(
                             continue
                         }
 
-                        executeToolCallStreaming(toolCall, emit)
+                        // 工具参数合法性检查：非法 JSON 先尝试自动修复（剥离 markdown
+                        // 围栏 / 前后缀文本）；无法修复则不调用工具，把错误写回历史，
+                        // 让 LLM 在下一轮自行纠正，避免工具收到垃圾参数。
+                        val repairedArgs = repairToolCallArguments(toolCall.arguments)
+                        if (repairedArgs == null) {
+                            val error = "Error: tool call '${toolCall.name}' has invalid JSON arguments: " +
+                                toolCall.arguments.take(200)
+                            addMessage(LlmMessage.ToolResult(toolCall.id, error))
+                            emit(
+                                AgentEvent.ToolCallComplete(
+                                    callId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    arguments = toolCall.arguments,
+                                    output = error,
+                                    success = false,
+                                    durationMs = 0
+                                )
+                            )
+                            anyActionFailed = true
+                            AppLogger.instance.warn(
+                                LogCategory.ENGINE, "ApexAgentEngine",
+                                "Invalid tool-call arguments for '${toolCall.name}', skipped: ${error.take(200)}"
+                            )
+                            continue
+                        }
+
+                        if (repairedArgs != toolCall.arguments) {
+                            // 修复成功：提示模型参数已被规范化，再按修复后的参数执行
+                            val notice = "[engine] tool call '${toolCall.name}' arguments were not valid JSON; " +
+                                "auto-repaired and executed."
+                            emit(AgentEvent.ToolOutputChunk(toolCall.id, notice))
+                            AppLogger.instance.warn(
+                                LogCategory.ENGINE, "ApexAgentEngine", notice
+                            )
+                            executeToolCallStreaming(toolCall.copy(arguments = repairedArgs), emit)
+                        } else {
+                            executeToolCallStreaming(toolCall, emit)
+                        }
                     }
                 }
 
@@ -646,8 +684,24 @@ class ApexAgentEngine(
                 }
 
                 else -> {
-                    emit(AgentEvent.Error("Empty response from LLM"))
-                    return iteration
+                    // 空响应韧性：LLM 偶发返回"无内容也无工具调用"（服务端截断/超时）。
+                    // 先追加一条系统提示消息重试，达到上限仍为空才报错。
+                    if (emptyResponses < config.emptyResponseRetries) {
+                        emptyResponses++
+                        AppLogger.instance.warn(
+                            LogCategory.ENGINE, "ApexAgentEngine",
+                            "Empty response from LLM, retrying (${emptyResponses}/${config.emptyResponseRetries})"
+                        )
+                        addMessage(
+                            LlmMessage.User(
+                                "[system] The previous response was empty. " +
+                                    "Please respond with either a tool call or a final answer."
+                            )
+                        )
+                    } else {
+                        emit(AgentEvent.Error("Empty response from LLM"))
+                        return iteration
+                    }
                 }
             }
         }
@@ -700,49 +754,65 @@ class ApexAgentEngine(
         val outputBuilder = StringBuilder()
 
         try {
-            toolExecutor.executeStream(toolCall.name, toolCall.arguments).collect { event ->
-                when (event) {
-                    is ToolStreamEvent.Output -> {
-                        outputBuilder.append(event.chunk)
-                        emit(
-                            AgentEvent.ToolOutputChunk(
-                                callId = toolCall.id,
-                                chunk = event.chunk
-                            )
-                        )
-                    }
-                    is ToolStreamEvent.Progress -> {
-                        emit(
-                            AgentEvent.ToolProgress(
-                                callId = toolCall.id,
-                                percent = event.percent,
-                                message = event.message
-                            )
-                        )
-                    }
-                    is ToolStreamEvent.Complete -> {
-                        // 防御：仅当工具只发 Complete 没发 Output（非典型）时补发。
-                        if (outputBuilder.isEmpty() && event.output.isNotEmpty()) {
-                            outputBuilder.append(event.output)
+            // 单工具超时保护：withTimeout 取消卡死的工具（如挂起的 shell 进程），
+            // 超时按失败结果写回历史，由 LLM 决定下一步，而非阻塞整个循环。
+            withTimeout(config.toolTimeoutMs) {
+                toolExecutor.executeStream(toolCall.name, toolCall.arguments).collect { event ->
+                    when (event) {
+                        is ToolStreamEvent.Output -> {
+                            outputBuilder.append(event.chunk)
                             emit(
                                 AgentEvent.ToolOutputChunk(
                                     callId = toolCall.id,
-                                    chunk = event.output
+                                    chunk = event.chunk
+                                )
+                            )
+                        }
+                        is ToolStreamEvent.Progress -> {
+                            emit(
+                                AgentEvent.ToolProgress(
+                                    callId = toolCall.id,
+                                    percent = event.percent,
+                                    message = event.message
+                                )
+                            )
+                        }
+                        is ToolStreamEvent.Complete -> {
+                            // 防御：仅当工具只发 Complete 没发 Output（非典型）时补发。
+                            if (outputBuilder.isEmpty() && event.output.isNotEmpty()) {
+                                outputBuilder.append(event.output)
+                                emit(
+                                    AgentEvent.ToolOutputChunk(
+                                        callId = toolCall.id,
+                                        chunk = event.output
+                                    )
+                                )
+                            }
+                        }
+                        is ToolStreamEvent.Error -> {
+                            outputBuilder.append(event.message)
+                            emit(
+                                AgentEvent.ToolOutputChunk(
+                                    callId = toolCall.id,
+                                    chunk = event.message
                                 )
                             )
                         }
                     }
-                    is ToolStreamEvent.Error -> {
-                        outputBuilder.append(event.message)
-                        emit(
-                            AgentEvent.ToolOutputChunk(
-                                callId = toolCall.id,
-                                chunk = event.message
-                            )
-                        )
-                    }
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // 注意：TimeoutCancellationException 是 CancellationException 子类，
+            // 必须在其之前捕获，否则会被当成 abort 重抛。
+            val message = "Error: Tool '${toolCall.name}' timed out after " +
+                "${config.toolTimeoutMs / 1000}s and was cancelled."
+            outputBuilder.append(message)
+            emit(
+                AgentEvent.ToolOutputChunk(
+                    callId = toolCall.id,
+                    chunk = message
+                )
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -1300,3 +1370,41 @@ private data class ToolCallAccumulator(
     var name: String = "",
     val arguments: StringBuilder = StringBuilder()
 )
+
+/**
+ * 工具参数 JSON 修复（循环韧性）。
+ *
+ * LLM 流式生成的 tool call arguments 偶尔不是合法 JSON 对象（带 markdown
+ * 围栏、前后缀说明文本等）。修复策略由宽松到严格：
+ * 1. 原样可解析 → 直接返回；
+ * 2. 剥离 ```json ... ``` 围栏后解析；
+ * 3. 截取第一个 '{' 到最后一个 '}' 的子串后解析。
+ *
+ * @return 修复后的 JSON 字符串；无法修复时返回 null（调用方应跳过该工具调用）。
+ */
+internal fun repairToolCallArguments(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    if (isValidJsonObject(trimmed)) return trimmed
+
+    // 剥离 markdown 围栏（```json / ``` / ~~~）
+    val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(trimmed)
+    val candidate = fenced?.groupValues?.get(1)?.trim() ?: trimmed
+    if (isValidJsonObject(candidate)) return candidate
+
+    // 截取 { ... } 之间的内容（丢弃前后缀文本）
+    val first = candidate.indexOf('{')
+    val last = candidate.lastIndexOf('}')
+    if (first >= 0 && last > first) {
+        val extracted = candidate.substring(first, last + 1)
+        if (isValidJsonObject(extracted)) return extracted
+    }
+    return null
+}
+
+private fun isValidJsonObject(text: String): Boolean = try {
+    Json.parseToJsonElement(text).jsonObject
+    true
+} catch (_: Exception) {
+    false
+}

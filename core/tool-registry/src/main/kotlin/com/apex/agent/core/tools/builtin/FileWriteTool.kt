@@ -63,21 +63,29 @@ class FileWriteTool(
 
             val existed = file.exists()
             val oldSize = if (existed) file.length() else 0L
+            // 覆盖/追加模式下读取旧内容，用于输出 diff 统计
+            val oldContent = if (existed) file.readText() else ""
 
             when (mode) {
                 "append" -> file.appendText(content + "\n")
                 else -> file.writeText(content)
             }
 
-            val lineCount = content.lines().size
+            val lineCount = lineCountOf(content)
             buildString {
                 if (existed && mode == "write") {
+                    val diffStat = computeLineDiffStat(oldContent, content)
                     appendLine("✅ Overwritten: ${file.name}")
+                    appendLine("  ${diffStat.toSummaryLine()}")
                     appendLine("  Old: ${formatSize(oldSize)} → New: ${formatSize(file.length())}")
                 } else if (mode == "append") {
+                    val oldLineCount = lineCountOf(oldContent)
                     appendLine("✅ Appended to: ${file.name} (+${formatSize(content.length.toLong())})")
+                    appendLine("  Diff stat: added=$lineCount, deleted=0, net=+$lineCount, " +
+                        "changedRange=${oldLineCount + 1}-${oldLineCount + lineCount}")
                 } else {
                     appendLine("✅ Created: ${file.name}")
+                    appendLine("  Diff stat: added=$lineCount, deleted=0, net=+$lineCount, changedRange=1-$lineCount")
                 }
                 appendLine("  $lineCount lines, ${formatSize(file.length())}")
                 appendLine("  Path: ${file.absolutePath}")

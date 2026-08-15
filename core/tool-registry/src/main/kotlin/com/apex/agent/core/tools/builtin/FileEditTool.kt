@@ -106,6 +106,7 @@ class FileEditTool(
             var content = file.readText()
             val originalContent = content
             val appliedEdits = mutableListOf<String>()
+            var totalMatches = 0
 
             for (editJson in editsArray) {
                 val edit = editJson.jsonObject
@@ -144,6 +145,7 @@ class FileEditTool(
                             }
                         } else {
                             val occurrences = Regex(Regex.escape(search)).findAll(content).count()
+                            totalMatches += occurrences
                             content = content.replace(search, replace)
                             val action = if (replace.isEmpty()) "Delete" else "Replace"
                             appliedEdits.add("$action ($occurrences occurrence${if (occurrences > 1) "s" else ""}): '${search.take(50)}'")
@@ -159,15 +161,13 @@ class FileEditTool(
             // 写入文件
             file.writeText(content)
 
-            // 生成变更摘要
-            val addedLines = content.lines().size - originalContent.lines().size
+            // 生成变更摘要（含 diff 统计与命中次数）
+            val diffStat = computeLineDiffStat(originalContent, content)
             buildString {
                 appendLine("✅ Edited ${file.name} (${appliedEdits.size} operations)")
                 appliedEdits.forEach { appendLine("  • $it") }
-                if (addedLines != 0) {
-                    appendLine("  Net change: ${if (addedLines > 0) "+" else ""}$addedLines lines")
-                }
-                appendLine("  File now: ${content.lines().size} lines, ${formatSize(content.length.toLong())}")
+                appendLine("  ${diffStat.toSummaryLine()}, matchCount=$totalMatches")
+                appendLine("  File now: ${lineCountOf(content)} lines, ${formatSize(content.length.toLong())}")
             }
         } catch (e: Exception) {
             "Edit error: ${e.message}"

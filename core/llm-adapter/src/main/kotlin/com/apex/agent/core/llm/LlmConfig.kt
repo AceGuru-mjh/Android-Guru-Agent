@@ -41,6 +41,16 @@ data class LlmConfig(
     val systemPromptPrefix: String = "",
 
     /**
+     * 瞬时故障自动重试次数（HTTP 408/429/5xx 或网络错误）。
+     * 0 = 不重试。重试只发生在请求建立阶段（流式响应收到第一个 SSE 分片前），
+     * 流已经开始后的中断不会重试，避免重复消耗 token。
+     */
+    val maxRetries: Int = 2,
+
+    /** 重试退避基础延迟（毫秒）；每次尝试翻倍，含随机抖动，上限 8 秒 */
+    val retryBaseDelayMs: Long = 500,
+
+    /**
      * 模型原生思考强度。控制 OpenAI o-series 的 `reasoning_effort` 字段，
      * 或 DeepSeek-R1 / Qwen3-thinking / GLM-Z1 等模型的原生思考预算。
      *

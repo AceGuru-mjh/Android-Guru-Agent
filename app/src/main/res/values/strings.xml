@@ -2,4 +2,48 @@
 <resources>
     <string name="app_name">Apex Agent</string>
     <string name="accessibility_description">Apex AI Agent需要无障碍权限来读取屏幕内容和执行UI操作。这是Agent"看见"和"操作"设备的核心能力。</string>
+    <string name="tooltip_copy_message">复制</string>
+    <string name="log_copy_all">复制全部</string>
+    <string name="action_delete">删除</string>
+    <string name="log_clear">清空</string>
+    <string name="action_export">导出</string>
+    <string name="log_export">导出日志</string>
+    <string name="log_auto_scroll_on">跟随</string>
+    <string name="log_auto_scroll_off">已停</string>
+    <string name="log_stats_total">条</string>
+    <string name="log_stats_errors">错误</string>
+    <string name="log_buffer">缓冲</string>
+    <string name="log_filter_all">全部</string>
+    <string name="log_filter_level">级别≥</string>
+    <string name="placeholder_search">搜索消息或来源…</string>
+    <string name="action_search">搜索</string>
+    <string name="log_filter_session">会话</string>
+    <string name="log_session_all">全部</string>
+    <string name="log_session_prefix">会话#</string>
+    <string name="action_close">收起</string>
+    <string name="action_open">堆栈</string>
+    <string name="memory_title">记忆</string>
+    <string name="action_confirm">确认</string>
+    <string name="memory_stat_episodes">会话</string>
+    <string name="memory_stat_nodes">节点</string>
+    <string name="memory_stat_macros">宏技能</string>
+    <string name="placeholder_search_nodes">搜索节点（文本 / 关键词）</string>
+    <string name="log_no_matching_nodes">没有匹配 "%1$s" 的记忆节点</string>
+    <string name="memory_episodes">记忆会话</string>
+    <string name="memory_no_episodes">还没有任何记忆会话
+Agent 执行任务后这里会沉淀 Episode</string>
+    <string name="memory_frequent_macros">高频宏技能</string>
+    <string name="memory_no_macros">还没有蒸馏出的宏技能
+任务成功后 Agent 会沉淀可复用 FSM 宏</string>
+    <string name="memory_delete_episode">删除记忆会话</string>
+    <string name="memory_delete_episode_confirm">确定删除 "%1$s" 吗？关联的边会一并清除（节点为共享字典，不随删硬删）。</string>
+    <string name="action_cancel">取消</string>
+    <string name="memory_episode_status">%1$s · %2$s · %3$d 个动作</string>
+    <string name="memory_episode_distilled">已蒸馏为宏</string>
+    <string name="memory_node_text_hint">(无文本)</string>
+    <string name="memory_node_role">角色：%1$s</string>
+    <string name="memory_macro_stats">%1$s · 成功 %2$d · 失败 %3$d</string>
+    <string name="memory_macro_universal">通用</string>
+    <string name="memory_macro_crystallized">已结晶</string>
+    <string name="memory_macro_steps">%1$d 步</string>
 </resources>

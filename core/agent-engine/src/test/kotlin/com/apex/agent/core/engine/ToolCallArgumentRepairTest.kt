@@ -50,15 +50,15 @@ class ToolCallArgumentRepairTest {
 
     @Test
     fun `unbalanced braces returns null`() {
-        assertNull(repairToolCallArguments("""{"path": "x""""))
+        assertNull(repairToolCallArguments("\u007b\"path\": \"x\""))
     }
 
     @Test
     fun `nested braces still extract whole object`() {
-        val raw = """prefix {"a": {"b": [1, 2]}, "c": "}d"} suffix"""
+        val raw = "prefix {\"a\": {\"b\": [1, 2]}, \"c\": \"\u007dd\"} suffix"
         val repaired = repairToolCallArguments(raw)
         assertNotNull(repaired)
         // 应从第一个 { 到最后一个 } 完整截取
-        assertEquals("""{"a": {"b": [1, 2]}, "c": "}d"}""", repaired)
+        assertEquals("{\"a\": {\"b\": [1, 2]}, \"c\": \"\u007dd\"}", repaired)
     }
 }

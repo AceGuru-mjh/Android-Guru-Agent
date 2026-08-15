@@ -1,0 +1,92 @@
+{
+  "name": "Sample Preview",
+  "theme": {
+    "primaryColor": "#FF6200EE",
+    "secondaryColor": "#FF03DAC5",
+    "backgroundColor": "#FFFFFFFF",
+    "surfaceColor": "#FFFFFFFF",
+    "errorColor": "#FFB00020"
+  },
+  "device": {
+    "widthDp": 412,
+    "heightDp": 915
+  },
+  "root": {
+    "type": "Column",
+    "modifier": {
+      "fillMaxSize": true,
+      "padding": { "all": 16 }
+    },
+    "children": [
+      {
+        "type": "Text",
+        "attributes": {
+          "text": "Welcome to ComposeFoundry",
+          "fontSize": "24",
+          "fontWeight": "Bold"
+        },
+        "modifier": {
+          "padding": { "bottom": 16 }
+        }
+      },
+      {
+        "type": "Text",
+        "attributes": {
+          "text": "Edit the DSL on the left to see changes here",
+          "fontSize": "14"
+        },
+        "modifier": {
+          "padding": { "bottom": 24 }
+        }
+      },
+      {
+        "type": "Button",
+        "attributes": {
+          "text": "Click Me",
+          "onClick": "toast:Hello!"
+        }
+      },
+      {
+        "type": "Spacer",
+        "modifier": {
+          "height": 16
+        }
+      },
+      {
+        "type": "Card",
+        "modifier": {
+          "fillMaxWidth": true,
+          "cornerRadius": 12
+        },
+        "children": [
+          {
+            "type": "Column",
+            "modifier": {
+              "padding": { "all": 16 }
+            },
+            "children": [
+              {
+                "type": "Text",
+                "attributes": {
+                  "text": "Card Title",
+                  "fontSize": "18",
+                  "fontWeight": "Medium"
+                },
+                "modifier": {
+                  "padding": { "bottom": 8 }
+                }
+              },
+              {
+                "type": "Text",
+                "attributes": {
+                  "text": "This is a card component with nested content",
+                  "fontSize": "14"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -12,6 +12,7 @@ import com.apex.agent.core.tools.mcp.McpTransport
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.marketplace.GitHubRepoHit
 import com.apex.agent.marketplace.MarketInstallManager
+import com.apex.agent.plugin.host.PluginInfo
 import com.apex.agent.plugin.host.PluginManager
 import com.apex.agent.ui.component.SlashMenuProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,7 +43,7 @@ data class MarketUiState(
     // 连接器
     val connectors: List<ConnectorDef> = emptyList(),
     // 插件
-    val plugins: List<PluginManager.PluginInfo> = emptyList(),
+    val plugins: List<PluginInfo> = emptyList(),
     val loadedPlugins: Set<String> = emptySet(),
     // 集成：魔搭
     val modelScopeSkills: List<ModelScopeSource.ModelScopeSkill> = emptyList(),

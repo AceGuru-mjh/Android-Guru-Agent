@@ -11,6 +11,7 @@ import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.plugin.host.PluginManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive

@@ -519,7 +519,7 @@ private fun exportAndShare(context: android.content.Context, content: String) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             withContext(Dispatchers.Main) {
-                context.startActivity(Intent.createChooser(intent, stringResource(R.string.log_export)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                context.startActivity(Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         } catch (e: Exception) {
             // 分享失败不影响日志中枢本身；如需可追溯可在此汇入 SYSTEM 日志。

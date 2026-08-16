@@ -21,7 +21,7 @@ jobs:
 
       - name: Install Kotlin compiler
         run: |
-          curl -sL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.2.21.zip -o /tmp/kotlin.zip
+          curl -sL https://github.com/JetBrains/kotlin/releases/download/v2.2.21/kotlin-compiler-2.2.21.zip -o /tmp/kotlin.zip
           unzip -q /tmp/kotlin.zip -d $HOME/
           echo "$HOME/kotlinc/bin" >> $GITHUB_PATH
 

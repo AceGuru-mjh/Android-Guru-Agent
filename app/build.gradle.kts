@@ -57,10 +57,10 @@ dependencies {
     implementation(libs.compose.animation)
     implementation(libs.compose.material3)
     implementation(libs.backdrop)
-    implementation("androidx.compose.material:material-icons-core:1.9.4")
-    implementation("androidx.compose.material:material-icons-extended:1.9.4")
+    implementation("androidx.compose.material:material-icons-core:1.7.8")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
     // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
-    // 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
+    // 固定 1.1.0：与 Kotlin 2.2 toolchain 兼容（项目已升级 Kotlin 2.2.21，可后续评估 2.x）。
     implementation("com.composables:icons-lucide-android:1.1.0")
     debugImplementation(libs.compose.ui.tooling)
 

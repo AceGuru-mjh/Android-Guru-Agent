@@ -1,8 +1,8 @@
 package com.apex.agent.di
 
-import com.apex.agent.platform.terminal.NativePty
 import com.apex.agent.platform.terminal.TerminalManager
 import com.apex.agent.platform.terminal.native.JniNativePty
+import com.apex.agent.platform.terminal.native.NativePty
 import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.policy.TerminalPolicyImpl
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime

@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21"
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
@@ -53,11 +53,12 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
-    implementation("androidx.compose.foundation:foundation:1.7.6")
+    implementation("androidx.compose.foundation:foundation:1.9.4")
     implementation(libs.compose.animation)
     implementation(libs.compose.material3)
-    implementation("androidx.compose.material:material-icons-core:1.7.8")
-    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation(libs.backdrop)
+    implementation("androidx.compose.material:material-icons-core:1.9.4")
+    implementation("androidx.compose.material:material-icons-extended:1.9.4")
     // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
     // 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
     implementation("com.composables:icons-lucide-android:1.1.0")

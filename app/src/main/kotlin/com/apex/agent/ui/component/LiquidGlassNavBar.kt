@@ -2,7 +2,6 @@ package com.apex.agent.ui.component
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,29 +23,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.rememberBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 
 /**
  * 液态玻璃底部导航栏（圆形长条）
  *
- * 效果完全由 Compose 原生绘制（零三方依赖）：
- * - 胶囊形容器：半透明白色渐变（顶部亮、底部透）模拟玻璃折射；
- * - 顶部高光弧线 + 边缘 1dp 白色描边模拟液态玻璃边缘高光；
- * - 每项为圆形图标按钮，选中项青霓虹填充 + 发光投影，未选中半透明白；
- * - 项目下方小字标签（选中项高亮）。
- *
- * 调研结论（2026-08 记录）：液态玻璃第三方库（io.github.kyant0:backdrop）
- * 所有版本要求 Kotlin ≥2.2 / Compose ≥1.9，与项目 Kotlin 2.0.21 /
- * Compose 1.7.x（BOM 2024.12.01）不兼容，强引会复刻 Lucide 元数据事故，
- * 故采用自绘（效果等价、零依赖、零风险）。
+ * 基于 io.github.kyant0:backdrop 1.0.0（Compose Multiplatform Liquid Glass）：
+ * - [backdrop] 由调用方用 rememberLayerBackdrop() 创建，并把内容区注册为
+ *   背景源（Modifier.layerBackdrop），导航栏即可实时模糊背后的内容；
+ * - 效果栈：vibrancy（色彩增强）+ blur（高斯模糊）+ lens（折射透镜），
+ *   均为 RenderEffect（API 31+ 硬件加速），低版本自动降级为纯 surface 色；
+ * - 选中项圆形按钮：青霓虹填充 + 发光投影，未选中半透明白。
  */
 data class GlassTab(
     val id: String,
@@ -59,60 +55,34 @@ fun LiquidGlassNavBar(
     tabs: List<GlassTab>,
     selectedId: String,
     onSelect: (String) -> Unit,
+    backdrop: Backdrop,
     modifier: Modifier = Modifier
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val onSurface = MaterialTheme.colorScheme.onSurface
 
+    // 将外部 backdrop（内容层快照）包装为本组件专属绘制源
+    val glassBackdrop = rememberBackdrop(backdrop) { drawBackdrop -> drawBackdrop() }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .shadow(
-                elevation = 18.dp,
-                shape = RoundedCornerShape(32.dp),
-                ambientColor = primary.copy(alpha = 0.35f),
-                spotColor = primary.copy(alpha = 0.45f)
+            .drawBackdrop(
+                backdrop = glassBackdrop,
+                shape = { RoundedCornerShape(36.dp) },
+                effects = {
+                    vibrancy()
+                    blur(10f.dp.toPx())
+                    lens(16f.dp.toPx(), 16f.dp.toPx())
+                },
+                onDrawSurface = {
+                    // 玻璃基色：半透明白
+                    drawRect(Color.White.copy(alpha = 0.14f))
+                }
             )
-            .clip(RoundedCornerShape(32.dp))
             .height(72.dp)
     ) {
-        // ═══ 液态玻璃容器（自绘） ═══
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val radius = CornerRadius(size.height / 2f, size.height / 2f)
-            // 基色：顶部亮白渐变 → 底部深色透出（玻璃折射感）
-            drawRoundRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.28f),
-                        Color.White.copy(alpha = 0.10f),
-                        Color(0xFF0F172A).copy(alpha = 0.30f)
-                    )
-                ),
-                cornerRadius = radius
-            )
-            // 顶部高光弧线（液态玻璃边缘高光）
-            drawRoundRect(
-                brush = Brush.horizontalGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.55f),
-                        Color.White.copy(alpha = 0.15f),
-                        Color.White.copy(alpha = 0.55f)
-                    )
-                ),
-                topLeft = Offset(size.width * 0.10f, 1.dp.toPx()),
-                size = Size(size.width * 0.80f, 1.2.dp.toPx()),
-                cornerRadius = CornerRadius(1.dp.toPx(), 1.dp.toPx())
-            )
-            // 边缘描边
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.35f),
-                style = Stroke(width = 1.dp.toPx()),
-                cornerRadius = radius
-            )
-        }
-
-        // ═══ 五项圆形按钮 ═══
         Row(
             modifier = Modifier
                 .fillMaxWidth()

@@ -1,7 +1,7 @@
 [versions]
-kotlin = "2.0.21"
+kotlin = "2.2.21"
 agp = "8.7.3"
-compose-bom = "2024.12.01"
+compose-bom = "2025.10.01"
 activity-compose = "1.9.3"
 lifecycle = "2.8.7"
 hilt = "2.53.1"
@@ -13,13 +13,14 @@ shizuku = "13.1.5"
 core-ktx = "1.15.0"
 navigation = "2.8.5"
 work = "2.10.0"
-ksp = "2.0.21-1.0.28"
+ksp = "2.2.21-2.0.5"
 coil = "2.6.0"
 security-crypto = "1.1.0-alpha06"
 junit = "4.13.2"
 room = "2.6.1"
 # 赛博霓虹悬浮球（JitPack；仅允许该 group 走 jitpack 仓库，版本固定避免动态解析）
 easyfloat = "2.0.4"
+backdrop = "1.0.0"
 
 [libraries]
 # Compose
@@ -54,6 +55,9 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 
 # Serialization
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+
+# Liquid Glass (backdrop, Compose Multiplatform)
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 
 # Network
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }

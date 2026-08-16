@@ -67,6 +67,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.ui.component.GlassTab
 import com.apex.agent.ui.component.LiquidGlassNavBar
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /** 市场主屏：内容区 + 底部液态玻璃导航栏（插件 / Skills / MCP / 连接器 / 集成） */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,6 +79,8 @@ fun MarketScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showToast by remember { mutableStateOf(false) }
+    // 液态玻璃背景源：内容区注册为 backdrop，导航栏实时模糊其内容
+    val glassBackdrop = rememberLayerBackdrop()
 
     val tabs = listOf(
         GlassTab(MarketTab.PLUGINS.id, MarketTab.PLUGINS.label, Icons.Default.Extension),
@@ -91,8 +95,8 @@ fun MarketScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ═══ 当前页签内容 ═══
-        Box(modifier = Modifier.weight(1f)) {
+        // ═══ 当前页签内容（注册为液态玻璃背景源）═══
+        Box(modifier = Modifier.weight(1f).layerBackdrop(glassBackdrop)) {
             when (state.selectedTab) {
                 MarketTab.PLUGINS -> PluginsTab(state, viewModel)
                 MarketTab.SKILLS -> SkillsTab(state, viewModel)
@@ -136,6 +140,7 @@ fun MarketScreen(
             onSelect = { id ->
                 viewModel.selectTab(MarketTab.entries.first { it.id == id })
             },
+            backdrop = glassBackdrop,
             modifier = Modifier.padding(bottom = 10.dp)
         )
     }

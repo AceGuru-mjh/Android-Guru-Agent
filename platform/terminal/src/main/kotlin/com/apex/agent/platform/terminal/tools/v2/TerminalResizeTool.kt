@@ -1,6 +1,13 @@
 package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
 
 /**
  * Agent tool: terminal.resize
@@ -18,12 +25,15 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  */
 class TerminalResizeTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal.resize"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal.resize"
+    override val name: String = id
+    override val description: String = """
         Resize the Session's PTY (sends SIGWINCH). Updates VirtualTerminal dimensions. Useful
         before running TUI programs (vim/top) to fit screen.
     """.trimIndent()
+
+    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["sessionId","rows","cols"]}"
 
     suspend fun execute(input: Input): Output {
         require(input.rows >= 1 && input.cols >= 1) {
@@ -34,6 +44,15 @@ class TerminalResizeTool(
             onSuccess = { r -> Output(resized = r.resized, rows = r.rows, cols = r.cols) },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull() ?: throw IllegalArgumentException("sessionId required")
+        val rows = json["rows"]?.jsonPrimitive?.content?.toIntOrNull() ?: throw IllegalArgumentException("rows required")
+        val cols = json["cols"]?.jsonPrimitive?.content?.toIntOrNull() ?: throw IllegalArgumentException("cols required")
+        val out = execute(Input(sessionId, rows, cols))
+        return buildJsonObject { put("resized", JsonPrimitive(out.resized)); put("rows", JsonPrimitive(out.rows)); put("cols", JsonPrimitive(out.cols)) }.toString()
     }
 
     data class Input(val sessionId: Long, val rows: Int, val cols: Int)

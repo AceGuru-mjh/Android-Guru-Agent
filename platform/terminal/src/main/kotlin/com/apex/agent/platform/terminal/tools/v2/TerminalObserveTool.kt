@@ -1,6 +1,12 @@
 package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Agent tool: terminal.observe
@@ -23,13 +29,16 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  */
 class TerminalObserveTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal.observe"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal.observe"
+    override val name: String = id
+    override val description: String = """
         Observe terminal state. Default mode=SEMANTIC returns machine-readable state (session/job/input/cursor)
         with NO raw output — token-cheap. mode=EVENT returns incremental events since afterCursor.
         mode=SCREEN returns parsed screen (for TUI like vim/top). mode=RAW returns raw bytes since afterCursor.
     """.trimIndent()
+
+    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"mode":{"type":"string","default":"SEMANTIC"},"afterCursor":{"type":"integer","default":0},"maxBytes":{"type":"integer","default":12000},"maxEvents":{"type":"integer","default":200}},"required":["sessionId"]}"
 
     suspend fun execute(input: Input): Output {
         val result = runtime.observe(
@@ -58,6 +67,55 @@ class TerminalObserveTool(
             },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull() ?: throw IllegalArgumentException("sessionId required")
+        val mode = runCatching { TerminalRuntime.ObserveMode.valueOf(json["mode"]?.jsonPrimitive?.content ?: "SEMANTIC") }.getOrDefault(TerminalRuntime.ObserveMode.SEMANTIC)
+        val afterCursor = json["afterCursor"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+        val maxBytes = json["maxBytes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 12000
+        val maxEvents = json["maxEvents"]?.jsonPrimitive?.content?.toIntOrNull() ?: 200
+        val out = execute(Input(sessionId, mode, afterCursor, maxBytes, maxEvents))
+        return buildJsonObject {
+            put("mode", JsonPrimitive(out.mode))
+            put("sessionId", JsonPrimitive(out.sessionId))
+            put("cursor", JsonPrimitive(out.cursor))
+            out.startCursor?.let { put("startCursor", JsonPrimitive(it)) }
+            out.endCursor?.let { put("endCursor", JsonPrimitive(it)) }
+            put("truncated", JsonPrimitive(out.truncated))
+            put("overrun", JsonPrimitive(out.overrun))
+            // mode-specific payload
+            when (mode) {
+                TerminalRuntime.ObserveMode.RAW -> put("raw", JsonPrimitive(out.raw ?: ""))
+                TerminalRuntime.ObserveMode.SCREEN -> {
+                    out.screen?.let { scr ->
+                        put("renderedText", JsonPrimitive(scr.renderedText ?: ""))
+                        put("rows", JsonPrimitive(scr.rows))
+                        put("cols", JsonPrimitive(scr.cols))
+                        put("cursorRow", JsonPrimitive(scr.cursorRow))
+                        put("cursorCol", JsonPrimitive(scr.cursorCol))
+                        put("alternateScreen", JsonPrimitive(scr.alternateScreen))
+                    }
+                }
+                TerminalRuntime.ObserveMode.SEMANTIC -> {
+                    out.semantic?.let { sem ->
+                        put("sessionState", JsonPrimitive(sem.session.state.name))
+                        put("cursor", JsonPrimitive(sem.session.cursor))
+                        put("shell", JsonPrimitive(sem.session.shell))
+                        put("cwd", JsonPrimitive(sem.session.cwd))
+                        sem.foregroundJob?.let { j ->
+                            put("fgJobId", JsonPrimitive(j.id))
+                            put("fgJobState", JsonPrimitive(j.state.name))
+                            put("fgJobCommand", JsonPrimitive(j.command))
+                            j.exitCode?.let { put("fgJobExitCode", JsonPrimitive(it)) }
+                        }
+                        put("inputState", JsonPrimitive(sem.input.state.name))
+                    }
+                }
+                TerminalRuntime.ObserveMode.EVENT -> put("eventCount", JsonPrimitive(out.events?.size ?: 0))
+            }
+        }.toString()
     }
 
     data class Input(

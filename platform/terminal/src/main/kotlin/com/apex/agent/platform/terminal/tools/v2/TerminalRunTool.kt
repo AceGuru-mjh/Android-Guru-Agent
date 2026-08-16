@@ -2,6 +2,13 @@ package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
 // NOTE: `AgentTool` interface is provided by :core:tool-registry. We reference it by FQN-style
 // assumption here; the real repo's package is `com.apex.agent.core.toolregistry.AgentTool`.
 // This file is a SCAFFOLD — wire to the real AgentTool base in Phase 2.
@@ -26,13 +33,16 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  */
 class TerminalRunTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal.run"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal.run"
+    override val name: String = id
+    override val description: String = """
         Run a command in a Session. Non-blocking: returns a Job immediately.
         Use terminal.wait(PROCESS_EXITED) to block until done, and terminal.observe(afterCursor=startCursor)
         to read incremental output. Long-running / interactive / background commands are all supported.
     """.trimIndent()
+
+    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"command":{"type":"string"},"background":{"type":"boolean","default":false},"timeoutMs":{"type":"integer","default":0}},"required":["sessionId","command"]}"
 
     suspend fun execute(input: Input): Output {
         // Owner is AUTO-INJECTED by Runtime based on call origin.
@@ -57,6 +67,16 @@ class TerminalRunTool(
             },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull() ?: throw IllegalArgumentException("sessionId required")
+        val command = json["command"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("command required")
+        val background = json["background"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+        val timeoutMs = json["timeoutMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+        val out = execute(Input(sessionId, command, background, timeoutMs))
+        return buildJsonObject { put("jobId", JsonPrimitive(out.jobId)); put("sessionId", JsonPrimitive(out.sessionId)); put("state", JsonPrimitive(out.state)); put("startCursor", JsonPrimitive(out.startCursor)); put("owner", JsonPrimitive(out.owner)); put("background", JsonPrimitive(out.background)) }.toString()
     }
 
     data class Input(

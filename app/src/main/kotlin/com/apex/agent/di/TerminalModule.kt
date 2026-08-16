@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.pty.JniNativePty
 import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.policy.TerminalPolicyImpl
+import com.apex.agent.platform.terminal.compat.LegacyTerminalManager
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.runtime.TerminalRuntimeImpl
 import com.apex.agent.platform.terminal.tools.*
@@ -38,6 +39,12 @@ object TerminalModule {
         native: NativePty,
         policy: TerminalPolicy
     ): TerminalRuntime = TerminalRuntimeImpl(native, policy)
+
+    /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */
+    @Provides
+    @Singleton
+    fun provideLegacyTerminalManager(runtime: TerminalRuntime): LegacyTerminalManager =
+        LegacyTerminalManager(runtime)
 }
 
 // 在 ToolModule.provideToolRegistry() 中注册：

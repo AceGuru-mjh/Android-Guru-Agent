@@ -5,7 +5,6 @@ import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.wait.WaitCondition
-import com.apex.agent.platform.terminal.wait.WaitResult
 
 /**
  * Compatibility facade that preserves the OLD TerminalManager API surface but delegates
@@ -29,6 +28,7 @@ import com.apex.agent.platform.terminal.wait.WaitResult
  *   Phase 3:   Old TerminalManager.kt replaced by this compat facade; old 6 tools delegate here.
  *   Phase 5:   Marked @Deprecated (kept for 1 version, then removed).
  */
+@Deprecated("ATR 2.0 compat facade — migrate to TerminalRuntime directly. Scheduled for removal in a future version.", ReplaceWith("runtime", "com.apex.agent.platform.terminal.runtime.TerminalRuntime"))
 class LegacyTerminalManager(
     private val runtime: TerminalRuntime
 ) {

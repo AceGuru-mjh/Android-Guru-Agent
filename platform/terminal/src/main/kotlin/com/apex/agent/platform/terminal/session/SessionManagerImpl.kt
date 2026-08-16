@@ -160,7 +160,7 @@ class SessionManagerImpl(
         waitEngine.drop(id)
         assemblies.remove(id)
         stateFlows.remove(id)
-        Result.success(Unit)
+        return Result.success(Unit)
     }
 
     override fun observeState(id: Long): Flow<SessionState> =

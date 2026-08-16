@@ -42,7 +42,7 @@ class InputManagerImpl(
 
     /** Per-session writer state. */
     private data class SessionWriter(
-        val channel: Channel<WriteOp>,
+        val channel: Channel<WriteOp.WriteBytes>,
         val control: MutableStateFlow<InputControlState>
     )
 

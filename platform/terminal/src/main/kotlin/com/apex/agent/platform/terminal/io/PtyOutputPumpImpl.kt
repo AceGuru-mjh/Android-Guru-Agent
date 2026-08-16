@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * One pump coroutine per Session. Started by SessionManager on S2 (READY), cancelled on close.
  */
 class PtyOutputPumpImpl(
-    private val sessionId: Long,
+    override val sessionId: Long,
     private val nativeSessionId: Int,          // the int id returned by NativePty.nativeCreateSession
     private val native: NativePty,
     private val ringBuffer: TerminalOutputBuffer,
@@ -55,7 +55,6 @@ class PtyOutputPumpImpl(
     private var pumpJob: Job? = null
     private val running = AtomicBoolean(false)
 
-    override val sessionId: Long get() = this.sessionId
     override val isRunning: Boolean get() = running.get()
 
     override suspend fun start() {

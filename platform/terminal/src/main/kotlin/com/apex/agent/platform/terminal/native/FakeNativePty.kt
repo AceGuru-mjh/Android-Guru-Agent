@@ -30,7 +30,7 @@ class FakeNativePty : NativePty {
     private data class Session(
         val id: Int,
         val shell: String,
-        val cwd: String,
+        var cwd: String,
         var rows: Int,
         var cols: Int,
         val pid: Int,

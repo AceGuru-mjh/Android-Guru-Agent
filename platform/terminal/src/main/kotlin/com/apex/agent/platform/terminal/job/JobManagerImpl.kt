@@ -1,5 +1,7 @@
 package com.apex.agent.platform.terminal.job
 
+import com.apex.agent.platform.terminal.session.SessionState
+
 import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventBus

@@ -167,16 +167,15 @@ class TerminalRuntimeImpl(
         if (sessionManager.assembly(sessionId) == null) {
             return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         }
-        val res: Result<Unit> = when (kind) {
+        val res: Result<com.apex.agent.platform.terminal.io.WriteResult> = when (kind) {
             WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
             WriteKind.LINE -> inputManager.sendLine(sessionId, owner, text ?: "")
             WriteKind.KEY -> inputManager.sendKey(sessionId, owner, key ?: TerminalKey.ENTER)
         }
-        return res.map {
-            val payload = text ?: ""
-            val bytes = if (payload.isEmpty()) 0 else payload.toByteArray(Charsets.UTF_8).size
+        return res.map { wr ->
+            // bytesWritten reflects the actual bytes written to the PTY (LINE appends '\n', RAW does not).
             WriteResult(
-                written = true, bytesWritten = bytes,
+                written = true, bytesWritten = wr.bytesWritten,
                 cursor = sessionManager.assembly(sessionId)!!.ringBuffer.totalCursor,
                 inputOwner = owner
             )

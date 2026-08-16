@@ -59,7 +59,9 @@ data class OutputSlice(
     val endCursor: Long,
     val bytes: ByteArray,
     val truncated: Boolean,
-    val overrun: Boolean
+    val overrun: Boolean,
+    /** PR #52 §5/§6: when overrun, the oldest still-available cursor (re-sync point). */
+    val availableFrom: Long? = null
 )
 
 /**

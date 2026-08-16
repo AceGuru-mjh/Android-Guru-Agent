@@ -62,12 +62,14 @@ class RingTerminalBuffer(
             val total = writePos.get()
             val oldest = oldestCursor
             if (cursor < oldest) {
+                // PR #52 §6: cursor expired — return availableFrom so caller can re-sync
                 return OutputSlice(
                     startCursor = oldest,
                     endCursor = oldest,
                     bytes = ByteArray(0),
                     truncated = false,
-                    overrun = true
+                    overrun = true,
+                    availableFrom = oldest
                 )
             }
             if (cursor > total) {

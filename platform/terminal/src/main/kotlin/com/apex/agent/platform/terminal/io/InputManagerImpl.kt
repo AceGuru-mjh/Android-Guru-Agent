@@ -158,16 +158,23 @@ class InputManagerImpl(
         return Result.success(Unit)
     }
 
-    override suspend fun write(sessionId: Long, owner: InputOwner, bytes: ByteArray): Result<Unit> {
-        return writeInternal(sessionId, owner, bytes = bytes, kind = InputKind.RAW).map { }
+    override suspend fun write(sessionId: Long, owner: InputOwner, bytes: ByteArray): Result<WriteResult> {
+        return writeInternal(sessionId, owner, bytes = bytes, kind = InputKind.RAW)
     }
 
-    override suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<Unit> {
-        return writeInternal(sessionId, owner, key = key, kind = InputKind.KEY).map { }
+    override suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<WriteResult> {
+        return writeInternal(sessionId, owner, key = key, kind = InputKind.KEY)
     }
 
     override suspend fun sendSignal(sessionId: Long, owner: InputOwner, signal: UnixSignal, jobId: Long?): Result<Unit> {
         return writeInternal(sessionId, owner, signal = signal, kind = InputKind.SIGNAL).map { }
+    }
+
+    // PR #52 §1: stdin lifecycle — EOF via Ctrl+D (byte 0x04). Distinct from close() (PTY teardown).
+    override suspend fun closeStdin(sessionId: Long, owner: InputOwner): Result<Unit> {
+        // Ctrl+D = EOT (0x04) — signals EOF to the foreground process reading stdin.
+        // This does NOT close the PTY; the shell continues running and can accept new commands.
+        return write(sessionId, owner, byteArrayOf(0x04)).map { }
     }
 
     private suspend fun writeInternal(

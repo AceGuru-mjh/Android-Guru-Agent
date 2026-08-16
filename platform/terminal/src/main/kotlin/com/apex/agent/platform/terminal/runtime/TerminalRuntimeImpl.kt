@@ -214,6 +214,11 @@ class TerminalRuntimeImpl(
     override suspend fun resize(sessionId: Long, rows: Int, cols: Int): Result<ResizeResult> {
         val a = sessionManager.assembly(sessionId)
             ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        // 0. Validate dimensions (Spec §34.7). Zero or negative rows/cols are rejected
+        //    BEFORE touching the native layer or VT.
+        if (rows <= 0 || cols <= 0) {
+            return Result.failure(RuntimeException("TerminalError:InvalidDimensions"))
+        }
         // 1. Resize the native PTY FIRST (sends SIGWINCH to child). Spec §34.7 / §18.
         //    If native resize fails, VirtualTerminal MUST NOT be updated (correctness: avoid
         //    VT/kernel size mismatch that breaks vim/top/less).
@@ -223,7 +228,16 @@ class TerminalRuntimeImpl(
         }
         // 2. Native OK → update VirtualTerminal to match.
         a.virtualTerminal.resize(rows, cols)
-        // 3. Emit ResizeChanged event.
+        // 3. Reflect the new size in the semantic reducer synchronously. In v1 the reducer is
+        //    only driven by PTY output events, so a following observe(SEMANTIC) would otherwise
+        //    still report the old dimensions. The broadcast below is for EVENT observers/logs.
+        a.semanticReducer.onEvent(
+            com.apex.agent.platform.terminal.events.TerminalEvent.ResizeChanged(
+                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                rows = rows, cols = cols
+            )
+        )
+        // 4. Emit ResizeChanged event.
         val ev = com.apex.agent.platform.terminal.events.TerminalEvent.ResizeChanged(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             rows = rows, cols = cols

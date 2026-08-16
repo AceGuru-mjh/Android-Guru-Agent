@@ -172,7 +172,7 @@ class TerminalRuntimeEndToEndTest {
     }
 
     @Test
-    fun `wait PROCESS_EXITED times out when command hangs`() = runBlocking {
+    fun `wait PROCESS_EXITED times out when command hangs`(): Unit = runBlocking {
         val rt = newRuntime()
         val session = rt.create().getOrThrow()
         kotlinx.coroutines.delay(100)
@@ -182,8 +182,9 @@ class TerminalRuntimeEndToEndTest {
         val wait = rt.wait(session.sessionId, WaitCondition.ProcessExited(job.jobId), 500).getOrThrow()
         assertTrue("should time out, got $wait", wait is WaitResult.Timeout)
 
-        // Clean up: kill the job.
+        // Clean up: kill the job. Explicit Unit keeps this method void for JUnit4.
         rt.signal(session.sessionId, UnixSignal.SIGKILL, InputOwner.AGENT, job.jobId)
+        Unit
     }
 
     @Test

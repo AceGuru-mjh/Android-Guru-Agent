@@ -80,7 +80,8 @@ enum class TerminalKey {
  *   SIGQUIT  (3)   Ctrl+\       → Job INTERRUPTED, exitCode=131
  */
 enum class UnixSignal(val number: Int) {
-    SIGINT(2), SIGTERM(15), SIGKILL(9), SIGHUP(1), SIGQUIT(3)
+    SIGINT(2), SIGTERM(15), SIGKILL(9), SIGHUP(1), SIGQUIT(3),
+    SIGSTOP(19), SIGCONT(18)  // PR #51 §2: process stop/continue
 }
 
 /** Kind of input written (carried in InputWritten event). */

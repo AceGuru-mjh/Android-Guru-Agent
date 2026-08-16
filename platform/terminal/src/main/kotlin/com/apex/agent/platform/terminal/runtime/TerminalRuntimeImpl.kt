@@ -80,6 +80,10 @@ class TerminalRuntimeImpl(
     private val waitEngine = WaitEngineImpl(eventBus, scope)
     private val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
+    // PR #51: process/timeout/cancellation controllers
+    private val processController = com.apex.agent.platform.terminal.process.ProcessController(native)
+    private val timeoutController = com.apex.agent.platform.terminal.process.TimeoutController(inputManager)
+    private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(inputManager, timeoutController)
     private val sessionManager = SessionManagerImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, scope
@@ -181,6 +185,19 @@ class TerminalRuntimeImpl(
         }
         val res = inputManager.sendSignal(sessionId, owner, signal, jobId)
         return res.map { SignalResult(sent = true, signal = signal, targetJobId = jobId) }
+    }
+
+    // ───────── cancel (Spec PR #51 §5) ─────────
+    override suspend fun cancel(sessionId: Long, jobId: Long): Result<CancelResult> {
+        if (sessionManager.assembly(sessionId) == null) {
+            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        }
+        cancellationController.cancel(sessionId, jobId)
+        // Wait briefly for the cancellation to take effect
+        kotlinx.coroutines.delay(100)
+        val job = jobManager.get(jobId)
+        val finalState = job?.state?.name ?: "UNKNOWN"
+        return Result.success(CancelResult(cancelled = true, jobId = jobId, finalState = finalState))
     }
 
     // ───────── resize ─────────

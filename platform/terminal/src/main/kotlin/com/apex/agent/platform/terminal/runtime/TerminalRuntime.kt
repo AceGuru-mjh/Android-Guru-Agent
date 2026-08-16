@@ -149,6 +149,19 @@ interface TerminalRuntime {
         val targetJobId: Long?
     )
 
+    // ───────── cancel (Spec PR #51 §5) ─────────
+    /** Cancel a job: graceful SIGTERM → grace period → SIGKILL. Agent doesn't manage signals manually. */
+    suspend fun cancel(
+        sessionId: Long,
+        jobId: Long
+    ): RuntimeResult<CancelResult>
+
+    data class CancelResult(
+        val cancelled: Boolean,
+        val jobId: Long,
+        val finalState: String   // TIMED_OUT / INTERRUPTED / EXITED
+    )
+
     // ───────── resize ─────────
     // Spec §34.7
     suspend fun resize(

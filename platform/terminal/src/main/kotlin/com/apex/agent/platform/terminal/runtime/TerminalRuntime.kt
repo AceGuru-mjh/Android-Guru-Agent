@@ -1,5 +1,6 @@
 package com.apex.agent.platform.terminal.runtime
 
+import com.apex.agent.platform.terminal.errors.RuntimeResult
 import com.apex.agent.platform.terminal.errors.TerminalError
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.io.InputOwner

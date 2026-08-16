@@ -1,4 +1,4 @@
-package com.apex.agent.platform.terminal.io
+package com.apex.agent.platform.terminal.errors
 
 /**
  * Typed Terminal errors. Never return raw "Error: xxx" strings.

@@ -18,11 +18,10 @@ class StubVirtualTerminal(
     initialCols: Int
 ) : VirtualTerminal {
 
-    private val buffer = StringBuilder()
-    private var rows = initialRows
-    private var cols = initialCols
-    private var cursorRow = 0
-    private var cursorCol = 0
+    private var _rows = initialRows
+    private var _cols = initialCols
+    private var _cursorRow = 0
+    private var _cursorCol = 0
     private var alternate = false
     private var title: String? = null
 
@@ -37,18 +36,18 @@ class StubVirtualTerminal(
         buffer.append(stripped)
         // recompute cursor row/col from buffer (very coarse)
         val lines = buffer.split('\n')
-        cursorRow = (lines.size - 1).coerceAtLeast(0)
-        cursorCol = lines.last().length
+        _cursorRow = (lines.size - 1).coerceAtLeast(0)
+        _cursorCol = lines.last().length
     }
 
     override fun resize(rows: Int, cols: Int) {
-        this.rows = rows
-        this.cols = cols
+        _rows = rows
+        _cols = cols
     }
 
     override fun snapshot(): TerminalScreenState = TerminalScreenState(
-        rows = rows, cols = cols,
-        cursorRow = cursorRow, cursorCol = cursorCol,
+        rows = _rows, cols = _cols,
+        cursorRow = _cursorRow, cursorCol = _cursorCol,
         alternateScreen = alternate, title = title,
         renderedText = buffer.toString(),
         changedRows = null
@@ -56,15 +55,17 @@ class StubVirtualTerminal(
 
     override fun reset() {
         buffer.clear()
-        cursorRow = 0
-        cursorCol = 0
+        _cursorRow = 0
+        _cursorCol = 0
         alternate = false
         title = null
     }
 
-    override val cursorRow: Int get() = this.cursorRow
-    override val cursorCol: Int get() = this.cursorCol
+    override val cursorRow: Int get() = _cursorRow
+    override val cursorCol: Int get() = _cursorCol
     override val alternateScreen: Boolean get() = alternate
-    override val rows: Int get() = this.rows
-    override val cols: Int get() = this.cols
+    override val rows: Int get() = _rows
+    override val cols: Int get() = _cols
+
+    private val buffer = StringBuilder()
 }

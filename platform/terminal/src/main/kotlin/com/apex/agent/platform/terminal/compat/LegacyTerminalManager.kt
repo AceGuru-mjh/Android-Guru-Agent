@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.wait.WaitCondition
+import com.apex.agent.platform.terminal.wait.WaitResult
 
 /**
  * Compatibility facade that preserves the OLD TerminalManager API surface but delegates

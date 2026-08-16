@@ -93,7 +93,7 @@ class TerminalSnapshotTool(
     )
 
     data class Output(
-        val sessions: List<Any>,           // List<TerminalSemanticState>
+        val sessions: List<TerminalSemanticState>,  // List<TerminalSemanticState>
         val globalCursor: Long,
         val recentEvents: List<Any>,       // List<TerminalEvent>
         val recentOutput: String

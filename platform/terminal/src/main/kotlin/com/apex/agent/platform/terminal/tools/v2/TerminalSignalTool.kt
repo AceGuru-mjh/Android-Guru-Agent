@@ -42,8 +42,7 @@ class TerminalSignalTool(
 """.trimIndent()
 
     suspend fun execute(input: Input): Output {
-        val signal: UnixSignal = runCatching { UnixSignal.valueOf(input.signal) }
-            .getOrElse { throw IllegalArgumentException("TerminalError:InvalidInput — unknown signal ${input.signal}") }
+        val signal: UnixSignal = input.signal
         val result = runtime.signal(
             sessionId = input.sessionId,
             signal = signal,
@@ -67,7 +66,7 @@ class TerminalSignalTool(
 
     data class Input(
         val sessionId: Long,
-        val signal: String,
+        val signal: UnixSignal,
         val jobId: Long? = null
     )
 

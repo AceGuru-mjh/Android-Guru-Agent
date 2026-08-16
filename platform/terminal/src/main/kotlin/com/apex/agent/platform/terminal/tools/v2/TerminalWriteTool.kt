@@ -45,7 +45,7 @@ class TerminalWriteTool(
 """.trimIndent()
 
     suspend fun execute(input: Input): Output {
-        val key: TerminalKey? = input.key?.let { runCatching { TerminalKey.valueOf(it) }.getOrNull() }
+        val key: TerminalKey? = input.key
         val result = runtime.write(
             sessionId = input.sessionId,
             owner = InputOwner.AGENT,   // auto-injected: Agent tool → AGENT
@@ -76,7 +76,7 @@ class TerminalWriteTool(
         val sessionId: Long,
         val kind: TerminalRuntime.WriteKind = TerminalRuntime.WriteKind.LINE,
         val text: String? = null,
-        val key: String? = null
+        val key: TerminalKey? = null
     )
 
     data class Output(

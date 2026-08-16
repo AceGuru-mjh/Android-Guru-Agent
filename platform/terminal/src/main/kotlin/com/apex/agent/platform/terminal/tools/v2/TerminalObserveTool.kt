@@ -137,9 +137,9 @@ class TerminalObserveTool(
         val truncated: Boolean,
         val overrun: Boolean,
         val oldestCursor: Long?,
-        val semantic: Any?,              // TerminalSemanticState — serialized to JSON by tool layer
+        val semantic: TerminalSemanticState?,  // serialized to JSON by tool layer
         val events: List<Any>?,          // List<TerminalEvent>
-        val screen: Any?,                // TerminalScreenState
+        val screen: TerminalScreenState?,     // TerminalScreenState
         val raw: String?
     )
 }

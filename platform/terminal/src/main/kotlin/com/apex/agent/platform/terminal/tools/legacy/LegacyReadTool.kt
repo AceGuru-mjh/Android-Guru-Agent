@@ -3,8 +3,8 @@ package com.apex.agent.platform.terminal.tools.legacy
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -39,7 +39,7 @@ class LegacyReadTool(
           "required": ["sessionId"]
         }
     """.trimIndent()
-    val description: String = """
+    override val description: String = """
         [COMPAT] Read pending output from a session (non-blocking, returns all retained output
         up to maxBytes). For incremental cursor-based reads, prefer terminal.observe(mode=RAW,
         afterCursor=...). Kept for backward compat.
@@ -65,11 +65,17 @@ class LegacyReadTool(
 
     override suspend fun invoke(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
-        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
-        val maxBytes = json["maxBytes"]?.jsonPrimitive?.intOrNull ?: 65536
-        val afterCursor = json["afterCursor"]?.jsonPrimitive?.longOrNull
-        return Json.encodeToString(execute(Input(sessionId, maxBytes, afterCursor)))
+        val maxBytes = json["maxBytes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 65536
+        val afterCursor = json["afterCursor"]?.jsonPrimitive?.content?.toLongOrNull()
+        val out = execute(Input(sessionId, maxBytes, afterCursor))
+        return buildJsonObject {
+            put("output", out.output)
+            put("cursor", out.cursor)
+            put("truncated", out.truncated)
+            put("overrun", out.overrun)
+        }.toString()
     }
 
     data class Input(
@@ -78,7 +84,6 @@ class LegacyReadTool(
         val afterCursor: Long? = null   // optional; null = from start (old behavior)
     )
 
-    @Serializable
     data class Output(
         val output: String,
         val cursor: Long,

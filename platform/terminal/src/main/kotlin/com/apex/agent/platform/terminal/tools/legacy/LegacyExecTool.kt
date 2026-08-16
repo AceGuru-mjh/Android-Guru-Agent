@@ -5,8 +5,8 @@ import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.wait.WaitCondition
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -48,7 +48,7 @@ class LegacyExecTool(
           "required": ["sessionId", "command"]
         }
     """.trimIndent()
-    val description: String = """
+    override val description: String = """
         [COMPAT, DEPRECATED] Execute a command synchronously and return output + exitCode. Blocks
         until process exits (waitpid-confirmed, NOT settle-time). For new code prefer terminal.run +
         terminal.wait + terminal.observe (non-blocking, incremental). Kept for backward compat.
@@ -94,13 +94,20 @@ class LegacyExecTool(
 
     override suspend fun invoke(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
-        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
         val command = json["command"]?.jsonPrimitive?.content
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'command' required")
-        val timeoutMs = json["timeoutMs"]?.jsonPrimitive?.longOrNull ?: 120_000L
-        val maxOutputBytes = json["maxOutputBytes"]?.jsonPrimitive?.intOrNull ?: 65536
-        return Json.encodeToString(execute(Input(sessionId, command, timeoutMs, maxOutputBytes)))
+        val timeoutMs = json["timeoutMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 120_000L
+        val maxOutputBytes = json["maxOutputBytes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 65536
+        val out = execute(Input(sessionId, command, timeoutMs, maxOutputBytes))
+        return buildJsonObject {
+            put("output", out.output)
+            put("exitCode", out.exitCode)
+            put("truncated", out.truncated)
+            put("durationMs", out.durationMs)
+            put("timedOut", out.timedOut)
+        }.toString()
     }
 
     data class Input(
@@ -110,7 +117,6 @@ class LegacyExecTool(
         val maxOutputBytes: Int = 65536
     )
 
-    @Serializable
     data class Output(
         val output: String,
         val exitCode: Int,

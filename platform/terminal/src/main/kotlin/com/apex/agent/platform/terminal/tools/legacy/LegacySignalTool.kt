@@ -4,8 +4,8 @@ import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -34,7 +34,7 @@ class LegacySignalTool(
           "required": ["sessionId", "signal"]
         }
     """.trimIndent()
-    val description: String = """
+    override val description: String = """
         [COMPAT] Send a Unix signal (SIGINT/SIGTERM/SIGKILL) to the session's foreground process.
         Equivalent to terminal.signal. Kept for backward compat.
     """.trimIndent()
@@ -56,11 +56,15 @@ class LegacySignalTool(
 
     override suspend fun invoke(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
-        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
         val signal = json["signal"]?.jsonPrimitive?.content
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'signal' required")
-        return Json.encodeToString(execute(Input(sessionId, signal)))
+        val out = execute(Input(sessionId, signal))
+        return buildJsonObject {
+            put("sent", out.sent)
+            put("signal", out.signal)
+        }.toString()
     }
 
     data class Input(
@@ -68,7 +72,6 @@ class LegacySignalTool(
         val signal: String     // "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | "SIGQUIT"
     )
 
-    @Serializable
     data class Output(
         val sent: Boolean,
         val signal: String

@@ -2,8 +2,8 @@ package com.apex.agent.platform.terminal.tools.legacy
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -32,7 +32,7 @@ class LegacyCloseTool(
           "required": ["sessionId"]
         }
     """.trimIndent()
-    val description: String = """
+    override val description: String = """
         [COMPAT] Close a terminal session (reap child, close fd). Equivalent to terminal.close.
         Kept for backward compat.
     """.trimIndent()
@@ -47,10 +47,15 @@ class LegacyCloseTool(
 
     override suspend fun invoke(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
-        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
-        val force = json["force"]?.jsonPrimitive?.booleanOrNull ?: false
-        return Json.encodeToString(execute(Input(sessionId, force)))
+        val force = json["force"]?.jsonPrimitive?.content == "true"
+        val out = execute(Input(sessionId, force))
+        return buildJsonObject {
+            put("closed", out.closed)
+            put("cause", out.cause)
+            put("finalCursor", out.finalCursor)
+        }.toString()
     }
 
     data class Input(
@@ -58,7 +63,6 @@ class LegacyCloseTool(
         val force: Boolean = false
     )
 
-    @Serializable
     data class Output(
         val closed: Boolean,
         val cause: String,

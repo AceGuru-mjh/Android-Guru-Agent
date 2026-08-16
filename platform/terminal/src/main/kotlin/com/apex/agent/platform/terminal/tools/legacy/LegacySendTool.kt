@@ -4,8 +4,8 @@ import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -37,7 +37,7 @@ class LegacySendTool(
           "required": ["sessionId"]
         }
     """.trimIndent()
-    val description: String = """
+    override val description: String = """
         [COMPAT] Send input (text line or special key) to a session. For new code prefer
         terminal.write (explicit RAW/LINE/KEY kind). Kept for backward compat.
     """.trimIndent()
@@ -74,12 +74,17 @@ class LegacySendTool(
 
     override suspend fun invoke(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
-        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
         val text = json["text"]?.jsonPrimitive?.content
         val key = json["key"]?.jsonPrimitive?.content
-        val raw = json["raw"]?.jsonPrimitive?.booleanOrNull ?: false
-        return Json.encodeToString(execute(Input(sessionId, text, key, raw)))
+        val raw = json["raw"]?.jsonPrimitive?.content == "true"
+        val out = execute(Input(sessionId, text, key, raw))
+        return buildJsonObject {
+            put("written", out.written)
+            put("bytesWritten", out.bytesWritten)
+            put("cursor", out.cursor)
+        }.toString()
     }
 
     data class Input(
@@ -89,7 +94,6 @@ class LegacySendTool(
         val raw: Boolean? = false       // if true, text is raw bytes (no newline)
     )
 
-    @Serializable
     data class Output(
         val written: Boolean,
         val bytesWritten: Int,

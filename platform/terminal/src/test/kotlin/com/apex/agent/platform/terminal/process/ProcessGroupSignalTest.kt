@@ -58,9 +58,10 @@ class ProcessGroupSignalTest {
 
         // Review scenario: terminal.cancel() must kill the whole group, not just the shell PID.
         rt.cancel(s.sessionId, job.jobId).getOrThrow()
-        // cancel() sends SIGTERM on a background coroutine — synchronize on job exit.
-        val wait = rt.wait(s.sessionId, WaitCondition.ProcessExited(job.jobId), 5000).getOrThrow()
-        assertTrue("job should exit after cancel, got $wait", wait is WaitResult.Matched)
+        // cancel() sends SIGTERM on a background coroutine — synchronize on the session's shell exit.
+        // (v1 emits ProcessExited at session level with jobId=null; job-scoped exit events land in v2.)
+        val wait = rt.wait(s.sessionId, WaitCondition.ProcessExited(), 5000).getOrThrow()
+        assertTrue("shell should exit after cancel, got $wait", wait is WaitResult.Matched)
 
         assertFalse("shell must be terminated", native.isSimulatedAlive(nativeId, s.pid))
         assertFalse("child must be terminated", native.isSimulatedAlive(nativeId, childPid))

@@ -11,6 +11,7 @@ import com.apex.agent.platform.terminal.io.InputManagerImpl
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.io.UnixSignal
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CancelResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CloseResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CreateResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.ObserveMode

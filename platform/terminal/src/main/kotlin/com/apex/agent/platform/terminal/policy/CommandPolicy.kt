@@ -23,7 +23,7 @@ data class ParsedCommand(
 
 object CommandParser {
 
-    private val shellOperators = listOf("&&", "||", ";", "|", ">", ">>", "<", "&", "`", "$(")
+    private val shellOperators = listOf("&&", "||", ";", "|", ">", ">>", "<", "&", "`", "\u0024\u0028")
     private val shellWrappers = setOf("sh", "bash", "zsh", "dash", "env", "command", "exec", "source", ".")
 
     /**

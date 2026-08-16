@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.sp
  * renders renderedText as monospace text. A cursor caret is drawn at the cursor position.
  *
  * For Phase 5+ this is a text renderer (sufficient for build logs, REPL, prompts).
- * A cell-level renderer (per-cell color from VT100Emulator.Cell) is a future enhancement.
+ * A cell-level renderer (per-cell color from TerminalCore.Cell) is a future enhancement.
  *
  * @param viewModel the TerminalViewModel (holds sessionId + semanticState + settings)
  * @param modifier Compose modifier

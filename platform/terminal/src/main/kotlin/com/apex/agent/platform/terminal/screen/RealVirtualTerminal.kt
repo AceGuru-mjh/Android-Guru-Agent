@@ -1,67 +1,47 @@
 package com.apex.agent.platform.terminal.screen
 
-import com.apex.agent.terminalemulator.VT100Emulator
+import com.apex.agent.terminalemulator.TerminalCore
 
 /**
- * Real VirtualTerminal implementation backed by [VT100Emulator].
+ * RealVirtualTerminal — now backed by TerminalCore 2.0 (Spec PR #53).
  *
- * Spec ref: ATR 2.0 Final Spec §24
+ * Adapter implementing the [VirtualTerminal] interface. Runtime/UI contract unchanged;
+ * internals upgraded from VT100Emulator (basic) to TerminalCore (incremental parser,
+ * UTF-8 decoder, wide chars, scroll region, alternate screen, modes, dirty mutations).
  *
- * Replaces Phase 1's [StubVirtualTerminal] (line-mode placeholder). The [VirtualTerminal]
- * interface is UNCHANGED — only the impl swaps. Phase 1's TerminalRuntimeImpl factory
- * `virtualTerminalFactory = { r, c -> StubVirtualTerminal(r, c) }` becomes
- * `virtualTerminalFactory = { r, c -> RealVirtualTerminal(r, c) }`.
- *
- * When the real repo vendors Termux `terminal-emulator` later, this class can be replaced
- * again by `TermuxVirtualTerminal` (delegating to Termux's `TerminalEmulator` + `TerminalBuffer`)
- * with the same interface — no Runtime changes needed.
- *
- * Supported via VT100Emulator:
- *   - Cursor movement (CUU/CUD/CUF/CUB/CUP/CHA/VPA/CNL/CPL)
- *   - Line wrap (auto-advance)
- *   - Alternate screen (DECSET 1049 / 47 / 1047) — for vim/top/less
- *   - Erase (ED/EL) all modes
- *   - Scroll (SU/SD/RI)
- *   - SGR colors (16-color + bold/underline; 256/true-color parsed but flattened)
- *   - OSC title (0/2)
- *   - Cursor show/hide (DECTCEM)
- *   - Resize (content-preserving)
+ * Spec ref: ATR 2.1 PR #53 — VT/ANSI/Unicode/Screen Core 2.0.
  */
 class RealVirtualTerminal(
     initialRows: Int,
     initialCols: Int
 ) : VirtualTerminal {
 
-    private val emulator = VT100Emulator(initialRows, initialCols)
+    private val core = TerminalCore(initialRows, initialCols)
 
-    override fun feed(bytes: ByteArray) = emulator.feed(bytes)
+    override fun feed(bytes: ByteArray) = core.feed(bytes)
 
-    override fun resize(rows: Int, cols: Int) = emulator.resize(rows, cols)
+    fun flush() = core.flush()
 
-    override fun snapshot(): TerminalScreenState = TerminalScreenState(
-        rows = emulator.snapshotRows(),
-        cols = emulator.snapshotCols(),
-        cursorRow = emulator.snapshotCursorRow(),
-        cursorCol = emulator.snapshotCursorCol(),
-        alternateScreen = emulator.snapshotAlternate(),
-        title = emulator.snapshotTitle(),
-        renderedText = emulator.renderedText(),
-        changedRows = null
-    )
+    override fun resize(rows: Int, cols: Int) = core.resize(rows, cols)
 
-    override fun reset() {
-        // Re-create the emulator to get a clean state.
-        // (VT100Emulator.reset() is private; re-init is simpler.)
-        // For Phase 2 we expose reset via re-feeding RIS (\ec) which the emulator handles.
-        emulator.feed(byteArrayOf(0x1B, 'c'.code.toByte()))
+    override fun snapshot(): TerminalScreenState {
+        val s = core.snapshot()
+        return TerminalScreenState(
+            rows = s.rows, cols = s.cols,
+            cursorRow = s.cursorRow, cursorCol = s.cursorCol,
+            alternateScreen = s.alternateScreen, title = s.title,
+            renderedText = s.renderedText, changedRows = null
+        )
     }
 
-    override val cursorRow: Int get() = emulator.snapshotCursorRow()
-    override val cursorCol: Int get() = emulator.snapshotCursorCol()
-    override val alternateScreen: Boolean get() = emulator.snapshotAlternate()
-    override val rows: Int get() = emulator.snapshotRows()
-    override val cols: Int get() = emulator.snapshotCols()
+    override fun reset() = core.reset()
 
-    /** Expose the underlying emulator for InputWaitingDetector (last-line inspection). */
-    internal val raw: VT100Emulator get() = emulator
+    /** Drain pending screen mutations (for event-driven UI / observation delta). */
+    fun drainMutations(): List<com.apex.agent.terminalemulator.ScreenMutation> = core.drainMutations()
+
+    override val cursorRow: Int get() = core.snapshot().cursorRow
+    override val cursorCol: Int get() = core.snapshot().cursorCol
+    override val alternateScreen: Boolean get() = core.snapshot().alternateScreen
+    override val rows: Int get() = core.snapshot().rows
+    override val cols: Int get() = core.snapshot().cols
 }

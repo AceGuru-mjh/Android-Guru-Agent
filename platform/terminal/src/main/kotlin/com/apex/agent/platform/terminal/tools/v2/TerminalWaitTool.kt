@@ -38,7 +38,9 @@ class TerminalWaitTool(
         matching event (e.g. exitCode) on success, Timeout on expiry.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"condition":{"type":"object","properties":{"type":{"type":"string"},"jobId":{"type":"integer"}},"required":["type"]},"timeoutMs":{"type":"integer","default":60000}},"required":["sessionId","condition"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"condition":{"type":"object","properties":{"type":{"type":"string"},"jobId":{"type":"integer"}},"required":["type"]},"timeoutMs":{"type":"integer","default":60000}},"required":["sessionId","condition"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.wait(input.sessionId, input.condition, input.timeoutMs)

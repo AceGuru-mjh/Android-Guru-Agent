@@ -37,7 +37,9 @@ class TerminalSignalTool(
         user cancellation from command failure.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"signal":{"type":"string"},"jobId":{"type":"integer"}},"required":["sessionId","signal"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"signal":{"type":"string"},"jobId":{"type":"integer"}},"required":["sessionId","signal"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val signal: UnixSignal = runCatching { UnixSignal.valueOf(input.signal) }

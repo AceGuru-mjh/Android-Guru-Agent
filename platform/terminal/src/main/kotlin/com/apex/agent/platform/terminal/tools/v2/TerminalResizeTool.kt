@@ -33,7 +33,9 @@ class TerminalResizeTool(
         before running TUI programs (vim/top) to fit screen.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["sessionId","rows","cols"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"rows":{"type":"integer"},"cols":{"type":"integer"}},"required":["sessionId","rows","cols"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         require(input.rows >= 1 && input.cols >= 1) {

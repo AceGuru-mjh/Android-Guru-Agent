@@ -40,7 +40,9 @@ class TerminalWriteTool(
         KEY for special keys (Ctrl+C etc.). For interactive prompts detected by InputWaiting.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"kind":{"type":"string","default":"LINE"},"text":{"type":"string"},"key":{"type":"string"}},"required":["sessionId"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"kind":{"type":"string","default":"LINE"},"text":{"type":"string"},"key":{"type":"string"}},"required":["sessionId"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val key: TerminalKey? = input.key?.let { runCatching { TerminalKey.valueOf(it) }.getOrNull() }

@@ -39,7 +39,9 @@ class TerminalCreateTool(
         command. Returns sessionId for subsequent run/observe/wait/write calls.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"shell":{"type":"string","default":"/system/bin/sh"},"cwd":{"type":"string","default":"/sdcard"},"rows":{"type":"integer","default":24},"cols":{"type":"integer","default":80}},"required":[]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"shell":{"type":"string","default":"/system/bin/sh"},"cwd":{"type":"string","default":"/sdcard"},"rows":{"type":"integer","default":24},"cols":{"type":"integer","default":80}},"required":[]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.create(

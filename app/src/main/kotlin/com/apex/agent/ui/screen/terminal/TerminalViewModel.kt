@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
-import com.apex.agent.platform.terminal.runtime.TerminalRuntimeImpl
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.wait.WaitCondition
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -49,7 +48,7 @@ class TerminalViewModel @Inject constructor(
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
         viewModelScope.launch {
-            val recovered = (terminalRuntime as? TerminalRuntimeImpl)?.recover() ?: emptyList()
+            val recovered = terminalRuntime.recover()
             if (recovered.isNotEmpty()) {
                 android.util.Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
             }

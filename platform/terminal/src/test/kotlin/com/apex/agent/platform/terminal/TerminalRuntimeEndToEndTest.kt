@@ -186,3 +186,44 @@ class TerminalRuntimeEndToEndTest {
             obs.truncated || obs.overrun)
     }
 }
+
+    // ═══ ATR 2.0 Hardening tests (Blocker fixes) ═══
+
+    @Test
+    fun `resize calls native PTY resize and updates VT`() = runBlocking {
+        val rt = newRuntime()
+        val session = rt.create().getOrThrow()
+        kotlinx.coroutines.delay(100)
+        // Resize to 40x120
+        val r = rt.resize(session.sessionId, 40, 120).getOrThrow()
+        assertTrue(r.resized)
+        assertEquals(40, r.rows)
+        assertEquals(120, r.cols)
+        // Verify SemanticState screen reflects new dims (via ResizeChanged event → reducer)
+        val obs = rt.observe(session.sessionId, TerminalRuntime.ObserveMode.SEMANTIC).getOrThrow()
+        assertEquals(40, obs.semantic!!.screen.rows)
+        assertEquals(120, obs.semantic!!.screen.cols)
+    }
+
+    @Test
+    fun `recover returns empty list when no persisted sessions`() = runBlocking {
+        val rt = newRuntime()
+        // No sessions created/persisted → recover() returns empty
+        val recovered = rt.recover()
+        assertTrue("recover should return empty list, got $recovered", recovered.isEmpty())
+    }
+
+    @Test
+    fun `recoveredSnapshot returns null for unknown session`() = runBlocking {
+        val rt = newRuntime()
+        val snap = rt.recoveredSnapshot(99999L)
+        assertNull("recoveredSnapshot should be null for unknown session", snap)
+    }
+
+    @Test
+    fun `TerminalRuntime interface exposes recover() without cast`() = runBlocking {
+        // Verify recover() is on the interface (not just impl) — no cast needed.
+        val rt: TerminalRuntime = newRuntime()
+        val recovered: List<Long> = rt.recover()  // compiles only if interface declares it
+        assertNotNull(recovered)
+    }

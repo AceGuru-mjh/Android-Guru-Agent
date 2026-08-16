@@ -38,7 +38,9 @@ class TerminalObserveTool(
         mode=SCREEN returns parsed screen (for TUI like vim/top). mode=RAW returns raw bytes since afterCursor.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"mode":{"type":"string","default":"SEMANTIC"},"afterCursor":{"type":"integer","default":0},"maxBytes":{"type":"integer","default":12000},"maxEvents":{"type":"integer","default":200}},"required":["sessionId"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"mode":{"type":"string","default":"SEMANTIC"},"afterCursor":{"type":"integer","default":0},"maxBytes":{"type":"integer","default":12000},"maxEvents":{"type":"integer","default":200}},"required":["sessionId"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.observe(

@@ -33,7 +33,9 @@ class TerminalCloseTool(
         All waiters receive SessionGone. Session state → CLOSED (terminal).
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"force":{"type":"boolean","default":false}},"required":["sessionId"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"force":{"type":"boolean","default":false}},"required":["sessionId"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.close(input.sessionId, input.force)

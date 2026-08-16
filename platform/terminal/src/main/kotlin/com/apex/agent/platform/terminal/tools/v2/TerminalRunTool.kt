@@ -42,7 +42,9 @@ class TerminalRunTool(
         to read incremental output. Long-running / interactive / background commands are all supported.
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"sessionId":{"type":"integer"},"command":{"type":"string"},"background":{"type":"boolean","default":false},"timeoutMs":{"type":"integer","default":0}},"required":["sessionId","command"]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"command":{"type":"string"},"background":{"type":"boolean","default":false},"timeoutMs":{"type":"integer","default":0}},"required":["sessionId","command"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         // Owner is AUTO-INJECTED by Runtime based on call origin.

@@ -34,7 +34,9 @@ class TerminalSnapshotTool(
         for Agent context recovery after engine restart. Also used to list sessions (mode=SESSIONS).
     """.trimIndent()
 
-    override val parametersSchema: String = "{"type":"object","properties":{"mode":{"type":"string","default":"SESSIONS"},"sessionId":{"type":"integer"},"recentEvents":{"type":"integer","default":50},"recentOutputBytes":{"type":"integer","default":4096}},"required":[]}"
+    override val parametersSchema: String = """
+{"type":"object","properties":{"mode":{"type":"string","default":"SESSIONS"},"sessionId":{"type":"integer"},"recentEvents":{"type":"integer","default":50},"recentOutputBytes":{"type":"integer","default":4096}},"required":[]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.snapshot(

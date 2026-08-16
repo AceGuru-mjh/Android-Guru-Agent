@@ -188,6 +188,14 @@ interface TerminalRuntime {
         val cause: String,         // USER / NORMAL / BROKEN
         val finalCursor: Long
     )
+
+    // ───────── recover ─────────
+    // Spec §39 — crash recovery. Call once on startup. Returns recovered session ids.
+    // Dead PTY sessions appear as EXITED/BROKEN (never faked alive).
+    suspend fun recover(): List<Long>
+
+    /** Read-only SemanticState for a recovered session (from persisted metadata). */
+    suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState?
 }
 
 /** Convenience: wrap a TerminalError into a kotlin.Result failure. */

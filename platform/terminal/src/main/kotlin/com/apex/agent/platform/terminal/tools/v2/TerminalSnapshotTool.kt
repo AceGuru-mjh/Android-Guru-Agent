@@ -1,6 +1,7 @@
 package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive

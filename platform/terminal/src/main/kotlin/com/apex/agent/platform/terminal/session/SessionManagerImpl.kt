@@ -12,7 +12,7 @@ import com.apex.agent.platform.terminal.events.TerminalEventLogImpl
 import com.apex.agent.platform.terminal.events.TerminalEventBusImpl
 import com.apex.agent.platform.terminal.io.InputManagerImpl
 import com.apex.agent.platform.terminal.io.PtyOutputPumpImpl
-import com.apex.agent.platform.terminal.native.NativePty
+import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.policy.TerminalCapability
 import com.apex.agent.platform.terminal.policy.TerminalPolicy

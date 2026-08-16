@@ -6,7 +6,7 @@ import com.apex.agent.platform.terminal.events.Confidence
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventBus
 import com.apex.agent.platform.terminal.events.TerminalEventLog
-import com.apex.agent.platform.terminal.native.NativePty
+import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.screen.RealVirtualTerminal
 import com.apex.agent.platform.terminal.screen.VirtualTerminal
 import com.apex.agent.platform.terminal.state.InputWaitingDetector

@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class InputManagerImpl(
     override val policy: TerminalPolicy,
-    private val native: com.apex.agent.platform.terminal.native.NativePty,
+    private val native: com.apex.agent.platform.terminal.pty.NativePty,
     private val eventLog: TerminalEventLog,
     private val eventBus: TerminalEventBus,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

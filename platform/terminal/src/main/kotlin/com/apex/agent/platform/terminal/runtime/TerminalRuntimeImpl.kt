@@ -23,7 +23,7 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.WriteKind
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.WriteResult
 import com.apex.agent.platform.terminal.job.JobManagerImpl
-import com.apex.agent.platform.terminal.native.NativePty
+import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.screen.TerminalScreenState

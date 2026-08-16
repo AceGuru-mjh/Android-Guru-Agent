@@ -1,4 +1,4 @@
-package com.apex.agent.platform.terminal.native
+package com.apex.agent.platform.terminal.pty
 
 /**
  * Abstraction over the JNI-backed NativePty. The real Android implementation lives in

@@ -1,4 +1,4 @@
-package com.apex.agent.platform.terminal.native
+package com.apex.agent.platform.terminal.pty
 
 import com.apex.agent.platform.terminal.io.UnixSignal
 import kotlinx.coroutines.delay

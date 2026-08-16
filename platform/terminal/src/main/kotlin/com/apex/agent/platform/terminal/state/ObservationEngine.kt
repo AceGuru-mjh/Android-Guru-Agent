@@ -66,11 +66,18 @@ class ObservationEngine(
         val currentCursor = ringBuffer.totalCursor
         return when (mode) {
             TerminalRuntime.ObserveMode.SEMANTIC -> {
+                // PR #50: run PromptDetector (multi-signal, O(lastLine)) and enrich SemanticState
+                val baseState = semanticReducer.snapshot()
+                val prompt = com.apex.agent.platform.terminal.intelligence.PromptDetector.detect(
+                    vt = virtualTerminal,
+                    foregroundCommand = baseState.foregroundJob?.command
+                )
+                val enriched = baseState.copy(prompt = prompt)
                 TerminalRuntime.ObserveResult(
                     mode = mode,
                     sessionId = sessionId,
                     cursor = currentCursor,
-                    semantic = semanticReducer.snapshot()
+                    semantic = enriched
                 )
             }
 

@@ -4,6 +4,8 @@ import com.apex.agent.platform.terminal.io.InputControlState
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.job.JobState
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
+import com.apex.agent.platform.terminal.intelligence.PromptDetection
+import com.apex.agent.platform.terminal.intelligence.TerminalError
 import com.apex.agent.platform.terminal.screen.TerminalScreenState
 import com.apex.agent.platform.terminal.session.SessionState
 
@@ -98,7 +100,13 @@ data class TerminalSemanticState(
     val screen: ScreenSnapshot,
     val input: InputSnapshot,
     val foregroundJob: JobSnapshot?,
-    val backgroundJobs: List<JobSnapshot>
+    val backgroundJobs: List<JobSnapshot>,
+    /** PR #50: prompt detection result (null if not detected or not checked). */
+    val prompt: PromptDetection? = null,
+    /** PR #50: classified error from last ProcessExited (null if no error or not classified). */
+    val error: TerminalError? = null,
+    /** PR #50: whether screen content changed since last SEMANTIC observe. */
+    val screenChanged: Boolean = false
 ) {
     /**
      * Full screen state (only populated when explicitly requested via observe(SCREEN)).

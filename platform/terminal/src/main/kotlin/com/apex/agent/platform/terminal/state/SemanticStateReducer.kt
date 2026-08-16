@@ -3,6 +3,9 @@ package com.apex.agent.platform.terminal.state
 import com.apex.agent.platform.terminal.events.CloseCause
 import com.apex.agent.platform.terminal.events.Confidence
 import com.apex.agent.platform.terminal.events.ExitCause
+import com.apex.agent.platform.terminal.intelligence.ErrorClassifier
+import com.apex.agent.platform.terminal.intelligence.PromptDetector
+import com.apex.agent.platform.terminal.intelligence.TerminalError
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.io.InputControlState
 import com.apex.agent.platform.terminal.io.InputOwner
@@ -84,7 +87,8 @@ class SemanticStateReducer(
             }
             is TerminalEvent.OutputProduced -> s.copy(
                 session = s.session.copy(cursor = event.endCursor),
-                input = s.input.copy(state = InputState.NONE)
+                input = s.input.copy(state = InputState.NONE),
+                screenChanged = true
             )
             is TerminalEvent.InputWritten -> s.copy(
                 input = s.input.copy(state = InputState.NONE)
@@ -122,13 +126,19 @@ class SemanticStateReducer(
                         jobs[event.jobId] = updated
                         val fg = if (event.jobId == foregroundJobId) updated else s.foregroundJob
                         val bg = s.backgroundJobs.map { if (it.id == event.jobId) updated else it }
+                        // PR #50: classify error if process failed (exit != 0 or signal)
+                        val classifiedError: TerminalError? = if (event.exitCode != null && event.exitCode != 0 || event.signal != null) {
+                            ErrorClassifier.classify(event, recentOutput = null)
+                        } else null
                         s.copy(
                             session = s.session.copy(
                                 state = if (event.jobId == foregroundJobId) SessionState.READY else s.session.state,
                                 lastExitCode = event.exitCode
                             ),
                             foregroundJob = fg,
-                            backgroundJobs = bg
+                            backgroundJobs = bg,
+                            error = classifiedError,
+                            screenChanged = false
                         )
                     } else s
                 } else {

@@ -48,7 +48,9 @@ class PtyOutputPumpImpl(
     private val semanticReducer: SemanticStateReducer,
     private val waitEngine: TerminalWaitEngine,
     private val inputDetector: InputWaitingDetector? = null,
-    private val foregroundCommandProvider: () -> String? = { null }
+    private val foregroundCommandProvider: () -> String? = { null },
+    /** Called after each VT feed — used to push screen state to ObservationEngine (Spec §41 event-driven). */
+    private val onOutput: (() -> Unit)? = null
 ) : PtyOutputPump {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -85,6 +87,7 @@ class PtyOutputPumpImpl(
                         val startCursor = ringBuffer.totalCursor
                         ringBuffer.append(OutputChunk(sessionId, startCursor, startCursor + n, bytes))
                         virtualTerminal.feed(bytes)
+                        onOutput?.invoke()  // push screen state update (event-driven, no polling)
                         val ev = TerminalEvent.OutputProduced(
                             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
                             cursor = startCursor, startCursor = startCursor, endCursor = startCursor + n,

@@ -175,16 +175,18 @@ class TerminalRuntimeImpl(
         if (sessionManager.assembly(sessionId) == null) {
             return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         }
-        val res: Result<com.apex.agent.platform.terminal.io.WriteResult> = when (kind) {
+        val res: Result<Unit> = when (kind) {
             WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
             WriteKind.LINE -> inputManager.sendLine(sessionId, owner, text ?: "")
             WriteKind.KEY -> inputManager.sendKey(sessionId, owner, key ?: TerminalKey.ENTER)
         }
-        return res.map { wr ->
+        return res.map {
+            val payload = text ?: ""
+            val bytes = if (payload.isEmpty()) 0 else payload.toByteArray(Charsets.UTF_8).size
             WriteResult(
-                written = wr.written, bytesWritten = wr.bytesWritten,
+                written = true, bytesWritten = bytes,
                 cursor = sessionManager.assembly(sessionId)!!.ringBuffer.totalCursor,
-                inputOwner = wr.inputOwner
+                inputOwner = owner
             )
         }
     }

@@ -56,7 +56,7 @@ class InputManagerImpl(
     private val regLock = Mutex()
 
     private fun writerFor(sessionId: Long): SessionWriter = writers.computeIfAbsent(sessionId) {
-        val ch = Channel<WriteOp>(Channel.UNLIMITED)
+        val ch = Channel<WriteOp.WriteBytes>(Channel.UNLIMITED)
         val control = MutableStateFlow(InputControlState.FREE)
         SessionWriter(ch, control)
     }.also { writer ->

@@ -21,19 +21,19 @@ import com.apex.agent.platform.terminal.errors.TerminalError
  */
 interface TerminalInput {
 
-    /** Write raw bytes. owner is assigned by the Runtime, not by the caller. */
-    suspend fun write(sessionId: Long, owner: InputOwner, bytes: ByteArray): Result<Unit>
+    /** Write raw bytes. owner is assigned by the Runtime, not by the caller. Returns bytes actually written to the PTY. */
+    suspend fun write(sessionId: Long, owner: InputOwner, bytes: ByteArray): Result<WriteResult>
 
     /** Convenience: write text as UTF-8 bytes, NO newline appended. */
-    suspend fun writeRaw(sessionId: Long, owner: InputOwner, text: String): Result<Unit> =
+    suspend fun writeRaw(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> =
         write(sessionId, owner, text.toByteArray(Charsets.UTF_8))
 
     /** Convenience: write text + "\n" (LINE mode). Most common for running commands. */
-    suspend fun sendLine(sessionId: Long, owner: InputOwner, text: String): Result<Unit> =
+    suspend fun sendLine(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> =
         write(sessionId, owner, (text + "\n").toByteArray(Charsets.UTF_8))
 
     /** Send a special key (ENTER, CTRL_C, ARROW_UP, ...). */
-    suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<Unit>
+    suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<WriteResult>
 
     /** Send a Unix signal (SIGINT/SIGTERM/SIGKILL/...). */
     suspend fun sendSignal(sessionId: Long, owner: InputOwner, signal: UnixSignal, jobId: Long? = null): Result<Unit>

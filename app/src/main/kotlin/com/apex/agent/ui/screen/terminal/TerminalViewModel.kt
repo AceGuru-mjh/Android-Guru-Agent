@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.wait.WaitCondition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -172,10 +174,29 @@ class TerminalViewModel @Inject constructor(
 
     private var sessionId: Long? = null
 
+    // ═══ 终端屏幕状态（供 renderer 订阅，Spec §41）═══
+    private val _semanticState = MutableStateFlow<TerminalSemanticState?>(null)
+    val semanticState: StateFlow<TerminalSemanticState?> = _semanticState.asStateFlow()
+
+    /** 启动屏幕状态轮询（UI 调用，20 FPS）。Spec §41 UI → ScreenState → Renderer。 */
+    fun observeScreenState() {
+        val sid = sessionId ?: return
+        viewModelScope.launch {
+            while (true) {
+                val r = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SEMANTIC)
+                if (r.isSuccess) _semanticState.value = r.getOrThrow().semantic
+                kotlinx.coroutines.delay(50L)
+            }
+        }
+    }
+
     private suspend fun ensureSession(): Long? {
         if (sessionId == null) {
             val r = terminalRuntime.create()
-            if (r.isSuccess) sessionId = r.getOrThrow().sessionId
+            if (r.isSuccess) {
+                sessionId = r.getOrThrow().sessionId
+                observeScreenState()
+            }
         }
         return sessionId
     }

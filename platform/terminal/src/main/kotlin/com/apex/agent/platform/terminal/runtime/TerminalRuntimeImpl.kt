@@ -27,6 +27,8 @@ import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.screen.TerminalScreenState
+import com.apex.agent.platform.terminal.persistence.RuntimeRecoveryService
+import com.apex.agent.platform.terminal.persistence.SessionMetadataStore
 import com.apex.agent.platform.terminal.screen.VirtualTerminal
 import com.apex.agent.platform.terminal.session.SessionManagerImpl
 import com.apex.agent.platform.terminal.session.SessionState
@@ -63,8 +65,14 @@ class TerminalRuntimeImpl(
     private val virtualTerminalFactory: (Int, Int) -> VirtualTerminal = { r, c ->
         com.apex.agent.platform.terminal.screen.RealVirtualTerminal(r, c)
     },
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /** Optional persistence (Spec §39). If set, auto-saves session metadata + enables recover(). */
+    private val persistenceStore: SessionMetadataStore? = null
 ) : TerminalRuntime {
+
+    private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
+        RuntimeRecoveryService(it, this, scope)
+    }
 
     private val eventLog: TerminalEventLog = TerminalEventLogImpl()
     private val eventBus: TerminalEventBus = TerminalEventBusImpl(eventLog, scope)
@@ -262,7 +270,40 @@ class TerminalRuntimeImpl(
         scope.launch {
             eventBus.subscribe(sessionId, afterCursor = 0L).collect { ev ->
                 jobManager.onEvent(ev)
+                // Auto-save on significant events (Spec §39)
+                if (persistenceStore != null && (ev is TerminalEvent.ProcessExited || ev is TerminalEvent.SessionClosed)) {
+                    autoSaveSession(sessionId)
+                }
             }
         }
     }
+
+    /** Persist current session state (Spec §39 auto-save). */
+    private suspend fun autoSaveSession(sessionId: Long) {
+        val store = persistenceStore ?: return
+        val a = sessionManager.assembly(sessionId) ?: return
+        val s = a.semanticReducer.snapshot()
+        val jobs = jobManager.listBySession(sessionId)
+        val events = eventLog.tail(sessionId, 100)
+        val session = com.apex.agent.platform.terminal.session.TerminalSession(
+            id = s.session.id, shell = s.session.shell, initialCwd = s.session.cwd,
+            pid = s.session.pid, rows = s.session.rows, cols = s.session.cols,
+            privilege = s.session.privilege, state = s.session.state,
+            createdAt = s.session.createdAt, lastExitCode = s.session.lastExitCode,
+            cursor = s.session.cursor
+        )
+        store.save(session, jobs, events)
+        if (s.session.state == SessionState.CLOSED) store.delete(sessionId)
+    }
+
+    /**
+     * Recover persisted sessions on startup (Spec §39).
+     * Returns recovered session ids (now visible via snapshot()).
+     * PTY fds cannot be reattached in v1; recovered sessions are EXITED/BROKEN (read-only).
+     */
+    suspend fun recover(): List<Long> = recoveryService?.recover() ?: emptyList()
+
+    /** Get a recovered session's last-known SemanticState (read-only, from persisted metadata). */
+    suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =
+        recoveryService?.recoveredSnapshot(sessionId)
 }

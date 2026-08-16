@@ -157,7 +157,7 @@ class ErrorClassifierTest {
 
     private fun exitEvent(exitCode: Int?, signal: UnixSignal? = null, cause: ExitCause = ExitCause.NORMAL): TerminalEvent.ProcessExited {
         val sig = signal
-        val realCause = if (signal == UnixSignal.SIGKILL && cause == ExitCause.NORMAL) ExitCause.PROCESS_KILLED else cause
+        val realCause = if (signal == UnixSignal.SIGKILL && cause == ExitCause.NORMAL) ExitCause.SIGNAL else cause
         return TerminalEvent.ProcessExited(
             id = 1, sessionId = 1, timestamp = System.currentTimeMillis(), cursor = -1,
             jobId = 1, pid = 123, exitCode = exitCode, signal = sig, cause = realCause

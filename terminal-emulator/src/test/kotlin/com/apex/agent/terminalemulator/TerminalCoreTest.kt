@@ -93,6 +93,29 @@ class VtParserTest {
         for (c in seq) p.feed(c.code, out::add)
         assertEquals(1, out.size)  // parsed, just unknown (handled by TerminalCore)
     }
+
+    @Test fun `parses OSC terminated by ESC backslash ST`() {
+        val p = VtParser()
+        val out = mutableListOf<VtParser.Event>()
+        val seq = "\u001B]0;My Title\u001B\\"  // ESC ] 0 ; My Title ESC \
+        for (c in seq) p.feed(c.code, out::add)
+        assertEquals(1, out.size)
+        val osc = out[0] as VtParser.Event.Osc
+        assertEquals(0, osc.seq.code)
+        assertEquals("My Title", osc.seq.data)
+    }
+
+    @Test fun `bounded OSC string discards over-long sequence`() {
+        val p = VtParser()
+        val out = mutableListOf<VtParser.Event>()
+        val huge = "\u001B]0;" + "x".repeat(VtParser.MAX_STRING_SEQUENCE_LENGTH + 10)
+        for (c in huge) p.feed(c.code, out::add)
+        // Over-long unterminated OSC must not emit and must not hang
+        val t = "\u001B\\"
+        for (c in t) p.feed(c.code, out::add)
+        // The discarded string produced no Osc event
+        assertTrue(out.none { it is VtParser.Event.Osc })
+    }
 }
 
 class TerminalCoreTest {
@@ -262,6 +285,127 @@ class TerminalCoreTest {
         val c = core("😀", cols = 10)
         // Emoji should be width 2
         assertEquals(2, c.snapshot().cursorCol)
+    }
+
+    // ─── PR #53 correctness-pass regression tests ───
+
+    @Test fun `DECOM origin mode offsets CUP to scroll-region top`() {
+        val c = TerminalCore(10, 10)
+        c.feed("\u001B[2;5r")    // DECSTBM: scroll region rows 2..5 (0-based)
+        c.feed("\u001B[?6h")     // DECOM on
+        c.feed("\u001B[1;1H")    // CUP 1;1 → region-relative → row 2, col 0
+        val s = c.snapshot()
+        assertEquals(2, s.cursorRow)
+        assertEquals(0, s.cursorCol)
+    }
+
+    @Test fun `DECOM origin mode offsets VPA`() {
+        val c = TerminalCore(10, 10)
+        c.feed("\u001B[3;7r")    // region rows 3..7
+        c.feed("\u001B[?6h")     // DECOM on
+        c.feed("\u001B[2d")      // VPA 2 → row 3+1 = 4
+        assertEquals(4, c.snapshot().cursorRow)
+    }
+
+    @Test fun `DECSET 1049 saves and restores cursor`() {
+        val c = TerminalCore(10, 10)
+        c.feed("\u001B[5;5H")    // cursor at row 4, col 4
+        c.feed("\u001B[?1049h")  // enter alt screen (save cursor)
+        c.feed("alt content")
+        c.feed("\u001B[?1049l")  // exit alt screen (restore cursor)
+        val s = c.snapshot()
+        assertEquals(4, s.cursorRow)
+        assertEquals(4, s.cursorCol)
+    }
+
+    @Test fun `ICH inserts blank cells shifting rest right`() {
+        val c = TerminalCore(1, 10)
+        c.feed("ABCDE")
+        c.feed("\u001B[1;1H")    // cursor to col 0
+        c.feed("\u001B[2@")      // ICH: insert 2 blanks at col 0
+        val line = c.snapshot().renderedText!!.split('\n')[0]
+        assertTrue("expected leading blanks then ABCDE, got '$line'", line.startsWith("  ABCDE"))
+    }
+
+    @Test fun `DCH deletes cells shifting rest left`() {
+        val c = TerminalCore(1, 10)
+        c.feed("ABCDE")
+        c.feed("\u001B[1;1H")
+        c.feed("\u001B[2P")      // DCH: delete 2 chars at col 0
+        val line = c.snapshot().renderedText!!.split('\n')[0]
+        assertTrue("expected CDE, got '$line'", line.startsWith("CDE"))
+    }
+
+    @Test fun `IRM insert mode inserts without overwriting`() {
+        val c = TerminalCore(1, 10)
+        c.feed("abc")
+        c.feed("\u001B[1;1H")
+        c.feed("\u001B[4h")      // IRM on
+        c.feed("X")              // insert X at col 0, shifting "abc" right
+        val line = c.snapshot().renderedText!!.split('\n')[0]
+        assertTrue("expected Xabc, got '$line'", line.startsWith("Xabc"))
+    }
+
+    @Test fun `terminal core replaces surrogate with U+FFFD`() {
+        val c = TerminalCore(5, 10)
+        // U+D800 encoded as UTF-8 = ED A0 80
+        c.feed(byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte()))
+        assertTrue("surrogate must be replaced", c.snapshot().renderedText!!.contains('\uFFFD'))
+    }
+
+    @Test fun `variation selector 16 is not an independent cell`() {
+        val c = TerminalCore(1, 10)
+        c.feed("e\uFE0F")        // e + VS16
+        assertEquals(1, c.snapshot().cursorCol)  // VS16 combines, no extra cell
+    }
+
+    @Test fun `ZWJ is not an independent cell`() {
+        val c = TerminalCore(1, 10)
+        c.feed("a\u200D")        // a + ZWJ
+        assertEquals(1, c.snapshot().cursorCol)
+    }
+
+    @Test fun `OSC terminated by ESC backslash ST is emitted`() {
+        val c = TerminalCore(5, 5)
+        c.feed("\u001B]2;My Title\u001B\\")  // ESC ] 2 ; My Title ESC \
+        assertEquals("My Title", c.snapshot().title)
+    }
+}
+
+class ScreenBufferTest {
+    @Test fun `scrollUp saves the truly scrolled-out top row to scrollback`() {
+        val buf = ScreenBuffer(3, 4, maxScrollbackLines = 10, hasScrollback = true)
+        buf.put(0, 0, TerminalCell(codePoint = 'A'.code, width = 1))
+        buf.put(1, 0, TerminalCell(codePoint = 'B'.code, width = 1))
+        buf.put(2, 0, TerminalCell(codePoint = 'C'.code, width = 1))
+        buf.scrollUp(1, 0, 2)   // scroll region rows 0..2
+        assertEquals(1, buf.scrollbackLineCount)
+        // The saved row must be the OLD row 0 ('A'), not a row that was shifted in.
+        assertEquals('A'.code, buf.scrollbackLine(0)[0].codePoint)
+    }
+
+    @Test fun `setCell performs raw assignment`() {
+        val buf = ScreenBuffer(2, 2)
+        buf.setCell(0, 1, TerminalCell(codePoint = 'Z'.code, width = 1))
+        assertEquals('Z'.code, buf.get(0, 1).codePoint)
+    }
+}
+
+class TerminalStateTest {
+    @Test fun `TabStops resize replaces the stops array preserving custom stops`() {
+        val t = TabStops(8)
+        t.clearAll(); t.set(3)
+        t.resize(16)
+        assertEquals(3, t.nextTab(0))  // custom stop at col 3 preserved across resize
+    }
+
+    @Test fun `TerminalModes autoWrap is mutable (DECAWM)`() {
+        val m = TerminalModes()
+        assertTrue(m.autoWrap)
+        m.autoWrap = false
+        assertFalse(m.autoWrap)
+        m.autoWrap = true
+        assertTrue(m.autoWrap)
     }
 }
 

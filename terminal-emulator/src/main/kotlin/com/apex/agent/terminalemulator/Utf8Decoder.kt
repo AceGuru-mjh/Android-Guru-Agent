@@ -81,8 +81,9 @@ class Utf8Decoder {
             4 -> ((b0 and 0x07) shl 18) or ((pending[1].toInt() and 0x3F) shl 12) or ((pending[2].toInt() and 0x3F) shl 6) or (pending[3].toInt() and 0x3F)
             else -> 0xFFFD
         }.let { cp ->
-            // Validate range + overlong
-            if (cp > 0x10FFFF || (expectedBytes == 2 && cp < 0x80) ||
+            // Validate range + overlong + surrogate (U+D800..U+DFFF are not Unicode scalars)
+            if (cp > 0x10FFFF || cp in 0xD800..0xDFFF ||
+                (expectedBytes == 2 && cp < 0x80) ||
                 (expectedBytes == 3 && cp < 0x800) || (expectedBytes == 4 && cp < 0x10000)) {
                 0xFFFD
             } else cp

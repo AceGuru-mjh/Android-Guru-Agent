@@ -22,7 +22,7 @@ class VtParser {
 
     enum class State {
         GROUND, ESCAPE, CSI_ENTRY, CSI_PARAM, CSI_INTERMEDIATE, CSI_IGNORE,
-        OSC_STRING, DCS_ENTRY, DCS_STRING, STRING_IGNORE, ESC_INTERMEDIATE
+        OSC_STRING, OSC_ESC, DCS_ENTRY, DCS_STRING, DCS_ESC, STRING_IGNORE, ESC_INTERMEDIATE
     }
 
     private var state = State.GROUND
@@ -30,6 +30,11 @@ class VtParser {
     private val csiIntermediates = StringBuilder()
     private var csiPrivateMarker: Char? = null
     private val stringBuf = StringBuilder()      // OSC/DCS string buffer
+
+    companion object {
+        /** Upper bound on an unterminated OSC/DCS string (§10 robustness, not security). */
+        const val MAX_STRING_SEQUENCE_LENGTH = 100_000
+    }
 
     data class CSISequence(
         val privateMarker: Char?,
@@ -63,8 +68,10 @@ class VtParser {
             State.CSI_INTERMEDIATE -> handleCsiIntermediate(codePoint, sink)
             State.CSI_IGNORE -> handleCsiIgnore(codePoint, sink)
             State.OSC_STRING -> handleOscString(codePoint, sink)
+            State.OSC_ESC -> handleOscEsc(codePoint, sink)
             State.DCS_ENTRY -> handleDcsEntry(codePoint, sink)
             State.DCS_STRING -> handleDcsString(codePoint, sink)
+            State.DCS_ESC -> handleDcsEsc(codePoint, sink)
             State.STRING_IGNORE -> handleStringIgnore(codePoint, sink)
             State.ESC_INTERMEDIATE -> handleEscIntermediate(codePoint, sink)
         }
@@ -143,10 +150,14 @@ class VtParser {
     private fun handleOscString(cp: Int, sink: (Event) -> Unit) {
         when {
             cp == 0x07 -> { emitOsc(sink); state = State.GROUND }   // BEL terminates OSC
-            cp == 0x1B -> state = State.STRING_IGNORE                // ESC \ (ST) — simplified
-            cp == '\\'.code && state == State.STRING_IGNORE -> { emitOsc(sink); state = State.GROUND }
-            else -> stringBuf.append(cp.toChar())
+            cp == 0x1B -> state = State.OSC_ESC                      // ESC begins ST (ESC \)
+            else -> appendString(cp.toChar())
         }
+    }
+
+    private fun handleOscEsc(cp: Int, sink: (Event) -> Unit) {
+        if (cp == '\\'.code) { emitOsc(sink); state = State.GROUND }   // ST terminates OSC
+        else { emitOsc(sink); state = State.ESCAPE; handleEscape(cp, sink) }  // ESC starts a new control
     }
 
     private fun handleDcsEntry(cp: Int, sink: (Event) -> Unit) {
@@ -156,17 +167,31 @@ class VtParser {
 
     private fun handleDcsString(cp: Int, sink: (Event) -> Unit) {
         when {
-            cp == 0x1B -> state = State.STRING_IGNORE
-            cp == '\\'.code && state == State.STRING_IGNORE -> {
-                sink(Event.Dcs(stringBuf.toString())); stringBuf.clear(); state = State.GROUND
-            }
-            else -> stringBuf.append(cp.toChar())
+            cp == 0x1B -> state = State.DCS_ESC                      // ESC begins ST (ESC \)
+            else -> appendString(cp.toChar())
+        }
+    }
+
+    private fun handleDcsEsc(cp: Int, sink: (Event) -> Unit) {
+        if (cp == '\\'.code) {
+            sink(Event.Dcs(stringBuf.toString())); stringBuf.clear(); state = State.GROUND
+        } else {
+            sink(Event.Dcs(stringBuf.toString())); stringBuf.clear(); state = State.ESCAPE; handleEscape(cp, sink)
+        }
+    }
+
+    /** Append to the OSC/DCS string buffer, discarding (and resetting) if it grows unbounded. */
+    private fun appendString(ch: Char) {
+        if (stringBuf.length >= MAX_STRING_SEQUENCE_LENGTH) {
+            stringBuf.clear(); state = State.STRING_IGNORE
+        } else {
+            stringBuf.append(ch)
         }
     }
 
     private fun handleStringIgnore(cp: Int, sink: (Event) -> Unit) {
-        if (cp == '\\'.code) state = State.GROUND
-        else if (cp == 0x1B) { /* stay */ }
+        if (cp == '\\'.code) state = State.GROUND   // ST ends the (discarded) string
+        // otherwise: stay ignoring until a terminator arrives
     }
 
     private fun emitCsi(final: Char, sink: (Event) -> Unit) {

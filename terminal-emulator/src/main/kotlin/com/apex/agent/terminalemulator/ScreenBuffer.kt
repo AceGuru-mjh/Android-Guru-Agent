@@ -22,6 +22,11 @@ class ScreenBuffer(
     private var cells: Array<Array<TerminalCell>> = Array(rows) { Array(cols) { TerminalCell.BLANK } }
     private val scrollback: ArrayDeque<Array<TerminalCell>> = ArrayDeque()
 
+    /** Raw cell assignment (no wide-trail fixup) — used by insert/shift operations. */
+    fun setCell(row: Int, col: Int, cell: TerminalCell) {
+        if (row in 0 until rows && col in 0 until cols) cells[row][col] = cell
+    }
+
     /** Place a normal-width (1) or wide (2) char at [row, col]. Handles continuation. */
     fun put(row: Int, col: Int, cell: TerminalCell) {
         if (row !in 0 until rows || col !in 0 until cols) return
@@ -66,6 +71,13 @@ class ScreenBuffer(
     fun scrollUp(n: Int, top: Int, bottom: Int) {
         if (n <= 0 || top >= bottom) return
         val count = minOf(n, bottom - top + 1)
+        // Save the truly scrolled-out top lines BEFORE moving rows (§15/§23)
+        if (hasScrollback && top == 0) {
+            for (i in 0 until count) {
+                if (scrollback.size >= maxScrollbackLines) scrollback.pollFirst()
+                scrollback.addLast(cells[top + i].copyOf())
+            }
+        }
         // Move lines up
         for (r in top..(bottom - count)) {
             cells[r] = cells[r + count]
@@ -73,13 +85,6 @@ class ScreenBuffer(
         // Blank freed lines at bottom
         for (r in (bottom - count + 1)..bottom) {
             cells[r] = Array(cols) { TerminalCell.BLANK }
-        }
-        // Push scrolled-out top lines to scrollback (main screen only)
-        if (hasScrollback && top == 0) {
-            for (i in 0 until count) {
-                if (scrollback.size >= maxScrollbackLines) scrollback.pollFirst()
-                scrollback.addLast(cells[top + i].copyOf())
-            }
         }
     }
 
@@ -159,4 +164,7 @@ class ScreenBuffer(
     }
 
     val scrollbackLineCount: Int get() = scrollback.size
+
+    /** Test/observation accessor for a saved scrollback row (internal). */
+    internal fun scrollbackLine(index: Int): Array<TerminalCell> = scrollback[index]
 }

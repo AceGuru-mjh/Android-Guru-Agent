@@ -6,7 +6,7 @@ package com.apex.agent.terminalemulator
  * Each is a DEC private mode (set/unset via CSI ? N h / CSI ? N l).
  */
 data class TerminalModes(
-    val autoWrap: Boolean = true,           // DECAWM (7) — wrap on line end
+    var autoWrap: Boolean = true,           // DECAWM (7) — wrap on line end
     var cursorVisible: Boolean = true,      // DECTCEM (25)
     var applicationCursor: Boolean = false, // DECCKM (1)
     var originMode: Boolean = false,        // DECOM (6)
@@ -47,8 +47,9 @@ data class ScrollRegion(
 /**
  * Tab stops (Spec §18 PR #53).
  */
-class TabStops(private val cols: Int) {
-    private val stops = BooleanArray(cols) { it % 8 == 0 && it > 0 }
+class TabStops(initialCols: Int) {
+    private var cols: Int = initialCols
+    private var stops: BooleanArray = BooleanArray(cols) { it % 8 == 0 && it > 0 }
 
     fun nextTab(col: Int): Int {
         var c = col + 1
@@ -67,9 +68,11 @@ class TabStops(private val cols: Int) {
     fun clearAll() { stops.fill(false) }
 
     fun resize(newCols: Int) {
-        // Recreate with default 8-col stops for new columns
+        // Recreate with default 8-col stops, preserving existing stops within overlap
         val newStops = BooleanArray(newCols) { it % 8 == 0 && it > 0 }
         for (i in 0 until minOf(cols, newCols)) newStops[i] = stops[i]
+        stops = newStops
+        cols = newCols
     }
 }
 

@@ -69,8 +69,12 @@ object UnicodeWidth {
     fun of(codePoint: Int): Int = when {
         codePoint < 0x20 || codePoint in 0x7F..0x9F -> 0       // C0/C1 control
         codePoint < 0x300 -> 1                                   // ASCII + Latin-1
+        codePoint == 0x200D -> 0                                 // ZWJ (joins grapheme clusters)
         codePoint in 0x300..0x36F -> 0                           // combining diacritical
         codePoint in 0x1AB0..0x1AFF -> 0                         // combining diacritical extended
+        codePoint in 0xFE00..0xFE0F -> 0                         // variation selectors VS1..VS16 (incl. VS16)
+        codePoint in 0xE0100..0xE01EF -> 0                       // supplementary variation selectors
+        codePoint in 0x1F3FB..0x1F3FF -> 0                       // emoji skin-tone modifiers
         codePoint in 0x1DC0..0x1DFF -> 0                         // combining diacritical supplemental
         codePoint in 0x20D0..0x20FF -> 0                         // combining symbols
         codePoint in 0xFE20..0xFE2F -> 0                         // combining half marks

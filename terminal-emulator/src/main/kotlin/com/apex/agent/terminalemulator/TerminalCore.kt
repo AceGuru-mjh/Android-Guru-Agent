@@ -36,6 +36,10 @@ class TerminalCore(
     private var savedStyle = TerminalStyle.DEFAULT
     private var title: String? = null
 
+    // Anchor of the last placed printable's base cell — combining marks attach here (§10/§11).
+    private var lastBaseRow = 0
+    private var lastBaseCol = 0
+
     var rows: Int = initialRows; private set
     var cols: Int = initialCols; private set
 
@@ -69,43 +73,70 @@ class TerminalCore(
     // ─── printable + wide char ───
     private fun putPrintable(cp: Int) {
         val width = UnicodeWidth.of(cp)
-        if (UnicodeWidth.isCombining(cp)) {
-            // Combining mark — attach to base cell at cursor (§10)
-            currentBuffer.putCombining(cursor.row, cursor.column, cp)
-            mutations += ScreenMutation.rows(cursor.row, cursor.row)
+        if (width == 0) {
+            // Zero-width (combining / ZWJ / variation selector / emoji modifier):
+            // attach to the last placed base cell — never occupy an independent cell (§10/§11)
+            currentBuffer.putCombining(lastBaseRow, lastBaseCol, cp)
+            mutations += ScreenMutation.rows(lastBaseRow, lastBaseRow)
             return
         }
-        // Auto-wrap (§13): if at last col with wrapPending, wrap first
-        if (cursor.wrapPending && modes.autoWrap) {
-            cursor.row++
-            cursor.column = 0
+
+        // Insert Mode (IRM, §3): shift cells right, cursor stays (no autowrap)
+        if (modes.insertMode) {
+            val r = cursor.row
+            val c = cursor.column
+            insertCharsAtCursor(width)
+            val cell = TerminalCell(codePoint = cp, width = width, style = currentStyle,
+                flags = if (width == 2) TerminalCell.FLAG_WIDE_LEAD else 0)
+            currentBuffer.put(r, c, cell)
+            lastBaseRow = r; lastBaseCol = c
+            mutations += ScreenMutation.rows(r, r)
+            cursor.column = (c + width).coerceAtMost(cols - 1)
             cursor.wrapPending = false
-            if (cursor.row > scrollRegion.bottom) {
-                currentBuffer.scrollUp(1, scrollRegion.top, scrollRegion.bottom)
-                cursor.row = scrollRegion.bottom
+            return
+        }
+
+        // Determine placement position (account for pending wrap)
+        var prow = cursor.row
+        var pcol = cursor.column
+        if (cursor.wrapPending && modes.autoWrap) {
+            prow++; pcol = 0; cursor.wrapPending = false
+            if (prow > scrollRegion.bottom) {
+                currentBuffer.scrollUp(1, scrollRegion.top, scrollRegion.bottom); prow = scrollRegion.bottom
             }
         }
-        if (width == 2 && cursor.column >= cols - 1) {
+        if (width == 2 && pcol >= cols - 1) {
             // Wide char at last column — wrap first (§9)
-            cursor.row++
-            cursor.column = 0
-            if (cursor.row > scrollRegion.bottom) {
-                currentBuffer.scrollUp(1, scrollRegion.top, scrollRegion.bottom)
-                cursor.row = scrollRegion.bottom
+            prow++; pcol = 0
+            if (prow > scrollRegion.bottom) {
+                currentBuffer.scrollUp(1, scrollRegion.top, scrollRegion.bottom); prow = scrollRegion.bottom
             }
         }
+
         val cell = TerminalCell(codePoint = cp, width = width, style = currentStyle,
             flags = if (width == 2) TerminalCell.FLAG_WIDE_LEAD else 0)
-        currentBuffer.put(cursor.row, cursor.column, cell)
-        mutations += ScreenMutation.rows(cursor.row, cursor.row)
+        currentBuffer.put(prow, pcol, cell)
+        lastBaseRow = prow; lastBaseCol = pcol
+        mutations += ScreenMutation.rows(prow, prow)
 
         // Advance cursor
-        if (width == 2 && cursor.column + 2 >= cols) {
-            cursor.column = cols - 1
+        if (width == 2 && pcol + 2 >= cols) {
+            cursor.row = prow; cursor.column = cols - 1
             cursor.wrapPending = modes.autoWrap
         } else {
-            cursor.column = (cursor.column + width).coerceAtMost(cols - 1)
+            cursor.row = prow; cursor.column = (pcol + width).coerceAtMost(cols - 1)
             if (cursor.column == cols - 1 && modes.autoWrap) cursor.wrapPending = true
+        }
+    }
+
+    /** Shift cells right by [width] within the current row, starting at the cursor column (IRM). */
+    private fun insertCharsAtCursor(width: Int) {
+        val r = cursor.row
+        for (c in (cols - 1) downTo (cursor.column + width)) {
+            currentBuffer.setCell(r, c, currentBuffer.get(r, c - width))
+        }
+        for (c in cursor.column until (cursor.column + width).coerceAtMost(cols)) {
+            currentBuffer.setCell(r, c, TerminalCell.BLANK)
         }
     }
 
@@ -136,13 +167,13 @@ class TerminalCore(
             'B' -> moveCursor(seq.param(0, 1), 0)                     // CUD
             'C' -> moveCursor(0, seq.param(0, 1))                     // CUF
             'D' -> moveCursor(0, -seq.param(0, 1))                    // CUB
-            'E' -> { cursor.row += seq.param(0, 1); cursor.column = 0 }  // CNL
-            'F' -> { cursor.row -= seq.param(0, 1); cursor.column = 0 }  // CPL
+            'E' -> { cursor.row = clampRow(cursor.row + seq.param(0, 1)); cursor.column = 0 }  // CNL
+            'F' -> { cursor.row = clampRow(cursor.row - seq.param(0, 1)); cursor.column = 0 }  // CPL
             'G' -> cursor.column = (seq.param(0, 1) - 1).coerceIn(0, cols - 1)  // CHA
-            'd' -> cursor.row = (seq.param(0, 1) - 1).coerceIn(0, rows - 1)     // VPA
+            'd' -> cursor.row = originRow(seq.param(0, 1))            // VPA
             'H', 'f' -> {  // CUP / HVP
-                cursor.row = (seq.param(0, 1) - 1).coerceIn(0, rows - 1)
                 cursor.column = (seq.param(1, 1) - 1).coerceIn(0, cols - 1)
+                cursor.row = originRow(seq.param(0, 1))
                 cursor.wrapPending = false
             }
             'J' -> eraseDisplay(seq.param(0, 0))                      // ED
@@ -151,8 +182,8 @@ class TerminalCore(
             'T' -> currentBuffer.scrollDown(seq.param(0, 1), scrollRegion.top, scrollRegion.bottom)  // SD
             'L' -> { currentBuffer.insertLines(cursor.row, seq.param(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.INSERT_LINES, cursor.row..scrollRegion.bottom) }  // IL
             'M' -> { currentBuffer.deleteLines(cursor.row, seq.param(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.DELETE_LINES, cursor.row..scrollRegion.bottom) }  // DL
-            'P' -> { /* DCH — delete chars; v1 simplified */ }
-            '@' -> { /* ICH — insert chars; v1 simplified */ }
+            'P' -> deleteChars(seq.param(0, 1))                       // DCH — delete chars
+            '@' -> insertChars(seq.param(0, 1))                        // ICH — insert chars
             'X' -> { currentBuffer.eraseRow(cursor.row, cursor.column, cursor.column + seq.param(0, 1) - 1, currentStyle); mutations += ScreenMutation.rows(cursor.row, cursor.row) }  // ECH
             'm' -> applySgr(seq.params)                                // SGR
             'r' -> {  // DECSTBM — scroll region
@@ -177,10 +208,44 @@ class TerminalCore(
         mutations += ScreenMutation.rows(cursor.row, cursor.row)
     }
 
+    private fun clampCol(c: Int): Int = c.coerceIn(0, cols - 1)
+    private fun clampRow(r: Int): Int =
+        if (modes.originMode) r.coerceIn(scrollRegion.top, scrollRegion.bottom) else r.coerceIn(0, rows - 1)
+    /** Map a 1-based cursor row param to an absolute row, honoring DECOM (§14). */
+    private fun originRow(param1Based: Int): Int {
+        val p = param1Based - 1
+        return if (modes.originMode) (scrollRegion.top + p).coerceIn(scrollRegion.top, scrollRegion.bottom)
+                else p.coerceIn(0, rows - 1)
+    }
+
     private fun moveCursor(dRow: Int, dCol: Int) {
-        cursor.row = (cursor.row + dRow).coerceIn(0, rows - 1)
-        cursor.column = (cursor.column + dCol).coerceIn(0, cols - 1)
+        cursor.row = clampRow(cursor.row + dRow)
+        cursor.column = clampCol(cursor.column + dCol)
         cursor.wrapPending = false
+    }
+
+    /** ICH (§5): insert [n] blank cells at the cursor, shifting the rest of the row right. */
+    private fun insertChars(n: Int) {
+        val count = n.coerceAtLeast(1)
+        val r = cursor.row
+        for (c in (cols - 1) downTo (cursor.column + count)) {
+            currentBuffer.setCell(r, c, currentBuffer.get(r, c - count))
+        }
+        for (c in cursor.column until (cursor.column + count).coerceAtMost(cols)) {
+            currentBuffer.setCell(r, c, TerminalCell.BLANK)
+        }
+        mutations += ScreenMutation.rows(r, r)
+    }
+
+    /** DCH (§5): delete [n] cells at the cursor, shifting the rest of the row left. */
+    private fun deleteChars(n: Int) {
+        val count = n.coerceAtLeast(1)
+        val r = cursor.row
+        for (c in cursor.column until cols) {
+            val src = c + count
+            currentBuffer.setCell(r, c, if (src < cols) currentBuffer.get(r, src) else TerminalCell.BLANK)
+        }
+        mutations += ScreenMutation.rows(r, r)
     }
 
     private fun eraseDisplay(mode: Int) {
@@ -299,20 +364,28 @@ class TerminalCore(
             7 -> modes.autoWrap = enable
             25 -> modes.cursorVisible = enable
             2004 -> modes.bracketedPaste = enable
-            47, 1047, 1049 -> switchScreen(enable)
+            47, 1047 -> switchAlternateScreen(enable, saveCursor = false)
+            1049 -> switchAlternateScreen(enable, saveCursor = true)
         }
     }
 
-    private fun switchScreen(toAlt: Boolean) {
+    /**
+     * Switch between main and alternate screen (§19).
+     * - 47 / 1047: switch + clear alt on enter, no cursor save/restore.
+     * - 1049: also save the cursor on enter and restore it on exit (full-screen TUI semantics).
+     */
+    private fun switchAlternateScreen(toAlt: Boolean, saveCursor: Boolean) {
         if (toAlt && !modes.alternateScreen) {
+            if (saveCursor) { savedCursor = cursor.saveTo(); savedStyle = currentStyle }
             altBuffer.clear()
             currentBuffer = altBuffer
             modes.alternateScreen = true
-            cursor.row = 0; cursor.column = 0
+            cursor.row = 0; cursor.column = 0; cursor.wrapPending = false
             mutations += ScreenMutation.FULL
         } else if (!toAlt && modes.alternateScreen) {
             currentBuffer = mainBuffer
             modes.alternateScreen = false
+            if (saveCursor) { cursor.restoreFrom(savedCursor); currentStyle = savedStyle }
             mutations += ScreenMutation.FULL
         }
     }

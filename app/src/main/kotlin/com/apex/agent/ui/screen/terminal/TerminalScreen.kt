@@ -83,7 +83,7 @@ fun TerminalScreen(
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // 终端页主内容（占位：PTY 输出区，后续接入 TerminalManager 实时流）
+    // 终端页主内容（占位：PTY 输出区，后续接入 TerminalRuntime 实时流）
     androidx.compose.material3.ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {

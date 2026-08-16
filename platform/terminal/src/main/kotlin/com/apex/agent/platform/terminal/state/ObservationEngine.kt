@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventLog
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.screen.VirtualTerminal
+import kotlinx.coroutines.flow.*
 
 /**
  * Formalized ObservationEngine. Encapsulates the 4 observe modes so the logic isn't inline

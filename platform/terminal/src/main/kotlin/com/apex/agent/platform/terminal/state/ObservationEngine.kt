@@ -32,6 +32,22 @@ class ObservationEngine(
     private val semanticReducer: SemanticStateReducer
 ) {
     /**
+     * Push-based screen state (Spec §41 — event-driven, NOT polling).
+     * PtyOutputPump calls [refreshScreenState] after each VT feed; UI collects this Flow.
+     * This replaces the old 50ms observe(SCREEN) polling loop.
+     */
+    private val _screenState = MutableStateFlow(virtualTerminal.snapshot())
+    val screenState: StateFlow<com.apex.agent.platform.terminal.screen.TerminalScreenState> = _screenState.asStateFlow()
+
+    /** Called by PtyOutputPump after feeding bytes to VT — pushes new screen snapshot. */
+    fun refreshScreenState() {
+        _screenState.value = virtualTerminal.snapshot()
+    }
+
+    /** Push-based semantic state (from SemanticStateReducer, already a StateFlow). */
+    val semanticState: StateFlow<TerminalSemanticState> get() = semanticReducer.state
+
+    /**
      * @param sessionId   target session
      * @param mode        one of SEMANTIC / EVENT / SCREEN / RAW
      * @param afterCursor for EVENT/RAW: return data after this cursor (use previous endCursor)

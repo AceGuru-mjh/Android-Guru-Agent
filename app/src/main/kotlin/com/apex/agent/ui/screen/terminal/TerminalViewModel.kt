@@ -191,17 +191,22 @@ class TerminalViewModel @Inject constructor(
     private val _screenText = MutableStateFlow("")
     val screenText: StateFlow<String> = _screenText.asStateFlow()
 
-    /** 启动屏幕状态轮询（UI 调用，20 FPS）。Spec §41 UI → ScreenState → Renderer。 */
+    /**
+     * 订阅屏幕状态（事件驱动，非轮询）。Spec §41 — PTY output → VT → Flow → Compose.
+     * PtyOutputPump pushes screen updates via ObservationEngine.screenState; we collect the Flow.
+     */
     fun observeScreenState() {
         val sid = sessionId ?: return
         viewModelScope.launch {
-            while (true) {
-                val sem = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SEMANTIC)
-                if (sem.isSuccess) _semanticState.value = sem.getOrThrow().semantic
-                // Also fetch SCREEN mode for the renderer (real terminal text)
-                val scr = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SCREEN)
-                if (scr.isSuccess) _screenText.value = scr.getOrThrow().screen?.renderedText ?: ""
-                kotlinx.coroutines.delay(50L)
+            // Collect push-based semantic state (no polling)
+            terminalRuntime.semanticStateFlow(sid)?.collect { state ->
+                _semanticState.value = state
+            }
+        }
+        viewModelScope.launch {
+            // Collect push-based screen state (no polling — emits on every VT update)
+            terminalRuntime.screenStateFlow(sid)?.collect { screen ->
+                _screenText.value = screen.renderedText ?: ""
             }
         }
     }

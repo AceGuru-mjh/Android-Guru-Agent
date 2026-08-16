@@ -10,6 +10,7 @@ import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.screen.TerminalScreenState
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.wait.WaitCondition
+import kotlinx.coroutines.flow.Flow
 import com.apex.agent.platform.terminal.wait.WaitResult
 
 /**
@@ -188,6 +189,13 @@ interface TerminalRuntime {
         val cause: String,         // USER / NORMAL / BROKEN
         val finalCursor: Long
     )
+
+    // ───────── push-based observation Flows (Spec §41 — event-driven, NOT polling) ─────────
+    /** Push-based screen state for a session. Emits on every VT update. Null if session not found. */
+    fun screenStateFlow(sessionId: Long): Flow<com.apex.agent.platform.terminal.screen.TerminalScreenState>?
+
+    /** Push-based semantic state for a session. Emits on every state change. Null if session not found. */
+    fun semanticStateFlow(sessionId: Long): Flow<com.apex.agent.platform.terminal.state.TerminalSemanticState>?
 
     // ───────── recover ─────────
     // Spec §39 — crash recovery. Call once on startup. Returns recovered session ids.

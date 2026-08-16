@@ -39,6 +39,7 @@ import com.apex.agent.platform.terminal.wait.WaitResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -129,38 +130,10 @@ class TerminalRuntimeImpl(
     ): Result<ObserveResult> {
         val a = sessionManager.assembly(sessionId)
             ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
-        val cursor = a.ringBuffer.totalCursor
+        // Delegate to per-session ObservationEngine (Spec §30). Runtime is orchestration only.
+        val engine = a.observationEngine
         return Result.success(
-            when (mode) {
-                ObserveMode.SEMANTIC -> ObserveResult(
-                    mode = mode, sessionId = sessionId, cursor = cursor,
-                    semantic = a.semanticReducer.snapshot()
-                )
-                ObserveMode.EVENT -> {
-                    val events = eventLog.query(sessionId, afterCursor, maxEvents)
-                    val endCursor = events.lastOrNull { it.cursor >= 0 }?.cursor ?: afterCursor
-                    ObserveResult(
-                        mode = mode, sessionId = sessionId, cursor = cursor,
-                        startCursor = afterCursor, endCursor = endCursor,
-                        truncated = events.size >= maxEvents, overrun = false,
-                        events = events
-                    )
-                }
-                ObserveMode.SCREEN -> ObserveResult(
-                    mode = mode, sessionId = sessionId, cursor = cursor,
-                    screen = a.virtualTerminal.snapshot()
-                )
-                ObserveMode.RAW -> {
-                    val slice = a.ringBuffer.getSince(afterCursor, maxBytes)
-                    ObserveResult(
-                        mode = mode, sessionId = sessionId, cursor = cursor,
-                        startCursor = slice.startCursor, endCursor = slice.endCursor,
-                        truncated = slice.truncated, overrun = slice.overrun,
-                        oldestCursor = if (slice.overrun) a.ringBuffer.oldestCursor else null,
-                        raw = String(slice.bytes, Charsets.UTF_8)
-                    )
-                }
-            }
+            engine.observe(sessionId, mode, afterCursor, maxBytes, maxEvents)
         )
     }
 
@@ -303,6 +276,17 @@ class TerminalRuntimeImpl(
         )
         store.save(session, jobs, events)
         if (s.session.state == SessionState.CLOSED) store.delete(sessionId)
+    }
+
+    // ───────── push-based observation Flows (Spec §41 — event-driven, NOT polling) ─────────
+    override fun screenStateFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.platform.terminal.screen.TerminalScreenState>? {
+        val a = sessionManager.assembly(sessionId) ?: return null
+        return a.observationEngine.screenState
+    }
+
+    override fun semanticStateFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.platform.terminal.state.TerminalSemanticState>? {
+        val a = sessionManager.assembly(sessionId) ?: return null
+        return a.observationEngine.semanticState
     }
 
     /**

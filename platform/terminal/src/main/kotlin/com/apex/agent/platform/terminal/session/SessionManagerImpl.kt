@@ -68,7 +68,8 @@ class SessionManagerImpl(
         val ringBuffer: RingTerminalBuffer,
         val virtualTerminal: VirtualTerminal,
         val semanticReducer: SemanticStateReducer,
-        val pump: PtyOutputPumpImpl
+        val pump: PtyOutputPumpImpl,
+        val observationEngine: com.apex.agent.platform.terminal.state.ObservationEngine
     )
 
     private val assemblies = ConcurrentHashMap<Long, SessionAssembly>()
@@ -95,19 +96,23 @@ class SessionManagerImpl(
             sessionId = sessionId, shell = shell, initialCwd = cwd, privilege = privilege,
             pid = pid, rows = rows, cols = cols
         )
+        val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
+            eventLog, ringBuffer, vt, reducer
+        )
         val pump = PtyOutputPumpImpl(
             sessionId = sessionId, nativeSessionId = nativeId, native = native,
             ringBuffer = ringBuffer, eventLog = eventLog, eventBus = eventBus,
             virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
             inputDetector = inputDetector,
-            foregroundCommandProvider = { foregroundCommandFor(sessionId) }
+            foregroundCommandProvider = { foregroundCommandFor(sessionId) },
+            onOutput = { observationEngine.refreshScreenState() }  // push screen state (event-driven)
         )
         val session = TerminalSession(
             id = sessionId, shell = shell, initialCwd = cwd, pid = pid,
             rows = rows, cols = cols, privilege = privilege, state = SessionState.STARTING,
             createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L
         )
-        assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump)
+        assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump, observationEngine)
         stateFlows[sessionId] = MutableStateFlow(SessionState.STARTING)
         // 3. start pump
         pump.start()

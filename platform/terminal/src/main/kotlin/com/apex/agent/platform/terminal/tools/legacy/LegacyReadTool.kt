@@ -2,6 +2,12 @@ package com.apex.agent.platform.terminal.tools.legacy
 
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Legacy compat tool: terminal_read
@@ -17,11 +23,24 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  * This compat version uses afterCursor=0 internally which means it returns ALL retained output
  * (up to maxBytes). For incremental reads, Agent should use terminal.observe(afterCursor=...).
  */
+@Deprecated("ATR 2.0 compat alias — use the new terminal.observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.")
 class LegacyReadTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal_read"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal_read"
+    override val name: String = id
+    override val parametersSchema: String = """
+        {
+          "type": "object",
+          "properties": {
+            "sessionId":  { "type": "integer", "description": "Target session id" },
+            "maxBytes":   { "type": "integer", "description": "Max bytes to return", "default": 65536 },
+            "afterCursor":{ "type": "integer", "description": "Cursor to read from (null = from start)" }
+          },
+          "required": ["sessionId"]
+        }
+    """.trimIndent()
+    override val description: String = """
         [COMPAT] Read pending output from a session (non-blocking, returns all retained output
         up to maxBytes). For incremental cursor-based reads, prefer terminal.observe(mode=RAW,
         afterCursor=...). Kept for backward compat.
@@ -43,6 +62,21 @@ class LegacyReadTool(
             ) },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
+        val maxBytes = json["maxBytes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 65536
+        val afterCursor = json["afterCursor"]?.jsonPrimitive?.content?.toLongOrNull()
+        val out = execute(Input(sessionId, maxBytes, afterCursor))
+        return buildJsonObject {
+            put("output", JsonPrimitive(out.output))
+            put("cursor", JsonPrimitive(out.cursor))
+            put("truncated", JsonPrimitive(out.truncated))
+            put("overrun", JsonPrimitive(out.overrun))
+        }.toString()
     }
 
     data class Input(

@@ -83,7 +83,7 @@ fun TerminalScreen(
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // 终端页主内容（占位：PTY 输出区，后续接入 TerminalManager 实时流）
+    // 终端页主内容（占位：PTY 输出区，后续接入 TerminalRuntime 实时流）
     androidx.compose.material3.ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -128,27 +128,9 @@ fun TerminalScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        modifier = Modifier.size(64.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Terminal, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text("终端会话输出区", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "点击左上角三条杠 → 环境依赖下载，可一键安装全部开发环境",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                // ATR 2.0 §41: Runtime → ScreenState → TerminalRenderer → Compose
+                TerminalRenderer(viewModel = viewModel)
             }
         }
     }

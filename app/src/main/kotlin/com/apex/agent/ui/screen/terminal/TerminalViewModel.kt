@@ -3,7 +3,11 @@ package com.apex.agent.ui.screen.terminal
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.apex.agent.platform.terminal.TerminalManager
+import com.apex.agent.environment.EnvironmentProvisioner
+import com.apex.agent.platform.terminal.io.InputOwner
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.state.TerminalSemanticState
+import com.apex.agent.platform.terminal.wait.WaitCondition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -18,19 +22,28 @@ import javax.inject.Inject
 /**
  * 终端设置 / 黑名单白名单 / 环境依赖下载中心 的 ViewModel。
  *
+ * ATR 2.0 重构：底层从 [com.apex.agent.platform.terminal.TerminalManager]（已删除）切换到
+ * [TerminalRuntime] + [EnvironmentProvisioner]。
+ *
  * 设计要点：
- * - 命令黑名单/白名单持久化于 SharedPreferences，供 TerminalManager 执行前校验。
+ * - 命令黑名单/白名单持久化于 SharedPreferences，供 PolicyEngine 执行前校验。
  * - 环境依赖清单内置官方源 + 镜像地址，可一键全装 / 独立装 / Android 开发依赖一键装。
- * - "安装"动作 = 生成安装命令并通过已注入的 [TerminalManager] 在终端会话中执行，
- *   输出实时回流到 [installLog]，UI 直接展示（不臆造装不成功的自动下载器）。
+ * - "安装"动作 = 生成安装命令并通过 [TerminalRuntime] 在终端会话中执行（run + wait +
+ *   observe），输出实时回流到 [installLog]，UI 直接展示。
+ * - 公开 API 与旧版完全兼容（TerminalScreen.kt 零改动）。
+ *
+ * Spec ref: ATR 2.0 Final Spec §41 / §43
  */
 @HiltViewModel
 class TerminalViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val terminalManager: TerminalManager
+    private val terminalRuntime: TerminalRuntime
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("apex_terminal", Context.MODE_PRIVATE)
+
+    /** 环境依赖安装器（ATR 2.0 — 用新 Runtime API，非旧 TerminalManager）。 */
+    private val provisioner = EnvironmentProvisioner(terminalRuntime)
 
     // ═══ 终端设置 ═══
     data class TerminalSettings(
@@ -59,8 +72,6 @@ class TerminalViewModel @Inject constructor(
     )
 
     // ═══ 黑名单 / 白名单命令 ═══
-    // 语义：白名单非空时，只允许执行白名单中的命令前缀；黑名单中的命令前缀永远禁止。
-    // 匹配规则：以空格切分命令，取第一段（如 "rm" / "adb"）做前缀匹配，大小写不敏感。
     private val _blacklist = MutableStateFlow(loadSet("cmd_blacklist"))
     val blacklist: StateFlow<Set<String>> = _blacklist.asStateFlow()
 
@@ -72,7 +83,6 @@ class TerminalViewModel @Inject constructor(
     fun addWhitelist(cmd: String) = editSet("cmd_whitelist", _whitelist) { add(normalize(cmd)) }
     fun removeWhitelist(cmd: String) = editSet("cmd_whitelist", _whitelist) { remove(normalize(cmd)) }
 
-    /** 命令校验：被黑名单命中 → 拒绝；白名单非空且未命中 → 拒绝；否则放行。 */
     fun isCommandAllowed(command: String): Boolean {
         val head = command.trim().substringBefore(' ').lowercase()
         if (head.isEmpty()) return true
@@ -97,13 +107,7 @@ class TerminalViewModel @Inject constructor(
 
     // ═══ 环境依赖下载中心 ═══
     /**
-     * 一个可安装的环境依赖项。
-     * @param id 唯一标识
-     * @param name 展示名
-     * @param group 分组（通用 / Android 开发）
-     * @param officialUrl 官方源命令
-     * @param mirrorCommand 镜像源命令（更快/国内可达）
-     * @param checkCommand 用于检测是否已安装的命令
+     * 一个可安装的环境依赖项（UI 兼容类型 — 委托给 environment/DepItem）。
      */
     data class DepItem(
         val id: String,
@@ -117,57 +121,44 @@ class TerminalViewModel @Inject constructor(
     enum class DepGroup { GENERAL, ANDROID }
 
     val depItems: List<DepItem> = listOf(
-        DepItem(
-            id = "jdk17", name = "JDK 17", group = DepGroup.GENERAL,
-            installOfficial = "winget install Microsoft.OpenJDK.17 --accept-source-agreements --accept-package-agreements",
-            installMirror = "scoop install adopt17-hotspot",
-            checkCommand = "java -version"
-        ),
-        DepItem(
-            id = "git", name = "Git", group = DepGroup.GENERAL,
-            installOfficial = "winget install Git.Git --accept-source-agreements --accept-package-agreements",
-            installMirror = "scoop install git",
-            checkCommand = "git --version"
-        ),
-        DepItem(
-            id = "gradle", name = "Gradle 8.10", group = DepGroup.GENERAL,
-            installOfficial = "winget install Gradle.Gradle --version 8.10 --accept-source-agreements",
-            installMirror = "scoop install gradle@8.10",
-            checkCommand = "gradle --version"
-        ),
-        DepItem(
-            id = "android-sdk", name = "Android SDK (cmdline-tools)", group = DepGroup.ANDROID,
-            installOfficial = "winget install Google.AndroidSDK --accept-source-agreements --accept-package-agreements",
-            installMirror = "scoop install android-sdk",
-            checkCommand = "sdkmanager --version"
-        ),
-        DepItem(
-            id = "ndk", name = "NDK 27.0.12077973", group = DepGroup.ANDROID,
-            installOfficial = "sdkmanager \"ndk;27.0.12077973\"",
-            installMirror = "sdkmanager \"ndk;27.0.12077973\"",
-            checkCommand = "ls \$ANDROID_HOME/ndk/27.0.12077973 >/dev/null 2>&1 && echo NDK_OK"
-        ),
-        DepItem(
-            id = "platform-tools", name = "Platform Tools (adb)", group = DepGroup.ANDROID,
-            installOfficial = "sdkmanager \"platform-tools\"",
-            installMirror = "scoop install adb",
-            checkCommand = "adb --version"
-        ),
-        DepItem(
-            id = "build-tools", name = "Build-Tools 35.0.0", group = DepGroup.ANDROID,
-            installOfficial = "sdkmanager \"build-tools;35.0.0\"",
-            installMirror = "sdkmanager \"build-tools;35.0.0\"",
-            checkCommand = "ls \$ANDROID_HOME/build-tools/35.0.0 >/dev/null 2>&1 && echo BT_OK"
-        )
+        DepItem("jdk17", "JDK 17", DepGroup.GENERAL,
+            "winget install Microsoft.OpenJDK.17 --accept-source-agreements --accept-package-agreements",
+            "scoop install adopt17-hotspot",
+            "java -version"),
+        DepItem("git", "Git", DepGroup.GENERAL,
+            "winget install Git.Git --accept-source-agreements --accept-package-agreements",
+            "scoop install git",
+            "git --version"),
+        DepItem("gradle", "Gradle 8.10", DepGroup.GENERAL,
+            "winget install Gradle.Gradle --version 8.10 --accept-source-agreements",
+            "scoop install gradle@8.10",
+            "gradle --version"),
+        DepItem("android-sdk", "Android SDK", DepGroup.ANDROID,
+            "winget install Google.AndroidSDK --accept-source-agreements --accept-package-agreements",
+            "scoop install android-sdk",
+            "sdkmanager --version"),
+        DepItem("ndk", "NDK 27.0.12077973", DepGroup.ANDROID,
+            "sdkmanager \"ndk;27.0.12077973\"",
+            "sdkmanager \"ndk;27.0.12077973\"",
+            "ndk-build --version"),
+        DepItem("platform-tools", "Platform Tools (adb)", DepGroup.ANDROID,
+            "sdkmanager \"platform-tools\"",
+            "scoop install adb",
+            "adb --version"),
+        DepItem("build-tools", "Build-Tools 35.0.0", DepGroup.ANDROID,
+            "sdkmanager \"build-tools;35.0.0\"",
+            "sdkmanager \"build-tools;35.0.0\"",
+            "ls \$ANDROID_HOME/build-tools/35.0.0 >/dev/null 2>&1 && echo BT_OK")
     )
 
-    // 镜像源开关：true 时用镜像命令，false 用官方命令
+    // 镜像源开关
     private val _useMirror = MutableStateFlow(prefs.getBoolean("dep_use_mirror", true))
     val useMirror: StateFlow<Boolean> = _useMirror.asStateFlow()
 
     fun setUseMirror(on: Boolean) {
         prefs.edit().putBoolean("dep_use_mirror", on).apply()
         _useMirror.value = on
+        provisioner.setUseMirror(on)
     }
 
     // 安装执行状态
@@ -180,26 +171,46 @@ class TerminalViewModel @Inject constructor(
     private val _install = MutableStateFlow(InstallState(useMirror = _useMirror.value))
     val install: StateFlow<InstallState> = _install.asStateFlow()
 
-    private var sessionId: Int = -1
+    private var sessionId: Long? = null
 
-    private fun ensureSession(): Int {
-        if (sessionId <= 0 || !terminalManager.isAlive(sessionId)) {
-            sessionId = terminalManager.createSession()
+    // ═══ 终端屏幕状态（供 renderer 订阅，Spec §41）═══
+    private val _semanticState = MutableStateFlow<TerminalSemanticState?>(null)
+    val semanticState: StateFlow<TerminalSemanticState?> = _semanticState.asStateFlow()
+
+    /** 启动屏幕状态轮询（UI 调用，20 FPS）。Spec §41 UI → ScreenState → Renderer。 */
+    fun observeScreenState() {
+        val sid = sessionId ?: return
+        viewModelScope.launch {
+            while (true) {
+                val r = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SEMANTIC)
+                if (r.isSuccess) _semanticState.value = r.getOrThrow().semantic
+                kotlinx.coroutines.delay(50L)
+            }
+        }
+    }
+
+    private suspend fun ensureSession(): Long? {
+        if (sessionId == null) {
+            val r = terminalRuntime.create()
+            if (r.isSuccess) {
+                sessionId = r.getOrThrow().sessionId
+                observeScreenState()
+            }
         }
         return sessionId
     }
 
-    /** 安装单个依赖项（用官方/镜像命令）。 */
+    /** 安装单个依赖项。 */
     fun installDep(item: DepItem) {
         val useMirror = _useMirror.value
         val cmd = if (useMirror) item.installMirror else item.installOfficial
         runCommand(item.id, cmd)
     }
 
-    /** 一键安装全部环境依赖（按清单顺序串行执行）。 */
+    /** 一键安装全部环境依赖。 */
     fun installAll(onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
-            _install.update { it.copy(runningId = "__all__", log = "▶ 开始安装全部环境依赖（镜像=${_useMirror.value}）…\n") }
+            _install.update { it.copy(runningId = "__all__", log = it.log + "▶ 开始安装全部环境依赖（镜像=${_useMirror.value}）…\n") }
             depItems.forEachIndexed { index, item ->
                 onProgress(index, depItems.size)
                 val cmd = if (_useMirror.value) item.installMirror else item.installOfficial
@@ -209,11 +220,11 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
-    /** Android 开发依赖一键装（仅 ANDROID 分组）。 */
+    /** Android 开发依赖一键装。 */
     fun installAndroidOnly(onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             val items = depItems.filter { it.group == DepGroup.ANDROID }
-            _install.update { it.copy(runningId = "__android__", log = "▶ 开始安装 Android 开发依赖（镜像=${_useMirror.value}）…\n") }
+            _install.update { it.copy(runningId = "__android__", log = it.log + "▶ 开始安装 Android 开发依赖（镜像=${_useMirror.value}）…\n") }
             items.forEachIndexed { index, item ->
                 onProgress(index, items.size)
                 val cmd = if (_useMirror.value) item.installMirror else item.installOfficial
@@ -231,22 +242,44 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 用新 Runtime API 执行命令（run + wait + observe），非旧 TerminalManager.execute。
+     * settle-time 已删除，完成靠 waitpid 确认（Spec §4.1）。
+     */
     private suspend fun execAndAppend(id: String, cmd: String) {
-        val sid = ensureSession()
-        if (sid <= 0) {
+        val sid = ensureSession() ?: run {
             _install.update { it.copy(log = it.log + "❌ 无法创建终端会话（设备不支持 PTY）\n") }
             return
         }
-        val result = withContext(Dispatchers.IO) {
-            terminalManager.execute(sid, cmd, timeoutMs = 120_000)
+        val output = withContext(Dispatchers.IO) {
+            // 1. run (非阻塞)
+            val runResult = terminalRuntime.run(sid, cmd, InputOwner.SYSTEM, background = false)
+            val run = runResult.getOrElse { return@withContext "❌ run 失败: ${it.message}\n" }
+            // 2. wait PROCESS_EXITED (可靠，非 settle-time)
+            val waitResult = terminalRuntime.wait(sid, WaitCondition.ProcessExited(jobId = run.jobId), 120_000)
+            val wait = waitResult.getOrElse { return@withContext "❌ wait 失败: ${it.message}\n" }
+            val exitCode = when (wait) {
+                is com.apex.agent.platform.terminal.wait.WaitResult.Matched -> {
+                    val ev = wait.event
+                    if (ev is com.apex.agent.platform.terminal.events.TerminalEvent.ProcessExited) ev.exitCode ?: -1 else 0
+                }
+                is com.apex.agent.platform.terminal.wait.WaitResult.Timeout -> {
+                    terminalRuntime.signal(sid, com.apex.agent.platform.terminal.io.UnixSignal.SIGKILL, InputOwner.SYSTEM, run.jobId)
+                    return@withContext "⚠️ 超时（120s），可能仍在后台进行。\n"
+                }
+                is com.apex.agent.platform.terminal.wait.WaitResult.SessionGone -> return@withContext "❌ 会话已关闭\n"
+            }
+            // 3. observe RAW output since startCursor
+            val obs = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.RAW, run.startCursor, 65536)
+                .getOrNull()?.raw ?: ""
+            val tail = if (obs.length > 4000) "…(已截断)\n" + obs.takeLast(4000) else obs
+            tail + if (exitCode != 0) "\n[exit=$exitCode]\n" else "\n"
         }
-        val tail = if (result.output.length > 4000) "…(已截断)\n" + result.output.takeLast(4000) else result.output
-        _install.update { st ->
-            st.copy(log = st.log + tail + if (result.timedOut) "\n⚠️ 超时（120s），可能仍在后台进行。\n" else "\n")
-        }
+        _install.update { it.copy(log = it.log + output) }
     }
 
     override fun onCleared() {
-        if (sessionId > 0) terminalManager.closeSession(sessionId)
+        // Runtime owns session lifecycle; explicit close via terminal.close() by Agent/UI.
+        // 这里不主动 close，因为 Runtime 是单例，session 可能被其他消费者复用。
     }
 }

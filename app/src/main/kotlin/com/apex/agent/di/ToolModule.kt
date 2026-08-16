@@ -15,14 +15,17 @@ import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.csmem.tools.MemoryRecentEpisodesTool
 import com.apex.agent.platform.csmem.tools.MemorySearchNodesTool
 import com.apex.agent.platform.csmem.tools.MemoryRecallMacroTool
-import com.apex.agent.platform.terminal.TerminalManager
 import com.apex.agent.platform.terminal.tools.*
+import com.apex.agent.platform.terminal.tools.legacy.LegacyExecTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacyReadTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacySendTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
-import com.apex.agent.tools.StreamingTerminalExecTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -87,7 +90,7 @@ object ToolModule {
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
-        terminalManager: TerminalManager,
+        terminalRuntime: TerminalRuntime,
         githubTokenManager: GithubTokenManager,
         githubApiService: GithubApiService,
         userQuestionGateway: UserQuestionGateway,
@@ -136,7 +139,7 @@ object ToolModule {
         // ═══ Agent 主动提问工具 ═══
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))
         registry.register(SafeAgentTool(AskUserTool()))
-        registry.register(SafeAgentTool(StreamingTerminalExecTool(terminalManager)))
+        // StreamingTerminalExecTool removed (§46 id collision); streaming = terminal.run + terminal.observe
 
         // ═══ 2. 文件操作 (7) ═══
         registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
@@ -200,13 +203,16 @@ object ToolModule {
         registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
-        // ═══ 10. Terminal PTY (6) ═══
-        registry.register(SafeAgentTool(TerminalCreateTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalExecTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalSendTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalReadTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalListTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalCloseTool(terminalManager)))
+        // ═══ 10. Terminal PTY — ATR 2.0 (legacy compat aliases) ═══
+        // 9 new Agent-Native tools (Spec §34) are implemented but NOT yet registered to the
+        // ToolRegistry — per Spec §45 Phase 2 ("新 9 工具实现，但不注册到 ToolRegistry").
+        // Their Output types carry `Any?`/`List<Any>` payloads that still need the Phase-2
+        // serialization layer, so they stay as internal scaffolds for now.
+        // 6 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved and wired.
+        registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(LegacyReadTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(LegacyListTool(terminalRuntime))))
 
         // ═══ 11. GitHub (7，条件注册) ═══
         if (githubTokenManager.isConnected()) {

@@ -3,6 +3,12 @@ package com.apex.agent.platform.terminal.tools.legacy
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Legacy compat tool: terminal_send
@@ -14,11 +20,25 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  * Maps to: terminal.write(kind=LINE|KEY). Owner auto-injected as AGENT.
  * Old terminal_send accepted either `text` or `key` — this compat version does the same.
  */
+@Deprecated("ATR 2.0 compat alias — use the new terminal.observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.")
 class LegacySendTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal_send"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal_send"
+    override val name: String = id
+    override val parametersSchema: String = """
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "integer", "description": "Target session id" },
+            "text": { "type": "string", "description": "Text to send (a line or raw bytes)" },
+            "key":  { "type": "string", "description": "Special key, e.g. CTRL_C, ENTER" },
+            "raw":  { "type": "boolean", "description": "If true, text is raw bytes (no newline)", "default": false }
+          },
+          "required": ["sessionId"]
+        }
+    """.trimIndent()
+    override val description: String = """
         [COMPAT] Send input (text line or special key) to a session. For new code prefer
         terminal.write (explicit RAW/LINE/KEY kind). Kept for backward compat.
     """.trimIndent()
@@ -51,6 +71,21 @@ class LegacySendTool(
             onSuccess = { r -> Output(written = r.written, bytesWritten = r.bytesWritten, cursor = r.cursor) },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull()
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
+        val text = json["text"]?.jsonPrimitive?.content
+        val key = json["key"]?.jsonPrimitive?.content
+        val raw = json["raw"]?.jsonPrimitive?.content == "true"
+        val out = execute(Input(sessionId, text, key, raw))
+        return buildJsonObject {
+            put("written", JsonPrimitive(out.written))
+            put("bytesWritten", JsonPrimitive(out.bytesWritten))
+            put("cursor", JsonPrimitive(out.cursor))
+        }.toString()
     }
 
     data class Input(

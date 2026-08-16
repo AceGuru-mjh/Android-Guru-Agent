@@ -42,6 +42,7 @@ android {
 
 dependencies {
     implementation(project(":core:tool-registry"))
+    implementation(project(":terminal-emulator"))  // ATR 2.0 VT100/ANSI emulator
     implementation(libs.core.ktx)
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)

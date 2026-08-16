@@ -40,6 +40,9 @@ include(":platform:persistence")
 include(":platform:terminal")
 include(":platform:cs-mem")
 
+// Terminal Runtime 2.0 — vendored VT100/ANSI emulator (ATR Phase 2)
+include(":terminal-emulator")
+
 // 插件SDK
 include(":plugin-sdk:plugin-api")
 include(":plugin-sdk:plugin-host")

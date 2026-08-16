@@ -18,4 +18,7 @@ dependencies {
     implementation(project(":core:logging"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
+
+    // Unit testing (pure-JVM src/test)
+    testImplementation(libs.junit)
 }

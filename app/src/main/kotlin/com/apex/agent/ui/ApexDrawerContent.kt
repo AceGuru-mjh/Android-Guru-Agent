@@ -119,6 +119,7 @@ fun ApexDrawerContent(
         val destinations = listOf(
             DrawerDestination.Agent,
             DrawerDestination.Terminal,
+            DrawerDestination.Market,
             DrawerDestination.Skill,
             DrawerDestination.Memory,
             DrawerDestination.Model,

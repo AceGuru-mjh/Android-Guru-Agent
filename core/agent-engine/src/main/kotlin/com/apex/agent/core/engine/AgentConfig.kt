@@ -133,6 +133,20 @@ data class AgentConfig(
     
     /** 工具输出最大长度（超出截断）*/
     val maxToolOutputLength: Int = 2000,
+
+    /**
+     * 单个工具调用的超时时间（毫秒）。超时后工具调用被取消，
+     * 以失败结果写回历史，由 LLM 决定下一步（换方案或重试），
+     * 避免卡死的工具（如挂起的 shell 进程）阻塞整个循环。
+     */
+    val toolTimeoutMs: Long = 120_000,
+
+    /**
+     * LLM 返回空响应（无内容也无工具调用）时的自动重试次数。
+     * 每次重试会追加一条系统提示消息引导模型重新输出，
+     * 超过次数仍为空才报错。默认 1 次（最多 2 次尝试）。
+     */
+    val emptyResponseRetries: Int = 1,
     
     /** 是否流式输出 */
     val streaming: Boolean = true,

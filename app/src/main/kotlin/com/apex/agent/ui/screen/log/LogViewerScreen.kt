@@ -48,11 +48,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.apex.agent.R
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
@@ -136,9 +138,13 @@ fun LogViewerScreen() {
                 onClick = { clipboard.setText(AnnotatedString(text)) },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.width(16.dp))
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = stringResource(R.string.tooltip_copy_message),
+                    modifier = Modifier.width(16.dp)
+                )
                 Spacer(Modifier.width(4.dp))
-                Text("复制")
+                Text(stringResource(R.string.log_copy_all))
             }
             FilledTonalButton(
                 onClick = {
@@ -147,17 +153,25 @@ fun LogViewerScreen() {
                 },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
-                Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.width(16.dp))
+                Icon(
+                    Icons.Default.DeleteSweep,
+                    contentDescription = stringResource(R.string.action_delete),
+                    modifier = Modifier.width(16.dp)
+                )
                 Spacer(Modifier.width(4.dp))
-                Text("清空")
+                Text(stringResource(R.string.log_clear))
             }
             FilledTonalButton(
                 onClick = { exportAndShare(context, text) },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
-                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.width(16.dp))
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = stringResource(R.string.action_export),
+                    modifier = Modifier.width(16.dp)
+                )
                 Spacer(Modifier.width(4.dp))
-                Text("导出")
+                Text(stringResource(R.string.log_export))
             }
             Spacer(Modifier.weight(1f))
             // 自动滚动开关
@@ -167,14 +181,14 @@ fun LogViewerScreen() {
             ) {
                 Icon(
                     if (autoScroll) Icons.Default.VerticalAlignBottom else Icons.Default.MoreVert,
-                    contentDescription = null,
+                    contentDescription = if (autoScroll) stringResource(R.string.log_auto_scroll_on) else stringResource(R.string.log_auto_scroll_off),
                     modifier = Modifier.width(16.dp)
                 )
                 Spacer(Modifier.width(4.dp))
-                Text(if (autoScroll) "跟随" else "已停")
+                Text(if (autoScroll) stringResource(R.string.log_auto_scroll_on) else stringResource(R.string.log_auto_scroll_off))
             }
             Text(
-                "${records.size} 条 · ${(stats.totalBytes / 1024 / 1024)}MB/${stats.maxBytes / 1024 / 1024}MB",
+                "${records.size} " + stringResource(R.string.log_stats_total) + " · ${(stats.totalBytes / 1024 / 1024)}MB/${stats.maxBytes / 1024 / 1024}MB",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.CenterVertically)
@@ -211,9 +225,13 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                StatChip("总计", "${stats.total}", MaterialTheme.colorScheme.primary)
                 StatChip(
-                    "错误",
+                    stringResource(R.string.log_stats_total),
+                    "${stats.total}",
+                    MaterialTheme.colorScheme.primary
+                )
+                StatChip(
+                    stringResource(R.string.log_stats_errors),
                     "${stats.errorCount}",
                     if (stats.errorCount > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant,
                     onClick = onClickError
@@ -244,7 +262,7 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "缓冲",
+                    stringResource(R.string.log_buffer),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -305,7 +323,7 @@ private fun FilterControls(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            CategoryTab("全部", selectedCategory == null) { onCategorySelected(null) }
+            CategoryTab(stringResource(R.string.log_filter_all), selectedCategory == null) { onCategorySelected(null) }
             LogCategory.entries.forEach { cat ->
                 CategoryTab(cat.displayName, selectedCategory == cat) { onCategorySelected(cat) }
             }
@@ -317,7 +335,11 @@ private fun FilterControls(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("级别≥", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                stringResource(R.string.log_filter_level),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             LogLevel.entries.filter { it != LogLevel.SILENT }.forEach { lvl ->
                 LevelChip(lvl, minLevel.atLeast(lvl)) { onMinLevelChanged(lvl) }
             }
@@ -328,8 +350,13 @@ private fun FilterControls(
             value = keyword,
             onValueChange = onKeywordChanged,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索消息或来源…") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            placeholder = { Text(stringResource(R.string.placeholder_search)) },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = stringResource(R.string.action_search)
+                )
+            },
             singleLine = true,
             shape = RoundedCornerShape(10.dp)
         )
@@ -342,10 +369,14 @@ private fun FilterControls(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("会话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SessionChip("全部", sessionId == null) { onSessionSelected(null) }
+                Text(
+                    stringResource(R.string.log_filter_session),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                SessionChip(stringResource(R.string.log_session_all), sessionId == null) { onSessionSelected(null) }
                 sessions.reversed().take(8).forEach { s ->
-                    val label = if (s.label.isNotEmpty()) s.label else "会话#${s.id}"
+                    val label = if (s.label.isNotEmpty()) s.label else stringResource(R.string.log_session_prefix) + "${s.id}"
                     SessionChip(label, sessionId == s.id) { onSessionSelected(s.id) }
                 }
             }
@@ -446,14 +477,19 @@ private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
             }
             if (hasTrace) {
                 Text(
-                    if (expanded) "收起" else "堆栈",
+                    if (expanded) stringResource(R.string.action_close) else stringResource(R.string.action_open),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
             IconButton(onClick = onCopy, modifier = Modifier.width(28.dp).height(28.dp)) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = stringResource(R.string.tooltip_copy_message),
+                    modifier = Modifier.width(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

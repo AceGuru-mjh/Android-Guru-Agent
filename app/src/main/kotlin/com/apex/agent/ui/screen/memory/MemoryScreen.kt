@@ -41,12 +41,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.csmem.model.SemanticNode
 import com.apex.agent.platform.csmem.store.EpisodeSummary
 import com.apex.agent.platform.csmem.store.FSMMacro
@@ -77,10 +79,13 @@ fun MemoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("记忆") },
+                title = { Text(stringResource(R.string.memory_title)) },
                 actions = {
                     IconButton(onClick = { showSearch = !showSearch }) {
-                        Icon(Icons.Default.Search, contentDescription = "搜索节点")
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = stringResource(R.string.action_search)
+                        )
                     }
                 }
             )
@@ -92,7 +97,7 @@ fun MemoryScreen(
                     modifier = Modifier.padding(16.dp),
                     action = {
                         TextButton(onClick = { showToast = false; viewModel.clearMessage() }) {
-                            Text("知道了")
+                            Text(stringResource(R.string.action_confirm))
                         }
                     }
                 ) { Text(msg) }
@@ -111,9 +116,21 @@ fun MemoryScreen(
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                StatCard("Episode", "${stats.episodeCount}", Modifier.weight(1f))
-                StatCard("节点", "${stats.nodeCount}", Modifier.weight(1f))
-                StatCard("宏技能", "${stats.macroCount}", Modifier.weight(1f))
+                StatCard(
+                    stringResource(R.string.memory_stat_episodes),
+                    "${stats.episodeCount}",
+                    Modifier.weight(1f)
+                )
+                StatCard(
+                    stringResource(R.string.memory_stat_nodes),
+                    "${stats.nodeCount}",
+                    Modifier.weight(1f)
+                )
+                StatCard(
+                    stringResource(R.string.memory_stat_macros),
+                    "${stats.macroCount}",
+                    Modifier.weight(1f)
+                )
             }
 
             // 搜索区
@@ -121,7 +138,7 @@ fun MemoryScreen(
                 OutlinedTextField(
                     value = query,
                     onValueChange = viewModel::onSearch,
-                    label = { Text("搜索节点（文本 / 关键词）") },
+                    label = { Text(stringResource(R.string.placeholder_search_nodes)) },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -132,7 +149,7 @@ fun MemoryScreen(
             if (showSearch && query.isNotBlank()) {
                 // 搜索结果
                 if (searchResults.isEmpty()) {
-                    EmptyHint("没有匹配 \"$query\" 的记忆节点")
+                    EmptyHint(stringResource(R.string.log_no_matching_nodes, query))
                 } else {
                     LazyColumn(
                         modifier = Modifier.padding(horizontal = 12.dp),
@@ -145,9 +162,9 @@ fun MemoryScreen(
                 }
             } else {
                 // 近期 Episode
-                SectionTitle("近期会话")
+                SectionTitle(stringResource(R.string.memory_episodes))
                 if (episodes.isEmpty()) {
-                    EmptyHint("还没有任何记忆会话\nAgent 执行任务后这里会沉淀 Episode")
+                    EmptyHint(stringResource(R.string.memory_no_episodes))
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -166,9 +183,9 @@ fun MemoryScreen(
                 }
 
                 // 高频宏
-                SectionTitle("高频宏技能")
+                SectionTitle(stringResource(R.string.memory_frequent_macros))
                 if (macros.isEmpty()) {
-                    EmptyHint("还没有蒸馏出的宏技能\n任务成功后 Agent 会沉淀可复用 FSM 宏")
+                    EmptyHint(stringResource(R.string.memory_no_macros))
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -190,16 +207,16 @@ fun MemoryScreen(
     pendingDelete?.let { ep ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除记忆会话") },
-            text = { Text("确定删除 \"${ep.goal}\" 吗？关联的边会一并清除（节点为共享字典，不随删硬删）。") },
+            title = { Text(stringResource(R.string.memory_delete_episode)) },
+            text = { Text(stringResource(R.string.memory_delete_episode_confirm, ep.goal)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteEpisode(ep.episodeId)
                     pendingDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -224,11 +241,18 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
             Spacer(Modifier.height(2.dp))
-            Text(label, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -272,22 +296,39 @@ private fun EpisodeCard(episode: EpisodeSummary, onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(episode.goal, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    episode.goal,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${episode.status} · ${formatTime(episode.startedAt)} · ${episode.totalActions} 动作",
+                    stringResource(
+                        R.string.memory_episode_status,
+                        episode.status,
+                        formatTime(episode.startedAt),
+                        episode.totalActions
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (episode.isDistilled) {
-                    Text("已蒸馏为宏", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        stringResource(R.string.memory_episode_distilled),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = stringResource(R.string.action_delete),
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -302,13 +343,14 @@ private fun NodeCard(node: SemanticNode) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    node.textHint ?: "(无文本)",
+                    node.textHint ?: stringResource(R.string.memory_node_text_hint),
                     style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "role=${node.role}",
+                    stringResource(R.string.memory_node_role, node.role),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -325,20 +367,35 @@ private fun MacroCard(macro: FSMMacro) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(macro.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                Text(
+                    macro.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium
+                )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${macro.appPackage ?: "通用"} · 成功 ${macro.successCount} / 失败 ${macro.failureCount}",
+                    stringResource(
+                        R.string.memory_macro_stats,
+                        macro.appPackage ?: stringResource(R.string.memory_macro_universal),
+                        macro.successCount,
+                        macro.failureCount
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (macro.isCrystallized) {
-                    Text("已晶化", style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        stringResource(R.string.memory_macro_crystallized),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
-            Text("${macro.transitions.size} 步", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary)
+            Text(
+                stringResource(R.string.memory_macro_steps, macro.transitions.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }

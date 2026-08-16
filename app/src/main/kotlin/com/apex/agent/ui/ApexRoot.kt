@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +53,7 @@ import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
 import com.apex.agent.ui.screen.skill.SkillScreen
 import com.apex.agent.ui.screen.memory.MemoryScreen
+import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.terminal.TerminalScreen
 import kotlinx.coroutines.launch
 
@@ -65,6 +67,7 @@ sealed class DrawerDestination(
 ) {
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
     data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
+    data object Market : DrawerDestination("market", "市场", Icons.Default.Storefront)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
     data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
@@ -153,6 +156,7 @@ fun ApexRoot() {
                     when (currentDestination) {
                         DrawerDestination.Agent -> AgentChatScreen()
                         DrawerDestination.Terminal -> TerminalScreen()
+                        DrawerDestination.Market -> MarketScreen()
                         DrawerDestination.Skill -> SkillScreen()
                         DrawerDestination.Memory -> MemoryScreen()
                         DrawerDestination.Model -> ModelScreen()

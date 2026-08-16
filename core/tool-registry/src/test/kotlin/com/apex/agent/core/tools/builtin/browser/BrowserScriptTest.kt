@@ -33,8 +33,10 @@ class BrowserScriptTest {
         assertTrue(js.contains("select,"))
         assertTrue(js.contains("textarea,"))
         assertTrue(js.contains("[role=checkbox]"))
-        // 不应把整页导航链接作为主要目标（a 不在 FORM_FIELDS 选择器内）
-        assertFalse("FORM_FIELDS 不应含裸 <a> 选择器", js.contains("a,"))
+        // 不应把整页导航链接作为主要目标：断言收窄到选择器定义本身
+        // （整段 JS 模板中其他地方也可能出现 "a," 子串，不能直接扫全文）
+        assertTrue(js.contains("interactiveSel = 'input,select,textarea"))
+        assertFalse("FORM_FIELDS 选择器不应含裸 a,", js.contains("interactiveSel = 'a,"))
     }
 
     @Test
@@ -99,7 +101,7 @@ class BrowserScriptTest {
     // ---- 下拉选择：byText / byValue 两种匹配语义 ----
 
     @Test
-    fun `selectJs byValue 按 option.value 匹配`() {
+    fun `selectJs byValue matches option value`() {
         val js = BrowserScript.selectJs("r_abc", "cn", byText = false)
         assertTrue("按 value 匹配", js.contains("opt.value"))
         assertTrue(js.contains("[data-apex-hash='r_abc']"))
@@ -107,7 +109,7 @@ class BrowserScriptTest {
     }
 
     @Test
-    fun `selectJs byText 按 option.text 匹配`() {
+    fun `selectJs byText matches option text`() {
         val js = BrowserScript.selectJs("r_abc", "中国", byText = true)
         assertTrue("按 text 匹配", js.contains("opt.text"))
     }

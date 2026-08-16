@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.plugin.host.PluginManager
@@ -24,19 +25,22 @@ import javax.inject.Singleton
  * 斜杠指令菜单的统一数据源（成品版）
  *
  * 与 PR #30 中被传参却从不消费的 SlashMenuProvider 不同，本实现：
- *  - 从 SkillRegistry / McpManager / PluginManager 实时聚合菜单数据；
+ *  - 从 SkillRegistry / McpManager / PluginManager / ConnectorRegistry 实时聚合菜单数据；
  *  - 通过 [menu] StateFlow 在插件加载/卸载时自动刷新；
  *  - 为每个条目附带状态（已连接 / 离线 / 未安装 / 外部），由 UI 渲染角标；
  *  - [refresh] 可在 MCP 连接状态变化后手动触发全量刷新。
  *
- * 所有依赖（SkillMenuProvider / McpManager / PluginManager）均已在 main 的 DI 图中提供，
- * 因此本类无需引入任何新的脚手架代码。
+ * 市场开关接线：Skill（SkillRegistry.setEnabled）、MCP（McpManager.setEnabled）、
+ * 连接器（ConnectorRegistry.setEnabled）关闭后，对应条目从 "/" 菜单消失。
+ *
+ * 所有依赖均已在 main 的 DI 图中提供，因此本类无需引入任何新的脚手架代码。
  */
 @Singleton
 class SlashMenuProvider @Inject constructor(
     private val skills: SkillMenuProvider,
     private val mcpManager: McpManager,
-    private val pluginManager: PluginManager
+    private val pluginManager: PluginManager,
+    private val connectorRegistry: ConnectorRegistry
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -92,10 +96,10 @@ class SlashMenuProvider @Inject constructor(
         )
     }
 
-    // ── MCP：展示已配置服务器，区分「已连接」与「离线」 ──
+    // ── MCP：展示已配置服务器（仅启用的），区分「已连接」与「离线」 ──
     private fun buildMcpCategory(): SlashMenuCategory {
         val connected = mcpManager.getConnectedServers().toSet()
-        val configs = mcpManager.getConfigs()
+        val configs = mcpManager.getEnabledConfigs()
         val items = configs.map { cfg ->
             val isConnected = cfg.name in connected
             SlashMenuItem(
@@ -112,11 +116,11 @@ class SlashMenuProvider @Inject constructor(
             icon = Icons.Default.Api,
             items = items,
             badge = if (connectedCount > 0) "已连接 $connectedCount" else null,
-            hint = if (items.isEmpty()) "未配置 MCP 服务器" else null
+            hint = if (items.isEmpty()) "未配置已启用的 MCP 服务器" else null
         )
     }
 
-    // ── 插件：从系统已安装的 Apex 插件中实时发现，区分「已加载」与「未安装」 ──
+    // ── 插件：从系统已安装的 Apex 插件中实时发现，区分「已加载」与「未加载」 ──
     private fun buildPluginsCategory(): SlashMenuCategory {
         val discovered = pluginManager.discoverPlugins()
         val loaded = pluginManager.loadedPlugins.value.keys
@@ -138,13 +142,14 @@ class SlashMenuProvider @Inject constructor(
         )
     }
 
-    // ── 连接器：当前无 ConnectorRegistry，保留已知示例并在此明确标注为示例 ──
+    // ── 连接器：从 ConnectorRegistry 实时读取（仅启用的），替代原硬编码示例 ──
     private fun buildConnectorsCategory(): SlashMenuCategory {
-        val items = KNOWN_CONNECTORS.map { (label, command) ->
+        val items = connectorRegistry.getEnabled().map { def ->
             SlashMenuItem(
-                label = label,
-                command = command,
-                status = SlashItemStatus.EXTERNAL
+                label = def.name,
+                command = "/connector:${def.id} ",
+                description = if (def.endpoint.isNotBlank()) def.endpoint else def.type,
+                status = SlashItemStatus.READY
             )
         }
         return SlashMenuCategory(
@@ -152,15 +157,7 @@ class SlashMenuProvider @Inject constructor(
             title = "连接器",
             icon = Icons.Default.Link,
             items = items,
-            hint = "示例连接器"
-        )
-    }
-
-    companion object {
-        private val KNOWN_CONNECTORS = listOf(
-            "Google Drive" to "/connector:google_drive ",
-            "Notion" to "/connector:notion ",
-            "SSH" to "/connector:ssh "
+            hint = if (items.isEmpty()) "未启用任何连接器" else null
         )
     }
 }

@@ -1,5 +1,14 @@
 # 产品需求：write / replace 工具原生返回 diff 统计
 
+> **实现状态**：✅ 已落地（2026-08-12，PR 待合入）
+> 本仓库对应工具为 `write_file`（≈`write_to_file`）与 `edit_file`（≈`replace_in_file`，
+> 支持多编辑块/插入/删除）。实现见 `core/tool-registry/.../builtin/`：
+> - `LineDiffStat.kt`：行级 LCS diff 统计（新增/删除行数、变更行区间，大文件退化净计数）
+> - `FileEditTool.kt` / `FileWriteTool.kt`：输出 `Diff stat: added=…, deleted=…, net=…, changedRange=…` + `matchCount`
+>
+> 差异说明：工具返回值为纯文本（供 LLM 消费），故以一行紧凑文本形式输出各字段，
+> 语义与本文档 JSON 字段一一对应。
+
 - **类型**：CodeBuddy 客户端（IDE）工具能力增强
 - **提出方**：Agent 使用者反馈
 - **优先级**：P2（体验增强，非阻塞）

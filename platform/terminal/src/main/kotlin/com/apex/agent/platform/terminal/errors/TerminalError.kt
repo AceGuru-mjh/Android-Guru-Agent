@@ -35,6 +35,8 @@ sealed class TerminalError(val code: String, val recoverable: Boolean) {
 
     /** afterCursor < oldestCursor; RingBuffer has dropped the requested range. Re-sync with current cursor. */
     object BufferOverrun : TerminalError("BufferOverrun", recoverable = true)
+    /** PR #52 §6: cursor < oldestCursor — requested output has been evicted. Re-sync with availableFrom. */
+    object CursorExpired : TerminalError("CursorExpired", recoverable = true)
 
     /** Invalid input parameters (bad rows/cols, empty command, unknown key, etc.). */
     object InvalidInput : TerminalError("InvalidInput", recoverable = false)

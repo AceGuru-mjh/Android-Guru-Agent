@@ -37,6 +37,12 @@ interface TerminalInput {
 
     /** Send a Unix signal (SIGINT/SIGTERM/SIGKILL/...). */
     suspend fun sendSignal(sessionId: Long, owner: InputOwner, signal: UnixSignal, jobId: Long? = null): Result<Unit>
+
+    // PR #52 §1: stdin lifecycle — closeStdin sends EOF (Ctrl+D), distinct from close() (kills PTY) and signal.
+    suspend fun closeStdin(sessionId: Long, owner: InputOwner): Result<Unit>
+
+    /** Convenience: send EOF (Ctrl+D) — equivalent to closeStdin. */
+    suspend fun sendEof(sessionId: Long, owner: InputOwner): Result<Unit> = closeStdin(sessionId, owner)
 }
 
 /** Common failure reasons for input operations. */

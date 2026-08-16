@@ -170,6 +170,13 @@ class InputManagerImpl(
         return writeInternal(sessionId, owner, signal = signal, kind = InputKind.SIGNAL).map { }
     }
 
+    // PR #52 §1: stdin lifecycle — EOF via Ctrl+D (byte 0x04). Distinct from close() (PTY teardown).
+    override suspend fun closeStdin(sessionId: Long, owner: InputOwner): Result<Unit> {
+        // Ctrl+D = EOT (0x04) — signals EOF to the foreground process reading stdin.
+        // This does NOT close the PTY; the shell continues running and can accept new commands.
+        return write(sessionId, owner, byteArrayOf(0x04))
+    }
+
     private suspend fun writeInternal(
         sessionId: Long,
         owner: InputOwner,

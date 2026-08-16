@@ -3,7 +3,12 @@ package com.apex.agent.platform.terminal.tools.legacy
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.wait.WaitCondition
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Legacy compat tool: terminal_exec
@@ -28,8 +33,21 @@ import com.apex.agent.platform.terminal.wait.WaitCondition
 )
 class LegacyExecTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal_exec"
+) : TerminalTool {
+    override val id: String = "terminal_exec"
+    override val name: String = id
+    override val parametersSchema: String = """
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "integer", "description": "Target session id" },
+            "command":   { "type": "string",  "description": "Shell command to execute" },
+            "timeoutMs": { "type": "integer", "description": "Max wait ms for process exit", "default": 120000 },
+            "maxOutputBytes": { "type": "integer", "description": "Max captured output bytes", "default": 65536 }
+          },
+          "required": ["sessionId", "command"]
+        }
+    """.trimIndent()
     val description: String = """
         [COMPAT, DEPRECATED] Execute a command synchronously and return output + exitCode. Blocks
         until process exits (waitpid-confirmed, NOT settle-time). For new code prefer terminal.run +
@@ -74,6 +92,17 @@ class LegacyExecTool(
         return Output(output = obs.raw ?: "", exitCode = exitCode, truncated = obs.truncated, durationMs = 0, timedOut = false)
     }
 
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
+        val command = json["command"]?.jsonPrimitive?.content
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'command' required")
+        val timeoutMs = json["timeoutMs"]?.jsonPrimitive?.longOrNull ?: 120_000L
+        val maxOutputBytes = json["maxOutputBytes"]?.jsonPrimitive?.intOrNull ?: 65536
+        return Json.encodeToString(execute(Input(sessionId, command, timeoutMs, maxOutputBytes)))
+    }
+
     data class Input(
         val sessionId: Long,
         val command: String,
@@ -81,6 +110,7 @@ class LegacyExecTool(
         val maxOutputBytes: Int = 65536
     )
 
+    @Serializable
     data class Output(
         val output: String,
         val exitCode: Int,

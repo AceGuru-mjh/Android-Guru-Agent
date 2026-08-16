@@ -3,6 +3,11 @@ package com.apex.agent.platform.terminal.tools.legacy
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Legacy compat tool: terminal_signal
@@ -16,8 +21,19 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 @Deprecated("ATR 2.0 compat alias — use the new terminal.observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.")
 class LegacySignalTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal_signal"
+) : TerminalTool {
+    override val id: String = "terminal_signal"
+    override val name: String = id
+    override val parametersSchema: String = """
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "integer", "description": "Target session id" },
+            "signal":    { "type": "string",  "description": "SIGINT | SIGTERM | SIGKILL | SIGHUP | SIGQUIT" }
+          },
+          "required": ["sessionId", "signal"]
+        }
+    """.trimIndent()
     val description: String = """
         [COMPAT] Send a Unix signal (SIGINT/SIGTERM/SIGKILL) to the session's foreground process.
         Equivalent to terminal.signal. Kept for backward compat.
@@ -38,11 +54,21 @@ class LegacySignalTool(
         )
     }
 
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
+        val signal = json["signal"]?.jsonPrimitive?.content
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'signal' required")
+        return Json.encodeToString(execute(Input(sessionId, signal)))
+    }
+
     data class Input(
         val sessionId: Long,
         val signal: String     // "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP" | "SIGQUIT"
     )
 
+    @Serializable
     data class Output(
         val sent: Boolean,
         val signal: String

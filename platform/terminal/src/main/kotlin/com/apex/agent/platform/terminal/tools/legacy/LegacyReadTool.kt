@@ -2,6 +2,11 @@ package com.apex.agent.platform.terminal.tools.legacy
 
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Legacy compat tool: terminal_read
@@ -20,8 +25,20 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 @Deprecated("ATR 2.0 compat alias — use the new terminal.observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.")
 class LegacyReadTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal_read"
+) : TerminalTool {
+    override val id: String = "terminal_read"
+    override val name: String = id
+    override val parametersSchema: String = """
+        {
+          "type": "object",
+          "properties": {
+            "sessionId":  { "type": "integer", "description": "Target session id" },
+            "maxBytes":   { "type": "integer", "description": "Max bytes to return", "default": 65536 },
+            "afterCursor":{ "type": "integer", "description": "Cursor to read from (null = from start)" }
+          },
+          "required": ["sessionId"]
+        }
+    """.trimIndent()
     val description: String = """
         [COMPAT] Read pending output from a session (non-blocking, returns all retained output
         up to maxBytes). For incremental cursor-based reads, prefer terminal.observe(mode=RAW,
@@ -46,12 +63,22 @@ class LegacyReadTool(
         )
     }
 
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.longOrNull
+            ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'sessionId' (long) required")
+        val maxBytes = json["maxBytes"]?.jsonPrimitive?.intOrNull ?: 65536
+        val afterCursor = json["afterCursor"]?.jsonPrimitive?.longOrNull
+        return Json.encodeToString(execute(Input(sessionId, maxBytes, afterCursor)))
+    }
+
     data class Input(
         val sessionId: Long,
         val maxBytes: Int = 65536,
         val afterCursor: Long? = null   // optional; null = from start (old behavior)
     )
 
+    @Serializable
     data class Output(
         val output: String,
         val cursor: Long,

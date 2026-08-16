@@ -3,6 +3,7 @@ package com.apex.agent.platform.terminal.tools.legacy
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -52,9 +53,9 @@ class LegacyCloseTool(
         val force = json["force"]?.jsonPrimitive?.content == "true"
         val out = execute(Input(sessionId, force))
         return buildJsonObject {
-            put("closed", out.closed)
-            put("cause", out.cause)
-            put("finalCursor", out.finalCursor)
+            put("closed", JsonPrimitive(out.closed))
+            put("cause", JsonPrimitive(out.cause))
+            put("finalCursor", JsonPrimitive(out.finalCursor))
         }.toString()
     }
 

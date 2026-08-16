@@ -6,6 +6,7 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.wait.WaitCondition
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -102,11 +103,11 @@ class LegacyExecTool(
         val maxOutputBytes = json["maxOutputBytes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 65536
         val out = execute(Input(sessionId, command, timeoutMs, maxOutputBytes))
         return buildJsonObject {
-            put("output", out.output)
-            put("exitCode", out.exitCode)
-            put("truncated", out.truncated)
-            put("durationMs", out.durationMs)
-            put("timedOut", out.timedOut)
+            put("output", JsonPrimitive(out.output))
+            put("exitCode", JsonPrimitive(out.exitCode))
+            put("truncated", JsonPrimitive(out.truncated))
+            put("durationMs", JsonPrimitive(out.durationMs))
+            put("timedOut", JsonPrimitive(out.timedOut))
         }.toString()
     }
 

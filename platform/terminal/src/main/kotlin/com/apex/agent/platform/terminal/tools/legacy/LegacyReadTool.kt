@@ -4,6 +4,7 @@ import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -71,10 +72,10 @@ class LegacyReadTool(
         val afterCursor = json["afterCursor"]?.jsonPrimitive?.content?.toLongOrNull()
         val out = execute(Input(sessionId, maxBytes, afterCursor))
         return buildJsonObject {
-            put("output", out.output)
-            put("cursor", out.cursor)
-            put("truncated", out.truncated)
-            put("overrun", out.overrun)
+            put("output", JsonPrimitive(out.output))
+            put("cursor", JsonPrimitive(out.cursor))
+            put("truncated", JsonPrimitive(out.truncated))
+            put("overrun", JsonPrimitive(out.overrun))
         }.toString()
     }
 

@@ -2,6 +2,7 @@ package com.apex.agent.platform.terminal.tools.legacy
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 
@@ -60,12 +61,12 @@ class LegacyListTool(
             put("sessions", buildJsonArray {
                 for (s in out.sessions) {
                     add(buildJsonObject {
-                        put("sessionId", s.sessionId)
-                        put("pid", s.pid)
-                        put("shell", s.shell)
-                        put("cwd", s.cwd)
-                        put("state", s.state)
-                        put("cursor", s.cursor)
+                        put("sessionId", JsonPrimitive(s.sessionId))
+                        put("pid", JsonPrimitive(s.pid))
+                        put("shell", JsonPrimitive(s.shell))
+                        put("cwd", JsonPrimitive(s.cwd))
+                        put("state", JsonPrimitive(s.state))
+                        put("cursor", JsonPrimitive(s.cursor))
                     })
                 }
             })

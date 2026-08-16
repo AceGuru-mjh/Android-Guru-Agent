@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -81,9 +82,9 @@ class LegacySendTool(
         val raw = json["raw"]?.jsonPrimitive?.content == "true"
         val out = execute(Input(sessionId, text, key, raw))
         return buildJsonObject {
-            put("written", out.written)
-            put("bytesWritten", out.bytesWritten)
-            put("cursor", out.cursor)
+            put("written", JsonPrimitive(out.written))
+            put("bytesWritten", JsonPrimitive(out.bytesWritten))
+            put("cursor", JsonPrimitive(out.cursor))
         }.toString()
     }
 

@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -62,8 +63,8 @@ class LegacySignalTool(
             ?: throw IllegalArgumentException("TerminalError:InvalidInput — 'signal' required")
         val out = execute(Input(sessionId, signal))
         return buildJsonObject {
-            put("sent", out.sent)
-            put("signal", out.signal)
+            put("sent", JsonPrimitive(out.sent))
+            put("signal", JsonPrimitive(out.signal))
         }.toString()
     }
 

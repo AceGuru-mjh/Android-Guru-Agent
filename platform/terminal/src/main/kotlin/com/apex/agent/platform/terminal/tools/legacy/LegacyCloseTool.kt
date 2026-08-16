@@ -11,7 +11,6 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  *
  * Maps to: terminal.close(). Identical behavior; this is a thin alias.
  */
-@Deprecated("ATR 2.0 compat alias — use the new terminal.run/observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.", ReplaceWith("See di/ToolRegistrationGuide for the new 9-tool API"))
 @Deprecated("ATR 2.0 compat alias — use the new terminal.observe/write/signal/snapshot/close API instead. Scheduled for removal in a future version.")
 class LegacyCloseTool(
     private val runtime: TerminalRuntime

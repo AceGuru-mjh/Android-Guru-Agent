@@ -81,7 +81,9 @@ class TerminalRuntimeImpl(
     private val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
     // PR #51: process/timeout/cancellation controllers
-    private val processController = com.apex.agent.platform.terminal.process.ProcessController(native)
+    // ProcessController routes signal() through InputManager (policy + control-state + events);
+    // the NATIVE layer delivers to the whole process group (kill(-PGID)).
+    private val processController = com.apex.agent.platform.terminal.process.ProcessController(inputManager)
     private val timeoutController = com.apex.agent.platform.terminal.process.TimeoutController(inputManager)
     private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(inputManager, timeoutController)
     private val sessionManager = SessionManagerImpl(
@@ -105,6 +107,10 @@ class TerminalRuntimeImpl(
         return r.map { s ->
             // start a JobManager listener for this session
             startSessionListener(s.id)
+            // Register the session's process group (v1: pgid == shell pid — forkpty makes the
+            // PTY child a session + process-group leader, so PGID == PID). Signals routed via
+            // ProcessController are then delivered to the whole group by the native layer.
+            processController.registerGroup(s.id, null, s.pid)
             CreateResult(
                 sessionId = s.id, pid = s.pid, shell = s.shell, cwd = s.initialCwd,
                 rows = s.rows, cols = s.cols, privilege = s.privilege,
@@ -183,7 +189,10 @@ class TerminalRuntimeImpl(
         if (sessionManager.assembly(sessionId) == null) {
             return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         }
-        val res = inputManager.sendSignal(sessionId, owner, signal, jobId)
+        // Route through ProcessController: records the session's process group and delegates
+        // to InputManager (policy + control-state + SignalSent event). The native layer
+        // delivers the signal to the WHOLE process group (kill(-PGID)), not just the shell.
+        val res = processController.signalGroup(sessionId, owner, signal, jobId)
         return res.map { SignalResult(sent = true, signal = signal, targetJobId = jobId) }
     }
 
@@ -253,6 +262,7 @@ class TerminalRuntimeImpl(
         val a = sessionManager.assembly(sessionId)
         val wasBroken = a != null && a.session.state == SessionState.BROKEN
         val r = sessionManager.close(sessionId, force)
+        if (r.isSuccess) processController.unregister(sessionId)
         return r.map {
             CloseResult(
                 closed = true,

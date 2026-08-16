@@ -66,6 +66,11 @@ object CommandParser {
 
 /**
  * Command Policy decision (Spec PR #51 §1).
+ *
+ * v1 contract: [CommandPolicy.check] only ever produces ALLOW / DENY.
+ * [REQUIRE_CONFIRMATION] is reserved for a future Confirmation UI — it is NEVER emitted in
+ * v1. Consumers (e.g. [TerminalPolicyImpl]) MUST treat it as DENY, never as a silent ALLOW:
+ * a command that requires confirmation must not pass until a UI exists to obtain it.
  */
 enum class CommandPolicyDecision { ALLOW, DENY, REQUIRE_CONFIRMATION }
 
@@ -75,6 +80,24 @@ enum class CommandPolicyDecision { ALLOW, DENY, REQUIRE_CONFIRMATION }
  *   ALLOWLIST_ONLY  — only allowlist commands allowed (denylist still takes precedence)
  */
 enum class CommandPolicyMode { ALLOW_ALL, ALLOWLIST_ONLY }
+
+/**
+ * Built-in DEFAULT policy (Spec §9).
+ *
+ * Kept separate from [CommandPolicy] on purpose: the default policy is what applies when a
+ * layer (user / global / agent-session) does NOT configure anything. A future Global/Session
+ * policy layer composes as `effective = default ∘ configured`:
+ *   - configured denylist == null          → inherit [DEFAULT_DENYLIST]
+ *   - configured denylist == emptySet()    → defaults explicitly cleared (opt-out)
+ *   - configured denylist == non-empty     → defaults replaced by the configured set
+ */
+object DefaultCommandPolicy {
+
+    /** Destructive commands denied by default (Spec §9 example). */
+    val DEFAULT_DENYLIST: Set<String> = setOf(
+        "shutdown", "reboot", "mkfs", "dd", "halt", "poweroff"
+    )
+}
 
 /**
  * Command Policy configuration (Spec §9).
@@ -90,15 +113,23 @@ enum class CommandPolicyMode { ALLOW_ALL, ALLOWLIST_ONLY }
 data class CommandPolicy(
     val mode: CommandPolicyMode = CommandPolicyMode.ALLOW_ALL,
     val allowlist: Set<String> = emptySet(),
-    val denylist: Set<String> = setOf(
-        // Destructive commands denied by default (Spec §9 example)
-        "shutdown", "reboot", "mkfs", "dd", "shutdown", "halt", "poweroff"
-    )
+    /** null → inherit [DefaultCommandPolicy.DEFAULT_DENYLIST]; empty set clears defaults. */
+    val denylist: Set<String>? = null
 ) {
+    /**
+     * Effective denylist after resolving defaults (default policy ∘ configured policy).
+     *
+     * This is the seam where a future Global/Session policy layer plugs in: it can build a
+     * [CommandPolicy] with an explicitly resolved denylist instead of relying on the default.
+     */
+    val effectiveDenylist: Set<String>
+        get() = denylist ?: DefaultCommandPolicy.DEFAULT_DENYLIST
+
     /**
      * Check a parsed command against the policy.
      *
      * Conservative (Spec §6): complex/unparseable commands → DENY.
+     * v1 contract: returns only [CommandPolicyDecision.ALLOW] or [CommandPolicyDecision.DENY].
      */
     fun check(parsed: ParsedCommand): CommandPolicyDecision {
         // Complex commands (shell operators, wrappers) → DENY (conservative)
@@ -108,8 +139,8 @@ data class CommandPolicy(
 
         val exe = parsed.executable
 
-        // 1. Denylist takes highest precedence
-        if (exe in denylist) return CommandPolicyDecision.DENY
+        // 1. Denylist takes highest precedence (over allowlist and defaults)
+        if (exe in effectiveDenylist) return CommandPolicyDecision.DENY
 
         // 2. Allowlist mode: must be in allowlist
         if (mode == CommandPolicyMode.ALLOWLIST_ONLY) {

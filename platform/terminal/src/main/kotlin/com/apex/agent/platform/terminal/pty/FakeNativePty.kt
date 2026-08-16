@@ -43,7 +43,11 @@ class FakeNativePty : NativePty {
         var commandThread: Thread? = null,
         var interrupted: AtomicBoolean = AtomicBoolean(false),
         var runningJob: AtomicBoolean = AtomicBoolean(false),
-        val startTime: Long = System.currentTimeMillis()
+        val startTime: Long = System.currentTimeMillis(),
+        // Simulated process-group members (child/grandchild pids) → alive flag.
+        // Mirrors the REAL native semantics: the PTY child is the group leader
+        // (PGID == shell pid), and kill(-PGID) terminates the whole group.
+        val groupChildren: ConcurrentHashMap<Int, AtomicBoolean> = ConcurrentHashMap()
     )
 
     private val sessions = ConcurrentHashMap<Int, Session>()
@@ -107,11 +111,25 @@ class FakeNativePty : NativePty {
 
     override fun nativeSendSignal(sessionId: Int, signal: Int): Boolean {
         val s = sessions[sessionId] ?: return false
+        // PROCESS-GROUP semantics (Spec PR #51 §1): a signal to the session is delivered to
+        // the WHOLE process group — shell + child + grandchild (real native: kill(-PGID)).
         s.interrupted.set(true)
         // SIGINT(2)→130, SIGTERM(15)→143, SIGKILL(9)→137, SIGHUP(1)→129, SIGQUIT(3)→131
         val exit = 128 + signal
         s.exitCode.set(exit)
         s.runningJob.set(false)
+        // Terminate every simulated child/grandchild in the group.
+        for ((_, alive) in s.groupChildren) alive.set(false)
+        // Group-terminating signals (SIGHUP/SIGTERM/SIGKILL) kill the shell process itself.
+        // SIGINT/SIGQUIT only interrupt the foreground job — the interactive shell survives
+        // (matches real PTY behavior: Ctrl+C interrupts the job, shell keeps running).
+        if (signal == UnixSignal.SIGHUP.number ||
+            signal == UnixSignal.SIGTERM.number ||
+            signal == UnixSignal.SIGKILL.number
+        ) {
+            s.alive.set(false)
+            s.exited.set(true)
+        }
         return true
     }
 
@@ -159,6 +177,30 @@ class FakeNativePty : NativePty {
     override fun nativeActiveCount(): Int = sessions.size
 
     override fun nativeListSessionIds(): IntArray = sessions.keys.toIntArray()
+
+    // ─── process-group simulation (Spec PR #51 §1 test helpers) ───
+    // These helpers let runtime-level tests model the real native scenario where a session's
+    // process group contains shell + child + grandchild (e.g. `sh -c 'sleep 60 & wait'`).
+
+    /** Register simulated child/grandchild pids into the session's process group. */
+    fun simulateGroupChildren(sessionId: Int, pids: List<Int>): Boolean {
+        val s = sessions[sessionId] ?: return false
+        for (p in pids) s.groupChildren[p] = AtomicBoolean(true)
+        return true
+    }
+
+    /** Whether a pid (shell or simulated child/grandchild) is still alive in the group. */
+    fun isSimulatedAlive(sessionId: Int, pid: Int): Boolean {
+        val s = sessions[sessionId] ?: return false
+        if (pid == s.pid) return s.alive.get()
+        return s.groupChildren[pid]?.get() ?: false
+    }
+
+    /** All pids in the session's simulated process group (shell + children). */
+    fun simulatedGroupPids(sessionId: Int): List<Int> {
+        val s = sessions[sessionId] ?: return emptyList()
+        return listOf(s.pid) + s.groupChildren.keys
+    }
 
     // ─── minimal shell simulator ───
 

@@ -1,10 +1,15 @@
 package com.apex.agent.platform.terminal.process
 
+import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 import com.apex.agent.platform.terminal.policy.CommandParser
 import com.apex.agent.platform.terminal.policy.CommandPolicy
 import com.apex.agent.platform.terminal.policy.CommandPolicyDecision
 import com.apex.agent.platform.terminal.policy.CommandPolicyMode
+import com.apex.agent.platform.terminal.policy.Decision
+import com.apex.agent.platform.terminal.policy.DefaultCommandPolicy
+import com.apex.agent.platform.terminal.policy.InputRequest
+import com.apex.agent.platform.terminal.policy.TerminalPolicyImpl
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -115,6 +120,101 @@ class CommandPolicyTest {
         // Any command with shell operators → DENY (Spec §6)
         assertEquals(CommandPolicyDecision.DENY, policy.check("ls | grep foo"))
         assertEquals(CommandPolicyDecision.DENY, policy.check("a && b"))
+    }
+
+    @Test fun `v1 check never emits REQUIRE_CONFIRMATION`() {
+        // v1 contract: CommandPolicy.check() only produces ALLOW/DENY. REQUIRE_CONFIRMATION is
+        // reserved for a future Confirmation UI and must never be auto-allowed downstream.
+        val candidates = listOf(
+            "ls", "git status", "pwd", "/bin/rm -rf /", "sh -c ls", "bash -c echo",
+            "echo a && echo b", "reboot", "shutdown", "", "env rm", "rm;ls"
+        )
+        for (c in candidates) {
+            val d = CommandPolicy().check(c)
+            assertNotEquals(
+                "v1 check must not emit REQUIRE_CONFIRMATION for '$c'",
+                CommandPolicyDecision.REQUIRE_CONFIRMATION, d
+            )
+        }
+    }
+}
+
+class CommandPolicyDefaultConfigTest {
+
+    @Test fun `default policy denies destructive commands`() {
+        // CommandPolicy() with no configuration inherits DefaultCommandPolicy.DEFAULT_DENYLIST.
+        val p = CommandPolicy()
+        for (cmd in listOf("shutdown", "reboot", "mkfs", "dd", "halt", "poweroff")) {
+            assertEquals("default policy must deny $cmd", CommandPolicyDecision.DENY, p.check(cmd))
+        }
+    }
+
+    @Test fun `default policy allows benign command`() {
+        assertEquals(CommandPolicyDecision.ALLOW, CommandPolicy().check("ls"))
+    }
+
+    @Test fun `explicitly empty denylist clears defaults`() {
+        // configured policy may opt OUT of the default denylist.
+        val p = CommandPolicy(denylist = setOf())
+        assertEquals(
+            "explicit empty denylist must clear defaults",
+            CommandPolicyDecision.ALLOW, p.check("reboot")
+        )
+    }
+
+    @Test fun `explicit denylist replaces defaults`() {
+        // configured policy may REPLACE the default denylist with its own.
+        val p = CommandPolicy(denylist = setOf("rm"))
+        assertEquals(CommandPolicyDecision.ALLOW, p.check("reboot"))  // default no longer applies
+        assertEquals(CommandPolicyDecision.DENY, p.check("rm"))
+    }
+
+    @Test fun `effectiveDenylist resolves default vs configured boundary`() {
+        assertEquals(DefaultCommandPolicy.DEFAULT_DENYLIST, CommandPolicy().effectiveDenylist)
+        assertEquals(setOf<String>(), CommandPolicy(denylist = setOf()).effectiveDenylist)
+        assertEquals(setOf("rm"), CommandPolicy(denylist = setOf("rm")).effectiveDenylist)
+    }
+
+    @Test fun `denylist still overrides allowlist under default policy`() {
+        // "reboot" is in DEFAULT_DENYLIST; even if allowlisted it must DENY (priority DENY > ALLOWLIST).
+        val p = CommandPolicy(mode = CommandPolicyMode.ALLOWLIST_ONLY, allowlist = setOf("reboot"))
+        assertEquals(CommandPolicyDecision.DENY, p.check("reboot"))
+    }
+}
+
+class TerminalPolicyDecisionTest {
+
+    @Test fun `ALLOW maps to Decision Allow`() {
+        val d = TerminalPolicyImpl.mapDecision(CommandPolicyDecision.ALLOW, CommandParser.parse("ls"))
+        assertTrue(d is Decision.Allow)
+    }
+
+    @Test fun `DENY maps to Decision Deny`() {
+        val d = TerminalPolicyImpl.mapDecision(CommandPolicyDecision.DENY, CommandParser.parse("rm -rf /"))
+        assertTrue(d is Decision.Deny)
+    }
+
+    @Test fun `REQUIRE_CONFIRMATION maps to DENY not silent allow`() {
+        // Fail-safe: no Confirmation UI exists in v1, so REQUIRE_CONFIRMATION must be DENIED.
+        val d = TerminalPolicyImpl.mapDecision(
+            CommandPolicyDecision.REQUIRE_CONFIRMATION, CommandParser.parse("reboot")
+        )
+        assertFalse(
+            "REQUIRE_CONFIRMATION must never be silently auto-allowed in v1",
+            d is Decision.Allow
+        )
+        assertTrue("REQUIRE_CONFIRMATION must map to Deny in v1", d is Decision.Deny)
+        val deny = d as Decision.Deny
+        assertTrue("deny reason must mention confirmation", deny.reason.contains("confirmation", ignoreCase = true))
+    }
+
+    @Test fun `check never produces Allow for REQUIRE_CONFIRMATION-capable paths`() {
+        // End-to-end through TerminalPolicyImpl: complex/destructive inputs never result in Allow.
+        val policy = TerminalPolicyImpl()
+        for (cmd in listOf("reboot", "shutdown", "sh -c rm", "echo a && reboot")) {
+            val d = policy.check(InputRequest(sessionId = 1L, command = cmd, bytes = null, owner = InputOwner.AGENT))
+            assertTrue("'$cmd' must be denied, got $d", d is Decision.Deny)
+        }
     }
 }
 

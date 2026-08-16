@@ -18,15 +18,32 @@ class TerminalPolicyImpl(
     override fun check(request: InputRequest): Decision {
         val cmd = request.command ?: return Decision.Allow
         val parsed = CommandParser.parse(cmd)
-        val decision = commandPolicy.check(parsed)
-        return when (decision) {
-            CommandPolicyDecision.ALLOW -> Decision.Allow
-            CommandPolicyDecision.DENY -> Decision.Deny(
-                reason = "COMMAND_POLICY_DENIED: command '${parsed.executable ?: "complex"}' blocked by policy"
-            )
-            CommandPolicyDecision.REQUIRE_CONFIRMATION -> Decision.Allow  // v1: auto-allow (confirmation UI is future)
-        }
+        return mapDecision(commandPolicy.check(parsed), parsed)
     }
 
     override fun capabilities(): TerminalCapability = TerminalCapability.forLevel(privilege)
+
+    companion object {
+        /**
+         * Map a [CommandPolicyDecision] to the final runtime [Decision] (Spec §10).
+         *
+         * v1 fail-safe: [CommandPolicy.check] only emits ALLOW/DENY. If a future policy layer
+         * ever emits [CommandPolicyDecision.REQUIRE_CONFIRMATION] while no Confirmation UI
+         * exists, it MUST be DENIED — never auto-allowed. Silently allowing a command that
+         * requires confirmation would let destructive commands through the policy gate.
+         */
+        internal fun mapDecision(decision: CommandPolicyDecision, parsed: ParsedCommand): Decision {
+            val exe = parsed.executable ?: "complex"
+            return when (decision) {
+                CommandPolicyDecision.ALLOW -> Decision.Allow
+                CommandPolicyDecision.DENY -> Decision.Deny(
+                    reason = "COMMAND_POLICY_DENIED: command '$exe' blocked by policy"
+                )
+                CommandPolicyDecision.REQUIRE_CONFIRMATION -> Decision.Deny(
+                    reason = "COMMAND_POLICY_CONFIRMATION_REQUIRED: command '$exe' requires confirmation; " +
+                        "no confirmation UI available in v1 — denied"
+                )
+            }
+        }
+    }
 }

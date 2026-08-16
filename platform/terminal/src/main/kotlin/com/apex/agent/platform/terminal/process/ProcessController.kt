@@ -1,5 +1,7 @@
 package com.apex.agent.platform.terminal.process
 
+import com.apex.agent.platform.terminal.io.InputManager
+import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.UnixSignal
 
 /**
@@ -19,56 +21,66 @@ data class ProcessExitStatus(
 }
 
 /**
- * Process Group controller (Spec PR #51 §1).
+ * Process Group metadata (Spec PR #51 §1).
  *
- * Manages the process group (pgid) of a Session's foreground job, so signals target the
- * whole group (shell + child + grandchild) not just the shell pid.
+ * v1: `pgid == shell pid`. The PTY child is created via `forkpty()`, which calls `setsid()`
+ * in the child — making the shell a session leader AND process-group leader, so
+ * `PGID == PID == shell pid`. The NATIVE layer delivers signals to the whole group
+ * (`kill(-PGID)`), covering shell + child + grandchild (plus the foreground job group via
+ * `tcgetpgrp`, see `PtySession::killProcessGroup`).
  *
- * On Android (no setpgid in bionic for non-root typically), the PTY child is the process
- * group leader. nativeSendSignal with negative pid sends to the group. This controller
- * abstracts that: signalJob(sessionId, jobId, signal) → nativeSendSignal(-pgid, signal).
+ * This type is pure metadata: it does NOT send signals itself. The actual delivery is done
+ * by [ProcessController.signalGroup] through the [InputManager] → native session path.
  *
- * v1: pgid = shell pid (the PTY child). Future: track child pids via waitpid + getpgid.
+ * Future: track child pids (jobs that create their own process groups) here.
  */
 data class ProcessGroup(
     val sessionId: Long,
     val jobId: Long?,
     val pgid: Int,                // process group id (== shell pid in v1)
     val childPids: List<Int> = emptyList()  // tracked children (future)
-) {
-    /** Send a signal to the whole process group (negative pid). */
-    fun signalGroup(native: com.apex.agent.platform.terminal.pty.NativePty, signal: UnixSignal): Boolean {
-        // nativeSendSignal with negative id targets process group (kill -PGID)
-        // The existing NativePty takes sessionId; we pass the shell's session.
-        // For v1, the NativePty.nativeSendSignal already targets the session's fg group.
-        return native.nativeSendSignal(pgid, signal.number)
-    }
-}
+)
 
 /**
  * Process Controller (Spec PR #51 §1).
  *
- * Owns ProcessGroup metadata per session. The Runtime delegates signal() here so signals
- * reach the correct process group, not just the shell.
+ * Owns [ProcessGroup] metadata per session and is the Runtime's routing seam for `signal()`.
+ *
+ * IMPORTANT (v1): signals are delivered by the NATIVE layer to the session's process group
+ * (`kill(-PGID)`, where PGID == shell pid). `nativeSendSignal` is session-based — it takes a
+ * session id, NOT a pgid. Routing a signal "to the group" is therefore just a session-based
+ * send; the process-group semantics live in `PtySession::killProcessGroup`.
  */
 class ProcessController(
-    private val native: com.apex.agent.platform.terminal.pty.NativePty
+    private val inputManager: InputManager
 ) {
     private val groups = mutableMapOf<Long, ProcessGroup>()  // sessionId → ProcessGroup
 
-    /** Register a process group for a session (called when Session/Job starts). */
+    /** Register a process group for a session (called when a Session is created). */
     fun registerGroup(sessionId: Long, jobId: Long?, pgid: Int) {
         groups[sessionId] = ProcessGroup(sessionId, jobId, pgid)
     }
 
-    /** Get the process group for a session. */
+    /** Get the process group metadata for a session. */
     fun group(sessionId: Long): ProcessGroup? = groups[sessionId]
 
-    /** Send a signal to the session's process group. Returns true if delivered. */
-    fun signalGroup(sessionId: Long, signal: UnixSignal): Boolean {
-        val g = groups[sessionId] ?: return false
-        return g.signalGroup(native, signal)
-    }
+    /**
+     * Route a signal to the session's process group.
+     *
+     * v1 semantics: the native layer targets the whole process group (`kill(-PGID)`,
+     * PGID == shell pid), so one session-based send reaches shell + child + grandchild.
+     * This controller records the pgid metadata and is the seam where future child-pid
+     * tracking plugs in.
+     *
+     * Delegates to [InputManager.sendSignal] so policy checks, control-state arbitration
+     * and SignalSent events are preserved.
+     */
+    suspend fun signalGroup(
+        sessionId: Long,
+        owner: InputOwner,
+        signal: UnixSignal,
+        jobId: Long?
+    ): Result<Unit> = inputManager.sendSignal(sessionId, owner, signal, jobId)
 
     /** Remove a process group (on session close). */
     fun unregister(sessionId: Long) {

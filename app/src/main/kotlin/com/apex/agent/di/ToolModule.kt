@@ -20,6 +20,15 @@ import com.apex.agent.platform.terminal.tools.legacy.LegacyExecTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyReadTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacySendTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalObserveTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalResizeTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalRunTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
@@ -203,12 +212,18 @@ object ToolModule {
         registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
-        // ═══ 10. Terminal PTY — ATR 2.0 (legacy compat aliases) ═══
-        // 9 new Agent-Native tools (Spec §34) are implemented but NOT yet registered to the
-        // ToolRegistry — per Spec §45 Phase 2 ("新 9 工具实现，但不注册到 ToolRegistry").
-        // Their Output types carry `Any?`/`List<Any>` payloads that still need the Phase-2
-        // serialization layer, so they stay as internal scaffolds for now.
-        // 6 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved and wired.
+        // ═══ 10. Terminal PTY — ATR 2.0 (9 new Agent-Native + 4 legacy compat) ═══
+        // 9 new Agent-Native tools (Spec §34) — non-blocking, incremental, event-driven.
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalCreateTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalRunTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalObserveTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWaitTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWriteTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalSignalTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalResizeTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalSnapshotTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalCloseTool(terminalRuntime))))
+        // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyReadTool(terminalRuntime))))

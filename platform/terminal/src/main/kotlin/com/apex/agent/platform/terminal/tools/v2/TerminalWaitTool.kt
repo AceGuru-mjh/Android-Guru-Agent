@@ -1,7 +1,13 @@
 package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.wait.WaitCondition
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Agent tool: terminal.wait
@@ -22,13 +28,18 @@ import com.apex.agent.platform.terminal.wait.WaitCondition
  */
 class TerminalWaitTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal.wait"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal.wait"
+    override val name: String = id
+    override val description: String = """
         Block until a condition is met or timeout. Event-driven (no polling). Use instead of
         sleep+read loops. Common: wait(PROCESS_EXITED, jobId) after terminal.run. Returns the
         matching event (e.g. exitCode) on success, Timeout on expiry.
     """.trimIndent()
+
+    override val parametersSchema: String = """
+{"type":"object","properties":{"sessionId":{"type":"integer"},"condition":{"type":"object","properties":{"type":{"type":"string"},"jobId":{"type":"integer"}},"required":["type"]},"timeoutMs":{"type":"integer","default":60000}},"required":["sessionId","condition"]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.wait(input.sessionId, input.condition, input.timeoutMs)
@@ -43,6 +54,32 @@ class TerminalWaitTool(
             },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val sessionId = json["sessionId"]?.jsonPrimitive?.content?.toLongOrNull() ?: throw IllegalArgumentException("sessionId required")
+        val condJson = json["condition"]?.jsonObject ?: throw IllegalArgumentException("condition required")
+        val condType = condJson["type"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("condition.type required")
+        val jobId = condJson["jobId"]?.jsonPrimitive?.content?.toLongOrNull()
+        val condition: WaitCondition = when (condType) {
+            "PROCESS_EXITED" -> WaitCondition.ProcessExited(jobId)
+            "PROCESS_STARTED" -> WaitCondition.ProcessStarted(jobId)
+            "USER_INTERRUPT" -> WaitCondition.UserInterrupt
+            "INPUT_REQUIRED" -> WaitCondition.InputRequired
+            "SESSION_CLOSED" -> WaitCondition.SessionClosed
+            "ERROR" -> WaitCondition.Error
+            "OUTPUT_MATCH" -> WaitCondition.OutputMatch(condJson["pattern"]?.jsonPrimitive?.content ?: "")
+            "SCREEN_CHANGED" -> WaitCondition.ScreenChanged
+            else -> throw IllegalArgumentException("unknown condition type: $condType")
+        }
+        val timeoutMs = json["timeoutMs"]?.jsonPrimitive?.content?.toLongOrNull() ?: 60_000L
+        val out = execute(Input(sessionId, condition, timeoutMs))
+        return buildJsonObject {
+            put("matched", JsonPrimitive(out.matched))
+            put("result", JsonPrimitive(out.result))
+            out.waitedMs.let { put("waitedMs", JsonPrimitive(it)) }
+        }.toString()
     }
 
     data class Input(

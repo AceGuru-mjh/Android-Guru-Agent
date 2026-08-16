@@ -45,6 +45,16 @@ class TerminalViewModel @Inject constructor(
     /** 环境依赖安装器（ATR 2.0 — 用新 Runtime API，非旧 TerminalManager）。 */
     private val provisioner = EnvironmentProvisioner(terminalRuntime)
 
+    init {
+        // Crash recovery (Spec §39): restore persisted sessions on startup.
+        viewModelScope.launch {
+            val recovered = terminalRuntime.recover()
+            if (recovered.isNotEmpty()) {
+                android.util.Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
+            }
+        }
+    }
+
     // ═══ 终端设置 ═══
     data class TerminalSettings(
         val fontSize: Int = 13,
@@ -177,13 +187,20 @@ class TerminalViewModel @Inject constructor(
     private val _semanticState = MutableStateFlow<TerminalSemanticState?>(null)
     val semanticState: StateFlow<TerminalSemanticState?> = _semanticState.asStateFlow()
 
+    /** 真实终端屏幕文本（observe SCREEN，供 TerminalRenderer 渲染）。Spec §41。 */
+    private val _screenText = MutableStateFlow("")
+    val screenText: StateFlow<String> = _screenText.asStateFlow()
+
     /** 启动屏幕状态轮询（UI 调用，20 FPS）。Spec §41 UI → ScreenState → Renderer。 */
     fun observeScreenState() {
         val sid = sessionId ?: return
         viewModelScope.launch {
             while (true) {
-                val r = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SEMANTIC)
-                if (r.isSuccess) _semanticState.value = r.getOrThrow().semantic
+                val sem = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SEMANTIC)
+                if (sem.isSuccess) _semanticState.value = sem.getOrThrow().semantic
+                // Also fetch SCREEN mode for the renderer (real terminal text)
+                val scr = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.SCREEN)
+                if (scr.isSuccess) _screenText.value = scr.getOrThrow().screen?.renderedText ?: ""
                 kotlinx.coroutines.delay(50L)
             }
         }

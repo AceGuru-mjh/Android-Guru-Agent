@@ -14,7 +14,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.apex.agent.platform.terminal.state.TerminalSemanticState
 
 /**
  * Pure terminal renderer. Subscribes to TerminalViewModel.semanticState and renders the screen.
@@ -58,16 +57,11 @@ fun TerminalRenderer(
             return@Box
         }
 
-        // Render the session state summary (for Phase 5+; full screen text comes from observe(SCREEN))
-        val s: TerminalSemanticState = semantic!!
-        val displayText = buildString {
-            appendLine("Session #${s.session.id}  state=${s.session.state}")
-            appendLine("shell=${s.session.shell}  cwd=${s.session.cwd}")
-            appendLine("cursor=${s.session.cursor}  lastExit=${s.session.lastExitCode ?: "—"}")
-            s.foregroundJob?.let { j ->
-                appendLine("fgJob=#${j.id} ${j.state} ${j.command.take(40)}")
-            }
-            appendLine("input=${s.input.state}  ${s.input.control}")
+        // Real terminal screen output (observe SCREEN → renderedText). Spec §41.
+        val screenText by viewModel.screenText.collectAsState()
+        val s = semantic!!
+        val displayText = screenText.ifEmpty {
+            "Session #${s.session.id} ready. State=${s.session.state}, cursor=${s.session.cursor}"
         }
 
         BasicText(

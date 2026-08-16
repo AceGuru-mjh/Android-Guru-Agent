@@ -214,7 +214,16 @@ class TerminalRuntimeImpl(
     override suspend fun resize(sessionId: Long, rows: Int, cols: Int): Result<ResizeResult> {
         val a = sessionManager.assembly(sessionId)
             ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        // 1. Resize the native PTY FIRST (sends SIGWINCH to child). Spec §34.7 / §18.
+        //    If native resize fails, VirtualTerminal MUST NOT be updated (correctness: avoid
+        //    VT/kernel size mismatch that breaks vim/top/less).
+        val nativeOk = native.nativeResize(a.nativeSessionId, rows, cols)
+        if (!nativeOk) {
+            return Result.failure(RuntimeException("TerminalError:UnsupportedOperation"))
+        }
+        // 2. Native OK → update VirtualTerminal to match.
         a.virtualTerminal.resize(rows, cols)
+        // 3. Emit ResizeChanged event.
         val ev = com.apex.agent.platform.terminal.events.TerminalEvent.ResizeChanged(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             rows = rows, cols = cols
@@ -301,9 +310,9 @@ class TerminalRuntimeImpl(
      * Returns recovered session ids (now visible via snapshot()).
      * PTY fds cannot be reattached in v1; recovered sessions are EXITED/BROKEN (read-only).
      */
-    suspend fun recover(): List<Long> = recoveryService?.recover() ?: emptyList()
+    override suspend fun recover(): List<Long> = recoveryService?.recover() ?: emptyList()
 
     /** Get a recovered session's last-known SemanticState (read-only, from persisted metadata). */
-    suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =
+    override suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =
         recoveryService?.recoveredSnapshot(sessionId)
 }

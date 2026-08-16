@@ -2,6 +2,13 @@ package com.apex.agent.platform.terminal.tools.v2
 
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.TerminalTool
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
 
 /**
  * Agent tool: terminal.create
@@ -24,12 +31,17 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
  */
 class TerminalCreateTool(
     private val runtime: TerminalRuntime
-) {
-    val id: String = "terminal.create"
-    val description: String = """
+) : TerminalTool {
+    override val id: String = "terminal.create"
+    override val name: String = id
+    override val description: String = """
         Create a long-lived terminal Session (PTY + shell). A Session is a workspace, not a single
         command. Returns sessionId for subsequent run/observe/wait/write calls.
     """.trimIndent()
+
+    override val parametersSchema: String = """
+{"type":"object","properties":{"shell":{"type":"string","default":"/system/bin/sh"},"cwd":{"type":"string","default":"/sdcard"},"rows":{"type":"integer","default":24},"cols":{"type":"integer","default":80}},"required":[]}
+""".trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.create(
@@ -48,6 +60,16 @@ class TerminalCreateTool(
             ) },
             onFailure = { throw it }
         )
+    }
+
+    override suspend fun invoke(arguments: String): String {
+        val json = Json.parseToJsonElement(arguments).jsonObject
+        val shell = json["shell"]?.jsonPrimitive?.content ?: "/system/bin/sh"
+        val cwd = json["cwd"]?.jsonPrimitive?.content ?: "/sdcard"
+        val rows = json["rows"]?.jsonPrimitive?.content?.toIntOrNull() ?: 24
+        val cols = json["cols"]?.jsonPrimitive?.content?.toIntOrNull() ?: 80
+        val out = execute(Input(shell, cwd, rows, cols))
+        return buildJsonObject { put("sessionId", JsonPrimitive(out.sessionId)); put("pid", JsonPrimitive(out.pid)); put("shell", JsonPrimitive(out.shell)); put("cwd", JsonPrimitive(out.cwd)); put("state", JsonPrimitive(out.state)); put("cursor", JsonPrimitive(out.cursor)) }.toString()
     }
 
     data class Input(

@@ -11,7 +11,6 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 add_library(apex_terminal SHARED
     src/main/cpp/pty_engine.cpp
     src/main/cpp/pty_session.cpp
-    src/main/cpp/ansi_filter.cpp
     src/main/cpp/jni_bridge.cpp
 )
 

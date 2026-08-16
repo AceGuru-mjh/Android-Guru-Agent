@@ -15,14 +15,26 @@ import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.csmem.tools.MemoryRecentEpisodesTool
 import com.apex.agent.platform.csmem.tools.MemorySearchNodesTool
 import com.apex.agent.platform.csmem.tools.MemoryRecallMacroTool
-import com.apex.agent.platform.terminal.TerminalManager
 import com.apex.agent.platform.terminal.tools.*
+import com.apex.agent.platform.terminal.tools.legacy.LegacyExecTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacyReadTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacySendTool
+import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool as V2CreateTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalRunTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalObserveTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalResizeTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool as V2CloseTool
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
-import com.apex.agent.tools.StreamingTerminalExecTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -87,7 +99,7 @@ object ToolModule {
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
-        terminalManager: TerminalManager,
+        terminalRuntime: TerminalRuntime,
         githubTokenManager: GithubTokenManager,
         githubApiService: GithubApiService,
         userQuestionGateway: UserQuestionGateway,
@@ -136,7 +148,7 @@ object ToolModule {
         // ═══ Agent 主动提问工具 ═══
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))
         registry.register(SafeAgentTool(AskUserTool()))
-        registry.register(SafeAgentTool(StreamingTerminalExecTool(terminalManager)))
+        // StreamingTerminalExecTool removed (§46 id collision); streaming = terminal.run + terminal.observe
 
         // ═══ 2. 文件操作 (7) ═══
         registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
@@ -200,13 +212,22 @@ object ToolModule {
         registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
-        // ═══ 10. Terminal PTY (6) ═══
-        registry.register(SafeAgentTool(TerminalCreateTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalExecTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalSendTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalReadTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalListTool(terminalManager)))
-        registry.register(SafeAgentTool(TerminalCloseTool(terminalManager)))
+        // ═══ 10. Terminal PTY — ATR 2.0 (9 new + 6 legacy compat) ═══
+        // 9 new Agent-Native tools (Spec §34)
+        registry.register(SafeAgentTool(V2CreateTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalRunTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalObserveTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalWaitTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalWriteTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalSignalTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalResizeTool(terminalRuntime)))
+        registry.register(SafeAgentTool(TerminalSnapshotTool(terminalRuntime)))
+        registry.register(SafeAgentTool(V2CloseTool(terminalRuntime)))
+        // 6 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved
+        registry.register(SafeAgentTool(LegacyExecTool(terminalRuntime)))
+        registry.register(SafeAgentTool(LegacySendTool(terminalRuntime)))
+        registry.register(SafeAgentTool(LegacyReadTool(terminalRuntime)))
+        registry.register(SafeAgentTool(LegacyListTool(terminalRuntime)))
 
         // ═══ 11. GitHub (7，条件注册) ═══
         if (githubTokenManager.isConnected()) {

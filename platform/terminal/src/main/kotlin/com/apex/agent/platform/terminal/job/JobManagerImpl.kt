@@ -162,7 +162,11 @@ class JobManagerImpl(
         val from = flow.value
         if (from == to) return
         flow.value = to
+        // Keep the jobs map in sync with the state flow; otherwise get/startJob would keep
+        // returning the stale CREATED state forever (onEvent's ProcessExited branch already
+        // updates jobs[jid] manually — this makes transition the single source of truth).
         val job = jobs[jobId] ?: return
+        jobs[jobId] = job.copy(state = to)
         val ev = TerminalEvent.StateChanged(
             id = 0, sessionId = job.sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             kind = com.apex.agent.platform.terminal.events.StateKind.JOB,

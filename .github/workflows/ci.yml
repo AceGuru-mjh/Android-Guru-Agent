@@ -234,6 +234,14 @@ jobs:
           tail -30 compile.log
           exit 1
 
+      - name: Run platform:terminal unit tests
+        run: |
+          # JVM unit tests (FakeNativePty-based contract + policy + process-group tests).
+          ./gradlew :platform:terminal:testDebugUnitTest \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
   build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest

@@ -39,6 +39,17 @@ public:
 private:
     void reapChild();
 
+    /**
+     * 向整个进程组发送信号（Spec PR #51 §1）。
+     *
+     * forkpty() 在子进程中调用 setsid()，因此 shell 同时是 session leader 和
+     * process-group leader：PGID == PID == shell pid。kill(-pid_, sig) 可以送达
+     * shell + child + grandchild。交互 shell 使用作业控制时，前台作业有独立的
+     * process group（pgid != shell pid），因此额外通过 tcgetpgrp(masterFd_) 获取
+     * 前台组并一并发信号。
+     */
+    bool killProcessGroup(int sig);
+
     int id_;
     int masterFd_ = -1;
     pid_t pid_ = -1;

@@ -11,6 +11,7 @@ import com.apex.agent.platform.terminal.io.InputManagerImpl
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.io.UnixSignal
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CancelResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CloseResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.CreateResult
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime.ObserveMode
@@ -80,6 +81,12 @@ class TerminalRuntimeImpl(
     private val waitEngine = WaitEngineImpl(eventBus, scope)
     private val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
+    // PR #51: process/timeout/cancellation controllers
+    // ProcessController routes signal() through InputManager (policy + control-state + events);
+    // the NATIVE layer delivers to the whole process group (kill(-PGID)).
+    private val processController = com.apex.agent.platform.terminal.process.ProcessController(inputManager)
+    private val timeoutController = com.apex.agent.platform.terminal.process.TimeoutController(inputManager)
+    private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(inputManager, timeoutController)
     private val sessionManager = SessionManagerImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, scope
@@ -101,6 +108,10 @@ class TerminalRuntimeImpl(
         return r.map { s ->
             // start a JobManager listener for this session
             startSessionListener(s.id)
+            // Register the session's process group (v1: pgid == shell pid — forkpty makes the
+            // PTY child a session + process-group leader, so PGID == PID). Signals routed via
+            // ProcessController are then delivered to the whole group by the native layer.
+            processController.registerGroup(s.id, null, s.pid)
             CreateResult(
                 sessionId = s.id, pid = s.pid, shell = s.shell, cwd = s.initialCwd,
                 rows = s.rows, cols = s.cols, privilege = s.privilege,
@@ -179,14 +190,35 @@ class TerminalRuntimeImpl(
         if (sessionManager.assembly(sessionId) == null) {
             return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         }
-        val res = inputManager.sendSignal(sessionId, owner, signal, jobId)
+        // Route through ProcessController: records the session's process group and delegates
+        // to InputManager (policy + control-state + SignalSent event). The native layer
+        // delivers the signal to the WHOLE process group (kill(-PGID)), not just the shell.
+        val res = processController.signalGroup(sessionId, owner, signal, jobId)
         return res.map { SignalResult(sent = true, signal = signal, targetJobId = jobId) }
+    }
+
+    // ───────── cancel (Spec PR #51 §5) ─────────
+    override suspend fun cancel(sessionId: Long, jobId: Long): Result<CancelResult> {
+        if (sessionManager.assembly(sessionId) == null) {
+            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        }
+        cancellationController.cancel(sessionId, jobId)
+        // Wait briefly for the cancellation to take effect
+        kotlinx.coroutines.delay(100)
+        val job = jobManager.get(jobId)
+        val finalState = job?.state?.name ?: "UNKNOWN"
+        return Result.success(CancelResult(cancelled = true, jobId = jobId, finalState = finalState))
     }
 
     // ───────── resize ─────────
     override suspend fun resize(sessionId: Long, rows: Int, cols: Int): Result<ResizeResult> {
         val a = sessionManager.assembly(sessionId)
             ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        // 0. Validate dimensions (Spec §34.7). Zero or negative rows/cols are rejected
+        //    BEFORE touching the native layer or VT.
+        if (rows <= 0 || cols <= 0) {
+            return Result.failure(RuntimeException("TerminalError:InvalidDimensions"))
+        }
         // 1. Resize the native PTY FIRST (sends SIGWINCH to child). Spec §34.7 / §18.
         //    If native resize fails, VirtualTerminal MUST NOT be updated (correctness: avoid
         //    VT/kernel size mismatch that breaks vim/top/less).
@@ -196,7 +228,16 @@ class TerminalRuntimeImpl(
         }
         // 2. Native OK → update VirtualTerminal to match.
         a.virtualTerminal.resize(rows, cols)
-        // 3. Emit ResizeChanged event.
+        // 3. Reflect the new size in the semantic reducer synchronously. In v1 the reducer is
+        //    only driven by PTY output events, so a following observe(SEMANTIC) would otherwise
+        //    still report the old dimensions. The broadcast below is for EVENT observers/logs.
+        a.semanticReducer.onEvent(
+            com.apex.agent.platform.terminal.events.TerminalEvent.ResizeChanged(
+                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                rows = rows, cols = cols
+            )
+        )
+        // 4. Emit ResizeChanged event.
         val ev = com.apex.agent.platform.terminal.events.TerminalEvent.ResizeChanged(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             rows = rows, cols = cols
@@ -236,6 +277,7 @@ class TerminalRuntimeImpl(
         val a = sessionManager.assembly(sessionId)
         val wasBroken = a != null && a.session.state == SessionState.BROKEN
         val r = sessionManager.close(sessionId, force)
+        if (r.isSuccess) processController.unregister(sessionId)
         return r.map {
             CloseResult(
                 closed = true,

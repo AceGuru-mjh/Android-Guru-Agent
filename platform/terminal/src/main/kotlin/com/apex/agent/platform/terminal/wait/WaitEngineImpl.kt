@@ -86,38 +86,28 @@ class WaitEngineImpl(
         val mutex = lockFor(sessionId)
         mutex.withLock { list.add(Waiter(waiterId, sessionId, condition) { matchEvent(condition, it) }) }
 
-        // Collect from bus until matched or timeout.
+        // Collect from bus until matched, session closed, or timeout.
+        // first{} returns the REAL event that satisfied the predicate so callers can
+        // inspect it (e.g. exitCode on ProcessExited), not a synthetic stand-in.
         val result = withTimeoutOrNull(timeoutMs) {
-            bus.subscribe(sessionId, afterCursor = 0L).first { ev ->
-                val m = matchEvent(condition, ev)
-                if (m.matched) return@first true
-                // SessionGone short-circuit
-                ev is TerminalEvent.SessionClosed
+            val ev = bus.subscribe(sessionId, afterCursor = 0L).first { e ->
+                matchEvent(condition, e).matched || e is TerminalEvent.SessionClosed
             }
-            WaitEngineOutcome.MatchOrGone
+            val m = matchEvent(condition, ev)
+            when {
+                m.matched -> WaitEngineOutcome.Matched(m.event ?: ev)
+                ev is TerminalEvent.SessionClosed -> WaitEngineOutcome.SessionGone(ev.cause)
+                else -> WaitEngineOutcome.Timeout
+            }
         } ?: WaitEngineOutcome.Timeout
 
         // cleanup
         mutex.withLock { list.removeAll { it.id == waiterId } }
 
         return when (result) {
+            is WaitEngineOutcome.Matched -> WaitResult.Matched(event = result.event)
+            is WaitEngineOutcome.SessionGone -> WaitResult.SessionGone(cause = result.cause)
             WaitEngineOutcome.Timeout -> WaitResult.Timeout(waitedMs = timeoutMs)
-            WaitEngineOutcome.MatchOrGone -> {
-                // Determine if it was a match or a session-gone by re-querying the last event.
-                // For Phase 1 simplicity: if condition was SessionClosed → Matched; else if a
-                // SessionClosed event arrived first → SessionGone.
-                // (The flow.first above captured whichever event satisfied the predicate;
-                //  we re-check the predicate against SessionClosed specifically.)
-                // Since we already returned from first(), we treat it as Matched with the event.
-                // A more precise impl would carry the event out; left for Phase 2 refinement.
-                WaitResult.Matched(
-                    event = TerminalEvent.StateChanged(
-                        id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
-                        cursor = -1, kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
-                        targetId = sessionId, from = "", to = ""
-                    )
-                )
-            }
         }
     }
 
@@ -146,5 +136,9 @@ class WaitEngineImpl(
         locks.remove(sessionId)
     }
 
-    private enum class WaitEngineOutcome { MatchOrGone, Timeout }
+    private sealed class WaitEngineOutcome {
+        data class Matched(val event: TerminalEvent) : WaitEngineOutcome()
+        data class SessionGone(val cause: CloseCause) : WaitEngineOutcome()
+        object Timeout : WaitEngineOutcome()
+    }
 }

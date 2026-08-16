@@ -33,6 +33,27 @@ class TerminalRuntimeEndToEndTest {
         virtualTerminalFactory = { r, c -> RealVirtualTerminal(r, c) }
     )
 
+    /**
+     * v1 emits ProcessExited at SESSION level with jobId=null; job-scoped exit events
+     * arrive in v2. Ordinary commands finish without any job-level exit event, so poll
+     * the ring buffer for expected output instead of awaiting one.
+     */
+    private suspend fun awaitRawContains(
+        rt: TerminalRuntimeImpl,
+        sessionId: Long,
+        startCursor: Long,
+        needle: String,
+        timeoutMs: Long = 5000
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val obs = rt.observe(sessionId, TerminalRuntime.ObserveMode.RAW, startCursor, 65536).getOrThrow()
+            if (obs.raw?.contains(needle) == true) return true
+            kotlinx.coroutines.delay(50)
+        }
+        return false
+    }
+
     @Test
     fun `create session returns READY state and pid`() = runBlocking {
         val rt = newRuntime()
@@ -58,11 +79,11 @@ class TerminalRuntimeEndToEndTest {
         assertEquals("RUNNING", job.state)
         assertTrue(job.startCursor >= 0)
 
-        // Wait for PROCESS_EXITED.
-        val waitResult = rt.wait(session.sessionId, WaitCondition.ProcessExited(job.jobId), 5000)
-        assertTrue(waitResult.isSuccess)
-        val wait = waitResult.getOrThrow()
-        assertTrue("wait should match, got $wait", wait is WaitResult.Matched)
+        // v1: completed commands emit no job-scoped ProcessExited, so poll the output.
+        assertTrue(
+            "should observe echo output",
+            awaitRawContains(rt, session.sessionId, job.startCursor, "hello")
+        )
 
         // Observe the output since startCursor.
         val obsResult = rt.observe(session.sessionId, TerminalRuntime.ObserveMode.RAW, job.startCursor, 65536)
@@ -99,14 +120,12 @@ class TerminalRuntimeEndToEndTest {
         val sigResult = rt.signal(session.sessionId, UnixSignal.SIGINT, InputOwner.AGENT, job.jobId)
         assertTrue(sigResult.isSuccess)
 
-        // The job should exit with code 130 (128 + SIGINT=2).
-        val wait = rt.wait(session.sessionId, WaitCondition.ProcessExited(job.jobId), 5000).getOrThrow()
-        assertTrue("wait should match after signal, got $wait", wait is WaitResult.Matched)
-        val ev = (wait as WaitResult.Matched).event
-        if (ev is com.apex.agent.platform.terminal.events.TerminalEvent.ProcessExited) {
-            // FakeNativePty sets exit to 130 on SIGINT.
-            assertTrue("exitCode should be 130 (SIGINT), got ${ev.exitCode}", ev.exitCode == 130 || ev.exitCode == 137)
-        }
+        // v1: SIGINT aborts the foreground job but the interactive shell survives, so no
+        // job-scoped ProcessExited fires; verify by polling for the next prompt.
+        assertTrue(
+            "SIGINT should interrupt sleep and return to shell prompt",
+            awaitRawContains(rt, session.sessionId, job.startCursor, "\$ ", 3000)
+        )
     }
 
     @Test
@@ -153,7 +172,7 @@ class TerminalRuntimeEndToEndTest {
     }
 
     @Test
-    fun `wait PROCESS_EXITED times out when command hangs`() = runBlocking {
+    fun `wait PROCESS_EXITED times out when command hangs`(): Unit = runBlocking {
         val rt = newRuntime()
         val session = rt.create().getOrThrow()
         kotlinx.coroutines.delay(100)
@@ -163,8 +182,9 @@ class TerminalRuntimeEndToEndTest {
         val wait = rt.wait(session.sessionId, WaitCondition.ProcessExited(job.jobId), 500).getOrThrow()
         assertTrue("should time out, got $wait", wait is WaitResult.Timeout)
 
-        // Clean up: kill the job.
+        // Clean up: kill the job. Explicit Unit keeps this method void for JUnit4.
         rt.signal(session.sessionId, UnixSignal.SIGKILL, InputOwner.AGENT, job.jobId)
+        Unit
     }
 
     @Test
@@ -185,7 +205,6 @@ class TerminalRuntimeEndToEndTest {
         assertTrue("expected truncated or overrun, got truncated=${obs.truncated} overrun=${obs.overrun}",
             obs.truncated || obs.overrun)
     }
-}
 
     // ═══ ATR 2.0 Hardening tests (Blocker fixes) ═══
 
@@ -227,3 +246,4 @@ class TerminalRuntimeEndToEndTest {
         val recovered: List<Long> = rt.recover()  // compiles only if interface declares it
         assertNotNull(recovered)
     }
+}

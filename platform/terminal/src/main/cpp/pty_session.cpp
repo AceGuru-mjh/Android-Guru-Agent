@@ -205,7 +205,36 @@ bool PtySession::waitForData(int timeoutMs) {
 
 bool PtySession::sendSignal(int sig) {
     if (pid_ <= 0 || !alive_) return false;
-    return kill(pid_, sig) == 0;
+    // 目标必须是整个进程组（shell + child + grandchild），而不是只有 shell pid。
+    return killProcessGroup(sig);
+}
+
+bool PtySession::killProcessGroup(int sig) {
+    if (pid_ <= 0) return false;
+    bool delivered = false;
+
+    // 1) 前台作业进程组（作业控制）。
+    //    交互 shell 会把前台作业（例如 `sh -c 'sleep 60 & wait'`）放进独立的 process
+    //    group（pgid != shell pid）。如果只给 shell 的组发信号，作业会存活下来，因此
+    //    还要对控制终端的前台组一并发信号。
+    int fg = tcgetpgrp(masterFd_);
+    if (fg > 0 && fg != pid_) {
+        if (kill(-fg, sig) == 0) delivered = true;
+        // ESRCH（前台组已不存在）可忽略，shell 组信号随后处理。
+    }
+
+    // 2) 会话自身的进程组。
+    //    forkpty() 在子进程调用 setsid()，shell 是 session leader 且是 process-group
+    //    leader：PGID == PID == shell pid。kill(-pid_, sig) 可送达 shell + 同组子进程 +
+    //    孙进程（非作业控制路径）。
+    if (kill(-pid_, sig) == 0) {
+        delivered = true;
+    } else if (errno == ESRCH) {
+        // 进程组已为空（shell 已退出）→ 回退到直接 kill PID。
+        if (kill(pid_, sig) == 0) delivered = true;
+    }
+
+    return delivered;
 }
 
 void PtySession::resize(int rows, int cols) {
@@ -217,29 +246,31 @@ void PtySession::resize(int rows, int cols) {
 }
 
 void PtySession::close() {
-    if (masterFd_ >= 0) {
-        ::close(masterFd_);
-        masterFd_ = -1;
-    }
-
+    // 注意顺序：先向整个进程组发信号，最后才关闭 master fd——
+    // killProcessGroup() 需要 masterFd_ 做 tcgetpgrp()。
     if (pid_ > 0 && alive_) {
-        // 先尝试优雅终止
-        kill(pid_, SIGHUP);
+        // 先尝试优雅终止整个进程组（shell + child + grandchild）
+        killProcessGroup(SIGHUP);
         usleep(50000); // 50ms
 
         if (isAlive()) {
-            kill(pid_, SIGTERM);
+            killProcessGroup(SIGTERM);
             usleep(100000); // 100ms
         }
 
         if (isAlive()) {
-            kill(pid_, SIGKILL);
+            killProcessGroup(SIGKILL);
         }
 
-        // 回收子进程
+        // 回收 shell 子进程
         int status;
         waitpid(pid_, &status, 0);
         pid_ = -1;
+    }
+
+    if (masterFd_ >= 0) {
+        ::close(masterFd_);
+        masterFd_ = -1;
     }
 
     alive_ = false;

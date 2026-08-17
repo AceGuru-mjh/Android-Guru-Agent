@@ -165,6 +165,7 @@ class ScreenBuffer(
 
     val scrollbackLineCount: Int get() = scrollback.size
 
-    /** Test/observation accessor for a saved scrollback row (internal). */
-    internal fun scrollbackLine(index: Int): Array<TerminalCell> = scrollback[index]
+    /** Test/observation accessor for a saved scrollback row (internal).
+     * ArrayDeque has no indexed 'get' operator, so use elementAt (O(n)). */
+    internal fun scrollbackLine(index: Int): Array<TerminalCell> = scrollback.elementAt(index)
 }

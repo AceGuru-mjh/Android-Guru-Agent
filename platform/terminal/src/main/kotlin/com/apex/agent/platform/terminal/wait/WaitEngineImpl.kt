@@ -15,7 +15,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
-import java.util.UUID
 
 /**
  * Event-driven WaitEngine. Replaces all `sleep + read` polling loops.
@@ -80,18 +79,16 @@ class WaitEngineImpl(
     }
 
     override suspend fun await(sessionId: Long, condition: WaitCondition, timeoutMs: Long): WaitResult {
-        // Fast path: SessionClosed is a terminal state — check via current bus subscriber.
-        val waiterId = UUID.randomUUID().toString()
-        val list = waiters.computeIfAbsent(sessionId) { mutableListOf() }
-        val mutex = lockFor(sessionId)
-        mutex.withLock { list.add(Waiter(waiterId, sessionId, condition) { matchEvent(condition, it) }) }
-
         // Collect from bus until matched, session closed, or timeout.
         // first{} returns the REAL event that satisfied the predicate so callers can
         // inspect it (e.g. exitCode on ProcessExited), not a synthetic stand-in.
+        // The bus guarantees no event is lost across the replay→live transition (see
+        // TerminalEventBusImpl.subscribe), so this will not miss the synthesized
+        // ProcessExited emitted when the shell returns to its idle prompt.
         val result = withTimeoutOrNull(timeoutMs) {
             val ev = bus.subscribe(sessionId, afterCursor = 0L).first { e ->
-                matchEvent(condition, e).matched || e is TerminalEvent.SessionClosed
+                val m = matchEvent(condition, e)
+                m.matched || e is TerminalEvent.SessionClosed
             }
             val m = matchEvent(condition, ev)
             when {
@@ -100,9 +97,6 @@ class WaitEngineImpl(
                 else -> WaitEngineOutcome.Timeout
             }
         } ?: WaitEngineOutcome.Timeout
-
-        // cleanup
-        mutex.withLock { list.removeAll { it.id == waiterId } }
 
         return when (result) {
             is WaitEngineOutcome.Matched -> WaitResult.Matched(event = result.event)

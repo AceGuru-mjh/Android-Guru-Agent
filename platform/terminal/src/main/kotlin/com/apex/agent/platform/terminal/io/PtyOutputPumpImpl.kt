@@ -3,6 +3,7 @@ package com.apex.agent.platform.terminal.io
 import com.apex.agent.platform.terminal.buffer.OutputChunk
 import com.apex.agent.platform.terminal.buffer.TerminalOutputBuffer
 import com.apex.agent.platform.terminal.events.Confidence
+import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventBus
 import com.apex.agent.platform.terminal.events.TerminalEventLog

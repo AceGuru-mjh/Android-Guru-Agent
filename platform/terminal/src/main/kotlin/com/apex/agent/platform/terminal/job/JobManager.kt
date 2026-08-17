@@ -49,6 +49,13 @@ interface JobManager {
     suspend fun activeJobs(sessionId: Long): List<TerminalJob>
 
     /**
+     * Current foreground job id for a session (most recently started non-terminal job),
+     * or null if idle. Used by the output pump to attribute command completion
+     * (ProcessExited) to the right job.
+     */
+    fun foregroundJobId(sessionId: Long): Long?
+
+    /**
      * Subscribe to Job state changes.
      * Emits the new JobState on every transition (J1-J10).
      */

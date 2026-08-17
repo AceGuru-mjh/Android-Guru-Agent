@@ -3,7 +3,9 @@ package com.apex.agent.platform.terminal.events
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -56,18 +58,45 @@ class TerminalEventBusImpl(
         }
 
     override fun subscribe(sessionId: Long, afterCursor: Long): Flow<TerminalEvent> = flow {
-        // Phase 1: replay historical events from EventLog (incremental, crash-safe).
-        val historical = eventLog.query(sessionId, afterCursor, limit = Int.MAX_VALUE)
-        for (e in historical) {
-            // skip events already passed (cursor <= afterCursor)
-            if (e.cursor > afterCursor || e.cursor == -1L) emit(e)
-        }
-        // Phase 2: live tail via SharedFlow.
         val bus = busFor(sessionId)
         bus.subscriberCount.incrementAndGet()
+        // Subscribe to the live SharedFlow FIRST and buffer events into a channel so that
+        // events emitted while we replay history are NOT lost. With a replay=0 SharedFlow the
+        // naive order (replay history, then collect live) has a gap: an event appended to the
+        // EventLog and tryEmit'd to the bus between the two phases is missed by both windows.
+        // Buffering live first closes that race; we then merge history + buffered live, deduping
+        // by event id (history and live copies share the same id assigned at append time).
+        val live = Channel<TerminalEvent>(Channel.UNLIMITED)
+        val collectJob = scope.launch {
+            try {
+                bus.flow.collect { live.send(it) }
+            } finally {
+                live.close()
+            }
+        }
         try {
-            bus.flow.asSharedFlow().collect { emit(it) }
+            // Phase 1: replay historical events from EventLog (incremental, crash-safe).
+            val historical = eventLog.query(sessionId, afterCursor, limit = Int.MAX_VALUE)
+            val seen = mutableSetOf<Long>()
+            for (e in historical) {
+                // skip events already passed (cursor <= afterCursor)
+                if (e.cursor > afterCursor || e.cursor == -1L) {
+                    seen.add(e.id)
+                    emit(e)
+                }
+            }
+            // Phase 2a: flush live events buffered during the history read, skipping those
+            // already emitted from history (dedup by id) to avoid double delivery.
+            while (true) {
+                val e = live.tryReceive().getOrNull() ?: break
+                if (e.id !in seen) emit(e)
+            }
+            // Phase 2b: live tail.
+            for (e in live) {
+                emit(e)
+            }
         } finally {
+            collectJob.cancel()
             bus.subscriberCount.decrementAndGet()
         }
     }

@@ -22,6 +22,24 @@ import com.apex.agent.platform.terminal.screen.RealVirtualTerminal
  * to end with "y/n"). The Runtime always allows the Agent to override via terminal.write()
  * regardless of detected state.
  */
+/**
+ * Known interactive programs. If the foreground command matches one of these AND the
+ * screen shows a prompt-like last line, confidence is HIGH. Exposed at package level so
+ * other components (e.g. JobManager) can avoid mis-attributing shell-idle to job completion.
+ */
+internal val interactivePrograms = setOf(
+    "python", "python3", "ipython", "node", "ruby", "irb", "lua",
+    "ssh", "sftp", "telnet", "ftp",
+    "vim", "vi", "nano", "emacs",
+    "top", "htop", "btop",
+    "less", "more", "man",
+    "adb", "fastboot",
+    "mysql", "psql", "sqlite3",
+    "gdb", "lldb",
+    "scala", "clojure", "lein",
+    "bash", "sh", "zsh"   // subshell
+)
+
 class InputWaitingDetector {
 
     /**
@@ -43,28 +61,11 @@ class InputWaitingDetector {
         Regex(".*[Cc]ontinue\\?.*\\??\\s*$"),
         Regex(".*[Ss]elect (an? )?option.*:?\\s*$"),
         Regex(".*[Cc]hoose \\[.*\\]:?\\s*$"),
-        Regex("^>\\s*$"),                          // REPL prompt (python/node)
-        Regex("^\\.\\.\\.\\s*$"),                  // python continuation
-        Regex("^\\$\\s*$"),                        // sh prompt
-        Regex("^#\\s*$"),                          // root prompt
-        Regex("^>>>\\s*$")                         // python REPL
-    )
-
-    /**
-     * Known interactive programs. If the foreground command matches one of these AND the
-     * screen shows a prompt-like last line, confidence is HIGH.
-     */
-    private val interactivePrograms = setOf(
-        "python", "python3", "ipython", "node", "ruby", "irb", "lua",
-        "ssh", "sftp", "telnet", "ftp",
-        "vim", "vi", "nano", "emacs",
-        "top", "htop", "btop",
-        "less", "more", "man",
-        "adb", "fastboot",
-        "mysql", "psql", "sqlite3",
-        "gdb", "lldb",
-        "scala", "clojure", "lein",
-        "bash", "sh", "zsh"   // subshell
+        Regex("^\\s*>\\s*$"),                      // REPL prompt (python/node)
+        Regex("^\\s*\\.\\.\\.\\s*$"),              // python continuation
+        Regex("^\\s*\\$\\s*$"),                    // sh prompt
+        Regex("^\\s*#\\s*$"),                      // root prompt
+        Regex("^\\s*>>>\\s*$")                     // python REPL
     )
 
     /**

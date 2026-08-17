@@ -61,7 +61,7 @@ class BoundedJobRegistry(
     fun add(entry: JobRegistryEntry) {
         if (entry.isTerminal) {
             completed.addLast(entry)
-            while (completed.size > maxCompletedJobs) completed.pollFirst()
+            while (completed.size > maxCompletedJobs) completed.removeFirst()
             active.remove(entry.jobId)
         } else {
             active[entry.jobId] = entry

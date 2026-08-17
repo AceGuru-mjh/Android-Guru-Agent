@@ -87,7 +87,7 @@ class TerminalRuntimeImpl(
     private val processController = com.apex.agent.platform.terminal.process.ProcessController(inputManager)
     private val timeoutController = com.apex.agent.platform.terminal.process.TimeoutController(inputManager)
     private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(inputManager, timeoutController)
-    private val sessionManager = SessionManagerImpl(
+    internal val sessionManager = SessionManagerImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, scope
     )
@@ -273,7 +273,7 @@ class TerminalRuntimeImpl(
 
     // ───────── stop (Spec PR #54 §5) ─────────
     /** Stop running jobs but keep Session alive. ≠ close(). Idempotent. */
-    override suspend fun stop(sessionId: Long): Result<StopResult> {
+    override suspend fun stop(sessionId: Long): Result<TerminalRuntime.StopResult> {
         val a = sessionManager.assembly(sessionId) ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         // Transition to STOPPING (graceful shutdown)
         sessionManager.transition(sessionId, SessionState.STOPPING)
@@ -285,7 +285,7 @@ class TerminalRuntimeImpl(
         kotlinx.coroutines.delay(100)  // brief grace
         // Transition back to READY (session still alive, jobs stopped)
         sessionManager.transition(sessionId, SessionState.READY)
-        return Result.success(StopResult(stopped = true, jobId = active.firstOrNull()?.id, finalState = SessionState.READY.name))
+        return Result.success(TerminalRuntime.StopResult(stopped = true, jobId = active.firstOrNull()?.id, finalState = SessionState.READY.name))
     }
 
     // ───────── close (Spec §34.9 + PR #54 §4 idempotent) ─────────

@@ -178,7 +178,7 @@ class SessionManagerImpl(
     }
 
     // PR #54 §8/§19: reconcile persisted vs actual PTY state
-    override suspend fun reconcile(persisted: List<Long>): List<ReconciliationResult> = mutex.withLock {
+    override suspend fun reconcile(persisted: List<Long>): List<SessionManager.ReconciliationResult> = mutex.withLock {
         persisted.map { sid ->
             val a = assemblies[sid]
             val actualState = if (a != null) {
@@ -192,7 +192,7 @@ class SessionManagerImpl(
             if (actualState == SessionState.LOST && a != null) {
                 transition(sid, SessionState.LOST)
             }
-            ReconciliationResult(
+            SessionManager.ReconciliationResult(
                 sessionId = sid,
                 persistedState = persistedState,
                 actualState = actualState,

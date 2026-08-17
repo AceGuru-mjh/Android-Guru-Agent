@@ -19,8 +19,8 @@ class Observation2Test {
         )
         val s = rt.create().getOrThrow()
         kotlinx.coroutines.delay(100)
-        val a = rt.sessionManager.assembly(obs.sessionId)!!
-        val obs = ObservationEngine2Impl(a.observationEngine, a.virtualTerminal, obs.sessionId)
+        val a = rt.sessionManager.assembly(s.sessionId)!!
+        val obs = ObservationEngine2Impl(a.observationEngine, a.virtualTerminal, s.sessionId)
         return obs to rt  // sessionId = obs.sessionId
     }
 
@@ -126,8 +126,8 @@ class Observation2Test {
         val resize = TerminalChange.ScreenResized(40, 120)
         val title = TerminalChange.TitleChanged("My Title")
         val mode = TerminalChange.ModeChanged(true, false)
-        val scroll = TerminalChange.ScrollChanged(TerminalChange.ScrollChanged.ScrollDirection.UP, 3)
-        val cleared = TerminalChange.Cleared(TerminalChange.Cleared.ClearMode.SCREEN)
+        val scroll = TerminalChange.ScrollChanged(TerminalChange.ScrollDirection.UP, 3)
+        val cleared = TerminalChange.Cleared(TerminalChange.ClearMode.SCREEN)
         assertNotNull(cells)
         assertNotNull(cursor)
         assertNotNull(resize)
@@ -168,7 +168,7 @@ class Observation2Test {
         assertEquals(0, d.droppedBatches)
     }
 
-    @Test fun `scenario: execute + observe shows output`() = runBlocking {
+    @Test fun `scenario execute observe shows output`() = runBlocking {
         val (obs, rt) = newObservation()
         val sid = 1L // sessionId from newObservation
         // Get initial cursor

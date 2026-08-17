@@ -30,11 +30,15 @@ package com.apex.agent.platform.terminal.session
 enum class SessionState {
     CREATED,
     STARTING,
-    READY,
-    RUNNING,
-    WAITING_INPUT,
-    INTERRUPTED,
-    EXITED,
-    BROKEN,
-    CLOSED
+    READY,           // shell ready, no foreground job
+    RUNNING,          // foreground job executing
+    WAITING_INPUT,    // high-confidence input-required
+    INTERRUPTED,      // SIGINT received, recovering
+    SUSPENDED,        // PR #54: execution environment paused (app background)
+    STOPPING,         // PR #54: graceful shutdown in progress (SIGTERM → grace → SIGKILL)
+    EXITED,           // normal lifecycle end
+    LOST,             // PR #54: PTY disappeared unexpectedly (≠ EXITED — we lost control)
+    FAILED,           // PR #54: runtime-level failure
+    BROKEN,           // legacy alias for LOST (kept for backward compat)
+    CLOSED            // terminal: resources released
 }

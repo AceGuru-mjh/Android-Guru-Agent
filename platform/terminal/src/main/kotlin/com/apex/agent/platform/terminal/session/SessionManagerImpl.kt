@@ -224,6 +224,9 @@ class SessionManagerImpl(
     /** Get the assembled deps for a session (used by Runtime/JobManager). */
     fun assembly(id: Long): SessionAssembly? = assemblies[id]
 
+    /** PR #56: Get LIVE session state (from stateFlows, not stale assembly). */
+    fun sessionState(id: Long): SessionState? = stateFlows[id]?.value
+
     /** Start a background coroutine that watches for shell process exit. */
     private fun startExitWatcher(sessionId: Long, nativeId: Int) {
         scope.launch {

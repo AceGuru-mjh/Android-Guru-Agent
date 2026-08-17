@@ -61,11 +61,11 @@ class InputWaitingDetector {
         Regex(".*[Cc]ontinue\\?.*\\??\\s*$"),
         Regex(".*[Ss]elect (an? )?option.*:?\\s*$"),
         Regex(".*[Cc]hoose \\[.*\\]:?\\s*$"),
-        Regex("^>\\s*$"),                          // REPL prompt (python/node)
-        Regex("^\\.\\.\\.\\s*$"),                  // python continuation
-        Regex("^\\$\\s*$"),                        // sh prompt
-        Regex("^#\\s*$"),                          // root prompt
-        Regex("^>>>\\s*$")                         // python REPL
+        Regex("^\\s*>\\s*$"),                      // REPL prompt (python/node)
+        Regex("^\\s*\\.\\.\\.\\s*$"),              // python continuation
+        Regex("^\\s*\\$\\s*$"),                    // sh prompt
+        Regex("^\\s*#\\s*$"),                      // root prompt
+        Regex("^\\s*>>>\\s*$")                     // python REPL
     )
 
     /**

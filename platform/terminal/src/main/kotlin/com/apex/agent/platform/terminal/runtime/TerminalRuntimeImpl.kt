@@ -80,7 +80,7 @@ class TerminalRuntimeImpl(
     private val eventLog: TerminalEventLog = TerminalEventLogImpl()
     private val eventBus: TerminalEventBus = TerminalEventBusImpl(eventLog, scope)
     private val waitEngine = WaitEngineImpl(eventBus, scope)
-    private val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
+    internal val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
     // PR #51: process/timeout/cancellation controllers
     // ProcessController routes signal() through InputManager (policy + control-state + events);

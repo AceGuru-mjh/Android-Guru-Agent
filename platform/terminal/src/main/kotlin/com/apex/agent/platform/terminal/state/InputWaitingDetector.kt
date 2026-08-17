@@ -54,7 +54,7 @@ class InputWaitingDetector {
      * Known interactive programs. If the foreground command matches one of these AND the
      * screen shows a prompt-like last line, confidence is HIGH.
      */
-    private val interactivePrograms = setOf(
+    internal val interactivePrograms = setOf(
         "python", "python3", "ipython", "node", "ruby", "irb", "lua",
         "ssh", "sftp", "telnet", "ftp",
         "vim", "vi", "nano", "emacs",

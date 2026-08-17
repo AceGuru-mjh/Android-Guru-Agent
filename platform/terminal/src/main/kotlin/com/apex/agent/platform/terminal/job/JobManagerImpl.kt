@@ -1,6 +1,7 @@
 package com.apex.agent.platform.terminal.job
 
 import com.apex.agent.platform.terminal.session.SessionState
+import com.apex.agent.platform.terminal.state.InputWaitingDetector
 
 import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
@@ -82,9 +83,26 @@ class JobManagerImpl(
                 )
             }
             is TerminalEvent.WaitingInput -> {
-                val jid = event.jobId ?: return
+                val jid = event.jobId
+                if (jid != null) {
+                    if (event.confidence == com.apex.agent.platform.terminal.events.Confidence.HIGH_CONFIDENCE) {
+                        transition(jid, JobState.WAITING_INPUT)
+                    }
+                    return
+                }
+                // event.jobId == null → shell returned to its top-level prompt (idle). If there is
+                // a RUNNING foreground job whose command is NOT an interactive REPL, the command has
+                // completed → emit ProcessExited so wait(ProcessExited(jobId)) resolves (Control
+                // Plane contract). This is the reliable completion signal (the pump already fires
+                // WaitingInput on HIGH_CONFIDENCE for "$ "/"# " prompts) and avoids mis-firing on
+                // interactive REPL prompts (python/ssh/vim) which also report waiting-input.
                 if (event.confidence == com.apex.agent.platform.terminal.events.Confidence.HIGH_CONFIDENCE) {
-                    transition(jid, JobState.WAITING_INPUT)
+                    val fid = foregroundJobIdBySession[event.sessionId] ?: return
+                    val job = jobs[fid] ?: return
+                    if (job.state != JobState.RUNNING) return
+                    val base = job.command.trim().substringBefore(' ').substringAfterLast('/')
+                    if (base in InputWaitingDetector.interactivePrograms) return
+                    emitProcessExited(fid, event.sessionId, ExitCause.NORMAL, 0)
                 }
             }
             is TerminalEvent.InputWritten -> {
@@ -161,6 +179,20 @@ class JobManagerImpl(
         jobs.values.filter { it.sessionId == sessionId && it.isRunning }
 
     override fun foregroundJobId(sessionId: Long): Long? = foregroundJobIdBySession[sessionId]
+
+    /**
+     * Emit a ProcessExited event for a job (used when the shell returns to idle and the
+     * foreground command has completed). Routed through EventLog + EventBus so both the
+     * WaitEngine and this manager's own listener observe it.
+     */
+    private suspend fun emitProcessExited(jobId: Long, sessionId: Long, cause: ExitCause, exitCode: Int?) {
+        val ev = TerminalEvent.ProcessExited(
+            id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
+            cursor = -1, jobId = jobId, pid = 0, exitCode = exitCode, signal = null, cause = cause
+        )
+        val eid = eventLog.append(ev)
+        eventBus.emit(ev.copy(id = eid))
+    }
 
     override fun observeState(jobId: Long): Flow<JobState> =
         (stateFlows[jobId] ?: MutableStateFlow(JobState.UNKNOWN)).asStateFlow().map { it }

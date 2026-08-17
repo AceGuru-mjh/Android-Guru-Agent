@@ -108,7 +108,6 @@ class TerminalRuntimeImpl(
         inputDetector, scope
     )
     private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope)
-        .also { sessionManager.jobManager = it }
 
     init {
         // Wire per-session event dispatch to JobManager + SemanticStateReducer.

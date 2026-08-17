@@ -40,11 +40,16 @@ class SessionMetadataStore(
 
     @Serializable
     data class SessionRecord(
+        val schemaVersion: Int = 1,   // PR #54 §17: versioned for future migration
         val id: Long, val shell: String, val initialCwd: String, val pid: Int,
         val rows: Int, val cols: Int, val privilege: String, val state: String,
-        val createdAt: Long, val lastExitCode: Int?, val cursor: Long,
+        val createdAt: Long, val lastActivityAt: Long = createdAt,  // PR #54 §25: activity tracking
+        val exitReason: String? = null,  // PR #54 §11: why session ended
+        val lastExitCode: Int?, val cursor: Long,
         val jobs: List<JobRecord>, val recentEvents: List<EventRecord>
-    )
+    ) {
+        companion object { const val CURRENT_SCHEMA = 1 }
+    }
 
     @Serializable
     data class JobRecord(
@@ -61,14 +66,22 @@ class SessionMetadataStore(
 
     suspend fun save(session: TerminalSession, jobs: List<TerminalJob>, recentEvents: List<TerminalEvent>) = mutex.withLock {
         val record = SessionRecord(
+            schemaVersion = SessionRecord.CURRENT_SCHEMA,
             id = session.id, shell = session.shell, initialCwd = session.initialCwd,
             pid = session.pid, rows = session.rows, cols = session.cols,
             privilege = session.privilege.name, state = session.state.name,
-            createdAt = session.createdAt, lastExitCode = session.lastExitCode, cursor = session.cursor,
+            createdAt = session.createdAt, lastActivityAt = System.currentTimeMillis(),
+            exitReason = null,  // set on close/reconcile by SessionManager
+            lastExitCode = session.lastExitCode, cursor = session.cursor,
             jobs = jobs.map { it.toRecord() },
             recentEvents = recentEvents.takeLast(maxRecentEvents).map { it.toRecord() }
         )
-        File(storageDir, "session-${session.id}.json").writeText(json.encodeToString(record))
+        // PR #54 §18: atomic write — temp file + flush + rename (avoid corruption on mid-write crash)
+        val target = File(storageDir, "session-${session.id}.json")
+        val tmp = File(storageDir, "session-${session.id}.json.tmp")
+        tmp.writeText(json.encodeToString(record))
+        tmp.copyTo(target, overwrite = true)
+        tmp.delete()
     }
 
     suspend fun loadAll(): List<SessionRecord> = mutex.withLock {

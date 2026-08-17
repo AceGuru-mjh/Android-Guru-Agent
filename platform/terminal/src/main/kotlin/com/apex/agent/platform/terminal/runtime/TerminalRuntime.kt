@@ -190,6 +190,12 @@ interface TerminalRuntime {
         val recentOutput: String
     )
 
+    // ───────── stop (Spec PR #54 §5) ─────────
+    /** Stop running jobs (cancel + SIGTERM→grace→SIGKILL) but keep Session alive. ≠ close(). */
+    suspend fun stop(sessionId: Long): RuntimeResult<StopResult>
+
+    data class StopResult(val stopped: Boolean, val jobId: Long?, val finalState: String)
+
     // ───────── close ─────────
     // Spec §34.9
     suspend fun close(

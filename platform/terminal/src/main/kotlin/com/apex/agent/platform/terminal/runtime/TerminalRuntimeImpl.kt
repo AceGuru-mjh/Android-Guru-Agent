@@ -271,18 +271,48 @@ class TerminalRuntimeImpl(
         )
     }
 
-    // ───────── close ─────────
+    // ───────── stop (Spec PR #54 §5) ─────────
+    /** Stop running jobs but keep Session alive. ≠ close(). Idempotent. */
+    override suspend fun stop(sessionId: Long): Result<StopResult> {
+        val a = sessionManager.assembly(sessionId) ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        // Transition to STOPPING (graceful shutdown)
+        sessionManager.transition(sessionId, SessionState.STOPPING)
+        // Cancel all active jobs in this session
+        val active = jobManager.activeJobs(sessionId)
+        for (job in active) {
+            cancellationController.cancel(sessionId, job.id)
+        }
+        kotlinx.coroutines.delay(100)  // brief grace
+        // Transition back to READY (session still alive, jobs stopped)
+        sessionManager.transition(sessionId, SessionState.READY)
+        return Result.success(StopResult(stopped = true, jobId = active.firstOrNull()?.id, finalState = SessionState.READY.name))
+    }
+
+    // ───────── close (Spec §34.9 + PR #54 §4 idempotent) ─────────
     override suspend fun close(sessionId: Long, force: Boolean): Result<CloseResult> {
+        // PR #54 §4: idempotent — if already closed, return success
         val a = sessionManager.assembly(sessionId)
-        val wasBroken = a != null && a.session.state == SessionState.BROKEN
+        if (a == null) {
+            // Already closed (assembly removed) — return idempotent success
+            return Result.success(CloseResult(closed = true, cause = "ALREADY_CLOSED", finalCursor = 0L))
+        }
+        val wasLost = a.session.state == SessionState.LOST || a.session.state == SessionState.BROKEN
+        val wasBroken = a.session.state == SessionState.BROKEN
+        // Cancel all jobs before closing (Spec §7: cancel → SIGTERM → wait → SIGKILL → close PTY)
+        if (force) {
+            val active = jobManager.activeJobs(sessionId)
+            for (job in active) cancellationController.cancel(sessionId, job.id)
+        }
         val r = sessionManager.close(sessionId, force)
         if (r.isSuccess) processController.unregister(sessionId)
+        timeoutController.cancelAll()
         return r.map {
-            CloseResult(
-                closed = true,
-                cause = if (wasBroken) "BROKEN" else "USER",
-                finalCursor = a?.ringBuffer?.totalCursor ?: 0L
-            )
+            val cause = when {
+                wasLost -> "LOST"
+                wasBroken -> "BROKEN"
+                else -> "USER"
+            }
+            CloseResult(closed = true, cause = cause, finalCursor = a.ringBuffer?.totalCursor ?: 0L)
         }
     }
 

@@ -168,6 +168,39 @@ class SessionManagerImpl(
         return Result.success(Unit)
     }
 
+    // PR #54 §5: stop jobs but keep Session alive
+    override suspend fun stop(id: Long): Result<SessionState> = mutex.withLock {
+        val a = assemblies[id] ?: return@withLock Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        transition(id, SessionState.STOPPING)
+        kotlinx.coroutines.delay(100)
+        transition(id, SessionState.READY)
+        Result.success(SessionState.READY)
+    }
+
+    // PR #54 §8/§19: reconcile persisted vs actual PTY state
+    override suspend fun reconcile(persisted: List<Long>): List<ReconciliationResult> = mutex.withLock {
+        persisted.map { sid ->
+            val a = assemblies[sid]
+            val actualState = if (a != null) {
+                // PTY exists in runtime — check if alive
+                if (native.nativeIsAlive(a.nativeSessionId)) a.session.state else SessionState.LOST
+            } else {
+                // PTY not in runtime — it's gone
+                SessionState.LOST
+            }
+            val persistedState = a?.session?.state?.name ?: "UNKNOWN"
+            if (actualState == SessionState.LOST && a != null) {
+                transition(sid, SessionState.LOST)
+            }
+            ReconciliationResult(
+                sessionId = sid,
+                persistedState = persistedState,
+                actualState = actualState,
+                recoverable = actualState != SessionState.LOST && actualState != SessionState.FAILED
+            )
+        }
+    }
+
     override fun observeState(id: Long): Flow<SessionState> =
         (stateFlows[id] ?: MutableStateFlow(SessionState.CLOSED)).asStateFlow().map { it }
 

@@ -49,6 +49,19 @@ interface SessionManager {
      * Each subscriber gets an independent flow; does NOT affect other subscribers.
      */
     fun observeState(id: Long): Flow<SessionState>
+
+    // PR #54 §5: stop running jobs but keep Session alive (≠ close)
+    suspend fun stop(id: Long): Result<SessionState>
+
+    // PR #54 §8/§19: reconcile persisted vs actual — mark dead PTY as LOST
+    suspend fun reconcile(persisted: List<Long>): List<ReconciliationResult>
+
+    data class ReconciliationResult(
+        val sessionId: Long,
+        val persistedState: String,
+        val actualState: SessionState,  // LOST if PTY gone
+        val recoverable: Boolean
+    )
 }
 
 /** Typed create failure reasons (mirrors TerminalError subset relevant to SessionManager). */

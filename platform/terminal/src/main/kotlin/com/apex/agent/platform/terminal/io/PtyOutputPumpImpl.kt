@@ -3,6 +3,7 @@ package com.apex.agent.platform.terminal.io
 import com.apex.agent.platform.terminal.buffer.OutputChunk
 import com.apex.agent.platform.terminal.buffer.TerminalOutputBuffer
 import com.apex.agent.platform.terminal.events.Confidence
+import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventBus
 import com.apex.agent.platform.terminal.events.TerminalEventLog
@@ -49,6 +50,8 @@ class PtyOutputPumpImpl(
     private val waitEngine: TerminalWaitEngine,
     private val inputDetector: InputWaitingDetector? = null,
     private val foregroundCommandProvider: () -> String? = { null },
+    /** Resolves the current foreground job id (used to attribute command completion). */
+    private val foregroundJobIdProvider: () -> Long? = { null },
     /** Called after each VT feed — used to push screen state to ObservationEngine (Spec §41 event-driven). */
     private val onOutput: (() -> Unit)? = null
 ) : PtyOutputPump {
@@ -112,6 +115,28 @@ class PtyOutputPumpImpl(
                                 semanticReducer.onEvent(wevWithId)
                                 waitEngine.onEvent(wevWithId)
                                 eventBus.emit(wevWithId)
+                                // Command completion: the shell returned to its top-level prompt
+                                // (idle), so the foreground job has exited. Emit ProcessExited(jobId)
+                                // so wait(ProcessExited(jobId)) resolves (Control Plane contract).
+                                // Narrow guard: only a strict top-level shell prompt ("$" / "#")
+                                // counts, to avoid mis-firing on interactive REPL prompts (">>>",
+                                // ">") which also report waiting-input but are NOT job completion.
+                                val fid = foregroundJobIdProvider()
+                                if (fid != null) {
+                                    val lastLine = virtualTerminal.lastVisibleLine()
+                                    if (Regex("^[$#]\\s*$").matches(lastLine)) {
+                                        val exEv = TerminalEvent.ProcessExited(
+                                            id = 0, sessionId = sessionId,
+                                            timestamp = System.currentTimeMillis(),
+                                            cursor = startCursor + n, jobId = fid, pid = 0,
+                                            exitCode = 0, signal = null, cause = ExitCause.NORMAL
+                                        )
+                                        val xid = eventLog.append(exEv)
+                                        val exWithId = exEv.copy(id = xid)
+                                        waitEngine.onEvent(exWithId)
+                                        eventBus.emit(exWithId)
+                                    }
+                                }
                             }
                         }
                     }

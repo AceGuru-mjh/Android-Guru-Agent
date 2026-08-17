@@ -7,6 +7,7 @@ import com.apex.agent.platform.terminal.events.TerminalEventBus
 import com.apex.agent.platform.terminal.events.TerminalEventBusImpl
 import com.apex.agent.platform.terminal.events.TerminalEventLog
 import com.apex.agent.platform.terminal.events.TerminalEventLogImpl
+import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.io.InputManagerImpl
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.TerminalKey
@@ -86,12 +87,26 @@ class TerminalRuntimeImpl(
     // the NATIVE layer delivers to the whole process group (kill(-PGID)).
     private val processController = com.apex.agent.platform.terminal.process.ProcessController(inputManager)
     private val timeoutController = com.apex.agent.platform.terminal.process.TimeoutController(inputManager)
-    private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(inputManager, timeoutController)
+    private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(
+        inputManager, timeoutController,
+        onCancelled = { sessionId, jobId ->
+            // Job was cancelled by the agent → emit ProcessExited so wait(ProcessExited(jobId))
+            // resolves with a non-RUNNING state (Control Plane contract).
+            val ev = TerminalEvent.ProcessExited(
+                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
+                cursor = -1, jobId = jobId, pid = 0,
+                exitCode = 130, signal = UnixSignal.SIGINT, cause = ExitCause.USER_INTERRUPT
+            )
+            val eid = eventLog.append(ev)
+            eventBus.emit(ev.copy(id = eid))
+        }
+    )
     internal val sessionManager = SessionManagerImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, scope
     )
     private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope)
+        .also { sessionManager.jobManager = it }
 
     init {
         // Wire per-session event dispatch to JobManager + SemanticStateReducer.

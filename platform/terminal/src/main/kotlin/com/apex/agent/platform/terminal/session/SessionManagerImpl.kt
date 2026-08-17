@@ -12,6 +12,7 @@ import com.apex.agent.platform.terminal.events.TerminalEventLogImpl
 import com.apex.agent.platform.terminal.events.TerminalEventBusImpl
 import com.apex.agent.platform.terminal.io.InputManagerImpl
 import com.apex.agent.platform.terminal.io.PtyOutputPumpImpl
+import com.apex.agent.platform.terminal.job.JobManager
 import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.policy.TerminalCapability
@@ -73,6 +74,9 @@ class SessionManagerImpl(
     )
 
     private val assemblies = ConcurrentHashMap<Long, SessionAssembly>()
+
+    /** Late-injected by TerminalRuntimeImpl (resolves a circular dependency). */
+    internal var jobManager: JobManager? = null
     private val idCounter = AtomicLong(0)
     private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<SessionState>>()
     private val mutex = Mutex()
@@ -105,6 +109,7 @@ class SessionManagerImpl(
             virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
             inputDetector = inputDetector,
             foregroundCommandProvider = { foregroundCommandFor(sessionId) },
+            foregroundJobIdProvider = { jobManager?.foregroundJobId(sessionId) },
             onOutput = { observationEngine.refreshScreenState() }  // push screen state (event-driven)
         )
         val session = TerminalSession(

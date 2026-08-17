@@ -46,6 +46,8 @@ class JobManagerImpl(
     private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<JobState>>()
     private val idCounter = AtomicLong(0)
     private val mutex = Mutex()
+    /** Most recently started non-terminal job per session (foreground job). */
+    private val foregroundJobIdBySession = ConcurrentHashMap<Long, Long>()
 
     init {
         // Subscribe to all session events to advance Job states.
@@ -70,6 +72,9 @@ class JobManagerImpl(
                     ExitCause.BROKEN -> JobState.FAILED
                 }
                 transition(jid, newState)
+                if (foregroundJobIdBySession[event.sessionId] == jid) {
+                    foregroundJobIdBySession.remove(event.sessionId)
+                }
                 jobs[jid] = job.copy(
                     state = newState, exitCode = event.exitCode, signal = event.signal,
                     finishedAt = event.timestamp,
@@ -108,6 +113,7 @@ class JobManagerImpl(
             startedAt = System.currentTimeMillis(), finishedAt = null
         )
         jobs[jobId] = job
+        foregroundJobIdBySession[sessionId] = jobId
         stateFlows[jobId] = MutableStateFlow(JobState.CREATED)
 
         // Write the command (LINE mode appends \n)
@@ -153,6 +159,8 @@ class JobManagerImpl(
 
     override suspend fun activeJobs(sessionId: Long): List<TerminalJob> =
         jobs.values.filter { it.sessionId == sessionId && it.isRunning }
+
+    override fun foregroundJobId(sessionId: Long): Long? = foregroundJobIdBySession[sessionId]
 
     override fun observeState(jobId: Long): Flow<JobState> =
         (stateFlows[jobId] ?: MutableStateFlow(JobState.UNKNOWN)).asStateFlow().map { it }

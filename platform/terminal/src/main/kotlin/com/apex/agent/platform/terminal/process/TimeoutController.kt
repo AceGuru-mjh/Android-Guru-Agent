@@ -76,7 +76,9 @@ class JobCancellationController(
     private val inputManager: InputManager,
     private val timeoutController: TimeoutController,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    private val gracePeriodMs: Long = 5000L
+    private val gracePeriodMs: Long = 5000L,
+    /** Called right after SIGTERM is delivered, so the job can be marked terminal. */
+    private val onCancelled: (sessionId: Long, jobId: Long) -> Unit = {},
 ) {
     /**
      * Cancel a job: SIGTERM → grace → SIGKILL.
@@ -89,6 +91,8 @@ class JobCancellationController(
         scope.launch {
             // 1. Graceful stop
             inputManager.sendSignal(sessionId, InputOwner.SYSTEM, UnixSignal.SIGTERM, jobId)
+            // Mark the job as cancelled immediately (agent decided to stop it).
+            onCancelled(sessionId, jobId)
             // 2. Grace period
             delay(gracePeriodMs)
             // 3. Force kill

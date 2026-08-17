@@ -22,5 +22,6 @@ android {
 
 dependencies {
     // Pure JVM/Android library — no dependency on :platform:terminal (Spec §7.3 forbids).
-    // VT100Emulator is self-contained.
+    // TerminalCore is self-contained.
+    testImplementation(libs.junit)
 }

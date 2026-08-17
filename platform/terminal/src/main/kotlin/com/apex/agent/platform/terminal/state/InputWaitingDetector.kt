@@ -78,7 +78,7 @@ class InputWaitingDetector {
         // TUI programs on alternate screen are NOT waiting for input (they're rendering).
         if (vt.alternateScreen) return Confidence.UNKNOWN
 
-        val lastLine = vt.raw.lastVisibleLine()
+        val lastLine = vt.lastVisibleLine()
         if (lastLine.isBlank()) return Confidence.UNKNOWN
 
         // Strong signal: last line matches a known prompt pattern.

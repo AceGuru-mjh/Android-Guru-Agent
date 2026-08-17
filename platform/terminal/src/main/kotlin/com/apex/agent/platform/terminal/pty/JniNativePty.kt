@@ -30,7 +30,7 @@ package com.apex.agent.platform.terminal.pty
  *   listSessionIds(): IntArray                                  →  nativeListSessionIds(): IntArray
  *
  * NOTE: the existing JNI nativeRead returns a String (UTF-8 decoded) with an optional
- * stripAnsi flag. We pass stripAnsi=false (the VT100Emulator handles ANSI parsing).
+ * stripAnsi flag. We pass stripAnsi=false (the TerminalCore handles ANSI parsing).
  */
 class JniNativePty(
     /** The existing JNI class. Injected for testability; default creates a real instance. */
@@ -54,7 +54,7 @@ class JniNativePty(
     }
 
     override fun nativeRead(sessionId: Int, buffer: ByteArray, maxBytes: Int): Int {
-        // Existing JNI returns a String (UTF-8). Pass stripAnsi=false — VT100Emulator parses ANSI.
+        // Existing JNI returns a String (UTF-8). Pass stripAnsi=false — TerminalCore parses ANSI.
         val result: String = try {
             jni.nativeRead(sessionId, maxBytes, false)
         } catch (e: Exception) {

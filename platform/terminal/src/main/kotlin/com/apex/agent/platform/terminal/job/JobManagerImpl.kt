@@ -1,7 +1,7 @@
 package com.apex.agent.platform.terminal.job
 
 import com.apex.agent.platform.terminal.session.SessionState
-import com.apex.agent.platform.terminal.state.InputWaitingDetector
+import com.apex.agent.platform.terminal.state.interactivePrograms
 
 import com.apex.agent.platform.terminal.events.ExitCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
@@ -101,7 +101,7 @@ class JobManagerImpl(
                     val job = jobs[fid] ?: return
                     if (job.state != JobState.RUNNING) return
                     val base = job.command.trim().substringBefore(' ').substringAfterLast('/')
-                    if (base in InputWaitingDetector.interactivePrograms) return
+                    if (base in interactivePrograms) return
                     emitProcessExited(fid, event.sessionId, ExitCause.NORMAL, 0)
                 }
             }

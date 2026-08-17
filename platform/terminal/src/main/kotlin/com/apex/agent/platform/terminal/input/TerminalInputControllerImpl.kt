@@ -168,7 +168,7 @@ class TerminalInputControllerImpl(
 
     /** §17: Session must be RUNNING/READY/WAITING_INPUT to accept input. */
     private fun isWritable(sessionId: Long): Boolean {
-        val a = sessionManager.assembly(sessionId) ?: return false
-        return a.session.state in setOf(SessionState.READY, SessionState.RUNNING, SessionState.WAITING_INPUT)
+        val state = sessionManager.sessionState(sessionId) ?: return false
+        return state in setOf(SessionState.READY, SessionState.RUNNING, SessionState.WAITING_INPUT)
     }
 }

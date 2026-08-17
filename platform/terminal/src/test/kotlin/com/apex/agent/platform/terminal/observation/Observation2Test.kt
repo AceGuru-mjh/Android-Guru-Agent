@@ -11,13 +11,13 @@ import org.junit.Test
 
 class Observation2Test {
 
-    private fun newObservation(): Pair<ObservationEngine2Impl, TerminalRuntimeImpl> {
+    private suspend fun newObservation(): Pair<ObservationEngine2Impl, TerminalRuntimeImpl> {
         val rt = TerminalRuntimeImpl(
             native = FakeNativePty(),
             policy = TerminalPolicyImpl(),
             virtualTerminalFactory = { r, c -> RealVirtualTerminal(r, c) }
         )
-        val s = runBlocking { rt.create().getOrThrow() }
+        val s = rt.create().getOrThrow()
         kotlinx.coroutines.delay(100)
         val a = rt.sessionManager.assembly(s.sessionId)!!
         val obs = ObservationEngine2Impl(a.observationEngine, a.virtualTerminal, s.sessionId)

@@ -19,14 +19,14 @@ class Observation2Test {
         )
         val s = rt.create().getOrThrow()
         kotlinx.coroutines.delay(100)
-        val a = rt.sessionManager.assembly(s.sessionId)!!
-        val obs = ObservationEngine2Impl(a.observationEngine, a.virtualTerminal, s.sessionId)
-        return obs to rt  // sessionId = s.sessionId
+        val a = rt.sessionManager.assembly(obs.sessionId)!!
+        val obs = ObservationEngine2Impl(a.observationEngine, a.virtualTerminal, obs.sessionId)
+        return obs to rt  // sessionId = obs.sessionId
     }
 
     @Test fun `snapshot returns consistent state`() = runBlocking {
         val (obs, _) = newObservation()
-        val snap = obs.snapshot(s.sessionId).getOrThrow()
+        val snap = obs.snapshot(obs.sessionId).getOrThrow()
         assertTrue(snap.sequence >= 0)
         assertTrue(snap.rows > 0)
         assertTrue(snap.cols > 0)
@@ -35,24 +35,24 @@ class Observation2Test {
 
     @Test fun `observeSince with initial cursor returns empty batch`() = runBlocking {
         val (obs, _) = newObservation()
-        val cursor = ObservationCursor(obs.diagnostics(s.sessionId)!!.currentSequence)
-        val batch = obs.observeSince(s.sessionId, cursor).getOrThrow()
+        val cursor = ObservationCursor(obs.diagnostics(obs.sessionId)!!.currentSequence)
+        val batch = obs.observeSince(obs.sessionId, cursor).getOrThrow()
         assertTrue("no changes should give empty batch", batch.changes.isEmpty())
     }
 
     @Test fun `sequence increments on mutation`() = runBlocking {
         val (obs, _) = newObservation()
-        val before = obs.diagnostics(s.sessionId)!!.currentSequence
+        val before = obs.diagnostics(obs.sessionId)!!.currentSequence
         obs.onScreenMutation(listOf(TerminalChange.CursorChanged(0, 5, true)))
-        val after = obs.diagnostics(s.sessionId)!!.currentSequence
+        val after = obs.diagnostics(obs.sessionId)!!.currentSequence
         assertTrue("sequence should increment", after > before)
     }
 
     @Test fun `observeSince after mutation returns changes`() = runBlocking {
         val (obs, _) = newObservation()
-        val cursor = ObservationCursor(obs.diagnostics(s.sessionId)!!.currentSequence)
+        val cursor = ObservationCursor(obs.diagnostics(obs.sessionId)!!.currentSequence)
         obs.onScreenMutation(listOf(TerminalChange.CellsChanged(10, 0, 18, "BUILD SUCCESSFUL")))
-        val batch = obs.observeSince(s.sessionId, cursor).getOrThrow()
+        val batch = obs.observeSince(obs.sessionId, cursor).getOrThrow()
         assertTrue("batch should have changes", batch.changes.isNotEmpty())
         assertTrue(batch.toSequence > cursor.sequence)
     }
@@ -62,50 +62,50 @@ class Observation2Test {
         // Fill batch ring beyond capacity to evict old entries
         for (i in 1..600) obs.onScreenMutation(listOf(TerminalChange.CursorChanged(0, i, true)))
         // Oldest cursor should be > 0 now
-        val diag = obs.diagnostics(s.sessionId)!!
+        val diag = obs.diagnostics(obs.sessionId)!!
         assertTrue("oldest should be > 0 after eviction", diag.oldestSequence > 0)
         assertTrue("some batches should be dropped", diag.droppedBatches > 0)
         // observeSince with cursor 0 should fail (expired)
-        val r = obs.observeSince(s.sessionId, ObservationCursor(0))
+        val r = obs.observeSince(obs.sessionId, ObservationCursor(0))
         assertTrue("cursor 0 should be expired", r.isFailure)
     }
 
     @Test fun `multi-consumer cursors are independent`() = runBlocking {
         val (obs, _) = newObservation()
-        val c1 = obs.registerConsumer(s.sessionId).getOrThrow()
-        val c2 = obs.registerConsumer(s.sessionId).getOrThrow()
+        val c1 = obs.registerConsumer(obs.sessionId).getOrThrow()
+        val c2 = obs.registerConsumer(obs.sessionId).getOrThrow()
         assertNotEquals("consumer IDs should differ", c1.consumerId, c2.consumerId)
         // Mutate
         obs.onScreenMutation(listOf(TerminalChange.CellsChanged(0, 0, 5, "hello")))
         // c1 observes
-        val b1 = obs.observeSince(s.sessionId, c1.cursor).getOrThrow()
+        val b1 = obs.observeSince(obs.sessionId, c1.cursor).getOrThrow()
         assertTrue("c1 should see changes", b1.changes.isNotEmpty())
         // c2 hasn't advanced — still sees same changes
-        val b2 = obs.observeSince(s.sessionId, c2.cursor).getOrThrow()
+        val b2 = obs.observeSince(obs.sessionId, c2.cursor).getOrThrow()
         assertTrue("c2 should also see changes", b2.changes.isNotEmpty())
         // c1 advances
         c1.cursor = ObservationCursor(b1.toSequence)
-        val b1b = obs.observeSince(s.sessionId, c1.cursor).getOrThrow()
+        val b1b = obs.observeSince(obs.sessionId, c1.cursor).getOrThrow()
         assertTrue("c1 after advance should see no new changes", b1b.changes.isEmpty())
     }
 
     @Test fun `unregister removes consumer`() = runBlocking {
         val (obs, _) = newObservation()
-        val c = obs.registerConsumer(s.sessionId).getOrThrow()
-        assertEquals(1, obs.diagnostics(s.sessionId)!!.activeConsumers)
+        val c = obs.registerConsumer(obs.sessionId).getOrThrow()
+        assertEquals(1, obs.diagnostics(obs.sessionId)!!.activeConsumers)
         obs.unregisterConsumer(c.consumerId)
-        assertEquals(0, obs.diagnostics(s.sessionId)!!.activeConsumers)
+        assertEquals(0, obs.diagnostics(obs.sessionId)!!.activeConsumers)
     }
 
     @Test fun `subscribe returns non-null flow`() = runBlocking {
         val (obs, _) = newObservation()
-        val flow = obs.subscribe(s.sessionId)
+        val flow = obs.subscribe(obs.sessionId)
         assertNotNull(flow)
     }
 
     @Test fun `diagnostics returns valid metrics`() = runBlocking {
         val (obs, _) = newObservation()
-        val d = obs.diagnostics(s.sessionId)
+        val d = obs.diagnostics(obs.sessionId)
         assertNotNull(d)
         assertTrue(d!!.currentSequence >= 0)
         assertTrue(d.activeConsumers >= 0)
@@ -114,8 +114,8 @@ class Observation2Test {
 
     @Test fun `snapshot sequence is atomic with screen state`() = runBlocking {
         val (obs, _) = newObservation()
-        val snap1 = obs.snapshot(s.sessionId).getOrThrow()
-        val snap2 = obs.snapshot(s.sessionId).getOrThrow()
+        val snap1 = obs.snapshot(obs.sessionId).getOrThrow()
+        val snap2 = obs.snapshot(obs.sessionId).getOrThrow()
         // Both snapshots should have same or increasing sequence
         assertTrue("sequence should be monotonic", snap2.sequence >= snap1.sequence)
     }
@@ -162,7 +162,7 @@ class Observation2Test {
         for (i in 1..15) {
             obs.onScreenMutation(listOf(TerminalChange.CellsChanged(0, 0, 1, "x")))
         }
-        val d = obs.diagnostics(s.sessionId)!!
+        val d = obs.diagnostics(obs.sessionId)!!
         // With default config (500 batches), all 15 should be retained
         assertEquals(15, d.bufferedBatches)
         assertEquals(0, d.droppedBatches)

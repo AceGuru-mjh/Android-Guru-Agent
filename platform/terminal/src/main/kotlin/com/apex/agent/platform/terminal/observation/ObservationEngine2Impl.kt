@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class ObservationEngine2Impl(
     private val engine: ObservationEngine,
     private val virtualTerminal: VirtualTerminal,
-    private val sessionId: Long,
+    val sessionId: Long,
     private val retentionConfig: TerminalRetentionConfig = TerminalRetentionConfig()
 ) : TerminalObservation {
 

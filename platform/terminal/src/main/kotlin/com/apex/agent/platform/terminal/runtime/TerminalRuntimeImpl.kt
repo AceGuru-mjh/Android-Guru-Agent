@@ -90,8 +90,9 @@ class TerminalRuntimeImpl(
     private val cancellationController = com.apex.agent.platform.terminal.process.JobCancellationController(
         inputManager, timeoutController,
         onCancelled = { sessionId, jobId ->
-            // Job was cancelled by the agent → emit ProcessExited so wait(ProcessExited(jobId))
-            // resolves with a non-RUNNING state (Control Plane contract).
+        // Job was cancelled by the agent → emit ProcessExited so wait(ProcessExited(jobId))
+        // resolves with a non-RUNNING state (Control Plane contract).
+        scope.launch {
             val ev = TerminalEvent.ProcessExited(
                 id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
                 cursor = -1, jobId = jobId, pid = 0,
@@ -99,6 +100,7 @@ class TerminalRuntimeImpl(
             )
             val eid = eventLog.append(ev)
             eventBus.emit(ev.copy(id = eid))
+        }
         }
     )
     internal val sessionManager = SessionManagerImpl(

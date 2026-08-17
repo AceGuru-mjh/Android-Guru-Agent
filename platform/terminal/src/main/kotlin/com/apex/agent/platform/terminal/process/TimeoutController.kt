@@ -78,7 +78,7 @@ class JobCancellationController(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val gracePeriodMs: Long = 5000L,
     /** Called right after SIGTERM is delivered, so the job can be marked terminal. */
-    private val onCancelled: (sessionId: Long, jobId: Long) -> Unit = {},
+    private val onCancelled: (sessionId: Long, jobId: Long) -> Unit = { _, _ -> },
 ) {
     /**
      * Cancel a job: SIGTERM → grace → SIGKILL.

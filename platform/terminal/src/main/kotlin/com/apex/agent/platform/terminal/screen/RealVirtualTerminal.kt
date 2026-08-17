@@ -44,4 +44,14 @@ class RealVirtualTerminal(
     override val alternateScreen: Boolean get() = core.snapshot().alternateScreen
     override val rows: Int get() = core.snapshot().rows
     override val cols: Int get() = core.snapshot().cols
+
+    /**
+     * Last visible (cursor) line as plain text — for InputWaiting heuristic (Spec §29).
+     * Mirrors the old VT100Emulator.lastVisibleLine() semantics: the cursor row, trimmed.
+     */
+    fun lastVisibleLine(): String {
+        val s = core.snapshot()
+        val lines = s.renderedText.split('\n')
+        return lines.getOrElse(s.cursorRow) { "" }.trimEnd()
+    }
 }

@@ -1,6 +1,8 @@
 package com.apex.agent.platform.terminal.ubuntu
 
 import com.apex.agent.platform.terminal.linux.*
+import com.apex.agent.platform.terminal.proot.PRootRuntime
+import com.apex.agent.platform.terminal.proot.RootfsValidation
 import com.apex.agent.platform.terminal.runtime.RuntimeType
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -312,6 +314,6 @@ class FakePRootBinaryProvider : com.apex.agent.platform.terminal.proot.PRootBina
 }
 
 class FakeRootfsValidator : com.apex.agent.platform.terminal.proot.RootfsValidator {
-    override suspend fun validate(rootfs: RootfsDescriptor): Result<RootfsValidation> =
-        Result.success(RootfsValidation(true, true, true, true, true, true, true, emptyList()))
+    override suspend fun validate(rootfs: RootfsDescriptor): Result<com.apex.agent.platform.terminal.proot.RootfsValidation> =
+        Result.success(com.apex.agent.platform.terminal.proot.RootfsValidation(true, true, true, true, true, true, true, emptyList()))
 }

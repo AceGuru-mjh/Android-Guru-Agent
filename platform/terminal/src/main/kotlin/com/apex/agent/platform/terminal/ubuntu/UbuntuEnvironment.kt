@@ -80,10 +80,10 @@ data class AtomicInstallConfig(
 
 // ─── Section 10: Installation Lock ───
 class InstallationLock {
-    private val lock = java.util.concurrent.locks.ReentrantLock()
-    fun tryAcquire(): Boolean = lock.tryLock()
-    fun release() { if (lock.isHeldByCurrentThread) lock.unlock() }
-    val isLocked: Boolean get() = lock.isLocked
+    private val locked = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun tryAcquire(): Boolean = locked.compareAndSet(false, true)
+    fun release() { locked.set(false) }
+    val isLocked: Boolean get() = locked.get()
 }
 
 // ─── Section 33: Storage Preflight ───

@@ -55,7 +55,7 @@ interface LinuxRuntime : TerminalRuntimeContext {
     fun filesystem(): LinuxFilesystem
     fun processProvider(): LinuxProcessProvider
     override fun shellProvider(): ShellProvider
-    fun environment(): LinuxEnvironment
+    override fun environment(): LinuxEnvironment
     fun ptyProvider(): LinuxPtyProvider
     fun runtimeInfo(): LinuxRuntimeInfo
     fun supports(capability: LinuxCapability): Boolean

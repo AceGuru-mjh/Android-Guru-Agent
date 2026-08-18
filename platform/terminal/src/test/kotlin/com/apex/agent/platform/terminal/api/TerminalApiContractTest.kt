@@ -119,7 +119,7 @@ class TerminalApiContractTest {
     }
 
     // ─── §22: API Version ───
-    @Test fun `API version is 1.0`() {
+    @Test fun `API version is 1-0`() {
         assertEquals(1, TerminalApiVersion.MAJOR)
         assertEquals(0, TerminalApiVersion.MINOR)
         assertEquals("1.0", TerminalApiVersion.versionString)
@@ -155,7 +155,7 @@ class TerminalApiContractTest {
     }
 
     // ─── §17: EnvironmentSpec ───
-    @Test fun `EnvironmentSpec supports inherit/override/remove`() {
+    @Test fun `EnvironmentSpec supports inherit-override-remove`() {
         val env = EnvironmentSpec(
             inheritParent = true,
             overrides = mapOf("PATH" to "/custom"),

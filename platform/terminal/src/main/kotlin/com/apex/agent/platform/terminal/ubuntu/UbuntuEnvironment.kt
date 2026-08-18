@@ -64,8 +64,8 @@ interface LinuxDistributionProvider {
 enum class UbuntuRootfsState {
     UNKNOWN, AVAILABLE, DOWNLOADING, VERIFYING, INSTALLING,
     READY, DOWNLOAD_FAILED, VERIFY_FAILED, INSTALL_FAILED,
-    CORRUPTED, REMOVING, REMOVED
-} {
+    CORRUPTED, REMOVING, REMOVED;
+
     val isTerminal: Boolean get() = this in setOf(REMOVED, DOWNLOAD_FAILED, VERIFY_FAILED, INSTALL_FAILED, CORRUPTED)
     val isUsable: Boolean get() = this == READY
 }

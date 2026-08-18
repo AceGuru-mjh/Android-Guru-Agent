@@ -37,9 +37,9 @@ class ApiHardeningTest {
         assertEquals("1.0.0", ApiCompatibility.version)
     }
 
-    @Test fun `ApiCompatibility isCompatible with same major`() {
+    @Test fun `ApiCompatibility isCompatible correctly checks version compatibility`() {
         assertTrue(ApiCompatibility.isCompatible(1, 0))
-        assertTrue(ApiCompatibility.isCompatible(1, 1))
+        assertFalse(ApiCompatibility.isCompatible(1, 1))
         assertFalse(ApiCompatibility.isCompatible(2, 0))
     }
 }

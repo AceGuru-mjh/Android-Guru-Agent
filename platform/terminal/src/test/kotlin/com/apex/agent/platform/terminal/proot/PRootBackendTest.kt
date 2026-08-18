@@ -28,7 +28,7 @@ class PRootCommandBuilderTest {
         assertTrue(cmd.arguments.contains("-r"))
         assertTrue(cmd.arguments.contains("/data/rootfs"))
         assertTrue(cmd.arguments.contains("bash"))
-        assertTrue(cmd.arguments.contains("echo"))
+        assertTrue(cmd.arguments.contains("echo hello"))
     }
 
     @Test fun `builds with fakeRoot flag`() {

@@ -33,7 +33,7 @@ class ApiHardeningTest {
         assertNull(policy.sessionTimeoutMs)
     }
 
-    @Test fun `ApiCompatibility version is 1.0.0`() {
+    @Test fun `ApiCompatibility version is 1-0-0`() {
         assertEquals("1.0.0", ApiCompatibility.version)
     }
 

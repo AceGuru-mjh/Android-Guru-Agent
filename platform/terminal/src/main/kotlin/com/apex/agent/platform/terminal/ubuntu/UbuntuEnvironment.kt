@@ -35,7 +35,7 @@ data class DistributionManifest(
     val installedSize: Long?,
     val sha256: String,
     val source: RootfsSource = RootfsSource.OFFICIAL,
-    val createdAt: Long?,
+    val createdAt: Long? = null,
     val metadataVersion: Int = 1
 )
 

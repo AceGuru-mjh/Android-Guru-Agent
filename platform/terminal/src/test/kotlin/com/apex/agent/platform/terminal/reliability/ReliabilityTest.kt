@@ -202,8 +202,8 @@ class RecoveryCoordinatorTest {
         val limiter = RecoveryAttemptLimiter(maxRecoveryAttempts = 2, resetWindowMs = 60000)
         val c = RecoveryCoordinator(stormLimiter = limiter)
         // First 2 recoveries OK
-        c.tryStartRecovery(1, TerminalFailure.IoFailure(1, 1, "w", null))?.let { c.markSucceeded(it) }
-        c.tryStartRecovery(1, TerminalFailure.IoFailure(1, 1, "w", null))?.let { c.markSucceeded(it) }
+        c.tryStartRecovery(1, TerminalFailure.IoFailure(1, 1, "w", null))?.let { c.markFailed(it, "fail") }
+        c.tryStartRecovery(1, TerminalFailure.IoFailure(1, 1, "w", null))?.let { c.markFailed(it, "fail") }
         // 3rd should be storm-blocked
         val blocked = c.tryStartRecovery(1, TerminalFailure.IoFailure(1, 1, "w", null))
         assertNull("storm should block 3rd recovery", blocked)

@@ -280,7 +280,7 @@ class PRootRuntime(
         }
         _state = RuntimeState.READY
         _health = RuntimeHealth.HEALTHY
-        Result.success(Unit)
+        return Result.success(Unit)
     }
 
     override suspend fun shutdown(force: Boolean): Result<Unit> {
@@ -308,6 +308,13 @@ class PRootRuntime(
         override fun shell() = ShellInfo("/bin/sh", "sh", null)
         override fun pathEntries() = listOf(WorkspacePath("workspace:/usr/bin"), WorkspacePath("workspace:/bin"))
         override fun path(): String? = "/proot/path"
+        override fun get(name: String): String? = when (name) {
+            "HOME" -> "/home/root"
+            "PATH" -> "/usr/local/bin:/usr/bin:/bin"
+            "SHELL" -> "/bin/sh"
+            else -> null
+        }
+        override fun snapshot(): Map<String, String> = mapOf("HOME" to "/home/root", "PATH" to "/usr/local/bin:/usr/bin:/bin", "SHELL" to "/bin/sh")
     }
     override fun environment(): LinuxEnvironment = fakeEnv
     override fun shellProvider(): ShellProvider = object : ShellProvider {

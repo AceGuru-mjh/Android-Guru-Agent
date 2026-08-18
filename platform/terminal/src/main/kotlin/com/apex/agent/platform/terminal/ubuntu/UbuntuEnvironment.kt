@@ -202,7 +202,7 @@ class UbuntuRuntime(
 
 // ─── Section 3: Ubuntu Distribution Provider ───
 class UbuntuDistributionProvider(
-    private val rootfsValidator: RootfsValidator = FakeRootfsValidator(),
+    private val rootfsValidator: com.apex.agent.platform.terminal.proot.RootfsValidator? = null,
     private val storagePreflight: StoragePreflight? = null,
     private val installLock: InstallationLock = InstallationLock()
 ) : LinuxDistributionProvider {
@@ -262,7 +262,17 @@ class UbuntuDistributionProvider(
     }
 
     override suspend fun verify(rootfs: RootfsDescriptor): Result<RootfsVerification> {
-        return rootfsValidator.validate(rootfs)
+        val validator = rootfsValidator ?: return Result.success(
+            RootfsVerification(valid = true, state = com.apex.agent.platform.terminal.linux.RootfsState.AVAILABLE, issues = emptyList())
+        )
+        val validation = validator.validate(rootfs).getOrElse { return Result.failure(it) }
+        return Result.success(
+            RootfsVerification(
+                valid = validation.valid,
+                state = if (validation.valid) com.apex.agent.platform.terminal.linux.RootfsState.AVAILABLE else com.apex.agent.platform.terminal.linux.RootfsState.INVALID,
+                issues = validation.errors.map { it.name }
+            )
+        )
     }
 }
 

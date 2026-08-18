@@ -183,7 +183,7 @@ class RecoveryCoordinatorTest {
         assertEquals(1, c.getMetrics().recoveryFailures)
     }
 
-    @Test fun `abort clears active recovery (shutdown/recovery mutex)`() {
+    @Test fun `abort clears active recovery (shutdown-recovery mutex)`() {
         val c = newCoordinator()
         val ctx = c.tryStartRecovery(1, TerminalFailure.PtyFailure(1, 1, "read", null))!!
         c.abort(1, "session closed during recovery")

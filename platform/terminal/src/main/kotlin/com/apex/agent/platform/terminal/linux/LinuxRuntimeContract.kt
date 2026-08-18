@@ -76,14 +76,12 @@ data class LinuxUser(
 )
 
 // ─── Section 8: Linux Environment ───
-interface LinuxEnvironment {
+interface LinuxEnvironment : com.apex.agent.platform.terminal.runtime.RuntimeEnvironment {
     fun user(): LinuxUser
     fun homeDirectory(): WorkspacePath
     fun workingDirectory(): WorkspacePath
     fun shell(): ShellInfo
     fun pathEntries(): List<WorkspacePath>
-    fun get(name: String): String?
-    fun snapshot(): Map<String, String>
 }
 
 // ─── Section 11: Filesystem Capabilities ───

@@ -80,6 +80,7 @@ class FakeLinuxRuntime(
 }
 
 class FakeLinuxEnvironment : LinuxEnvironment {
+    override fun path(): String? = "/fake/path"
     override fun user(): LinuxUser = LinuxUser(
         uid = 1000, gid = 1000, username = "agent",
         home = WorkspacePath.home(), isRoot = false

@@ -69,7 +69,7 @@ class DefaultEnvironmentResolver : EnvironmentResolver {
             // §20: ENV: marker → emit a SetEnvironmentVariable action.
             // (Used by the JDK profile for JAVA_HOME.)
             if (req.packages.isEmpty() && req.detection.command.startsWith(ENV_PREFIX)) {
-                parseEnvAction(req.detection.command)?.let(actions.add(it))
+                parseEnvAction(req.detection.command)?.let { actions.add(it) }
                 continue
             }
 

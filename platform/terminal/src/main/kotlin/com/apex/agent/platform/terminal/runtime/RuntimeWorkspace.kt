@@ -19,7 +19,7 @@ enum class RuntimeType { ANDROID, TERMUX, LINUX, PROOT, CONTAINER, CUSTOM }
 @JvmInline value class RuntimeId(val value: String)
 
 // ─── Section 1: Terminal Runtime ───
-interface TerminalRuntime {
+interface TerminalRuntimeContext {
     val id: RuntimeId
     val type: RuntimeType
     val state: RuntimeState
@@ -78,9 +78,9 @@ data class ShellInfo(val path: String, val name: String, val version: String? = 
 
 // ─── Section 16: Runtime Manager ───
 interface RuntimeManager {
-    fun get(id: RuntimeId): TerminalRuntime?
+    fun get(id: RuntimeId): TerminalRuntimeContext?
     fun list(): List<RuntimeSnapshot>
-    suspend fun create(request: RuntimeRequest): Result<TerminalRuntime>
+    suspend fun create(request: RuntimeRequest): Result<TerminalRuntimeContext>
     suspend fun destroy(id: RuntimeId, force: Boolean = false): Result<Unit>
 }
 

@@ -23,12 +23,10 @@ object LlmModule {
 
     @Provides
     @Singleton
-    fun provideLlmClient(config: LlmConfig): LlmClient {
-        if (!config.isValid) {
-            // 返回一个占位客户端（未配置时）
-            return NoOpLlmClient()
-        }
-        return LlmClientFactory.create(config)
+    fun provideLlmClient(repo: SettingsRepository): LlmClient {
+        // 动态委托：设置页/对话页"小大脑"菜单修改默认模型或采样参数后即时生效，
+        // 无需重启 App（内部按 profiles/providers 变化重建真实 client）。
+        return DynamicLlmClient(repo)
     }
 }
 

@@ -100,6 +100,17 @@ class ApexAgentEngine(
         config = newConfig
     }
 
+    /** 当前生效的 [AgentConfig]（供 UI 层做 read-modify-write）。 */
+    fun currentConfig(): AgentConfig = config
+
+    /**
+     * 读-改-写式更新配置：保留未触及字段，避免 [updateConfig] 全量替换时
+     * 把 maxIterations / maxContextTokens / temperature 等字段重置回默认值。
+     */
+    fun patchConfig(transform: (AgentConfig) -> AgentConfig) {
+        config = transform(config)
+    }
+
     /**
      * 清空对话历史并清空持久化记忆（开新会话）。
      */
@@ -527,7 +538,10 @@ class ApexAgentEngine(
             }
 
             val messages = buildMessages()
-            val tools = toolRegistry.getToolDefinitions()
+            // 「函数调用」白名单：仅向模型暴露用户圈选的工具子集（null = 全部）
+            val tools = toolRegistry.getToolDefinitions().let { defs ->
+                config.enabledToolIds?.let { whitelist -> defs.filter { it.name in whitelist } } ?: defs
+            }
 
             val contentBuilder = StringBuilder()
             val toolCallsAccumulator = mutableMapOf<String, ToolCallAccumulator>()
@@ -871,10 +885,14 @@ class ApexAgentEngine(
                 appendLine("## Thinking Instructions")
                 appendLine(thinking)
             }
+            // 「函数调用」白名单：system prompt 工具清单与实际下发的 ToolDefinition 保持一致
+            val visibleTools = toolRegistry.getAllTools().let { all ->
+                config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
+            }
             appendLine()
-            appendLine("## Available Tools (${toolRegistry.getAllTools().size})")
+            appendLine("## Available Tools (${visibleTools.size})")
             // 动态读取当前注册的工具，不硬编码
-            toolRegistry.getAllTools().forEach { tool ->
+            visibleTools.forEach { tool ->
                 val firstLine = tool.description
                     .lineSequence()
                     .firstOrNull()
@@ -893,6 +911,14 @@ class ApexAgentEngine(
                     appendLine(prompt)
                     appendLine()
                 }
+            }
+
+            // 会话级动态上下文（当前时间 / 用户规则 / 结构化输出 / 联网搜索指令等），
+            // 由 UI 层在每次发送前组装，任意模式下生效。
+            if (config.additionalSystemContext.isNotBlank()) {
+                appendLine()
+                appendLine("## Session Context")
+                appendLine(config.additionalSystemContext.trim())
             }
             appendLine()
             appendLine("## File Operation Strategy")

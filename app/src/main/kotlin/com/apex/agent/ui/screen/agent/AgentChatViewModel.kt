@@ -9,13 +9,18 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
-import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.core.llm.ImageContent
+import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.ReasoningEffort
+import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.slash.SlashCommandParser
 import com.apex.agent.slash.SlashCommandRouter
 import com.apex.agent.slash.SlashRouteContext
+import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
+import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -201,6 +206,9 @@ class AgentChatViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
     private val userQuestionBridge: UserQuestionBridge,
+    private val settingsRepository: SettingsRepository,
+    private val chatToolkit: ChatToolkitStore,
+    private val toolRegistry: ToolRegistry,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -497,6 +505,16 @@ class AgentChatViewModel @Inject constructor(
             images = imageContents.take(3),
             files = fileRefs
         )
+
+        // ═══ "小圆环"工具菜单：发送前注入会话上下文 + 收窄工具白名单 ═══
+        // 时间注入在调用时刻生成；规则/结构化输出/网络搜索指令组装为
+        // "## Session Context" 段落；函数调用圈选则只向模型暴露白名单工具。
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+            cfg.copy(
+                additionalSystemContext = chatToolkit.buildSessionContext(),
+                enabledToolIds = chatToolkit.effectiveToolWhitelist()
+            )
+        }
 
         agentEngine.execute(userInput).collect { event ->
             handleEvent(event)
@@ -901,6 +919,62 @@ class AgentChatViewModel @Inject constructor(
             .apply()
         _uiState.update { it.copy(reasoningEffort = effort) }
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // "小大脑"智能菜单：模型切换 + 采样参数调节 + 配置跳转
+    // ═══════════════════════════════════════════════════════════
+
+    /** 当前选中的模型 Profile id（跟随默认 Profile，UI 只读）。 */
+    val currentProfileId: StateFlow<String?> =
+        settingsRepository.profiles.map { list ->
+            list.firstOrNull { it.isDefault }?.id
+                ?: list.firstOrNull()?.id
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** 全部模型 Profile（菜单列表数据源）。 */
+    val profiles: StateFlow<List<ModelProfile>> = settingsRepository.profiles
+
+    /** 全部 Provider（用于模型列表展示 Provider 名）。 */
+    val providers: StateFlow<List<ProviderConfig>> = settingsRepository.providers
+
+    /**
+     * 切换当前模型：把该 Profile 设为默认 + 同步角色映射 + 引擎温度，
+     * 运行中的 LLM client 由 DynamicLlmClient 自动重建（即时生效）。
+     */
+    fun selectProfile(profileId: String) {
+        val target = settingsRepository.getProfile(profileId) ?: return
+        settingsRepository.setDefaultProfile(profileId)
+        settingsRepository.updateRoles { it.copy(primaryProfileId = profileId) }
+        // 引擎侧仅同步温度（temperature 是 Agent 引擎 chat 调用的入参）
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+            cfg.copy(temperature = target.temperature)
+        }
+    }
+
+    /**
+     * 更新当前模型的采样参数（Temperature / Top-P / Max Tokens）。
+     * 写入 Profile（持久化）后由 DynamicLlmClient 即时生效。
+     */
+    fun updateModelParams(temperature: Float, topP: Float, maxTokens: Int) {
+        val cur = settingsRepository.getProfile(currentProfileId.value ?: return) ?: return
+        settingsRepository.upsertProfile(
+            cur.copy(
+                temperature = temperature,
+                topP = topP,
+                maxOutputTokens = maxTokens
+            )
+        )
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+            cfg.copy(temperature = temperature)
+        }
+    }
+
+    /** 函数调用二级菜单候选：全部已注册工具（id + 显示名）。 */
+    fun availableTools(): List<Pair<String, String>> =
+        toolRegistry.getAllTools().map { it.id to it.name }.sortedBy { it.first }
+
+    /** "小圆环"工具菜单状态仓库（UI 直接读写开关/规则/格式）。 */
+    val toolkitStore: ChatToolkitStore = chatToolkit
 
     // ═══════════════════════════════════════════════════════════
     // 附件处理（缺陷 1 修复：全部异步化）

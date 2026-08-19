@@ -149,7 +149,11 @@ fun ApexRoot() {
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     when (currentDestination) {
-                        DrawerDestination.Agent -> AgentChatScreen()
+                        DrawerDestination.Agent -> AgentChatScreen(
+                            // "小大脑"菜单 → 配置模型：跳转设置页模型配置区
+                            // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
+                            onOpenSettings = { currentDestination = DrawerDestination.Settings }
+                        )
                         DrawerDestination.Terminal -> TerminalScreen()
                         DrawerDestination.Skill -> SkillScreen()
                         DrawerDestination.Memory -> MemoryScreen()

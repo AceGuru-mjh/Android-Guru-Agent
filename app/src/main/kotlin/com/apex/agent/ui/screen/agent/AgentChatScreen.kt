@@ -128,13 +128,15 @@ import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel()
+    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel(),
+    onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
@@ -143,6 +145,22 @@ fun AgentChatScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scrollScope = rememberCoroutineScope()
+
+    // ═══ "小大脑" + "小圆环"菜单状态收集 ═══
+    val toolkit = viewModel.toolkitStore
+    val webSearchEnabled by toolkit.webSearchEnabled.collectAsStateWithLifecycle()
+    val timeEnabled by toolkit.timeEnabled.collectAsStateWithLifecycle()
+    val selectedFunctionIds by toolkit.selectedFunctionIds.collectAsStateWithLifecycle()
+    val outputFormat by toolkit.outputFormat.collectAsStateWithLifecycle()
+    val customSchema by toolkit.customSchema.collectAsStateWithLifecycle()
+    val rules by toolkit.rules.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
+    // 函数调用二级菜单候选工具（注册表快照，静态即可）
+    val availableTools = remember {
+        viewModel.availableTools().map { ToolRef(it.first, it.second) }
+    }
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
@@ -370,6 +388,21 @@ fun AgentChatScreen(
                     onRemove = { index -> viewModel.removeAttachment(index) }
                 )
 
+                // ═══ "小圆环"工具菜单状态标签行（可单独关闭）═══
+                ToolkitChipsRow(
+                    webSearchEnabled = webSearchEnabled,
+                    timeEnabled = timeEnabled,
+                    selectedFunctionIds = selectedFunctionIds,
+                    toolNameOf = { id -> availableTools.firstOrNull { it.id == id }?.name ?: id },
+                    outputFormat = outputFormat,
+                    enabledRulesCount = rules.count { it.enabled },
+                    onCloseWebSearch = { toolkit.setWebSearchEnabled(false) },
+                    onCloseTime = { toolkit.setTimeEnabled(false) },
+                    onRemoveFunction = { toolkit.toggleFunction(it) },
+                    onCloseFormat = { toolkit.setOutputFormat(OutputFormat.NONE) },
+                    onDisableAllRules = { rules.filter { it.enabled }.forEach { r -> toolkit.setRuleEnabled(r.id, false) } }
+                )
+
                 // 模型原生思考强度 chip
                 ReasoningEffortRow(
                     current = uiState.reasoningEffort,
@@ -381,6 +414,26 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // ═══ 迷你小圆环：工具菜单（搜索/时间/函数/结构化输出/规则）═══
+                    ToolkitRingButton(
+                        webSearchEnabled = webSearchEnabled,
+                        timeEnabled = timeEnabled,
+                        selectedFunctionIds = selectedFunctionIds,
+                        availableTools = availableTools,
+                        outputFormat = outputFormat,
+                        customSchema = customSchema,
+                        rules = rules,
+                        onToggleWebSearch = { toolkit.setWebSearchEnabled(it) },
+                        onToggleTime = { toolkit.setTimeEnabled(it) },
+                        onToggleFunction = { toolkit.toggleFunction(it) },
+                        onSelectFormat = { toolkit.setOutputFormat(it) },
+                        onSetCustomSchema = { toolkit.setCustomSchema(it) },
+                        onUpsertRule = { toolkit.upsertRule(it) },
+                        onDeleteRule = { toolkit.deleteRule(it) },
+                        onToggleRule = { id, enabled -> toolkit.setRuleEnabled(id, enabled) },
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+
                     // ═══ / 斜杠指令按钮 ═══
                     SlashCommandButton(
                         slashMenuProvider = slashMenuProvider,
@@ -415,6 +468,19 @@ fun AgentChatScreen(
                         onImageSelected = { uri ->
                             viewModel.attachImage(uri)
                         },
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+
+                    // ═══ 小大脑：模型切换 + 参数调节 + 配置跳转 ═══
+                    BrainMenuButton(
+                        profiles = profiles,
+                        currentProfileId = currentProfileId ?: "",
+                        providerNameOf = { providerId ->
+                            providers.firstOrNull { it.id == providerId }?.displayName ?: "未知 Provider"
+                        },
+                        onSelectProfile = { viewModel.selectProfile(it) },
+                        onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
+                        onConfigure = onOpenSettings,
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
 

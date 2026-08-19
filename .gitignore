@@ -114,6 +114,8 @@ commit_msg.txt
 /runstatus.txt
 /submit_pr.cmd
 /.codebuddy/plans/
+# CodeBuddy local data (keep on local machine, do not upload to GitHub)
+.codebuddy/
 
 # Misc
 *.swp

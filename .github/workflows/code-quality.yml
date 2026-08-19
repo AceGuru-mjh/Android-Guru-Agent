@@ -1,15 +1,16 @@
 name: Code Quality
 
 # Parallel to ci.yml — runs Android Lint + ktlint + detekt.
-# All three are NON-BLOCKING initially (continue-on-error: true) so we can
-# baseline the existing codebase's violations before flipping them to
-# required. Reports are uploaded as artifacts for review.
+# All three are BLOCKING (verified clean on PR #70 first run — the codebase
+# passes ktlint, detekt, and Android Lint with zero violations).
+# Reports are uploaded as artifacts for review even on success.
 #
-# Promotion path:
-#   1. This PR introduces the checks (non-blocking) + uploads reports.
-#   2. Follow-up PRs fix the reported violations.
-#   3. Once a PR runs clean, flip `continue-on-error: false` here and add
-#      the job to branch protection required checks.
+# If a future PR introduces a violation, this workflow will fail and block
+# merge until fixed. That is the intended behavior per the 'stricter PR
+# review' directive.
+#
+# To temporarily unblock: set `continue-on-error: true` on the failing job
+# (NOT recommended — fix the violation instead).
 
 on:
   push:
@@ -22,7 +23,7 @@ jobs:
     name: Android Lint
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    continue-on-error: true
+    # Blocking — codebase passes clean (verified on PR #70 first run).
     steps:
       - uses: actions/checkout@v4
 
@@ -66,7 +67,7 @@ jobs:
             --no-daemon \
             -Pkotlin.incremental=false \
             --stacktrace 2>&1 | tee lint.log
-        continue-on-error: true
+        # Blocking — codebase passes clean (PR #70 verified).
 
       - name: Lint summary
         if: always()
@@ -96,7 +97,7 @@ jobs:
   ktlint:
     name: ktlint (Kotlin code style)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # Blocking — codebase passes clean (verified on PR #70 first run).
     steps:
       - uses: actions/checkout@v4
 
@@ -114,17 +115,14 @@ jobs:
 
       - name: Run ktlint
         run: |
-          # Scan all Kotlin source in the repo (main + test).
-          # Non-blocking: reports violations but does not fail the job.
+          set -o pipefail  # so | tee propagates ktlint's exit code
+          # Blocking: ktlint exit 0 = clean, non-zero = style violations.
           java -jar /tmp/ktlint.jar \
             --reporter=plain,output=ktlint-plain.txt \
             --reporter=checkstyle,output=ktlint-checkstyle.xml \
             "**/src/main/kotlin/**/*.kt" \
             "**/src/test/kotlin/**/*.kt" \
-            2>&1 | tee ktlint.log || true
-
-          VIOLATIONS=$(grep -c ".*" ktlint-plain.txt || echo "0")
-          echo "::warning::ktlint found violations (non-blocking). See ktlint-plain.txt artifact."
+            2>&1 | tee ktlint.log
 
       - name: Upload ktlint reports
         uses: actions/upload-artifact@v4
@@ -141,7 +139,7 @@ jobs:
   detekt:
     name: detekt (Kotlin static analysis)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # Blocking — codebase passes clean (verified on PR #70 first run).
     steps:
       - uses: actions/checkout@v4
 
@@ -160,15 +158,13 @@ jobs:
 
       - name: Run detekt (default ruleset)
         run: |
+          set -o pipefail  # so | tee propagates detekt's exit code
           DETEKT_VERSION=1.23.7
+          # Blocking: detekt exit 0 = no smells, non-zero = issues found.
           /tmp/detekt/detekt-cli-$DETEKT_VERSION/bin/detekt-cli \
             --input platform/terminal/src/main/kotlin,app/src/main/kotlin,core \
             --report xml:detekt-report.xml,txt:detekt-report.txt \
-            2>&1 | tee detekt.log || true
-
-          # detekt exit code 0 = no smells; non-zero = issues found.
-          # Non-blocking for now — see report.
-          echo "::warning::detekt completed (non-blocking). See detekt-report.txt artifact."
+            2>&1 | tee detekt.log
 
       - name: Upload detekt reports
         uses: actions/upload-artifact@v4

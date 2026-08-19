@@ -1,0 +1,14 @@
+# Code owners — GitHub auto-requests review from these on PRs touching the paths.
+# Single owner for now; expand to team reviewers as the project grows.
+
+*                           @AceGuru-mjh
+
+# Terminal Runtime (ATR) — the core subsystem, needs careful review.
+/platform/terminal/         @AceGuru-mjh
+/app/src/main/kotlin/com/apex/agent/platform/terminal/  @AceGuru-mjh
+
+# CI / build config — gates everything else.
+/.github/                   @AceGuru-mjh
+/build.gradle.kts           @AceGuru-mjh
+/settings.gradle.kts        @AceGuru-mjh
+/gradle/                    @AceGuru-mjh

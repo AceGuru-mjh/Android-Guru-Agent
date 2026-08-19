@@ -88,20 +88,38 @@ class DefaultEnvironmentResolver : EnvironmentResolver {
                         if (constraint == null) {
                             satisfied.add(cap)
                         } else {
-                            val actualVersion = snapshot.toolVersion(req.detection.command)
-                            if (actualVersion == null) {
-                                // Tool exists but version unknown — treat as
-                                // missing (conservative) to force a re-install
-                                // path; provisioner will short-circuit if pkg
-                                // already present.
-                                missing.add(cap)
-                                addPackagesOnce(packages, req.packages)
-                            } else if (constraint.satisfies(actualVersion)) {
-                                satisfied.add(cap)
-                            } else {
-                                incompatible.add(cap)
-                                missing.add(cap)
-                                addPackagesOnce(packages, req.packages)
+                            // §11: the version constraint applies to the detected
+                            // tool's PRIMARY capability (ToolRecord.capability),
+                            // NOT to sibling capabilities installed alongside it.
+                            // E.g. PYTHON_PIP is present if python3 is present;
+                            // pip itself has no version constraint, so a too-old
+                            // python3 marks PYTHON_RUNTIME incompatible but leaves
+                            // PYTHON_PIP satisfied.
+                            val toolRecord = snapshot.tools[req.detection.command]
+                            val isVersionedCapability =
+                                toolRecord != null && toolRecord.capability == cap
+                            val actualVersion = toolRecord?.version
+                            when {
+                                !isVersionedCapability -> {
+                                    // This capability rides along with the detected
+                                    // tool but is not itself version-constrained.
+                                    // State READY suffices.
+                                    satisfied.add(cap)
+                                }
+                                actualVersion == null -> {
+                                    // The versioned tool exists but its version is
+                                    // unknown. Conservative: treat as missing to
+                                    // force re-detect; provisioner short-circuits
+                                    // if the package is already present.
+                                    missing.add(cap)
+                                    addPackagesOnce(packages, req.packages)
+                                }
+                                constraint.satisfies(actualVersion) -> satisfied.add(cap)
+                                else -> {
+                                    incompatible.add(cap)
+                                    missing.add(cap)
+                                    addPackagesOnce(packages, req.packages)
+                                }
                             }
                         }
                     }

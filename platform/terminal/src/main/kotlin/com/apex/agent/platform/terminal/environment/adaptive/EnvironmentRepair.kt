@@ -161,7 +161,7 @@ class EnvironmentRepairPlanner {
 data class CapabilityProvenance(
     val capability: DeveloperCapability,
     val source: DependencySource,
-    val package: String?,
+    val packageName: String?,
     val version: String?,
     val installedBy: String,
     val workspace: String

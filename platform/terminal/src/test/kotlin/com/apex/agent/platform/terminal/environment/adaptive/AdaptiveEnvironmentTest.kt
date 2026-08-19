@@ -1285,7 +1285,7 @@ class ProvenanceStoreTest {
         val p = CapabilityProvenance(
             capability = DeveloperCapability.CMAKE,
             source = DependencySource.APT,
-            package = "cmake",
+            packageName = "cmake",
             version = "3.27",
             installedBy = "EnvironmentProvisioner",
             workspace = "ws-1"

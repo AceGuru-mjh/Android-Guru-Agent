@@ -92,7 +92,8 @@ fun ApexRoot() {
                 onDestinationSelected = { dest ->
                     currentDestination = dest
                     scope.launch { drawerState.close() }
-                }
+                },
+                tokenManager = agentVm.githubTokenManager
             )
         }
     ) {

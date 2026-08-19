@@ -286,7 +286,7 @@ class ProjectEnvironmentAnalyzerTest {
         // Python profile contributes ONE requirement (python3) despite
         // three matching markers.
         assertEquals(1, analysis.requirements.size)
-        assertEquals(ProfileIds.PYTHON, analysis.requirements.first().id)
+        assertEquals("python3", analysis.requirements.first().id)  // requirement id, not profile id
     }
 }
 

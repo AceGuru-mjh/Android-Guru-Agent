@@ -117,6 +117,7 @@ class PRootRuntimeIntegrationTest {
         assertTrue("initialize should succeed: ${result.exceptionOrNull()?.message}", result.isSuccess)
         assertEquals(RuntimeState.READY, rt.state)
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     @Test fun `PRoot runtime spawns real process and captures echo output`() = runBlocking {
@@ -152,6 +153,7 @@ class PRootRuntimeIntegrationTest {
         assertEquals("exit code should be 0", 0, exitInfo.exitCode)
         assertEquals("proot-runtime-p68-integration", stdout)
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     @Test fun `PRoot runtime captures nonzero exit code`() = runBlocking {
@@ -173,6 +175,7 @@ class PRootRuntimeIntegrationTest {
         val exitInfo = handle.await().getOrThrow()
         assertEquals(42, exitInfo.exitCode)
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     @Test fun `PRoot runtime filesystem checks real rootfs`() = runBlocking {
@@ -188,6 +191,7 @@ class PRootRuntimeIntegrationTest {
         // /bin should exist on the host rootfs
         assertTrue("/bin should exist", fs.exists(com.apex.agent.platform.terminal.workspace.WorkspacePath("workspace:/bin")))
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     @Test fun `PRoot runtime shellProvider finds real shell`() = runBlocking {
@@ -204,6 +208,7 @@ class PRootRuntimeIntegrationTest {
         // On CI, /bin/sh exists (and /bin/bash may too)
         assertTrue(shell.name == "sh" || shell.name == "bash")
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     @Test fun `PRoot runtime terminates a long-running process`() = runBlocking {
@@ -233,6 +238,7 @@ class PRootRuntimeIntegrationTest {
         // Force-terminated processes have nonzero exit (signal)
         assertTrue("terminated process should have nonzero exit or signal", exitInfo.exitCode != 0 || exitInfo.signal != null)
         rt.shutdown()
+        Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
 
     /** A rootfs validator that accepts anything (for integration tests). */

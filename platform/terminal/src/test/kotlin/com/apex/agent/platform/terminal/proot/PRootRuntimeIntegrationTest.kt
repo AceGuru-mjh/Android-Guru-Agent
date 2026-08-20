@@ -149,7 +149,7 @@ class PRootRuntimeIntegrationTest {
     }
 
     @Test fun `PRoot runtime spawns real process and captures echo output`() = runBlocking {
-        assumeTrue("proot must be installed for integration test", prootAvailable())
+        assumeTrue("proot must be able to EXECUTE (ptrace-enabled runner required — GitHub Actions ubuntu-24.04 restricts ptrace)", prootCanRun())
         val rt = PRootRuntime(
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
@@ -181,7 +181,7 @@ class PRootRuntimeIntegrationTest {
     }
 
     @Test fun `PRoot runtime captures nonzero exit code`() = runBlocking {
-        assumeTrue("proot must be installed for integration test", prootAvailable())
+        assumeTrue("proot must be able to EXECUTE (ptrace-enabled runner required — GitHub Actions ubuntu-24.04 restricts ptrace)", prootCanRun())
         val rt = PRootRuntime(
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
@@ -240,7 +240,7 @@ class PRootRuntimeIntegrationTest {
     }
 
     @Test fun `PRoot runtime terminates a long-running process`() = runBlocking {
-        assumeTrue("proot must be installed for integration test", prootAvailable())
+        assumeTrue("proot must be able to EXECUTE (ptrace-enabled runner required — GitHub Actions ubuntu-24.04 restricts ptrace)", prootCanRun())
         val rt = PRootRuntime(
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),

@@ -145,13 +145,15 @@ class PRootRuntimeIntegrationTest {
         val handle = startResult.getOrThrow()
         assertTrue("handle should be PRootProcessHandle", handle is PRootProcessHandle)
 
-        // Read REAL stdout from the proot process.
-        val stdout = (handle as PRootProcessHandle).processStdout().bufferedReader().readText().trim()
+        // Read REAL stdout AND stderr from the proot process.
+        val pRootHandle = handle as PRootProcessHandle
+        val stdout = pRootHandle.processStdout().bufferedReader().readText().trim()
+        val stderr = pRootHandle.processStderr().bufferedReader().readText().trim()
         val exitResult = handle.await()
         assertTrue("await should succeed", exitResult.isSuccess)
         val exitInfo = exitResult.getOrThrow()
-        assertEquals("exit code should be 0", 0, exitInfo.exitCode)
-        assertEquals("proot-runtime-p68-integration", stdout)
+        assertEquals("exit code should be 0 (stderr: $stderr)", 0, exitInfo.exitCode)
+        assertEquals("stdout mismatch (stderr: $stderr)", "proot-runtime-p68-integration", stdout)
         rt.shutdown()
         Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }
@@ -172,8 +174,9 @@ class PRootRuntimeIntegrationTest {
             environment = mapOf("PATH" to "/usr/local/bin:/usr/bin:/bin")
         )
         val handle = provider.start(request).getOrThrow()
+        val stderr = (handle as PRootProcessHandle).processStderr().bufferedReader().readText().trim()
         val exitInfo = handle.await().getOrThrow()
-        assertEquals(42, exitInfo.exitCode)
+        assertEquals("exit code should be 42 (stderr: $stderr)", 42, exitInfo.exitCode)
         rt.shutdown()
         Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }

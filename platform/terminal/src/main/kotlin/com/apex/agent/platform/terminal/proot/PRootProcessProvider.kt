@@ -26,7 +26,8 @@ class PRootProcessProvider(
     private val rootfs: RootfsDescriptor,
     private val rootfsPath: AbsolutePath,
     private val workspacePath: AbsolutePath,
-    private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl()
+    private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl(),
+    private val fakeRoot: Boolean = true
 ) : LinuxProcessProvider {
 
     override val capabilities: ProcessCapabilities = ProcessCapabilities(
@@ -53,7 +54,7 @@ class PRootProcessProvider(
             environment = request.environment,
             terminalMode = request.terminalMode,
             killOnExit = true,
-            fakeRoot = true   // fake-root so apt/dpkg later work without real root
+            fakeRoot = fakeRoot
         )
         val command = commandBuilder.build(launchRequest, binaryPath, rootfsPath, workspacePath)
 

@@ -180,15 +180,10 @@ class PRootRuntimeIntegrationTest {
             arguments = listOf("-c", "exit 42"),
             environment = mapOf("PATH" to "/usr/local/bin:/usr/bin:/bin")
         )
-        val handle = provider.start(request).getOrThrow() as PRootProcessHandle
-        val stderrDef = async(Dispatchers.IO) {
-            withTimeoutOrNull(15000) { handle.processStderr().bufferedReader().readText().trim() } ?: "<TIMEOUT>"
-        }
-        val stdout = withTimeoutOrNull(15000) { handle.processStdout().bufferedReader().readText().trim() } ?: "<TIMEOUT>"
-        val stderr = stderrDef.await()
+        val handle = provider.start(request).getOrThrow()
         val exitInfo = handle.await().getOrThrow()
-        println("=== P68 exit diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")
-        assertEquals("exit code should be 42 (stderr: $stderr)", 42, exitInfo.exitCode)
+        println("=== P68 exit test === exit=${exitInfo.exitCode} reason=${exitInfo.reason}")
+        assertEquals("exit 42 should propagate (reason: ${exitInfo.reason})", 42, exitInfo.exitCode)
         rt.shutdown()
         Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
     }

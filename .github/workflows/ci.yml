@@ -234,6 +234,12 @@ jobs:
           tail -30 compile.log
           exit 1
 
+      - name: Install proot (for PRootRuntimeIntegrationTest)
+        # P68: the integration test spawns REAL proot processes. Self-skips
+        # (assumeTrue) if proot is absent, so this install is what makes it run.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq proot 2>/dev/null || echo "proot install skipped (optional)"
+        continue-on-error: true
+
       - name: Run platform:terminal unit tests
         run: |
           # JVM unit tests (FakeNativePty-based contract + policy + process-group tests).

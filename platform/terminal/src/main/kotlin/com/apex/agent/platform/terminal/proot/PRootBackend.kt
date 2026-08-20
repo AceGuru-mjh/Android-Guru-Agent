@@ -8,6 +8,9 @@ import com.apex.agent.platform.terminal.workspace.WorkspacePath
 import com.apex.agent.platform.terminal.workspace.WorkspaceSnapshot
 import com.apex.agent.platform.terminal.api.TerminalSize
 
+// P68 real providers live in this same package (proot); no extra imports needed.
+// RootfsProvider is in the linux package, already imported via linux.* above.
+
 /**
  * PR #63: PRoot Userspace Backend.
  *
@@ -246,10 +249,17 @@ data class SessionReconciliation(
     val action: String
 )
 
-// ─── Section 47: PRoot Runtime ───
+// ─── Section 47: PRoot Runtime (PR #68 — real providers wired in) ───
+// P68: processProvider()/ptyProvider() now return REAL PRootProcessProvider /
+// PRootPtyProvider that spawn actual PRoot processes via ProcessBuilder, when
+// configured with a rootfsProvider + workspacePath. The Fake fallback remains
+// only for the "not configured" state (old contract tests that don't provide
+// rootfs). Production MUST provide rootfsProvider — see PRootRuntimeIntegrationTest.
 class PRootRuntime(
     private val binaryProvider: PRootBinaryProvider,
     private val rootfsValidator: RootfsValidator,
+    private val rootfsProvider: RootfsProvider? = null,
+    private val workspacePath: AbsolutePath? = null,
     private val mountPlanner: LinuxMountPlanner = LinuxMountPlannerImpl(),
     private val envBuilder: LinuxEnvironmentBuilder = LinuxEnvironmentBuilderImpl(),
     private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl(),
@@ -264,20 +274,66 @@ class PRootRuntime(
     override val health: RuntimeHealth get() = _health
 
     private var binaryInfo: PRootBinaryInfo? = null
+    private var binaryPath: AbsolutePath? = null
     private var rootfsDescriptor: RootfsDescriptor? = null
+
+    // ── P68: real providers (null until initialize() configures them) ──
+    private var realProcessProvider: PRootProcessProvider? = null
+    private var realPtyProvider: PRootPtyProvider? = null
+    private var realFilesystem: PRootFilesystem? = null
+    private var realEnvironment: PRootEnvironment? = null
+    private var realShellProvider: PRootShellProvider? = null
 
     override suspend fun initialize(): Result<Unit> {
         _state = RuntimeState.INITIALIZING
-        val binaryPath = binaryProvider.locate().getOrElse {
+        val bPath = binaryProvider.locate().getOrElse {
             _state = RuntimeState.FAILED
             _health = RuntimeHealth.UNAVAILABLE
             return Result.failure(RuntimeException("PRootError:BINARY_NOT_FOUND"))
         }
-        binaryInfo = binaryProvider.verify(binaryPath).getOrElse {
+        binaryInfo = binaryProvider.verify(bPath).getOrElse {
             _state = RuntimeState.FAILED
             _health = RuntimeHealth.UNAVAILABLE
             return Result.failure(RuntimeException("PRootError:BINARY_NOT_EXECUTABLE"))
         }
+        binaryPath = bPath
+
+        // ── P68: if rootfsProvider is configured, wire real providers ──
+        if (rootfsProvider != null && workspacePath != null) {
+            val rootfs = rootfsProvider.current()
+            if (rootfs == null) {
+                _state = RuntimeState.FAILED
+                _health = RuntimeHealth.UNAVAILABLE
+                return Result.failure(RuntimeException("PRootError:ROOTFS_UNAVAILABLE — no rootfs configured"))
+            }
+            val verification = rootfsProvider.verify(rootfs).getOrElse {
+                _state = RuntimeState.FAILED
+                _health = RuntimeHealth.UNAVAILABLE
+                return Result.failure(RuntimeException("PRootError:ROOTFS_INVALID — verify failed"))
+            }
+            if (!verification.valid) {
+                _state = RuntimeState.FAILED
+                _health = RuntimeHealth.UNAVAILABLE
+                return Result.failure(RuntimeException("PRootError:ROOTFS_INVALID — ${verification.issues}"))
+            }
+            rootfsDescriptor = rootfs
+            val rootfsPath = rootfs.location
+                ?: return Result.failure(RuntimeException("PRootError:ROOTFS_UNAVAILABLE — rootfs has no location"))
+
+            // Construct real providers — these spawn actual PRoot processes.
+            realFilesystem = PRootFilesystem(rootfsPath)
+            realEnvironment = PRootEnvironment(rootfsPath)
+            realShellProvider = PRootShellProvider(rootfsPath)
+            realProcessProvider = PRootProcessProvider(
+                binaryPath = bPath,
+                rootfs = rootfs,
+                rootfsPath = rootfsPath,
+                workspacePath = workspacePath,
+                commandBuilder = commandBuilder
+            )
+            realPtyProvider = PRootPtyProvider(realProcessProvider!!)
+        }
+
         _state = RuntimeState.READY
         _health = RuntimeHealth.HEALTHY
         return Result.success(Unit)
@@ -286,6 +342,10 @@ class PRootRuntime(
     override suspend fun shutdown(force: Boolean): Result<Unit> {
         _state = RuntimeState.SHUTTING_DOWN
         _health = RuntimeHealth.SHUTTING_DOWN
+        // P68: real providers don't hold long-lived resources beyond the
+        // processes they spawned (each Process is tracked by its handle).
+        // --kill-on-exit in PRootCommandBuilder ensures child processes
+        // inside the rootfs are cleaned up when the host PRoot process exits.
         _state = RuntimeState.CLOSED
         return Result.success(Unit)
     }
@@ -301,7 +361,8 @@ class PRootRuntime(
         workspaceIds = emptyList(), createdAt = System.currentTimeMillis()
     )
 
-    private val fakeEnv = object : LinuxEnvironment {
+    // ── Environment: real when configured, fake fallback for unconfigured ──
+    private val fallbackEnv = object : LinuxEnvironment {
         override fun user() = LinuxUser(0, 0, "root", WorkspacePath.home(), true)
         override fun homeDirectory() = WorkspacePath.home()
         override fun workingDirectory() = WorkspacePath.work()
@@ -316,12 +377,14 @@ class PRootRuntime(
         }
         override fun snapshot(): Map<String, String> = mapOf("HOME" to "/home/root", "PATH" to "/usr/local/bin:/usr/bin:/bin", "SHELL" to "/bin/sh")
     }
-    override fun environment(): LinuxEnvironment = fakeEnv
-    override fun shellProvider(): ShellProvider = object : ShellProvider {
+    override fun environment(): LinuxEnvironment = realEnvironment ?: fallbackEnv
+
+    override fun shellProvider(): ShellProvider = realShellProvider ?: object : ShellProvider {
         override suspend fun defaultShell() = ShellInfo("/bin/sh", "sh", null)
         override suspend fun availableShells() = listOf(ShellInfo("/bin/sh", "sh", null))
     }
-    override fun filesystem(): LinuxFilesystem = object : LinuxFilesystem {
+
+    override fun filesystem(): LinuxFilesystem = realFilesystem ?: object : LinuxFilesystem {
         override val capabilities = FilesystemCapabilities()
         override suspend fun exists(path: WorkspacePath) = false
         override suspend fun isDirectory(path: WorkspacePath) = false
@@ -330,8 +393,15 @@ class PRootRuntime(
         override suspend fun size(path: WorkspacePath) = null
         override suspend fun resolve(path: WorkspacePath) = AbsolutePath("/proot" + path.value.removePrefix("workspace:"))
     }
-    override fun processProvider(): LinuxProcessProvider = FakeLinuxProcessProvider()
-    override fun ptyProvider(): LinuxPtyProvider = FakeLinuxPtyProvider()
+
+    // P68: real process/PTY providers when configured. Fake fallback ONLY
+    // for the "not configured" state (old contract tests / unconfigured runtime).
+    // Production MUST provide rootfsProvider — see PRootRuntimeIntegrationTest.
+    override fun processProvider(): LinuxProcessProvider =
+        realProcessProvider ?: com.apex.agent.platform.terminal.linux.FakeLinuxProcessProvider()
+    override fun ptyProvider(): LinuxPtyProvider =
+        realPtyProvider ?: com.apex.agent.platform.terminal.linux.FakeLinuxPtyProvider()
+
     override fun runtimeInfo(): LinuxRuntimeInfo = LinuxRuntimeInfo(
         architecture = binaryInfo?.architecture ?: CpuArchitecture.UNKNOWN,
         kernelVersion = null, distribution = rootfsDescriptor?.distribution,

@@ -5,6 +5,7 @@ import com.apex.agent.platform.terminal.linux.*
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.WorkspacePath
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * PR #68: Real PRoot Process Provider.
@@ -36,6 +37,7 @@ class PRootProcessProvider(
     )
 
     private val processes = ConcurrentHashMap<Long, PRootProcessHandle>()
+    private val pidCounter = AtomicLong(10000)
 
     override suspend fun start(request: LinuxProcessRequest): Result<LinuxProcessHandle> {
         if (rootfs.location == null) {
@@ -66,7 +68,7 @@ class PRootProcessProvider(
 
         return try {
             val process = pb.start()
-            val pid = LinuxPid(process.pid().toLong())
+            val pid = LinuxPid(pidCounter.incrementAndGet())
             val handle = PRootProcessHandle(pid, process, request.executable, request.arguments)
             processes[pid.value] = handle
             Result.success(handle)

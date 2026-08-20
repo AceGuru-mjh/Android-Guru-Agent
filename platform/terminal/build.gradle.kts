@@ -52,3 +52,16 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.coroutines.android)
 }
+
+
+// P68: show test stdout/stderr in CI log so println diagnostics are visible
+// when tests fail. Without this, Gradle captures stdout into the HTML report
+// only, not the console — making integration-test debugging impossible.
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events("passed", "skipped", "failed", "standardOut", "standardError")
+        showStandardStreams = true
+        showExceptions = true
+        showCauses = true
+    }
+}

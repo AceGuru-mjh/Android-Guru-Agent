@@ -3,6 +3,8 @@ package com.apex.agent.platform.terminal.proot
 import com.apex.agent.platform.terminal.linux.*
 import com.apex.agent.platform.terminal.runtime.RuntimeState
 import com.apex.agent.platform.terminal.workspace.AbsolutePath as WsAbsolutePath
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -178,8 +180,11 @@ class PRootRuntimeIntegrationTest {
             environment = mapOf("PATH" to "/usr/local/bin:/usr/bin:/bin")
         )
         val handle = provider.start(request).getOrThrow() as PRootProcessHandle
+        val stderrDef = async(Dispatchers.IO) {
+            handle.processStderr().bufferedReader().readText().trim()
+        }
         val stdout = handle.processStdout().bufferedReader().readText().trim()
-        val stderr = handle.processStderr().bufferedReader().readText().trim()
+        val stderr = stderrDef.await()
         val exitInfo = handle.await().getOrThrow()
         println("=== P68 exit diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")
         assertEquals("exit code should be 42 (stderr: $stderr)", 42, exitInfo.exitCode)

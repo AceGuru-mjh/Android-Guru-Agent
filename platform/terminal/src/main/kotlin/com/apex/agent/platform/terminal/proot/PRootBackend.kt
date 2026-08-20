@@ -260,6 +260,7 @@ class PRootRuntime(
     private val rootfsValidator: RootfsValidator,
     private val rootfsProvider: RootfsProvider? = null,
     private val workspacePath: AbsolutePath? = null,
+    private val fakeRoot: Boolean = true,
     private val mountPlanner: LinuxMountPlanner = LinuxMountPlannerImpl(),
     private val envBuilder: LinuxEnvironmentBuilder = LinuxEnvironmentBuilderImpl(),
     private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl(),
@@ -329,7 +330,8 @@ class PRootRuntime(
                 rootfs = rootfs,
                 rootfsPath = rootfsPath,
                 workspacePath = workspacePath,
-                commandBuilder = commandBuilder
+                commandBuilder = commandBuilder,
+                fakeRoot = fakeRoot
             )
             realPtyProvider = PRootPtyProvider(realProcessProvider!!)
         }

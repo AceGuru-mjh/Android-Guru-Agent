@@ -1,131 +1,96 @@
 package com.apex.agent.ui.screen.settings
 
-import android.content.Context
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.apex.agent.core.llm.*
+import com.apex.agent.core.llm.LlmClientFactory
+import com.apex.agent.core.llm.LlmConfig
+import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.core.llm.ModelRoleConfig
+import com.apex.agent.core.llm.ProviderConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-data class ModelSettings(
-    val baseUrl: String = "",
-    val apiKey: String = "",
-    val model: String = "",
-    val temperature: Float = 0.7f
-)
+/**
+ * 设置中心 ViewModel。
+ *
+ * 所有持久化委托给 [SettingsRepository]（单一可信源）。本类仅负责：
+ *  - 向 UI 暴露各 StateFlow；
+ *  - 转发增改操作；
+ *  - 提供「测试连接」能力。
+ */
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    private val repo: SettingsRepository
+) : ViewModel() {
 
-/** Agent 运行参数，持久化于 SharedPreferences，供 Chat 启动时读取。 */
-data class AgentSettings(
-    val defaultMode: String = "auto",   // build | chat | auto
-    val thinkLevel: String = "standard", // standard | deep | minimal
-    val maxIterations: Int = 20,
-    val keepAlive: Boolean = true
-)
+    val profiles: StateFlow<List<ModelProfile>> = repo.profiles
+    val providers: StateFlow<List<ProviderConfig>> = repo.providers
+    val roles: StateFlow<ModelRoleConfig> = repo.roles
+    val agentSettings: StateFlow<AgentSettings> = repo.agentSettings
+
+    val defaultProfile: ModelProfile get() = repo.defaultProfile()
+
+    // ── Profile 操作 ───────────────────────────────────────────
+    fun upsertProfile(profile: ModelProfile) = repo.upsertProfile(profile)
+    fun deleteProfile(id: String) = repo.deleteProfile(id)
+    fun duplicateProfile(id: String) = repo.duplicateProfile(id)
+    fun setDefaultProfile(id: String) = repo.setDefaultProfile(id)
+    fun getProfile(id: String) = repo.getProfile(id)
+
+    // ── Provider 操作 ──────────────────────────────────────────
+    fun upsertProvider(provider: ProviderConfig) = repo.upsertProvider(provider)
+    fun deleteProvider(id: String) = repo.deleteProvider(id)
+    fun getProvider(id: String) = repo.getProvider(id)
+
+    // ── 角色 / Agent ───────────────────────────────────────────
+    fun updateRoles(block: ModelRoleConfig.() -> ModelRoleConfig) = repo.updateRoles(block)
+    fun updateAgentSettings(block: AgentSettings.() -> AgentSettings) = repo.updateAgentSettings(block)
+
+    /**
+     * 测试指定模型 Profile 的连接是否可用。
+     * 用最小请求调用一次 chat，根据返回判断成功与否。
+     */
+    suspend fun testConnection(profileId: String): TestResult {
+        return withContext(Dispatchers.IO) {
+            val profile = repo.getProfile(profileId)
+            val provider = profile?.let { repo.getProvider(it.providerId) }
+
+            if (profile == null) {
+                return@withContext TestResult(false, "未找到该模型配置")
+            }
+            if (profile.modelId.isBlank()) {
+                return@withContext TestResult(false, "模型名称不能为空")
+            }
+            val config = LlmConfig.fromProfile(profile, provider)
+            if (config.baseUrl.isBlank()) {
+                return@withContext TestResult(false, "Base URL 为空（请检查 Provider 配置）")
+            }
+            if (config.apiKey.isBlank()) {
+                return@withContext TestResult(false, "API Key 为空（请检查 Provider 配置）")
+            }
+
+            try {
+                val client = LlmClientFactory.create(config)
+                val messages = listOf(
+                    com.apex.agent.core.llm.LlmMessage.User(content = "ping")
+                )
+                val result = client.chat(
+                    messages = messages,
+                    tools = emptyList(),
+                    temperature = config.temperature,
+                    maxTokens = 16
+                )
+                TestResult(true, "连接成功：收到 ${result.content?.length ?: 0} 字符响应")
+            } catch (e: Exception) {
+                TestResult(false, "连接失败：${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+    }
+}
 
 data class TestResult(
     val success: Boolean,
     val message: String
 )
-
-@HiltViewModel
-class SettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
-) : ViewModel() {
-
-    private val prefs = context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
-    
-    private val _settings = MutableStateFlow(loadSettings())
-    val settings: StateFlow<ModelSettings> = _settings.asStateFlow()
-
-    private val _agentSettings = MutableStateFlow(loadAgentSettings())
-    val agentSettings: StateFlow<AgentSettings> = _agentSettings.asStateFlow()
-    
-    var testResult: TestResult? by mutableStateOf(null)
-        private set
-
-    fun saveConfig(baseUrl: String, apiKey: String, model: String, temperature: Float) {
-        prefs.edit()
-            .putString("llm_base_url", baseUrl)
-            .putString("llm_api_key", apiKey)
-            .putString("llm_model", model)
-            .putFloat("llm_temperature", temperature)
-            .apply()
-        
-        _settings.value = ModelSettings(baseUrl, apiKey, model, temperature)
-    }
-    
-    fun testConnection(baseUrl: String, apiKey: String, model: String) {
-        viewModelScope.launch {
-            testResult = null
-            
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    val config = LlmConfig(
-                        baseUrl = baseUrl,
-                        apiKey = apiKey,
-                        model = model,
-                        timeoutSeconds = 15
-                    )
-                    val client = LlmClientFactory.create(config)
-                    
-                    // 发送简单测试消息
-                    val response = client.chat(
-                        messages = listOf(LlmMessage.User("Say 'OK' in one word.")),
-                        maxTokens = 10
-                    )
-                    
-                    val content = response.content
-                    if (content != null) {
-                        TestResult(true, "✅ 连接成功！模型响应: ${content.take(50)}")
-                    } else if (response.toolCalls.isNotEmpty()) {
-                        TestResult(true, "✅ 连接成功！（模型返回了工具调用）")
-                    } else {
-                        TestResult(false, "⚠️ 连接成功但响应为空")
-                    }
-                } catch (e: Exception) {
-                    TestResult(false, "❌ 连接失败: ${e.message?.take(200)}")
-                }
-            }
-            
-            testResult = result
-        }
-    }
-    
-    /** 局部更新 Agent 设置并持久化。 */
-    fun updateAgentSettings(block: AgentSettings.() -> AgentSettings) {
-        val next = _agentSettings.value.block()
-        prefs.edit()
-            .putString("agent_default_mode", next.defaultMode)
-            .putString("agent_think_level", next.thinkLevel)
-            .putInt("agent_max_iterations", next.maxIterations)
-            .putBoolean("agent_keep_alive", next.keepAlive)
-            .apply()
-        _agentSettings.value = next
-    }
-    
-    private fun loadSettings(): ModelSettings {
-        return ModelSettings(
-            baseUrl = prefs.getString("llm_base_url", "") ?: "",
-            apiKey = prefs.getString("llm_api_key", "") ?: "",
-            model = prefs.getString("llm_model", "") ?: "",
-            temperature = prefs.getFloat("llm_temperature", 0.7f)
-        )
-    }
-
-    private fun loadAgentSettings(): AgentSettings {
-        return AgentSettings(
-            defaultMode = prefs.getString("agent_default_mode", "auto") ?: "auto",
-            thinkLevel = prefs.getString("agent_think_level", "standard") ?: "standard",
-            maxIterations = prefs.getInt("agent_max_iterations", 20),
-            keepAlive = prefs.getBoolean("agent_keep_alive", true)
-        )
-    }
-}

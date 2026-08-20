@@ -125,7 +125,6 @@ fun ApexDrawerContent(
             DrawerDestination.Terminal,
             DrawerDestination.Skill,
             DrawerDestination.Memory,
-            DrawerDestination.Model,
             DrawerDestination.Permissions,
             DrawerDestination.Log,
             DrawerDestination.Settings

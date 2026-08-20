@@ -2,6 +2,7 @@ package com.apex.agent.di
 
 import android.content.Context
 import com.apex.agent.core.llm.*
+import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,27 +16,17 @@ object LlmModule {
 
     @Provides
     @Singleton
-    fun provideLlmConfig(@ApplicationContext context: Context): LlmConfig {
-        val prefs = context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
-        return LlmConfig(
-            baseUrl = prefs.getString("llm_base_url", "") ?: "",
-            apiKey = prefs.getString("llm_api_key", "") ?: "",
-            model = prefs.getString("llm_model", "") ?: "",
-            temperature = prefs.getFloat("llm_temperature", 0.7f),
-            reasoningEffort = ReasoningEffort.fromName(
-                prefs.getString("llm_reasoning_effort", null)
-            )
-        )
+    fun provideLlmConfig(repo: SettingsRepository): LlmConfig {
+        // 由默认模型 Profile + Provider 派生运行时配置（含完整 sampling / network / tools 参数）
+        return repo.defaultLlmConfig()
     }
 
     @Provides
     @Singleton
-    fun provideLlmClient(config: LlmConfig): LlmClient {
-        if (!config.isValid) {
-            // 返回一个占位客户端（未配置时）
-            return NoOpLlmClient()
-        }
-        return LlmClientFactory.create(config)
+    fun provideLlmClient(repo: SettingsRepository): LlmClient {
+        // 动态委托：设置页/对话页"小大脑"菜单修改默认模型或采样参数后即时生效，
+        // 无需重启 App（内部按 profiles/providers 变化重建真实 client）。
+        return DynamicLlmClient(repo)
     }
 }
 

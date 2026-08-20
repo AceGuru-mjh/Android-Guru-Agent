@@ -47,7 +47,6 @@ import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
 import com.apex.agent.ui.screen.log.LogViewerScreen
-import com.apex.agent.ui.screen.model.ModelScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
 import com.apex.agent.ui.screen.skill.SkillScreen
@@ -67,7 +66,6 @@ sealed class DrawerDestination(
     data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
-    data object Model : DrawerDestination("model", "模型", Icons.Default.Hub)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
@@ -152,11 +150,14 @@ fun ApexRoot() {
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     when (currentDestination) {
-                        DrawerDestination.Agent -> AgentChatScreen()
+                        DrawerDestination.Agent -> AgentChatScreen(
+                            // "小大脑"菜单 → 配置模型：跳转设置页模型配置区
+                            // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
+                            onOpenSettings = { currentDestination = DrawerDestination.Settings }
+                        )
                         DrawerDestination.Terminal -> TerminalScreen()
                         DrawerDestination.Skill -> SkillScreen()
                         DrawerDestination.Memory -> MemoryScreen()
-                        DrawerDestination.Model -> ModelScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
                         DrawerDestination.Log -> LogViewerScreen()
                         DrawerDestination.Settings -> SettingsScreen()

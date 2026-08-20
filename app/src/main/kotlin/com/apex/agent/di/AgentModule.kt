@@ -10,6 +10,7 @@ import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,13 +30,29 @@ object AgentModule {
 
     @Provides
     @Singleton
-    fun provideAgentConfig(): AgentConfig {
+    fun provideAgentConfig(repo: SettingsRepository): AgentConfig {
+        val agent = repo.agentSettings.value
+        val profile = repo.defaultProfile()
+        // Execution Mode → AgentMode（chat 偏重质量评审，auto/build 走自主构建）
+        val mode = when (agent.defaultMode) {
+            "chat" -> AgentMode.REFLECTION
+            else -> AgentMode.BUILD
+        }
+        // 思考深度
+        val thinkingLevel = when (agent.thinkLevel) {
+            "deep" -> ThinkingLevel.DEEP
+            "minimal" -> ThinkingLevel.NONE
+            else -> ThinkingLevel.STANDARD
+        }
         return AgentConfig(
-            mode = AgentMode.BUILD,
-            thinkingLevel = ThinkingLevel.STANDARD,
-            maxIterations = 20,
-            maxContextTokens = 128000,
-            streaming = true
+            mode = mode,
+            thinkingLevel = thinkingLevel,
+            maxIterations = agent.maxIterations,
+            maxContextTokens = profile.contextWindow,
+            streaming = profile.streaming,
+            temperature = profile.temperature,
+            maxToolOutputLength = profile.maxToolResultTokens,
+            reflectionRounds = if (agent.reflection) 1 else 0,
         )
     }
 

@@ -153,7 +153,24 @@ data class AgentConfig(
      * 自定义模式附加指令（[AgentMode.CUSTOM] 生效）：
      * 原样拼入 system prompt 的 "## Custom Instructions" 段落。
      */
-    val customInstruction: String? = null
+    val customInstruction: String? = null,
+
+    /**
+     * 追加到 system prompt 末尾的动态上下文（任意模式生效）。
+     *
+     * 由 UI 层在每次发送前组装（如当前时间注入、用户规则、结构化输出指令、
+     * 联网搜索强制指令），原样拼入 "## Session Context" 段落。
+     */
+    val additionalSystemContext: String = "",
+
+    /**
+     * 本轮允许暴露给 LLM 的工具 id 白名单；null = 全部工具。
+     *
+     * 用于"函数调用"功能：用户在输入框工具菜单中圈选可用函数子集后，
+     * 引擎只把白名单内的 [com.apex.agent.core.llm.ToolDefinition] 传给模型，
+     * system prompt 的工具清单同步收窄，避免模型幻觉调用未启用工具。
+     */
+    val enabledToolIds: Set<String>? = null
 ) {
     companion object {
         /** 快速模式：Build + 无思考 */

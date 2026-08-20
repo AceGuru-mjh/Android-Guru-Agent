@@ -15,28 +15,28 @@ package com.apex.agent.core.llm
 data class LlmConfig(
     /** API基础URL，如 "https://api.openai.com/v1" */
     val baseUrl: String = "",
-    
-    /** API密钥 */
+
+    /** API密钥（单 client 默认取 Provider 的第一个 Key；Key 轮换由上层处理） */
     val apiKey: String = "",
-    
+
     /** 模型名称，如 "gpt-4o", "claude-3-5-sonnet", "qwen2.5:72b" */
     val model: String = "",
-    
+
     /** 温度 */
     val temperature: Float = 0.7f,
-    
+
     /** 最大输出token */
     val maxTokens: Int = 4096,
-    
+
     /** 是否启用流式 */
     val streaming: Boolean = true,
-    
-    /** 超时秒数 */
+
+    /** 读超时秒数（旧字段，等价于 readTimeoutMs/1000，保留以兼容旧调用） */
     val timeoutSeconds: Long = 120,
-    
+
     /** 自定义请求头（某些API需要额外header）*/
     val customHeaders: Map<String, String> = emptyMap(),
-    
+
     /** 系统提示词前缀 */
     val systemPromptPrefix: String = "",
 
@@ -53,7 +53,55 @@ data class LlmConfig(
      * - thinkingLevel 只影响 system prompt 文本，对任何模型都适用
      * - reasoningEffort 是模型 API 原生参数，仅对支持思考模式的模型生效
      */
-    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE
+    val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
+
+    // ── Sampling（完整采样参数）─────────────────────────────────
+    val topP: Float = 1.0f,
+    /** 0 = disabled */
+    val topK: Int = 0,
+    val minP: Float = 0.0f,
+    val frequencyPenalty: Float = 0.0f,
+    val presencePenalty: Float = 0.0f,
+    val repetitionPenalty: Float = 1.0f,
+    /** null = Auto（不固定种子） */
+    val seed: Long? = null,
+    val stopSequences: List<String> = emptyList(),
+
+    // ── Reasoning 扩展 ─────────────────────────────────────────
+    /** 思维预算（tokens），null = Auto。与 [reasoningEffort] 不强行绑定。 */
+    val thinkingBudget: Int? = null,
+    val showThinking: Boolean = true,
+
+    // ── Context ────────────────────────────────────────────────
+    val contextWindow: Int = 128_000,
+    /** 为 Agent 运行保留的输出预算 */
+    val reservedOutputTokens: Int = 4096,
+
+    // ── Network ────────────────────────────────────────────────
+    val connectTimeoutMs: Long = 15_000,
+    val readTimeoutMs: Long = 120_000,
+    val writeTimeoutMs: Long = 30_000,
+    val requestTimeoutMs: Long = 120_000,
+    val retryCount: Int = 2,
+    val retryDelayMs: Long = 1_000,
+    val maxRetryDelayMs: Long = 10_000,
+    val retryOnCodes: Set<Int> = setOf(408, 429, 500, 502, 503, 504),
+    val keepAlive: Boolean = true,
+
+    // ── Tools ──────────────────────────────────────────────────
+    val enableTools: Boolean = true,
+    val toolChoice: ToolChoiceMode = ToolChoiceMode.AUTO,
+    val parallelToolCalls: Boolean = true,
+    val maxToolCalls: Int = 10,
+    val toolTimeoutSeconds: Int = 30,
+    val maxToolResultTokens: Int = 4096,
+
+    // ── Structured Output ──────────────────────────────────────
+    val structuredOutputMode: StructuredOutputMode = StructuredOutputMode.TEXT,
+    val structuredOutputStrict: Boolean = false,
+
+    // ── Capabilities ───────────────────────────────────────────
+    val capabilities: ModelCapabilities = ModelCapabilities(),
 ) {
     val isValid: Boolean
         get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
@@ -93,6 +141,62 @@ data class LlmConfig(
             apiKey = apiKey,
             model = model
         )
+
+        /**
+         * 由 [ModelProfile] + 其挂载的 [ProviderConfig] 转换为运行时 [LlmConfig]。
+         *
+         * - apiKey 取 Provider 的第一个 Key（多 Key 轮换由上层 client 管理，不在单 [LlmConfig] 表达）。
+         * - customHeaders = Provider.defaultHeaders + Profile.customHeaders（Profile 优先）。
+         * - timeoutSeconds 与 readTimeoutMs 保持同步（旧字段兼容）。
+         */
+        fun fromProfile(profile: ModelProfile, provider: ProviderConfig?): LlmConfig {
+            val headers = buildMap {
+                provider?.defaultHeaders?.let { putAll(it) }
+                putAll(profile.customHeaders)
+            }
+            return LlmConfig(
+                baseUrl = provider?.baseUrl?.takeIf { it.isNotBlank() } ?: "",
+                apiKey = provider?.apiKeys?.firstOrNull()?.takeIf { it.isNotBlank() } ?: "",
+                model = profile.modelId,
+                temperature = profile.temperature,
+                maxTokens = profile.maxOutputTokens,
+                streaming = profile.streaming,
+                timeoutSeconds = profile.readTimeoutMs / 1000,
+                customHeaders = headers,
+                systemPromptPrefix = profile.systemPromptPrefix,
+                reasoningEffort = profile.reasoningEffort,
+                topP = profile.topP,
+                topK = profile.topK,
+                minP = profile.minP,
+                frequencyPenalty = profile.frequencyPenalty,
+                presencePenalty = profile.presencePenalty,
+                repetitionPenalty = profile.repetitionPenalty,
+                seed = profile.seed,
+                stopSequences = profile.stopSequences,
+                thinkingBudget = profile.thinkingBudget,
+                showThinking = profile.showThinking,
+                contextWindow = profile.contextWindow,
+                reservedOutputTokens = profile.reservedOutputTokens,
+                connectTimeoutMs = profile.connectTimeoutMs,
+                readTimeoutMs = profile.readTimeoutMs,
+                writeTimeoutMs = profile.writeTimeoutMs,
+                requestTimeoutMs = profile.requestTimeoutMs,
+                retryCount = profile.retryCount,
+                retryDelayMs = profile.retryDelayMs,
+                maxRetryDelayMs = profile.maxRetryDelayMs,
+                retryOnCodes = profile.retryOnCodes,
+                keepAlive = profile.keepAlive,
+                enableTools = profile.enableTools,
+                toolChoice = profile.toolChoice,
+                parallelToolCalls = profile.parallelToolCalls,
+                maxToolCalls = profile.maxToolCalls,
+                toolTimeoutSeconds = profile.toolTimeoutSeconds,
+                maxToolResultTokens = profile.maxToolResultTokens,
+                structuredOutputMode = profile.structuredOutputMode,
+                structuredOutputStrict = profile.structuredOutputStrict,
+                capabilities = profile.capabilities,
+            )
+        }
     }
 }
 

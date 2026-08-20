@@ -118,13 +118,41 @@ class StreamingOpenAiClient(
             put("max_tokens", maxTokens)
             put("stream", stream)
 
-            // 模型原生思考强度（OpenAI o-series 的 reasoning_effort；
-            // DeepSeek-R1 / Qwen3-thinking 等也兼容此字段）
+            // ── Sampling 参数（完整开放）─────────────────────────
+            if (config.topP != 1.0f) put("top_p", config.topP)
+            if (config.topK != 0) put("top_k", config.topK)
+            if (config.minP != 0.0f) put("min_p", config.minP)
+            if (config.presencePenalty != 0.0f) put("presence_penalty", config.presencePenalty)
+            if (config.frequencyPenalty != 0.0f) put("frequency_penalty", config.frequencyPenalty)
+            if (config.repetitionPenalty != 1.0f) put("repetition_penalty", config.repetitionPenalty)
+            config.seed?.let { put("seed", it) }
+            if (config.stopSequences.isNotEmpty()) {
+                putJsonArray("stop") { config.stopSequences.forEach { s -> add(s) } }
+            }
+
+            // ── Reasoning（原生思考强度 + 思维预算）──────────────
             config.reasoningEffort.apiValue?.let { effort ->
                 put("reasoning_effort", effort)
-                // MAX 模式下提高 max_completion_tokens 上限，让思考链有空间
-                if (config.reasoningEffort == ReasoningEffort.MAX) {
-                    put("max_completion_tokens", maxOf(maxTokens, 8192))
+            }
+            // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准
+            val maxCompletion = config.thinkingBudget ?: run {
+                if (config.reasoningEffort == ReasoningEffort.MAX) maxOf(maxTokens, 8192) else null
+            }
+            maxCompletion?.let { put("max_completion_tokens", it) }
+
+            // ── Structured Output ───────────────────────────────
+            when (config.structuredOutputMode) {
+                StructuredOutputMode.TEXT -> Unit
+                StructuredOutputMode.JSON -> putJsonObject("response_format") {
+                    put("type", "json_object")
+                }
+                StructuredOutputMode.JSON_SCHEMA -> putJsonObject("response_format") {
+                    put("type", "json_schema")
+                    put("strict", config.structuredOutputStrict)
+                    putJsonObject("json_schema") {
+                        put("name", "structured_output")
+                        putJsonObject("schema") { put("type", "object") }
+                    }
                 }
             }
 
@@ -190,7 +218,7 @@ class StreamingOpenAiClient(
                 }
             }
             
-            if (tools.isNotEmpty()) {
+            if (config.enableTools && tools.isNotEmpty()) {
                 putJsonArray("tools") {
                     for (tool in tools) {
                         addJsonObject {
@@ -203,7 +231,17 @@ class StreamingOpenAiClient(
                         }
                     }
                 }
-                put("tool_choice", "auto")
+                put(
+                    "tool_choice",
+                    when (config.toolChoice) {
+                        ToolChoiceMode.AUTO -> "auto"
+                        ToolChoiceMode.REQUIRED -> "required"
+                        ToolChoiceMode.NONE -> "none"
+                    }
+                )
+                if (config.parallelToolCalls) {
+                    put("parallel_tool_calls", true)
+                }
             }
         }
     }

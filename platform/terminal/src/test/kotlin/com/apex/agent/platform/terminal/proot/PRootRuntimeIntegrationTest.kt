@@ -111,7 +111,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         val result = rt.initialize()
         assertTrue("initialize should succeed: ${result.exceptionOrNull()?.message}", result.isSuccess)
@@ -126,7 +127,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         rt.initialize()
 
@@ -152,6 +154,7 @@ class PRootRuntimeIntegrationTest {
         val exitResult = handle.await()
         assertTrue("await should succeed", exitResult.isSuccess)
         val exitInfo = exitResult.getOrThrow()
+        println("=== P68 echo diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")
         assertEquals("exit code should be 0 (stderr: $stderr)", 0, exitInfo.exitCode)
         assertEquals("stdout mismatch (stderr: $stderr)", "proot-runtime-p68-integration", stdout)
         rt.shutdown()
@@ -164,7 +167,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         rt.initialize()
         val provider = rt.processProvider() as PRootProcessProvider
@@ -176,6 +180,7 @@ class PRootRuntimeIntegrationTest {
         val handle = provider.start(request).getOrThrow()
         val stderr = (handle as PRootProcessHandle).processStderr().bufferedReader().readText().trim()
         val exitInfo = handle.await().getOrThrow()
+        println("=== P68 exit diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")
         assertEquals("exit code should be 42 (stderr: $stderr)", 42, exitInfo.exitCode)
         rt.shutdown()
         Unit  // explicit Unit — JUnit @Test must return void/Unit, not Result<Unit>
@@ -187,7 +192,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         rt.initialize()
         val fs = rt.filesystem()
@@ -203,7 +209,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         rt.initialize()
         val shell = rt.shellProvider().defaultShell()
@@ -220,7 +227,8 @@ class PRootRuntimeIntegrationTest {
             binaryProvider = RealPRootBinaryProvider(),
             rootfsValidator = NoopRootfsValidator(),
             rootfsProvider = TestRootfsProvider("/"),
-            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir"))
+            workspacePath = WsAbsolutePath(System.getProperty("java.io.tmpdir")),
+            fakeRoot = false  // -0 flag can fail on CI (ptrace perms); test without it
         )
         rt.initialize()
         val provider = rt.processProvider() as PRootProcessProvider

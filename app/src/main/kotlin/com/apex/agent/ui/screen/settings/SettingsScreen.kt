@@ -92,7 +92,7 @@ fun SettingsScreen(
                 onSelect = { selectedId = it },
                 onAdd = {
                     val id = "profile_${System.currentTimeMillis()}"
-                    val p = ModelProfile(id = id, name = "新模型", providerId = providers.firstOrNull()?.id ?: "")
+                    val p = ModelProfile(id = id, name = "新模型", providerId = providers.firstOrNull()?.id ?: "", modelId = "")
                     viewModel.upsertProfile(p)
                     selectedId = id
                 },
@@ -128,7 +128,7 @@ fun SettingsScreen(
             VisionSection(agent, roles, profiles, viewModel)
 
             // ── Agent ──
-            AgentSection(agent) { viewModel.updateAgentSettings(it) }
+            AgentSection(agent) { updated -> viewModel.updateAgentSettings { updated } }
 
             // ── Network ──
             selected?.let { p ->
@@ -361,7 +361,7 @@ private fun ModelsSection(
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = p.id == selectedId, onClick = { onSelect(p.id) })
-                        Text(p.name, style = MaterialTheme.typography.titleSmall, Modifier.weight(1f))
+                        Text(p.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                         if (p.isDefault) Icon(Icons.Default.Star, "Default",
                             tint = MaterialTheme.colorScheme.primary)
                     }

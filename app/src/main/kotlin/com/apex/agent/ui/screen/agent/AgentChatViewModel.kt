@@ -944,7 +944,7 @@ class AgentChatViewModel @Inject constructor(
     fun selectProfile(profileId: String) {
         val target = settingsRepository.getProfile(profileId) ?: return
         settingsRepository.setDefaultProfile(profileId)
-        settingsRepository.updateRoles { it.copy(primaryProfileId = profileId) }
+        settingsRepository.updateRoles { copy(primaryProfileId = profileId) }
         // 引擎侧仅同步温度（temperature 是 Agent 引擎 chat 调用的入参）
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
             cfg.copy(temperature = target.temperature)

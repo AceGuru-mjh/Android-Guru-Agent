@@ -74,19 +74,15 @@ class SettingsViewModel @Inject constructor(
             try {
                 val client = LlmClientFactory.create(config)
                 val messages = listOf(
-                    com.apex.agent.core.llm.Message(
-                        role = com.apex.agent.core.llm.MessageRole.USER,
-                        content = "ping"
-                    )
+                    com.apex.agent.core.llm.LlmMessage.User(content = "ping")
                 )
                 val result = client.chat(
                     messages = messages,
                     tools = emptyList(),
                     temperature = config.temperature,
-                    maxTokens = 16,
-                    stream = false
+                    maxTokens = 16
                 )
-                TestResult(true, "连接成功：收到 ${result.content.length} 字符响应")
+                TestResult(true, "连接成功：收到 ${result.content?.length ?: 0} 字符响应")
             } catch (e: Exception) {
                 TestResult(false, "连接失败：${e.message ?: e.javaClass.simpleName}")
             }

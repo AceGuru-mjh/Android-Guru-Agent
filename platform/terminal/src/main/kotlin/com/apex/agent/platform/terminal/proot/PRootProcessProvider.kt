@@ -61,10 +61,15 @@ class PRootProcessProvider(
         val commandList = listOf(command.executable.value) + command.arguments
         val pb = ProcessBuilder(commandList)
         pb.redirectErrorStream(false)   // keep stdout/stderr separate for observation
-        // Pass through the request environment to the PRoot process itself
-        // (PRoot's -E flag injects these INTO the rootfs namespace).
-        pb.environment().clear()
-        pb.environment().putAll(request.environment)
+        // Keep the host environment for the PRoot process itself (PRoot needs
+        // HOME/PATH/locale to function). The command builder's -E flag injects
+        // request.environment INTO the rootfs namespace for the child process,
+        // so the rootfs sees the right env without leaking host env into it.
+        // Only override host env with request env for the PRoot process.
+        val hostEnv = pb.environment()
+        for ((key, value) in request.environment) {
+            hostEnv[key] = value
+        }
 
         return try {
             val process = pb.start()

@@ -6,6 +6,7 @@ import com.apex.agent.platform.terminal.workspace.AbsolutePath as WsAbsolutePath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -181,9 +182,9 @@ class PRootRuntimeIntegrationTest {
         )
         val handle = provider.start(request).getOrThrow() as PRootProcessHandle
         val stderrDef = async(Dispatchers.IO) {
-            handle.processStderr().bufferedReader().readText().trim()
+            withTimeoutOrNull(15000) { handle.processStderr().bufferedReader().readText().trim() } ?: "<TIMEOUT>"
         }
-        val stdout = handle.processStdout().bufferedReader().readText().trim()
+        val stdout = withTimeoutOrNull(15000) { handle.processStdout().bufferedReader().readText().trim() } ?: "<TIMEOUT>"
         val stderr = stderrDef.await()
         val exitInfo = handle.await().getOrThrow()
         println("=== P68 exit diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")

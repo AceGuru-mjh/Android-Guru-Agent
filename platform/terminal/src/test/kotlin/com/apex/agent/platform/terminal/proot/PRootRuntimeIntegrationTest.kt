@@ -106,6 +106,30 @@ class PRootRuntimeIntegrationTest {
         } catch (e: Exception) { false }
     }
 
+    /**
+     * Checks if PRoot can ACTUALLY EXECUTE a command (not just installed).
+     * PRoot needs ptrace(PTRACE_TRACEME) to intercept syscalls. GitHub Actions
+     * ubuntu-24.04 runners restrict ptrace, so PRoot installs but exits 1 on
+     * every command. This pre-check lets the execution tests self-skip on
+     * ptrace-restricted runners, and run for real on ptrace-enabled hosts
+     * (real device / local Linux / ptrace-permitting CI).
+     */
+    private fun prootCanRun(): Boolean {
+        val bin = listOf("/usr/bin/proot", "/usr/local/bin/proot", "/bin/proot")
+            .firstOrNull { File(it).exists() && File(it).canExecute() } ?: return false
+        return try {
+            val proc = ProcessBuilder(bin, "-r", "/", "--kill-on-exit", "--", "/bin/true")
+                .redirectErrorStream(true).start()
+            val out = proc.inputStream.bufferedReader().readText()
+            val exit = proc.waitFor()
+            println("prootCanRun: exit=$exit out='$out'")
+            exit == 0
+        } catch (e: Exception) {
+            println("prootCanRun exception: ${e.message}")
+            false
+        }
+    }
+
     // ─── Integration tests (REAL proot, REAL processes) ───
 
     @Test fun `PRoot runtime initializes with real binary and rootfs`() = runBlocking {

@@ -177,8 +177,9 @@ class PRootRuntimeIntegrationTest {
             arguments = listOf("-c", "exit 42"),
             environment = mapOf("PATH" to "/usr/local/bin:/usr/bin:/bin")
         )
-        val handle = provider.start(request).getOrThrow()
-        val stderr = (handle as PRootProcessHandle).processStderr().bufferedReader().readText().trim()
+        val handle = provider.start(request).getOrThrow() as PRootProcessHandle
+        val stdout = handle.processStdout().bufferedReader().readText().trim()
+        val stderr = handle.processStderr().bufferedReader().readText().trim()
         val exitInfo = handle.await().getOrThrow()
         println("=== P68 exit diagnostics === stdout='$stdout' stderr='$stderr' exit=${exitInfo.exitCode}")
         assertEquals("exit code should be 42 (stderr: $stderr)", 42, exitInfo.exitCode)

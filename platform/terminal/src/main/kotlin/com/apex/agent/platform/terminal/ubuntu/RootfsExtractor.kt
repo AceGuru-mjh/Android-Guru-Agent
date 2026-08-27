@@ -42,10 +42,17 @@ class RootfsExtractor(
         archiveFile: File,
         targetDir: File,
         progress: (suspend (Long, Long) -> Unit)? = null
-    ): Result<ExtractResult> = runCatching {
-        archiveFile.inputStream().buffered().use { fis ->
-            extractTarStream(GZIPInputStream(fis), archiveFile.length(), targetDir, progress)
+    ): Result<ExtractResult> = try {
+        val fis = archiveFile.inputStream().buffered()
+        val gz = GZIPInputStream(fis)
+        try {
+            Result.success(extractTarStream(gz, archiveFile.length(), targetDir, progress))
+        } finally {
+            gz.close()
+            fis.close()
         }
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     /** Extract from any [InputStream] (already-decompressed if caller did it). */
@@ -132,7 +139,7 @@ class RootfsExtractor(
                     }
                     // Restore executable bit if set in the tar header (mode field)
                     val mode = parseOctal(readCString(block, 100, 8).trim())
-                    if ((mode and 0x49) != 0) {  // any of 0100/0010/0001 exec bits
+                    if ((mode and 0x49L) != 0L) {  // any of 0100/0010/0001 exec bits
                         outFile.setExecutable(true, false)
                     }
                 }
@@ -145,7 +152,7 @@ class RootfsExtractor(
             entries++
         }
 
-        ExtractResult(entries, bytes, System.currentTimeMillis() - startMs, rejected)
+        return ExtractResult(entries, bytes, System.currentTimeMillis() - startMs, rejected)
     }
 
     // ─── §10: path-traversal sanitization ───

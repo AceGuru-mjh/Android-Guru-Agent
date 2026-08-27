@@ -158,7 +158,7 @@ class RootfsDownloader(
             }
         }
 
-        DownloadResult(
+        return DownloadResult(
             file = targetFile,
             bytesDownloaded = totalBytes,
             sha256Actual = sha256OfFile(targetFile),

@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+import java.time.Duration
+
 android {
     namespace = "com.apex.agent.platform.terminal"
     compileSdk = 35
@@ -58,6 +60,7 @@ dependencies {
 // when tests fail. Without this, Gradle captures stdout into the HTML report
 // only, not the console — making integration-test debugging impossible.
 tasks.withType<Test>().configureEach {
+    timeout.set(Duration.ofMinutes(5))
     testLogging {
         events("passed", "skipped", "failed", "standardOut", "standardError")
         showStandardStreams = true

@@ -222,7 +222,9 @@ class RootfsProvisioningTest {
         println("=== checksum test diagnostics ===")
         println("install result: $result")
         println("result class: ${result::class.simpleName}")
-        assertTrue("should fail with checksum mismatch: $result", result is ProvisioningResult.Failed)
+        val isFailed = result is ProvisioningResult.Failed
+        println("isFailed: $isFailed")
+        assertTrue("should fail with checksum mismatch: $result", isFailed)
         val failed = result as ProvisioningResult.Failed
         assertEquals(ProvisioningErrorCode.CHECKSUM_MISMATCH, failed.error.code)
     }

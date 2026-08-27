@@ -248,6 +248,20 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
+      - name: Run core:agent-engine unit tests (A68.1 orchestrator)
+        run: |
+          # A68.1 — Task Execution Orchestrator state-machine + loop + timeout +
+          # cancellation tests. Pure JVM (no Android), uses FakeLlmClient + FakeToolExecutor.
+          ./gradlew :core:agent-engine:test \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
+      # NOTE: :core:tool-registry:test is intentionally NOT run in CI yet —
+      # the existing DomParserTest and BrowserScriptTest have pre-existing
+      # compile errors (internal RawDomElement visibility + illegal test names)
+      # unrelated to A68.1. Fixing those is out of A68.1's scope.
+
   build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest

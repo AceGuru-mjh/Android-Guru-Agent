@@ -11,8 +11,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 /**
@@ -52,7 +50,6 @@ class RootfsProvisionerImpl(
         File(layout.metadataFile.value)
     ),
     private val installLock: RootfsInstallLock = RootfsInstallLock(),
-    private val stateLock: Mutex = Mutex()
 ) : RootfsProvisioner {
 
     private val _state = MutableStateFlow(ProvisioningState.IDLE)
@@ -69,19 +66,19 @@ class RootfsProvisionerImpl(
     fun markIdle() { inUse = false }
 
     // ─── §24: install() ───
-    override suspend fun install(target: RootfsTarget): ProvisioningResult = withLock {
+    override suspend fun install(target: RootfsTarget): ProvisioningResult {
         // Already READY?
         val existing = current()
         if (existing != null && _state.value == ProvisioningState.READY) {
             // §25: ALREADY_INSTALLED — return the current rootfs, no reinstall
-            return@withLock ProvisioningResult.AlreadyReady(existing)
+            return ProvisioningResult.AlreadyReady(existing)
         }
 
         if (!installLock.tryAcquire()) {
-            return@withLock ProvisioningResult.Busy("Another install/repair/remove in progress")
+            return ProvisioningResult.Busy("Another install/repair/remove in progress")
         }
 
-        try {
+        return try {
             doInstall(target)
         } catch (e: kotlinx.coroutines.CancellationException) {
             _state.value = ProvisioningState.CANCELLED
@@ -301,7 +298,7 @@ class RootfsProvisionerImpl(
     }
 
     // ─── §16: reconcile() — crash recovery ───
-    override suspend fun reconcile(): ReconciliationResult = withLock {
+    override suspend fun reconcile(): ReconciliationResult {
         val activeRootfs = current()
         val staging = File(layout.stagingDir.value)
         val staleStaging = staging.exists() && staging.isDirectory && staging.listFiles().orEmpty().isNotEmpty()
@@ -354,7 +351,7 @@ class RootfsProvisionerImpl(
             else -> { /* NONE or FRESH_INSTALL_REQUIRED — caller decides */ }
         }
 
-        ReconciliationResult(
+        return ReconciliationResult(
             activeRootfs = activeRootfs,
             state = if (activeRootfs != null) ProvisioningState.READY else ProvisioningState.IDLE,
             staleStaging = staleStaging,
@@ -374,17 +371,17 @@ class RootfsProvisionerImpl(
     }
 
     // ─── §18: repair() ───
-    override suspend fun repair(): ProvisioningResult = withLock {
+    override suspend fun repair(): ProvisioningResult {
         val active = current()
         if (active != null) {
             val validation = validateRootfsLayout(File(active.location!!.value))
             if (validation.valid) {
                 _state.value = ProvisioningState.READY
-                return@withLock ProvisioningResult.AlreadyReady(active)
+                return ProvisioningResult.AlreadyReady(active)
             }
         }
         // Reuse cached archive if checksum still matches; else full reinstall
-        install(RootfsTarget(
+        return install(RootfsTarget(
             distribution = metadataStore.load()?.distribution ?: "ubuntu",
             version = metadataStore.load()?.version ?: "24.04",
             architecture = metadataStore.load()?.architecture ?: com.apex.agent.platform.terminal.linux.CpuArchitecture.ARM64
@@ -392,12 +389,12 @@ class RootfsProvisionerImpl(
     }
 
     // ─── §19: remove() ───
-    override suspend fun remove(): ProvisioningResult = withLock {
+    override suspend fun remove(): ProvisioningResult {
         if (inUse) {
-            return@withLock ProvisioningResult.Busy("Rootfs in use by an active session — cannot remove")
+            return ProvisioningResult.Busy("Rootfs in use by an active session — cannot remove")
         }
         if (!installLock.tryAcquire()) {
-            return@withLock ProvisioningResult.Busy("Another install/repair/remove in progress")
+            return ProvisioningResult.Busy("Another install/repair/remove in progress")
         }
         try {
             _state.value = ProvisioningState.REMOVING
@@ -458,5 +455,4 @@ class RootfsProvisionerImpl(
         }
     }
 
-    private suspend inline fun <T> withLock(crossinline block: suspend () -> T): T = stateLock.withLock { block() }
 }

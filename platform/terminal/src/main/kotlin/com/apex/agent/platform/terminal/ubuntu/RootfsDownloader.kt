@@ -54,7 +54,7 @@ class RootfsDownloader(
      * [progress] receives (bytesSoFar, totalOrNull) — caller can throttle.
      */
     suspend fun download(
-        source: RootfsSource,
+        source: RootfsArtifactSource,
         artifact: RootfsArtifact,
         targetFile: File,
         preflight: ProvisioningStoragePreflight? = null,
@@ -62,12 +62,10 @@ class RootfsDownloader(
     ): Result<DownloadResult> = runCatching {
         // §26: disk-space preflight
         if (preflight != null && !preflight.sufficient) {
-            return@runCatching Result.failure(
-                provisioningException(
-                    ProvisioningErrorCode.INSUFFICIENT_STORAGE,
-                    "Need ${preflight.totalRequired} bytes, only ${preflight.availableSpace} available",
-                    recoverable = false
-                )
+            throw provisioningException(
+                ProvisioningErrorCode.INSUFFICIENT_STORAGE,
+                "Need ${preflight.totalRequired} bytes, only ${preflight.availableSpace} available",
+                recoverable = false
             )
         }
         targetFile.parentFile?.mkdirs()
@@ -89,18 +87,16 @@ class RootfsDownloader(
                 }
             }
         }
-        Result.failure<DownloadResult>(
-            provisioningException(
-                ProvisioningErrorCode.DOWNLOAD_FAILED,
-                "Download failed after $maxRetries attempts: ${lastError?.message}",
-                recoverable = true,
-                cause = lastError
-            )
-        ).getOrThrow()
+        throw provisioningException(
+            ProvisioningErrorCode.DOWNLOAD_FAILED,
+            "Download failed after $maxRetries attempts: ${lastError?.message}",
+            recoverable = true,
+            cause = lastError
+        )
     }
 
     private suspend fun attemptDownload(
-        source: RootfsSource,
+        source: RootfsArtifactSource,
         artifact: RootfsArtifact,
         targetFile: File,
         progress: (suspend (Long, Long?) -> Unit)?
@@ -108,7 +104,7 @@ class RootfsDownloader(
         val partFile = File(targetFile.parentFile, "${targetFile.name}.part")
         val startMs = System.currentTimeMillis()
 
-        // Open the source stream (delegates to RootfsSource — could be HTTP or bundled)
+        // Open the source stream (delegates to RootfsArtifactSource — could be HTTP or bundled)
         val input = source.open(artifact).getOrElse {
             throw provisioningException(
                 ProvisioningErrorCode.NETWORK_FAILURE,
@@ -125,27 +121,25 @@ class RootfsDownloader(
         val sha = MessageDigest.getInstance("SHA-256")
         val bytesSoFar = if (append) partFile.length() else 0L
 
-        return coroutineScope {
+        var totalBytes = bytesSoFar
+        coroutineScope {
             FileOutputStream(partFile, append).use { out ->
                 val buf = ByteArray(bufferBytes)
                 var read = 0
-                var total = bytesSoFar
                 while (true) {
                     ensureActive()   // §8: cancellation check
                     read = input.read(buf)
                     if (read <= 0) break
                     out.write(buf, 0, read)
-                    if (!append) sha.update(buf, 0, read)   // §9: only hash the fresh bytes (resume correctness: if we appended, we can't hash just new bytes — full re-hash below)
-                    total += read
-                    progress?.invoke(total, artifact.expectedSize)
+                    if (!append) sha.update(buf, 0, read)   // §9: hash fresh bytes (full re-hash below)
+                    totalBytes += read
+                    progress?.invoke(totalBytes, artifact.expectedSize)
                 }
                 out.fd.sync()   // flush to disk before rename
             }
             input.close()
 
-            // §9: SHA-256 verification — always re-hash the COMPLETE file on completion
-            // (resume correctness: the partial-hash above is only for progress;
-            //  the final verification hashes the whole .part file).
+            // §9: SHA-256 verification — re-hash the COMPLETE file on completion
             val actualSha = sha256OfFile(partFile)
             val expected = artifact.sha256
             if (expected != null && actualSha != expected) {
@@ -162,16 +156,16 @@ class RootfsDownloader(
                 partFile.copyTo(targetFile, overwrite = true)
                 partFile.delete()
             }
-
-            DownloadResult(
-                file = targetFile,
-                bytesDownloaded = total,
-                sha256Actual = actualSha,
-                sha256Expected = expected,
-                checksumMatches = expected == null || actualSha == expected,
-                durationMs = System.currentTimeMillis() - startMs
-            )
         }
+
+        DownloadResult(
+            file = targetFile,
+            bytesDownloaded = totalBytes,
+            sha256Actual = sha256OfFile(targetFile),
+            sha256Expected = artifact.sha256,
+            checksumMatches = artifact.sha256 == null || sha256OfFile(targetFile) == artifact.sha256,
+            durationMs = System.currentTimeMillis() - startMs
+        )
     }
 
     private fun sha256OfFile(f: File): String {

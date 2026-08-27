@@ -121,7 +121,7 @@ class RootfsProvisioningTest {
         assertFalse(b.isVerifiable)
     }
 
-    // ─── §6: RootfsSource tests ───
+    // ─── §6: RootfsArtifactSource tests ───
 
     @Test fun `OfficialUbuntuRootfsSource resolves 24-04 arm64`() = runBlocking {
         val src = OfficialUbuntuRootfsSource()

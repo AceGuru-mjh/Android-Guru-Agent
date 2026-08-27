@@ -43,7 +43,7 @@ import java.io.File
  * Spec: PR #69 sections 3, 8, 11, 12, 16, 17, 18, 19, 24, 25, 26, 31.
  */
 class RootfsProvisionerImpl(
-    private val source: RootfsSource,
+    private val source: RootfsArtifactSource,
     private val validator: RootfsValidator?,
     private val layout: RootfsInstallLayout,
     private val downloader: RootfsDownloader = RootfsDownloader(),

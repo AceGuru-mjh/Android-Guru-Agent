@@ -26,7 +26,7 @@ import java.net.URL
  * functional; the URLs/checksums are filled in when the real artifact is
  * published to the mirror). Tests use FakeRootfsSource (no network).
  */
-class OfficialUbuntuRootfsSource : RootfsSource {
+class OfficialUbuntuRootfsSource : RootfsArtifactSource {
 
     override val sourceKind: RootfsSourceKind = RootfsSourceKind.OFFICIAL_MIRROR
 
@@ -124,7 +124,7 @@ class OfficialUbuntuRootfsSource : RootfsSource {
 class FakeRootfsSource(
     private val artifact: RootfsArtifact,
     private val archiveBytes: ByteArray
-) : RootfsSource {
+) : RootfsArtifactSource {
     override val sourceKind: RootfsSourceKind = RootfsSourceKind.CUSTOM
     override suspend fun resolve(target: RootfsTarget): Result<RootfsArtifact> =
         if (target.distribution == artifact.distribution &&

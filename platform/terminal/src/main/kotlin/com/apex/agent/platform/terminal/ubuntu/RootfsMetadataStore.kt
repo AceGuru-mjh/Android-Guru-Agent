@@ -98,7 +98,7 @@ class RootfsMetadataStore(
     }
 
     suspend fun delete(): Result<Unit> = mutex.withLock {
-        runCatching { metadataFile.delete() }
+        runCatching { metadataFile.delete(); Unit }
     }
 
     suspend fun exists(): Boolean = mutex.withLock { metadataFile.exists() }

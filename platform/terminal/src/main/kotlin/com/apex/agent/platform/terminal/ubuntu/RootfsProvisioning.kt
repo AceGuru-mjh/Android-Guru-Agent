@@ -48,12 +48,12 @@ data class RootfsArtifact(
 enum class ArchiveFormat { TAR_GZ, TAR_XZ, TAR_ZSTD, TAR, SQUASHFS, UNKNOWN }
 enum class RootfsSourceKind { OFFICIAL_MIRROR, CUSTOM_HTTP, BUNDLED, LOCAL_CACHE, CUSTOM }
 
-// ─── Section 6: RootfsSource — abstracts WHERE artifacts come from ───
+// ─── Section 6: RootfsArtifactSource — abstracts WHERE artifacts come from ───
 // P69 implements OfficialUbuntuRootfsSource (resolves Ubuntu 24.04 ARM64 from
 // the official mirror). Future: DebianRootfsSource, AlpineRootfsSource,
 // BundledRootfsSource (from APK assets), CustomRootfsSource (user URL).
 // Adding a source NEVER touches the provisioner.
-interface RootfsSource {
+interface RootfsArtifactSource {
     val sourceKind: RootfsSourceKind
     suspend fun resolve(target: RootfsTarget): Result<RootfsArtifact>
     /** Opens a streaming download stream for the artifact's archive. */

@@ -88,12 +88,25 @@ class RootfsDownloader(
                 }
             }
         }
-        throw provisioningException(
-            ProvisioningErrorCode.DOWNLOAD_FAILED,
-            "Download failed after $maxRetries attempts: ${lastError?.message}",
-            recoverable = true,
-            cause = lastError
-        )
+        // Preserve the real error code if the last failure was a known
+        // ProvisioningError (e.g. CHECKSUM_MISMATCH). Only wrap as
+        // DOWNLOAD_FAILED for unexpected/network failures.
+        throw when (lastError?.message?.let { msg ->
+            when {
+                msg.contains("CHECKSUM_MISMATCH") -> ProvisioningErrorCode.CHECKSUM_MISMATCH
+                msg.contains("NETWORK_FAILURE") -> ProvisioningErrorCode.NETWORK_FAILURE
+                msg.contains("INSUFFICIENT_STORAGE") -> ProvisioningErrorCode.INSUFFICIENT_STORAGE
+                else -> null
+            }
+        }) {
+            ProvisioningErrorCode.CHECKSUM_MISMATCH ->
+                provisioningException(ProvisioningErrorCode.CHECKSUM_MISMATCH, lastError!!.message ?: "checksum", recoverable = true)
+            ProvisioningErrorCode.NETWORK_FAILURE ->
+                provisioningException(ProvisioningErrorCode.NETWORK_FAILURE, lastError!!.message ?: "network", recoverable = true)
+            ProvisioningErrorCode.INSUFFICIENT_STORAGE ->
+                provisioningException(ProvisioningErrorCode.INSUFFICIENT_STORAGE, lastError!!.message ?: "storage", recoverable = false)
+            else -> provisioningException(ProvisioningErrorCode.DOWNLOAD_FAILED, "Download failed after $maxRetries attempts: ${lastError?.message}", recoverable = true, cause = lastError)
+        }
     }
 
     private suspend fun attemptDownload(

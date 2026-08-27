@@ -278,15 +278,17 @@ class RootfsProvisionerImpl(
     }
 
     // ─── §24: current() — returns active RootfsDescriptor or null ───
-    override suspend fun current(): RootfsDescriptor? = withLock {
+    // Lock-free: only reads files (current marker + metadata). Safe to call
+    // from within install()/repair()/remove() which already hold stateLock.
+    override suspend fun current(): RootfsDescriptor? {
         val marker = File(layout.currentMarker.value)
-        if (!marker.exists()) return@withLock null
+        if (!marker.exists()) return null
         val artifactId = marker.readText().trim()
-        if (artifactId.isEmpty()) return@withLock null
+        if (artifactId.isEmpty()) return null
         val versionDir = File(layout.versionsDir.value, artifactId)
-        if (!versionDir.exists()) return@withLock null
-        val meta = metadataStore.load() ?: return@withLock null
-        RootfsDescriptor(
+        if (!versionDir.exists()) return null
+        val meta = metadataStore.load() ?: return null
+        return RootfsDescriptor(
             id = meta.artifactId,
             distribution = LinuxDistribution.UBUNTU,
             version = meta.version,

@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.coroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -127,7 +128,7 @@ class RootfsDownloader(
                 val buf = ByteArray(bufferBytes)
                 var read = 0
                 while (true) {
-                    ensureActive()   // §8: cancellation check
+                    coroutineContext.ensureActive()   // §8: cancellation check
                     read = input.read(buf)
                     if (read <= 0) break
                     out.write(buf, 0, read)

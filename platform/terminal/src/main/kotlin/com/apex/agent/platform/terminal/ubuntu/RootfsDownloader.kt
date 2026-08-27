@@ -190,9 +190,7 @@ internal fun provisioningException(
     recoverable: Boolean = false,
     cause: Throwable? = null
 ): RuntimeException {
-    val err = ProvisioningError(code, message, recoverable, cause)
-    return RuntimeException("ProvisioningError:${code.name} — $message", cause).also {
-        // stash the typed error for the provisioner to unwrap
-        it.initCause(cause)
-    }
+    // RuntimeException(msg, cause) already sets the cause. Do NOT call
+    // initCause(cause) -- it throws IllegalStateException('Cause can't be set twice').
+    return RuntimeException("ProvisioningError:" + code.name + " -- " + message, cause)
 }

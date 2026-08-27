@@ -219,6 +219,9 @@ class RootfsProvisioningTest {
         val src = FakeRootfsSource(artifact, archive)
         val prov = RootfsProvisionerImpl(src, null, layout)
         val result = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
+        println("=== checksum test diagnostics ===")
+        println("install result: $result")
+        println("result class: ${result::class.simpleName}")
         assertTrue("should fail with checksum mismatch: $result", result is ProvisioningResult.Failed)
         val failed = result as ProvisioningResult.Failed
         assertEquals(ProvisioningErrorCode.CHECKSUM_MISMATCH, failed.error.code)

@@ -435,6 +435,15 @@ class RootfsProvisioningTest {
         println("=== Provider current test diagnostics ===")
         println("install result: $installResult")
         println("provisioner state: ${prov.state()}")
+        // Check each component current() reads
+        val markerFile = java.io.File(layout.currentMarker.value)
+        println("marker exists: ${markerFile.exists()}, content: '${if (markerFile.exists()) markerFile.readText().trim() else "<none>"}'")
+        val versionsDir = java.io.File(layout.versionsDir.value)
+        println("versions dir exists: ${versionsDir.exists()}")
+        if (versionsDir.exists()) versionsDir.listFiles()?.forEach { println("  version: ${it.name}") }
+        val metaFile = java.io.File(layout.metadataFile.value)
+        println("metadata file exists: ${metaFile.exists()}")
+        if (metaFile.exists()) println("  content: ${metaFile.readText().take(200)}")
         val provider = ProvisionedRootfsProvider(prov)
         val current = provider.current()
         println("provider.current(): $current")

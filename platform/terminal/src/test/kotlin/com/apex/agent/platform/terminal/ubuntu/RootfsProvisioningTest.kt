@@ -219,12 +219,7 @@ class RootfsProvisioningTest {
         val src = FakeRootfsSource(artifact, archive)
         val prov = RootfsProvisionerImpl(src, null, layout)
         val result = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
-        println("=== checksum test diagnostics ===")
-        println("install result: $result")
-        println("result class: ${result::class.simpleName}")
-        val isFailed = result is ProvisioningResult.Failed
-        println("isFailed: $isFailed")
-        assertTrue("should fail with checksum mismatch: $result", isFailed)
+        assertTrue("should fail with checksum mismatch: $result", result is ProvisioningResult.Failed)
         val failed = result as ProvisioningResult.Failed
         assertEquals(ProvisioningErrorCode.CHECKSUM_MISMATCH, failed.error.code)
     }
@@ -399,14 +394,9 @@ class RootfsProvisioningTest {
     @Test fun `validate returns AVAILABLE for installed rootfs`() = runBlocking {
         val layout = tempLayout()
         val prov = RootfsProvisionerImpl(fakeSourceWithChecksum(buildRootfsTarGz()), null, layout)
-        val installResult = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
-        println("=== validate test diagnostics ===")
-        println("install result: $installResult")
-        println("provisioner state: ${prov.state()}")
-        println("current after install: ${prov.current()}")
+        prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
         val v = prov.validate().getOrThrow()
-        println("validate result: valid=${v.valid} state=${v.state} issues=${v.issues}")
-        assertTrue("validate should be valid (install=$installResult, v=$v)", v.valid)
+        assertTrue(v.valid)
         assertEquals(RootfsState.AVAILABLE, v.state)
     }
 
@@ -436,23 +426,10 @@ class RootfsProvisioningTest {
     @Test fun `ProvisionedRootfsProvider current returns active rootfs`() = runBlocking {
         val layout = tempLayout()
         val prov = RootfsProvisionerImpl(fakeSourceWithChecksum(buildRootfsTarGz()), null, layout)
-        val installResult = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
-        println("=== Provider current test diagnostics ===")
-        println("install result: $installResult")
-        println("provisioner state: ${prov.state()}")
-        // Check each component current() reads
-        val markerFile = java.io.File(layout.currentMarker.value)
-        println("marker exists: ${markerFile.exists()}, content: '${if (markerFile.exists()) markerFile.readText().trim() else "<none>"}'")
-        val versionsDir = java.io.File(layout.versionsDir.value)
-        println("versions dir exists: ${versionsDir.exists()}")
-        if (versionsDir.exists()) versionsDir.listFiles()?.forEach { println("  version: ${it.name}") }
-        val metaFile = java.io.File(layout.metadataFile.value)
-        println("metadata file exists: ${metaFile.exists()}")
-        if (metaFile.exists()) println("  content: ${metaFile.readText().take(200)}")
+        prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
         val provider = ProvisionedRootfsProvider(prov)
         val current = provider.current()
-        println("provider.current(): $current")
-        assertNotNull("current should not be null (install=$installResult, state=${prov.state()})", current)
+        assertNotNull(current)
         assertEquals("ubuntu-24.04-arm64", current!!.id)
     }
 

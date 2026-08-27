@@ -407,7 +407,7 @@ class RootfsProvisionerImpl(
             _state.value = ProvisioningState.REMOVED
             emit(ProvisioningState.REMOVED, 100, "Removed")
             // §24: removed — caller treats REMOVED as terminal
-            ProvisioningResult.Ready(
+            return ProvisioningResult.Ready(
                 RootfsDescriptor(
                     id = "removed", distribution = LinuxDistribution.UNKNOWN,
                     version = null, architecture = com.apex.agent.platform.terminal.linux.CpuArchitecture.UNKNOWN,

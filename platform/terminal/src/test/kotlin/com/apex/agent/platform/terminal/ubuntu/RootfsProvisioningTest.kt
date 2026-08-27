@@ -394,9 +394,14 @@ class RootfsProvisioningTest {
     @Test fun `validate returns AVAILABLE for installed rootfs`() = runBlocking {
         val layout = tempLayout()
         val prov = RootfsProvisionerImpl(fakeSourceWithChecksum(buildRootfsTarGz()), null, layout)
-        prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
+        val installResult = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
+        println("=== validate test diagnostics ===")
+        println("install result: $installResult")
+        println("provisioner state: ${prov.state()}")
+        println("current after install: ${prov.current()}")
         val v = prov.validate().getOrThrow()
-        assertTrue(v.valid)
+        println("validate result: valid=${v.valid} state=${v.state} issues=${v.issues}")
+        assertTrue("validate should be valid (install=$installResult, v=$v)", v.valid)
         assertEquals(RootfsState.AVAILABLE, v.state)
     }
 
@@ -426,10 +431,14 @@ class RootfsProvisioningTest {
     @Test fun `ProvisionedRootfsProvider current returns active rootfs`() = runBlocking {
         val layout = tempLayout()
         val prov = RootfsProvisionerImpl(fakeSourceWithChecksum(buildRootfsTarGz()), null, layout)
-        prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
+        val installResult = prov.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64))
+        println("=== Provider current test diagnostics ===")
+        println("install result: $installResult")
+        println("provisioner state: ${prov.state()}")
         val provider = ProvisionedRootfsProvider(prov)
         val current = provider.current()
-        assertNotNull(current)
+        println("provider.current(): $current")
+        assertNotNull("current should not be null (install=$installResult, state=${prov.state()})", current)
         assertEquals("ubuntu-24.04-arm64", current!!.id)
     }
 

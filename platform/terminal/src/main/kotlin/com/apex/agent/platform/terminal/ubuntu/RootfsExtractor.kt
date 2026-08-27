@@ -75,7 +75,7 @@ class RootfsExtractor(
         val buf = ByteArray(bufferBytes)
 
         while (true) {
-            coroutineContext.currentCoroutineContext().ensureActive()   // §8: cancellation check per entry
+            currentCoroutineContext().ensureActive()   // §8: cancellation check per entry
             if (!readExact(decompressed, block, 512)) break   // EOF
             // Two consecutive zero blocks = end of archive
             if (block.all { it == 0.toByte() }) {

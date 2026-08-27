@@ -1,6 +1,6 @@
 package com.apex.agent.platform.terminal.ubuntu
 
-import kotlinx.coroutines.coroutineContext
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.BufferedInputStream
 import java.io.File
@@ -14,7 +14,7 @@ import java.util.zip.GZIPInputStream
  * §30: streams entry-by-entry — NEVER loads the whole archive into RAM.
  * §10: rejects path-traversal entries (../ or absolute paths) so a
  *      malicious archive can't escape the staging dir.
- * §8: cancellation-aware (coroutineContext.ensureActive() per entry).
+ * §8: cancellation-aware (currentCoroutineContext().ensureActive() per entry).
  * §26: progress callback (bytes extracted, entry count).
  *
  * P69 supports TAR_GZ (Ubuntu cloud images). TAR_XZ / TAR_ZSTD / TAR
@@ -75,7 +75,7 @@ class RootfsExtractor(
         val buf = ByteArray(bufferBytes)
 
         while (true) {
-            coroutineContext.coroutineContext.ensureActive()   // §8: cancellation check per entry
+            coroutineContext.currentCoroutineContext().ensureActive()   // §8: cancellation check per entry
             if (!readExact(decompressed, block, 512)) break   // EOF
             // Two consecutive zero blocks = end of archive
             if (block.all { it == 0.toByte() }) {
@@ -127,7 +127,7 @@ class RootfsExtractor(
                     FileOutputStream(outFile).use { out ->
                         var remaining = size
                         while (remaining > 0) {
-                            coroutineContext.ensureActive()
+                            currentCoroutineContext().ensureActive()
                             val toRead = minOf(buf.size.toLong(), remaining).toInt()
                             val n = decompressed.read(buf, 0, toRead)
                             if (n <= 0) break

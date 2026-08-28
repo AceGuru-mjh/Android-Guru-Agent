@@ -53,7 +53,9 @@ std::string PtyEngine::read(int sessionId, int maxBytes) {
     return s ? s->read(maxBytes) : "";
 }
 
-PtyEngine::ReadOutcome PtyEngine::readEx(int sessionId, int maxBytes) {
+// ReadOutcome 声明于 apex 命名空间作用域（pty_engine.h:28），
+// 而非 PtyEngine 的嵌套类型 —— 此处不得写 PtyEngine::ReadOutcome。
+ReadOutcome PtyEngine::readEx(int sessionId, int maxBytes) {
     std::lock_guard<std::mutex> lock(mutex_);
     ReadOutcome out;
     auto* s = getSession(sessionId);

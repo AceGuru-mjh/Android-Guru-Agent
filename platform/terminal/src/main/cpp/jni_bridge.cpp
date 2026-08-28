@@ -19,13 +19,14 @@ extern "C" {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // P70 读取状态数值约定 —— 与 Kotlin 侧 com.apex.agent.platform.terminal.pty.PtyJniReadStatus
-// 一一对应，勿改数值。详见 pty_engine.h 的 PtyReadStatus（nativeReadBytes 直接透传
-// PtyEngine::readEx 的 status 字段，此处仅需 SESSION_NOT_FOUND 用于初始值）：
+// 一一对应，勿改数值。单一事实来源是 pty_engine.h 的 apex::PtyReadStatus 枚举
+// （nativeReadBytes 直接透传 PtyEngine::readEx 的 status 字段，此处仅用
+// apex::PTY_READ_SESSION_NOT_FOUND 作初始值，不再定义本地同名常量——
+// 「using namespace apex」+ 本地全局常量会造成名字查找二义性）：
 //   0 = DATA（读到数据）          1 = NO_DATA（EAGAIN —— idle，一切正常）
 //   2 = EOF（输出流结束）          3 = ERROR（真实错误，errno 有效）
 //   4 = SESSION_NOT_FOUND
 // ═══════════════════════════════════════════════════════════════════════════
-static constexpr jint PTY_READ_SESSION_NOT_FOUND = 4;
 
 JNIEXPORT jint JNICALL
 Java_com_apex_agent_platform_terminal_NativePty_nativeCreateSession(
@@ -102,7 +103,7 @@ JNIEXPORT jbyteArray JNICALL
 Java_com_apex_agent_platform_terminal_NativePty_nativeReadBytes(
     JNIEnv* env, jobject, jint sessionId, jint maxBytes, jintArray statusOut) {
 
-    jint status[3] = {PTY_READ_SESSION_NOT_FOUND, 0, 0};
+    jint status[3] = {apex::PTY_READ_SESSION_NOT_FOUND, 0, 0};
 
     int cap = (maxBytes > 0) ? maxBytes : 4096;
     ReadOutcome outcome = PtyEngine::instance().readEx(sessionId, cap);

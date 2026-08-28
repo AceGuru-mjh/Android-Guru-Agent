@@ -72,9 +72,9 @@ class ProotExecutorProotSmokeTest {
 
     /**
      * T72: host proot 5.4 与 Termux proot 5.1.107（生产目标）的两处语法差异：
-     *  a) upstream 无 `-E K=V`（Termux 私有扩展）→ 放进 ProcessBuilder env
+     * (a) upstream 无 `-E K=V`（Termux 私有扩展）→ 放进 ProcessBuilder env
      *     （upstream 继承 env，语义等价）
-     *  b) upstream 5.4 不认 `--` 分隔符 → 去掉（options 后直接跟 command）
+     * (b) upstream 5.4 不认 `--` 分隔符 → 去掉（options 后直接跟 command）
      * 原始 argv 契约（含 -E/--）由真机 androidTest（Termux proot）锁定。
      */
     private fun adaptForHostProot(argv: List<String>): Pair<List<String>, Map<String, String>> {

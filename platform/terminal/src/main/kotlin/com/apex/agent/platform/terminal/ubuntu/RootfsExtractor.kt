@@ -413,7 +413,7 @@ class RootfsExtractor(
             val spaceIdx = content.indexOf(' ', pos)
             if (spaceIdx < 0) break
             val len = content.substring(pos, spaceIdx).toIntOrNull() ?: break
-            // record body spans [spaceIdx+1, pos+len)
+            // record body spans: spaceIdx+1 .. pos+len-1
             if (len <= 0 || pos + len > content.length || spaceIdx + 1 > pos + len) break
             val record = content.substring(spaceIdx + 1, pos + len)
             val eq = record.indexOf('=')

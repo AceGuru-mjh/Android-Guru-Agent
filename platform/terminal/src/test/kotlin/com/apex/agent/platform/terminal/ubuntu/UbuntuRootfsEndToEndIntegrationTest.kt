@@ -40,10 +40,10 @@ import java.nio.file.Files
  *  - Level 2（proot 执行）：需要 host 上有 proot 且 ptrace 可用。CI 装
  *    proot 5.4 —— 它与 Termux proot 5.1.107.92（APK 生产目标）有两处
  *    语法差异：
- *      a) upstream proot 没有 `-E KEY=VALUE`（Termux 私有扩展）→ 测试把
+     *      (a) upstream proot 没有 `-E KEY=VALUE`（Termux 私有扩展）→ 测试把
  *         guest env 放进 ProcessBuilder env（upstream proot 继承之，语义等价）
- *      b) upstream proot 5.4 不认 `--` 分隔符 → 去掉（options 后直接跟 command）
- *      c) glibc 2.39 (Ubuntu 24.04) 与 seccomp 加速冲突 → PROOT_NO_SECCOMP=1
+     *      (b) upstream proot 5.4 不认 `--` 分隔符 → 去掉（options 后直接跟 command）
+     *      (c) glibc 2.39 (Ubuntu 24.04) 与 seccomp 加速冲突 → PROOT_NO_SECCOMP=1
  *    这些适配只存在于本测试 —— 生产路径（Termux proot + -E + --）的契约
  *    由 P71 的 androidTest（真机）锁定。
  *  - Level 3（apt update）：真实网络 + DNS + sources。慢（1-3 min）但

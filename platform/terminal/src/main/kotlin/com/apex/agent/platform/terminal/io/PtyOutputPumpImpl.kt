@@ -51,10 +51,18 @@ class PtyOutputPumpImpl(
     private val inputDetector: InputWaitingDetector? = null,
     private val foregroundCommandProvider: () -> String? = { null },
     /** Called after each VT feed — used to push screen state to ObservationEngine (Spec §41 event-driven). */
-    private val onOutput: (() -> Unit)? = null
+    private val onOutput: (() -> Unit)? = null,
+    /**
+     * P70: pump coroutine scope. Injectable so tests can run the pump on an isolated
+     * dispatcher — a shared Dispatchers.IO pool gets saturated by leftover pumps from
+     * earlier tests in the same JVM (each blocks ~100ms per waitForData poll), starving
+     * new pumps and making tests flaky. Defaults to a dedicated IO scope (unchanged
+     * production behavior). The scope's lifecycle belongs to the OWNER, not the pump:
+     * [stop] cancels only the pump job.
+     */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PtyOutputPump {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pumpJob: Job? = null
     private val running = AtomicBoolean(false)
 
@@ -69,7 +77,15 @@ class PtyOutputPumpImpl(
                 val n = native.nativeRead(nativeSessionId, buf, buf.size)
                 when {
                     n < 0 -> {
-                        // fd closed / error — emit Error event; SessionManager will move to BROKEN
+                        // P70-1: -1 现在只表示「输出流结束（EOF）/真实错误/会话不存在」。
+                        // 若进程已退出（或会话已被 close），这是正常收尾 —— exit watcher
+                        // 负责 ProcessExited 与状态迁移，pump 静默停止，不发虚假 ReadFailed
+                        // 错误事件（旧实现在 idle 窗口就会走到这里，把活着的 session 判死）。
+                        if (!native.nativeIsAlive(nativeSessionId)) {
+                            running.set(false)
+                            break
+                        }
+                        // 进程还活着却读到流结束/错误 —— 真异常，报告并停止 pump。
                         emitError("ReadFailed", "nativeRead returned $n", recoverable = false)
                         running.set(false)
                         break
@@ -123,8 +139,11 @@ class PtyOutputPumpImpl(
 
     override suspend fun stop() {
         running.set(false)
+        // P70: cancel only THIS pump's job. The scope is owned by the constructor caller
+        // (SessionManager/Runtime) when injected — cancelling it here would kill sibling
+        // coroutines (exit watcher, event dispatch). The loop's `isActive && running` guard
+        // plus pumpJob.cancel() terminates the pump coroutine.
         pumpJob?.cancel()
-        scope.cancel()
     }
 
     private suspend fun emitError(code: String, message: String, recoverable: Boolean) {

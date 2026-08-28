@@ -27,7 +27,13 @@ interface NativePty {
 
     /**
      * Read up to [maxBytes] from the session's master fd. NON-BLOCKING.
-     * @return bytes read (≥0), 0 if no data, -1 if fd closed / error.
+     *
+     * P70-1 状态语义（实现必须严格遵守，禁止用 hasData() 等二次猜测）：
+     *   - `> 0` — 读到的字节数（二进制安全：NUL 与任意字节原样保留，P70-2）。
+     *   - `0`   — 暂时无数据（EAGAIN/EWOULDBLOCK —— idle）。PTY 与进程均正常，
+     *             绝不能报告 -1（旧实现正是这样导致 PtyOutputPump 提前自杀）。
+     *   - `-1`  — 输出流结束（EOF/EIO —— slave 已关闭）或真实读错误或会话不存在。
+     *             EOF ≠ 进程退出：进程存活状态只由 [nativeIsAlive]/[nativeWaitExit] 决定。
      *
      * IMPORTANT: this is the ONLY reader entry point. PtyOutputPump is the sole caller (Spec §14).
      */

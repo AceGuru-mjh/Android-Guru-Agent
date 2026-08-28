@@ -105,7 +105,8 @@ class SessionManagerImpl(
             virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
             inputDetector = inputDetector,
             foregroundCommandProvider = { foregroundCommandFor(sessionId) },
-            onOutput = { observationEngine.refreshScreenState() }  // push screen state (event-driven)
+            onOutput = { observationEngine.refreshScreenState() },  // push screen state (event-driven)
+            scope = scope  // P70: shared session-manager scope (injectable in tests; pump.stop cancels only its own job)
         )
         val session = TerminalSession(
             id = sessionId, shell = shell, initialCwd = cwd, pid = pid,

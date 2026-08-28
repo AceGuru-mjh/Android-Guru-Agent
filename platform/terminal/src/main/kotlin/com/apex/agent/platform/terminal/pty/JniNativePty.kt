@@ -1,40 +1,49 @@
 package com.apex.agent.platform.terminal.pty
 
+import com.apex.agent.platform.terminal.NativePtyJniBridge
+
+/**
+ * JNI 状态常量 —— 与 jni_bridge.cpp 的 PTY_READ_* 一一对应，勿改数值。
+ * （单一事实来源：platform/terminal/src/main/cpp/pty_engine.h 的 PtyReadStatus）
+ */
+internal object PtyJniReadStatus {
+    /** 读到数据（statusOut[2] 为字节数）。 */
+    const val DATA = 0
+
+    /** EAGAIN/EWOULDBLOCK —— 暂时无数据（idle）。PTY 与进程均正常。 */
+    const val NO_DATA = 1
+
+    /** 输出流结束（read()==0 或 EIO —— slave 已全部关闭）。 */
+    const val EOF = 2
+
+    /** 真实 read 错误（statusOut[1] 为 errno）。 */
+    const val ERROR = 3
+
+    /** sessionId 不存在（已 close 或从未创建）。 */
+    const val SESSION_NOT_FOUND = 4
+}
+
 /**
  * JNI-backed NativePty adapter. Implements the [NativePty] interface by delegating to the
- * EXISTING `class NativePty` in the real repo (which declares `external fun`s backed by
+ * JNI bridge ([NativePtyJniBridge], real impl = `class NativePty` backed by
  * `libapex_terminal.so` via `jni_bridge.cpp`).
  *
  * Spec ref: ATR 2.0 Final Spec §2.2 / §2.3 / §44.1 (NativePty.kt EXTEND, not rewrite)
  *
- * This adapter bridges:
- *   - the NEW Runtime (depends on the [NativePty] interface in subpackage .pty)
- *   - the EXISTING JNI layer (class com.apex.agent.platform.terminal.NativePty — UNTOUCHED)
+ * P70 hardening — the read/write paths now use the BINARY-SAFE byte channels:
+ *   - nativeWrite → NativePtyJniBridge.nativeWriteBytes   (bytes pass through verbatim,
+ *     NO newline appended — LINE's "\n" is appended exactly once by TerminalInput.sendLine;
+ *     fixes the LINE double-newline bug and the raw-write newline corruption)
+ *   - nativeRead  → NativePtyJniBridge.nativeReadBytes    (byte[] + explicit status;
+ *     NUL bytes and arbitrary binary are preserved, idle/EOF/error are distinguished —
+ *     an idle read NEVER reports -1, which used to kill the PtyOutputPump)
  *
- * Signature mapping (interface → existing JNI):
- *   createSession(shell, cwd, rows, cols, env: Array<String>)  →  nativeCreateSession(shell, workDir, envKeys, envVals, rows, cols)
- *   write(sessionId, bytes, offset, len): Int                   →  nativeWrite(sessionId, String): Boolean  (UTF-8 decode)
- *   writeRaw(sessionId, text): Int                              →  nativeWriteRaw(sessionId, String): Boolean
- *   read(sessionId, buffer, maxBytes): Int                      →  nativeRead(sessionId, maxBytes, stripAnsi=false): String
- *   hasData(sessionId): Boolean                                 →  nativeHasData(sessionId): Boolean
- *   waitForData(sessionId, timeoutMs: Long): Boolean            →  nativeWaitForData(sessionId, timeoutMs.toInt()): Boolean
- *   sendSignal(sessionId, signal: Int): Boolean                 →  nativeSendSignal(sessionId, signal): Boolean
- *   resize(sessionId, rows, cols): Boolean                      →  nativeResize(sessionId, rows, cols): Unit  (true if no exception)
- *   isAlive(sessionId): Boolean                                 →  nativeIsAlive(sessionId): Boolean
- *   getPid(sessionId): Int                                      →  nativeGetPid(sessionId): Int
- *   getExitCode(sessionId): Int                                 →  nativeGetExitCode(sessionId): Int
- *   waitExit(sessionId, timeoutMs): Int                         →  poll nativeIsAlive + nativeGetExitCode
- *   closeSession(sessionId): Boolean                            →  nativeCloseSession(sessionId): Unit  (true if no exception)
- *   closeAll(): Unit                                            →  nativeCloseAll(): Unit
- *   activeCount(): Int                                          →  nativeActiveCount(): Int
- *   listSessionIds(): IntArray                                  →  nativeListSessionIds(): IntArray
- *
- * NOTE: the existing JNI nativeRead returns a String (UTF-8 decoded) with an optional
- * stripAnsi flag. We pass stripAnsi=false (the TerminalCore handles ANSI parsing).
+ * Legacy String JNI methods (nativeRead/nativeWrite/nativeWriteRaw) are no longer called
+ * from production code (kept only for ABI compatibility, marked @Deprecated).
  */
 class JniNativePty(
-    /** The existing JNI class. Injected for testability; default creates a real instance. */
-    private val jni: com.apex.agent.platform.terminal.NativePty = com.apex.agent.platform.terminal.NativePty()
+    /** The JNI bridge. Injected for testability; default creates the real JNI instance. */
+    private val jni: NativePtyJniBridge = com.apex.agent.platform.terminal.NativePty()
 ) : NativePty {
 
     override fun nativeCreateSession(shell: String, cwd: String, rows: Int, cols: Int, env: Array<String>): Int {
@@ -45,29 +54,50 @@ class JniNativePty(
     }
 
     override fun nativeWrite(sessionId: Int, bytes: ByteArray, offset: Int, len: Int): Int {
-        val text = String(bytes, offset, len, Charsets.UTF_8)
-        return if (jni.nativeWrite(sessionId, text)) len else -1
+        // P70-2/P70-3: raw byte write. NO newline is appended here — LINE semantics
+        // ("text + \n") are owned by TerminalInput.sendLine, which appends it exactly once.
+        if (len == 0) return 0
+        if (offset < 0 || len < 0 || offset + len > bytes.size) return -1
+        return if (jni.nativeWriteBytes(sessionId, bytes, offset, len)) len else -1
     }
 
     override fun nativeWriteRaw(sessionId: Int, text: String): Int {
-        return if (jni.nativeWriteRaw(sessionId, text)) text.toByteArray(Charsets.UTF_8).size else -1
+        // P70-2: route through the byte channel so \u0000 and multi-byte UTF-8 are
+        // written exactly (the old jstring path mangled NUL as modified-UTF-8 C0 80).
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        return nativeWrite(sessionId, bytes, 0, bytes.size)
     }
 
     override fun nativeRead(sessionId: Int, buffer: ByteArray, maxBytes: Int): Int {
-        // Existing JNI returns a String (UTF-8). Pass stripAnsi=false — TerminalCore parses ANSI.
-        val result: String = try {
-            jni.nativeRead(sessionId, maxBytes, false)
-        } catch (e: Exception) {
+        // P70-1: explicit status mapping — never guess.
+        //   NO_DATA (idle)              → 0    (the old impl fell back to hasData()
+        //                                        and reported -1 during idle windows,
+        //                                        killing the PtyOutputPump)
+        //   EOF / ERROR / NOT_FOUND     → -1   (stream ended or real error)
+        //   DATA                        → byte count (binary-safe, NULs preserved)
+        if (buffer.isEmpty()) return 0
+        val cap = maxBytes.coerceIn(1, buffer.size)
+        val status = IntArray(3)
+        val data: ByteArray = try {
+            jni.nativeReadBytes(sessionId, cap, status)
+        } catch (e: Throwable) {
             return -1
         }
-        if (result.isEmpty()) {
-            // Distinguish "no data" from "fd closed": existing JNI returns "" for both in some impls.
-            return if (jni.nativeHasData(sessionId)) 0 else -1
+        return when (status[0]) {
+            PtyJniReadStatus.DATA -> {
+                val n = status[2]
+                if (n <= 0) return 0
+                // n ≤ cap ≤ buffer.size by contract; the copy guard is defensive only.
+                val copyLen = minOf(n, buffer.size)
+                System.arraycopy(data, 0, buffer, 0, copyLen)
+                n
+            }
+            PtyJniReadStatus.NO_DATA -> 0
+            PtyJniReadStatus.EOF,
+            PtyJniReadStatus.ERROR,
+            PtyJniReadStatus.SESSION_NOT_FOUND -> -1
+            else -> -1
         }
-        val bytes = result.toByteArray(Charsets.UTF_8)
-        val n = minOf(bytes.size, maxBytes)
-        System.arraycopy(bytes, 0, buffer, 0, n)
-        return n
     }
 
     override fun nativeHasData(sessionId: Int): Boolean = jni.nativeHasData(sessionId)

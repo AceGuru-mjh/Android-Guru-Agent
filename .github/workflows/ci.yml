@@ -248,6 +248,17 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
+      - name: Compile platform:terminal instrumentation tests (P70 real-JNI PTY)
+        run: |
+          # P70: NativePtyJniInstrumentationTest exercises the real forkpty/JNI
+          # stack, so it needs a device to RUN. CI has no emulator — we
+          # compile it (Kotlin + native .so) so it stays green and runnable
+          # via :platform:terminal:connectedDebugAndroidTest on a real device.
+          ./gradlew :platform:terminal:compileDebugAndroidTestKotlin \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
       - name: Run core:agent-engine unit tests (A68.1 orchestrator)
         run: |
           # A68.1 — Task Execution Orchestrator state-machine + loop + timeout +

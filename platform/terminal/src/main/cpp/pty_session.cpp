@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <cstdlib>
@@ -19,6 +20,11 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 namespace apex {
+
+// P70 生命周期加固：master 写满（EAGAIN）时的退避参数。
+// 200 次 × 1ms = 最多 200ms 有界重试，替代原先的无限忙等。
+static constexpr int MAX_EAGAIN_RETRIES = 200;
+static constexpr useconds_t WRITE_BACKOFF_US = 1000;
 
 PtySession::PtySession(int id, const std::string& shell, const std::string& workDir,
                        const std::vector<std::pair<std::string, std::string>>& envVars,
@@ -33,10 +39,13 @@ PtySession::PtySession(int id, const std::string& shell, const std::string& work
 
     // forkpty: 创建PTY对并fork子进程
     // 父进程获得master fd，子进程连接到slave
-    pid_ = forkpty(&masterFd_, nullptr, nullptr, &ws);
+    int masterFd = -1;
+    pid_ = forkpty(&masterFd, nullptr, nullptr, &ws);
+    masterFd_.store(masterFd, std::memory_order_release);
 
     if (pid_ < 0) {
         LOGE("Session %d: forkpty failed: %s", id_, strerror(errno));
+        masterFd_.store(-1, std::memory_order_release);
         return;
     }
 
@@ -89,21 +98,21 @@ PtySession::PtySession(int id, const std::string& shell, const std::string& work
     alive_ = true;
 
     // master fd 设为非阻塞
-    int flags = fcntl(masterFd_, F_GETFL, 0);
+    int flags = fcntl(masterFd, F_GETFL, 0);
     if (flags >= 0) {
-        fcntl(masterFd_, F_SETFL, flags | O_NONBLOCK);
+        fcntl(masterFd, F_SETFL, flags | O_NONBLOCK);
     }
 
     // 设置PTY属性：关闭回显（避免输出重复）
     struct termios tio{};
-    if (tcgetattr(masterFd_, &tio) == 0) {
+    if (tcgetattr(masterFd, &tio) == 0) {
         tio.c_lflag &= ~(ECHO | ECHONL);  // 关闭回显
         tio.c_iflag &= ~(ICRNL);          // 不转换CR为NL
-        tcsetattr(masterFd_, TCSANOW, &tio);
+        tcsetattr(masterFd, TCSANOW, &tio);
     }
 
     LOGI("Session %d created: pid=%d fd=%d shell=%s cwd=%s",
-         id_, pid_, masterFd_, shell.c_str(), workDir.c_str());
+         id_, pid_, masterFd, shell.c_str(), workDir.c_str());
 }
 
 PtySession::~PtySession() {
@@ -133,17 +142,29 @@ void PtySession::reapChild() {
 
 bool PtySession::write(const char* data, size_t len) {
     std::lock_guard<std::mutex> lock(ioMutex_);
-    if (masterFd_ < 0 || !alive_) return false;
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0 || !alive_) return false;
 
     size_t totalWritten = 0;
+    int eagainRetries = 0;
     while (totalWritten < len) {
-        ssize_t n = ::write(masterFd_, data + totalWritten, len - totalWritten);
+        ssize_t n = ::write(fd, data + totalWritten, len - totalWritten);
         if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 缓冲区满，短暂等待
-                usleep(1000);
+            if (errno == EINTR) {
+                // 被信号打断 —— 直接重试（P70-1：EINTR 不等同于错误）。
                 continue;
             }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // master 缓冲区满。有限退避重试，防止无限忙等（P70 生命周期加固）。
+                if (++eagainRetries > MAX_EAGAIN_RETRIES) {
+                    LOGW("Session %d: write stalled after %d EAGAIN retries, giving up",
+                         id_, eagainRetries);
+                    return false;
+                }
+                usleep(WRITE_BACKOFF_US);
+                continue;
+            }
+            // 真实错误（EPIPE/EIO/EBADF...）向上传播。
             return false;
         }
         totalWritten += static_cast<size_t>(n);
@@ -157,25 +178,70 @@ bool PtySession::writeLine(const std::string& line) {
 }
 
 std::string PtySession::read(int maxBytes) {
-    std::lock_guard<std::mutex> lock(ioMutex_);
-    if (masterFd_ < 0) return "";
+    // Legacy：仅返回数据字节，不区分 idle/EOF/error。内部统一走 readEx。
+    // 生产路径（PtyOutputPump → JniNativePty）一律使用 nativeReadBytes/readEx。
+    return readEx(maxBytes).data;
+}
 
-    std::string result;
-    result.reserve(maxBytes);
+ReadResult PtySession::readEx(int maxBytes) {
+    std::lock_guard<std::mutex> lock(ioMutex_);
+    ReadResult result;
+    result.status = ReadStatus::NO_DATA;
+
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0) {
+        // fd 已关闭 —— 输出流已结束（既非 idle 也非进程状态判断）。
+        result.status = ReadStatus::EOF_;
+        return result;
+    }
+    if (maxBytes <= 0) {
+        return result;
+    }
+
+    result.data.reserve(static_cast<size_t>(std::min(maxBytes, 64 * 1024)));
 
     char buf[4096];
-    while (static_cast<int>(result.size()) < maxBytes) {
+    while (static_cast<int>(result.data.size()) < maxBytes) {
         int toRead = std::min(static_cast<int>(sizeof(buf)),
-                              maxBytes - static_cast<int>(result.size()));
-        ssize_t n = ::read(masterFd_, buf, toRead);
+                              maxBytes - static_cast<int>(result.data.size()));
+        ssize_t n = ::read(fd, buf, toRead);
         if (n > 0) {
-            result.append(buf, static_cast<size_t>(n));
+            // 二进制安全：append(buf, n) 保留 NUL 与任意字节（P70-2）。
+            result.data.append(buf, static_cast<size_t>(n));
+            result.status = ReadStatus::DATA;
         } else if (n == 0) {
-            // EOF
-            alive_ = false;
+            // read()==0：所有 slave 已关闭且无缓冲数据 —— EOF。
+            // P70-1：EOF 只代表 PTY 输出流结束，绝不修改 alive_（进程存活由
+            // waitpid/reapChild 判定，两个概念独立）。
+            if (result.data.empty()) {
+                result.status = ReadStatus::EOF_;
+            }
+            // 本次已读到数据则保持 DATA，EOF 留给下一次调用报告（drain 语义，
+            // 保证不丢数据、不提前终止）。
             break;
         } else {
-            // EAGAIN = 没有更多数据
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // idle：暂时无数据。绝不视为 EOF/错误（P70-1 修复点）。
+                if (result.data.empty()) {
+                    result.status = ReadStatus::NO_DATA;
+                }
+                break;
+            }
+            if (errno == EINTR) {
+                // 被信号打断 —— 重试，不改变状态语义。
+                continue;
+            }
+            if (errno == EIO) {
+                // Linux PTY 语义：slave 全部关闭后 read(master) 返回 EIO，
+                // 等价于输出流 EOF（shell 及其子进程都已退出/关闭）。
+                if (result.data.empty()) {
+                    result.status = ReadStatus::EOF_;
+                }
+                break;
+            }
+            // 真实错误（EBADF/EFAULT/...）：向上传播（P70-1）。
+            result.status = ReadStatus::ERROR_;
+            result.err = errno;
             break;
         }
     }
@@ -183,23 +249,25 @@ std::string PtySession::read(int maxBytes) {
 }
 
 bool PtySession::hasData() {
-    if (masterFd_ < 0) return false;
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0) return false;
     fd_set fds;
     FD_ZERO(&fds);
-    FD_SET(masterFd_, &fds);
+    FD_SET(fd, &fds);
     struct timeval tv{0, 0};
-    return select(masterFd_ + 1, &fds, nullptr, nullptr, &tv) > 0;
+    return select(fd + 1, &fds, nullptr, nullptr, &tv) > 0;
 }
 
 bool PtySession::waitForData(int timeoutMs) {
-    if (masterFd_ < 0) return false;
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0) return false;
     fd_set fds;
     FD_ZERO(&fds);
-    FD_SET(masterFd_, &fds);
+    FD_SET(fd, &fds);
     struct timeval tv;
     tv.tv_sec = timeoutMs / 1000;
     tv.tv_usec = (timeoutMs % 1000) * 1000;
-    int ret = select(masterFd_ + 1, &fds, nullptr, nullptr, &tv);
+    int ret = select(fd + 1, &fds, nullptr, nullptr, &tv);
     return ret > 0;
 }
 
@@ -217,7 +285,8 @@ bool PtySession::killProcessGroup(int sig) {
     //    交互 shell 会把前台作业（例如 `sh -c 'sleep 60 & wait'`）放进独立的 process
     //    group（pgid != shell pid）。如果只给 shell 的组发信号，作业会存活下来，因此
     //    还要对控制终端的前台组一并发信号。
-    int fg = tcgetpgrp(masterFd_);
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    int fg = fd >= 0 ? tcgetpgrp(fd) : -1;
     if (fg > 0 && fg != pid_) {
         if (kill(-fg, sig) == 0) delivered = true;
         // ESRCH（前台组已不存在）可忽略，shell 组信号随后处理。
@@ -238,16 +307,17 @@ bool PtySession::killProcessGroup(int sig) {
 }
 
 void PtySession::resize(int rows, int cols) {
-    if (masterFd_ < 0) return;
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0) return;
     struct winsize ws{};
     ws.ws_row = static_cast<unsigned short>(rows);
     ws.ws_col = static_cast<unsigned short>(cols);
-    ioctl(masterFd_, TIOCSWINSZ, &ws);
+    ioctl(fd, TIOCSWINSZ, &ws);
 }
 
 void PtySession::close() {
-    // 注意顺序：先向整个进程组发信号，最后才关闭 master fd——
-    // killProcessGroup() 需要 masterFd_ 做 tcgetpgrp()。
+    // 注意顺序：先向整个进程组发信号，最后才关闭 master fd ——
+    // killProcessGroup() 需要 master fd 做 tcgetpgrp()。
     if (pid_ > 0 && alive_) {
         // 先尝试优雅终止整个进程组（shell + child + grandchild）
         killProcessGroup(SIGHUP);
@@ -268,9 +338,15 @@ void PtySession::close() {
         pid_ = -1;
     }
 
-    if (masterFd_ >= 0) {
-        ::close(masterFd_);
-        masterFd_ = -1;
+    // P70 并发加固：fd 关闭与 readEx/write（ioMutex_）串行化，
+    // 避免close 与 read 并发时的 fd 复用竞争。
+    {
+        std::lock_guard<std::mutex> lock(ioMutex_);
+        const int fd = masterFd_.load(std::memory_order_acquire);
+        if (fd >= 0) {
+            ::close(fd);
+            masterFd_.store(-1, std::memory_order_release);
+        }
     }
 
     alive_ = false;

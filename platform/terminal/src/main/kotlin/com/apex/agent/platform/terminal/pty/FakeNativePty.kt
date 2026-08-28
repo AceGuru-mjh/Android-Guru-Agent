@@ -81,7 +81,10 @@ class FakeNativePty : NativePty {
     }
 
     override fun nativeWriteRaw(sessionId: Int, text: String): Int {
-        return nativeWrite(sessionId, text.toByteArray(Charsets.UTF_8), 0, text.length)
+        // P70: byte count must be the UTF-8 encoded length, not the char count
+        // (they differ for multi-byte characters).
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        return nativeWrite(sessionId, bytes, 0, bytes.size)
     }
 
     override fun nativeRead(sessionId: Int, buffer: ByteArray, maxBytes: Int): Int {

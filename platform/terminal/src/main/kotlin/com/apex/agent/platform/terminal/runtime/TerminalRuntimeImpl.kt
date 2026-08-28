@@ -69,6 +69,14 @@ class TerminalRuntimeImpl(
         com.apex.agent.platform.terminal.screen.RealVirtualTerminal(r, c)
     },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /**
+     * P70: dedicated scope for per-session output pumps + exit watchers (blocking
+     * poll loops — IO-bound, hence IO dispatcher by default). Injectable so tests can
+     * run pumps on an isolated dispatcher instead of the shared Dispatchers.IO pool,
+     * which gets saturated by leftover pumps from earlier tests in the same JVM.
+     * Production behavior is unchanged (same IO pool as before the refactor).
+     */
+    private val pumpScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /** Optional persistence (Spec §39). If set, auto-saves session metadata + enables recover(). */
     private val persistenceStore: SessionMetadataStore? = null
 ) : TerminalRuntime {
@@ -105,14 +113,17 @@ class TerminalRuntimeImpl(
     )
     internal val sessionManager = SessionManagerImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
-        inputDetector, scope
+        inputDetector, pumpScope  // P70: pumps + exit watchers on the injectable pump scope
     )
     private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope)
 
     init {
-        // Wire per-session event dispatch to JobManager + SemanticStateReducer.
-        // (SessionManagerImpl already emits to EventBus; JobManager subscribes lazily per session
-        //  via the Runtime's sessionCreated hook below.)
+        // P70-4: wire the REAL sessionId(Long) → nativeSessionId(Int) mapping into the
+        // write path. Previously InputManagerImpl guessed `sessionId.toInt()`, which
+        // diverges from the native engine's process-wide id counter whenever the Runtime
+        // is rebuilt in-process (Kotlin counter resets, native counter never does) —
+        // writes/signals then landed on the WRONG native session.
+        inputManager.nativeIdResolver = { sid -> sessionManager.assembly(sid)?.nativeSessionId }
     }
 
     // ───────── create ─────────

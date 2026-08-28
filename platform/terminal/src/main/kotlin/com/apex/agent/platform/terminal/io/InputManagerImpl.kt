@@ -40,6 +40,21 @@ class InputManagerImpl(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : InputManager {
 
+    /**
+     * P70-4: runtime sessionId (Long) → native session id (Int) 的真实映射解析器。
+     *
+     * 旧实现直接 `sessionId.toInt()` 并假设两套计数器 1:1 —— 但 Kotlin 端
+     * SessionManagerImpl.idCounter 随 Runtime 实例重建归零，而 native 端
+     * PtyEngine::nextId_ 是进程级单例永不归零。Runtime 在同一进程内重建后映射失步，
+     * write/signal 会打到错误的 native session（串 session）。
+     *
+     * TerminalRuntimeImpl 在构造完成后接线为
+     * `{ sid -> sessionManager.assembly(sid)?.nativeSessionId }`。
+     * 解析不到（会话不存在/已关闭）→ 拒绝写入（绝不落到“猜来的” native id 上）。
+     */
+    @Volatile
+    internal var nativeIdResolver: (Long) -> Int? = { null }
+
     /** Per-session writer state. */
     private data class SessionWriter(
         val channel: Channel<WriteOp.WriteBytes>,
@@ -93,8 +108,11 @@ class InputManagerImpl(
                 Decision.Allow -> {}
             }
         }
-        // 3. Native write
-        val nativeId = sessionId.toInt()  // assume 1:1 mapping for Phase 1 (SessionManager assigns)
+        // 3. Resolve the REAL native session id (P70-4 — never guess via sessionId.toInt()).
+        //    Unresolvable = session does not exist / already closed → refuse the write.
+        val nativeId = nativeIdResolver(sessionId)
+            ?: return Result.failure(RuntimeException("TerminalError:WriteFailed"))
+        // 4. Native write
         val written: Int = when (op.kind) {
             InputKind.SIGNAL -> {
                 val ok = native.nativeSendSignal(nativeId, (op.signal ?: UnixSignal.SIGINT).number)
@@ -112,7 +130,7 @@ class InputManagerImpl(
         if (written < 0) {
             return Result.failure(RuntimeException("TerminalError:WriteFailed"))
         }
-        // 4. Emit InputWritten event
+        // 5. Emit InputWritten event
         val ev = TerminalEvent.InputWritten(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             owner = op.owner, kind = op.kind, byteCount = written,
@@ -121,7 +139,7 @@ class InputManagerImpl(
         val id = eventLog.append(ev)
         eventBus.emit(ev.copy(id = id))
 
-        // 5. If signal, also emit SignalSent
+        // 6. If signal, also emit SignalSent
         if (op.kind == InputKind.SIGNAL && op.signal != null) {
             val sev = TerminalEvent.SignalSent(
                 id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,

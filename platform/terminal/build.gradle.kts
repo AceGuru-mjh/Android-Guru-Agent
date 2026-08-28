@@ -19,6 +19,10 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
 
+        // P70: real-JNI PTY tests (NativePtyJniInstrumentationTest) — run on a
+        // device/emulator via :platform:terminal:connectedDebugAndroidTest.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17 -Wall -Wextra -O2"
@@ -54,6 +58,13 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.coroutines.android)
+
+    // P70: real-JNI instrumentation tests (forkpty against /system/bin/sh on device).
+    // CI has no emulator — these are compile-checked in CI and run via
+    // connectedDebugAndroidTest on a real device.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }
 
 

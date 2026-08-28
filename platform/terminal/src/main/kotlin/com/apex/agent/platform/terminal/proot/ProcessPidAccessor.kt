@@ -17,14 +17,14 @@ package com.apex.agent.platform.terminal.proot
 internal object ProcessPidAccessor {
 
     fun pidOf(process: Process): Long {
-        // 1) Java 9+ / Android 34+ 方法
+        // 1. Java 9+ / Android 34+ 方法
         try {
             val m = Process::class.java.getMethod("pid")
             return (m.invoke(process) as Number).toLong()
         } catch (_: Exception) {
             // fall through
         }
-        // 2) 旧 Android ProcessImpl 内部字段（best-effort）
+        // 2. 旧 Android ProcessImpl 内部字段（best-effort）
         try {
             val f = process.javaClass.getDeclaredField("pid")
             f.isAccessible = true

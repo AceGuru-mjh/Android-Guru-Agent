@@ -145,7 +145,7 @@ jobs:
   app-compile:
     name: App Module Compile (Android SDK + Gradle)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -250,9 +250,12 @@ jobs:
           tail -30 compile.log
           exit 1
 
-      - name: Install proot (for PRootRuntimeIntegrationTest)
-        # P68: the integration test spawns REAL proot processes. Self-skips
-        # (assumeTrue) if proot is absent, so this install is what makes it run.
+      - name: Install proot (for T72 E2E + P71 smoke tests)
+        # T72: UbuntuRootfsEndToEndIntegrationTest downloads the REAL Ubuntu
+        # 24.04.4 amd64 archive and runs REAL proot processes against it
+        # (bash / apt / apt-get update inside the provisioned rootfs).
+        # ProotExecutorProotSmokeTest runs the P71 builder contract through
+        # the host-adapted argv. Self-skip (assumeTrue) if proot is absent.
         run: sudo apt-get update -qq && sudo apt-get install -y -qq proot 2>/dev/null || echo "proot install skipped (optional)"
         continue-on-error: true
 

@@ -9,8 +9,6 @@ import com.apex.agent.platform.terminal.runtime.ExecutionBackend
 import com.apex.agent.platform.terminal.runtime.SessionSpawnRequest
 import com.apex.agent.platform.terminal.runtime.SpawnSpec
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -52,39 +50,43 @@ class LinuxPRootBackend(
 
     override val runtimeType: BackendRuntimeType = BackendRuntimeType.LINUX
 
-    override suspend fun availability(): BackendAvailability = withContext(Dispatchers.IO) {
+    // 注意：availability/prepare 不包 withContext(Dispatchers.IO) —— 内部全是瞬时操作
+    //（文件存在性/ELF 头读取/mkdirs；--version 探针在 provider 内同步执行）。
+    // 全局 IO 池在测试套件中会被历史泄漏的协程耗尽，若此处切换上下文会在 CI 全套件
+    // 下永久挂起（实测）。线程归属由 P73 接线时的调用方（TerminalRuntime，IO 协程）决定。
+    override suspend fun availability(): BackendAvailability {
         val binary = binaryProvider.locate().getOrNull()
-            ?: return@withContext BackendAvailability.Failed("PRootError:BINARY_NOT_FOUND")
+            ?: return BackendAvailability.Failed("PRootError:BINARY_NOT_FOUND")
         val verified = binaryProvider.verify(binary).getOrNull()
-            ?: return@withContext BackendAvailability.Failed("PRootError:VERIFY_FAILED")
+            ?: return BackendAvailability.Failed("PRootError:VERIFY_FAILED")
         if (!verified.executable) {
-            return@withContext BackendAvailability.Failed("PRootError:BINARY_NOT_EXECUTABLE")
+            return BackendAvailability.Failed("PRootError:BINARY_NOT_EXECUTABLE")
         }
         val rootfs = rootfsProvider.current()
-            ?: return@withContext BackendAvailability.NeedsRootfs()
-        if (rootfs.location == null) {
+            ?: return BackendAvailability.NeedsRootfs()
+        return if (rootfs.location == null) {
             BackendAvailability.NeedsRootfs("no_location")
         } else {
             BackendAvailability.Ready
         }
     }
 
-    override suspend fun prepare(request: SessionSpawnRequest): Result<SpawnSpec> = withContext(Dispatchers.IO) {
+    override suspend fun prepare(request: SessionSpawnRequest): Result<SpawnSpec> {
         // 1. proot 二进制
         val binaryPath = binaryProvider.locate().getOrElse { e ->
-            return@withContext Result.failure(e)
+            return Result.failure(e)
         }
         binaryProvider.verify(binaryPath).getOrElse { e ->
-            return@withContext Result.failure(e)
+            return Result.failure(e)
         } // verify 仅为校验门禁（存在性/ABI/可执行），结果信息在 availability() 中上报
 
         // 2. rootfs
         val rootfs: RootfsDescriptor = rootfsProvider.current()
-            ?: return@withContext Result.failure(
+            ?: return Result.failure(
                 RuntimeException("TerminalError:RootfsNotReady — 无已安装 rootfs（P72 接入安装引导）")
             )
         val rootfsPath = rootfs.location
-            ?: return@withContext Result.failure(
+            ?: return Result.failure(
                 RuntimeException("TerminalError:RootfsNotReady — rootfs 无 location")
             )
 
@@ -115,11 +117,11 @@ class LinuxPRootBackend(
 
         // 7. host env（G4：guest 变量绝不在其中）
         val env = hostEnv?.let { he ->
-            he.prepare().getOrElse { e -> return@withContext Result.failure(e) }
+            he.prepare().getOrElse { e -> return Result.failure(e) }
             he.hostEnv()
         } ?: mapOf("PATH" to "/usr/bin:/bin:/system/bin")
 
-        Result.success(
+        return Result.success(
             SpawnSpec(
                 argv = argv,
                 env = env,

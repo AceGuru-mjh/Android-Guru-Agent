@@ -33,6 +33,11 @@ android {
 
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+        // P71: PRoot 以可执行二进制（libproot.so 等）随 APK 分发。AGP 默认
+        //不解压 .so 到磁盘（extractNativeLibs=false 语义），nativeLibraryDir 下将
+        //不存在 proot 文件 —— 必须 legacy 打包（解压到 nativeLibraryDir）才能 exec。
+        // Termux/UserLAnd 的标准做法。
+        jniLibs { useLegacyPackaging = true }
     }
 }
 

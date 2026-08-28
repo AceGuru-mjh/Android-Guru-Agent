@@ -38,6 +38,12 @@ android {
         }
     }
 
+    packaging {
+        // P71: proot/loader/talloc 预构建二进制需要在设备上以文件形式存在
+        //（nativeLibraryDir exec），app 与本模块（androidTest APK）都开 legacy 打包。
+        jniLibs { useLegacyPackaging = true }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -49,16 +49,60 @@ class ProotExecutorProotSmokeTest {
             .map { File(it) }
             .firstOrNull { it.exists() && it.canExecute() }
 
+    /**
+     * T72 修正：预检不再使用 `--` 分隔符 —— upstream proot 5.4（CI apt 版）
+     * 不支持 Termux proot 5.1.107 的 `--` 扩展，P71 时代的预检因此恒 false，
+     * CI 上的 SKIPPED 被误读为“ptrace 受限”（实际 ptrace 可用，语法不兼容）。
+     * 现在探测真实能力：无 `--` 语法 + PROOT_NO_SECCOMP（glibc≥2.39 guest 与
+     * seccomp 加速冲突；Termux proot 忽略此变量，无条件设置是安全的）。
+     */
     private fun prootCanRun(): Boolean {
         val bin = prootBinary() ?: return false
         return try {
-            val proc = ProcessBuilder(bin.absolutePath, "-r", "/", "--kill-on-exit", "--", "/bin/true")
-                .redirectErrorStream(true).start()
+            val pb = ProcessBuilder(bin.absolutePath, "-r", "/", "--kill-on-exit", "/bin/true")
+                .redirectErrorStream(true)
+            pb.environment()["PROOT_NO_SECCOMP"] = "1"
+            val proc = pb.start()
             proc.inputStream.bufferedReader().readText()
             proc.waitFor() == 0
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * T72: host proot 5.4 与 Termux proot 5.1.107（生产目标）的两处语法差异：
+     *  a) upstream 无 `-E K=V`（Termux 私有扩展）→ 放进 ProcessBuilder env
+     *     （upstream 继承 env，语义等价）
+     *  b) upstream 5.4 不认 `--` 分隔符 → 去掉（options 后直接跟 command）
+     * 原始 argv 契约（含 -E/--）由真机 androidTest（Termux proot）锁定。
+     */
+    private fun adaptForHostProot(argv: List<String>): Pair<List<String>, Map<String, String>> {
+        val env = mutableMapOf<String, String>("PROOT_NO_SECCOMP" to "1")
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < argv.size) {
+            when (argv[i]) {
+                "--" -> { /* upstream: no separator */ }
+                "-E" -> {
+                    val kv = argv[i + 1]
+                    val eq = kv.indexOf('=')
+                    if (eq > 0) env[kv.substring(0, eq)] = kv.substring(eq + 1)
+                    i++
+                }
+                else -> out.add(argv[i])
+            }
+            i++
+        }
+        return out to env
+    }
+
+    /** 以 host-proot 兼容形式执行 builder 命令（语义等价，见 adaptForHostProot）。 */
+    private fun execAdapted(cmd: PRootCommand): ProotExecutor.Execution {
+        val argv = listOf(cmd.executable.value) + cmd.arguments
+        val (adapted, guestEnv) = adaptForHostProot(argv)
+        val withEnv = ProotExecutor(hostEnv = { guestEnv })
+        return withEnv.execute(PRootCommand(AbsolutePath(adapted[0]), adapted.drop(1)))
     }
 
     private fun buildCommand(bin: File, guestCwd: String, command: List<String>): PRootCommand {
@@ -83,7 +127,7 @@ class ProotExecutorProotSmokeTest {
         assumeTrue("proot must be runnable (ptrace)", prootCanRun())
 
         val exec = ProotExecutor()
-        val result = exec.execute(buildCommand(bin!!, "/root", listOf("/bin/true")))
+        val result = execAdapted(buildCommand(bin!!, "/root", listOf("/bin/true")))
 
         assertEquals("stderr: ${result.stderr}", 0, result.exitCode)
         assertTrue(result.pid > 0)
@@ -97,7 +141,7 @@ class ProotExecutorProotSmokeTest {
         assumeTrue("proot must be runnable (ptrace)", prootCanRun())
 
         val exec = ProotExecutor()
-        val result = exec.execute(
+        val result = execAdapted(
             buildCommand(bin!!, "/root", listOf("/bin/sh", "-c", "echo P71=\$P71_SMOKE cwd=\$(pwd)"))
         )
 
@@ -112,9 +156,7 @@ class ProotExecutorProotSmokeTest {
         assumeTrue("proot must be runnable (ptrace)", prootCanRun())
 
         val exec = ProotExecutor()
-        val result = exec.execute(
-            buildCommand(bin!!, "/root", listOf("/bin/sh", "-c", "exit 42"))
-        )
+        val result = execAdapted(buildCommand(bin!!, "/root", listOf("/bin/sh", "-c", "exit 42")))
 
         assertEquals(42, result.exitCode)
     }
@@ -146,7 +188,7 @@ class ProotExecutorProotSmokeTest {
         val exec = ProotExecutor()
         val samples = mutableListOf<Long>()
         repeat(5) {
-            val r = exec.execute(buildCommand(bin!!, "/root", listOf("/bin/true")))
+            val r = execAdapted(buildCommand(bin!!, "/root", listOf("/bin/true")))
             assertEquals(0, r.exitCode)
             samples.add(r.durationMs)
         }

@@ -108,11 +108,18 @@ class PRootRuntimeIntegrationTest {
 
     /**
      * Checks if PRoot can ACTUALLY EXECUTE a command (not just installed).
-     * PRoot needs ptrace(PTRACE_TRACEME) to intercept syscalls. GitHub Actions
-     * ubuntu-24.04 runners restrict ptrace, so PRoot installs but exits 1 on
-     * every command. This pre-check lets the execution tests self-skip on
-     * ptrace-restricted runners, and run for real on ptrace-enabled hosts
-     * (real device / local Linux / ptrace-permitting CI).
+     *
+     * T72 CORRECTION of the P68-era comment: GitHub Actions runners do NOT
+     * restrict ptrace — the historical skips here had a different root cause:
+     * this preflight (and the P68 runtime's argv) use the `--` separator and
+     * `-E K=V` env flags, which are Termux-proot 5.1.107 extensions that
+     * upstream proot 5.4 (what `apt install proot` provides on CI) rejects
+     * with "unknown option '--'" → exit 1 → self-skip.
+     *
+     * The P68 PRootRuntime path therefore only truly executes on Termux-proot
+     * hosts (real device androidTest). The T72 production chain (Ubuntu
+     * rootfs → LinuxPRootBackend → proot) has its own host-adapted E2E:
+     * UbuntuRootfsEndToEndIntegrationTest.
      */
     private fun prootCanRun(): Boolean {
         val bin = listOf("/usr/bin/proot", "/usr/local/bin/proot", "/bin/proot")

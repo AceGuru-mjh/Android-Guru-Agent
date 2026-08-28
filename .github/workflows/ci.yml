@@ -268,10 +268,19 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
-      # NOTE: :core:tool-registry:test is intentionally NOT run in CI yet —
-      # the existing DomParserTest and BrowserScriptTest have pre-existing
-      # compile errors (internal RawDomElement visibility + illegal test names)
-      # unrelated to A68.1. Fixing those is out of A68.1's scope.
+      - name: Run core:tool-registry unit tests
+        run: |
+          # Quality gate restored: DomParserTest / BrowserScriptTest compile
+          # errors fixed (missing kotlinx.serialization import + illegal '.'
+          # in backtick test names) and the FORM_FIELDS selector assertion was
+          # repaired to parse the actual selector entries instead of naive
+          # substring matching (which false-positived on "textarea," containing
+          # "a,"). This module must stay green from now on — do NOT delete or
+          # skip this step to make CI pass; fix the code or the test instead.
+          ./gradlew :core:tool-registry:test \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
 
   build-apk:
     name: Build Debug APK

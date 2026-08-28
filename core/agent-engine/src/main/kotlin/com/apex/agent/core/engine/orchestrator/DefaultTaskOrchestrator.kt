@@ -23,6 +23,10 @@ import com.apex.agent.core.tools.ToolStreamEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.ProducerScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -31,17 +35,22 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Default [TaskOrchestrator] implementation — A68.1 core.
+ * Default [TaskOrchestrator] implementation — A68.1 core + A68.2 fault
+ * tolerance + A68.3 parallel execution.
  *
  * ### Architecture
  *
@@ -51,7 +60,12 @@ import kotlinx.serialization.json.jsonPrimitive
  * ```
  * Observe → Understand → Decide → Act → Observe → ... → Respond
  *    │          │           │         │
- *    │          │           │         └─ ToolExecutor.executeStream (with per-tool timeout)
+ *    │          │           │         └─ ToolCallRunner (per-attempt timeout +
+ *    │          │           │            A68.2 retry/backoff/classification)
+ *    │          │           │            ├─ serial path: one call at a time
+ *    │          │           │            └─ A68.3 parallel path: ToolCallGraph
+ *    │          │           │               levels → bounded concurrency →
+ *    │          │           │               partial-failure skip + aggregation
  *    │          │           └─ LlmClient.chatStream (streaming)
  *    │          └─ TaskState.Planning → Acting → Observing transitions
  *    └─ TaskProgress updates on every meaningful change
@@ -60,8 +74,8 @@ import kotlinx.serialization.json.jsonPrimitive
  * For PLAN / SPEC / REFLECTION / HUMAN_ASSIST / CUSTOM modes, the orchestrator
  * **delegates** to a wrapped [AgentEngine] (typically `ApexAgentEngine` in
  * production) and observes its [AgentEvent] stream to derive [TaskState].
- * This avoids reimplementing the complex plan/spec/reflection branches in
- * A68.1's scope and preserves existing behaviour exactly.
+ * This avoids reimplementing the complex plan/spec/reflection branches
+ * and preserves existing behaviour exactly.
  *
  * ### State ownership
  *
@@ -69,6 +83,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * **explicitly** at every transition, never inferred from events on the way
  * out. For BUILD mode, transitions happen inline. For delegated modes,
  * [updateStateFromEvent] derives transitions from observed events.
+ *
+ * A68.3 note: parallel workers call [transitionTo] concurrently; the
+ * state+progress mutation is guarded by [stateLock] (the lifecycle emit
+ * happens outside the lock — SharedFlow emit is thread-safe).
  *
  * ### Cancellation model
  *
@@ -79,23 +97,48 @@ import kotlinx.serialization.json.jsonPrimitive
  *   [CancellationException] into the flow body, which is caught and translated
  *   to [TaskState.Finished.Aborted].
  *
- * ### Timeout model (NEW in A68.1)
+ * ### Timeout model (A68.1, preserved)
  *
  * - Per-tool timeout: [TaskOrchestratorConfig.toolTimeoutMs] wraps every
- *   `toolExecutor.executeStream(...)` call in [withTimeout]. On timeout,
- *   emits [AgentEvent.ToolCallComplete] (success=false) and
- *   [TaskLifecycleEvent.Timeout] with [TaskLifecycleEvent.Timeout.Kind.PER_TOOL].
+ *   tool attempt in `withTimeout` (inside [ToolCallRunner]). On timeout,
+ *   a [TaskLifecycleEvent.Timeout] (PER_TOOL) is emitted and the attempt
+ *   is classified [FailureClass.TIMEOUT] — which is retryable by default.
  * - Task-level timeout: [TaskOrchestratorConfig.taskTimeoutMs] wraps the entire
  *   inner flow. On timeout, emits [AgentEvent.Error] (recoverable=false) and
  *   transitions to [TaskState.Finished.Failed].
  *
+ * ### Fault tolerance (A68.2)
+ *
+ * - Retry: [ToolCallRunner] retries TRANSIENT/TIMEOUT failures with
+ *   exponential backoff + jitter, bounded per call by
+ *   [TaskOrchestratorConfig.retryPolicy] and per task by a [RetryBudget].
+ * - Failure classification: [FailureClassifier] (TRANSIENT/TIMEOUT/
+ *   PERMISSION/FATAL) decides retryability.
+ * - Loop detection: [LoopDetector] flags repeated identical calls and
+ *   short-period oscillation; [RecoveryPlanner] injects a recovery prompt
+ *   forcing the LLM to change strategy, bounded by
+ *   [TaskOrchestratorConfig.maxRecoveries].
+ *
+ * ### Parallel execution (A68.3)
+ *
+ * When the LLM emits MULTIPLE tool calls in one response and
+ * [TaskOrchestratorConfig.enableParallelToolExecution] is true, the batch
+ * goes through [ToolCallGraph] (explicit `depends_on` + conservative
+ * same-tool chaining). Independent calls run concurrently (bounded by
+ * [TaskOrchestratorConfig.maxParallelToolCalls]); a failed call marks its
+ * transitive dependents SKIPPED (partial-failure isolation) and the batch
+ * result is aggregated ([ParallelBatchResult] +
+ * [TaskLifecycleEvent.ParallelBatchFinished]). ToolResults are appended in
+ * the ORIGINAL emission order — the LLM sees one result per call, exactly
+ * as in serial execution.
+ *
  * ### Error propagation
  *
- * - Tool errors (ToolStreamEvent.Error or thrown exception): emitted as
- *   [AgentEvent.ToolCallComplete] (success=false) + appended to history as
- *   [LlmMessage.ToolResult]. Loop continues to next Planning iteration
- *   (let LLM decide next step) unless [TaskOrchestratorConfig.failTaskOnToolError]
- *   is true.
+ * - Tool errors (ToolStreamEvent.Error or thrown exception): after retries,
+ *   emitted as [AgentEvent.ToolCallComplete] (success=false) + appended to
+ *   history as [LlmMessage.ToolResult]. Loop continues to next Planning
+ *   iteration (let LLM decide next step) unless
+ *   [TaskOrchestratorConfig.failTaskOnToolError] is true.
  * - LLM errors: emitted as [AgentEvent.Error]; fatal → [TaskState.Finished.Failed].
  * - Max iterations exceeded: emitted as [AgentEvent.Error] (recoverable=false);
  *   transitions to [TaskState.Finished.Failed].
@@ -173,6 +216,29 @@ class DefaultTaskOrchestrator(
     @Volatile private var taskStartTimeMs: Long = 0L
     @Volatile private var taskGoal: String = ""
 
+    /**
+     * A68.3 — guards the `_state`/`_progress` read-modify-write in
+     * [transitionTo] against concurrent parallel workers. Lifecycle emits
+     * happen OUTSIDE this lock (they suspend).
+     */
+    private val stateLock = Any()
+
+    // ─── A68.2/A68.3 per-task runtime ─────────────────────────────
+
+    /**
+     * Per-task fault-tolerance runtime (runner + loop detector + recovery
+     * planner). Recreated by every [execute] call from the config snapshot;
+     * null outside a task.
+     */
+    private var resilience: TaskResilienceRuntime? = null
+
+    /** Per-task A68.2 components. See [resilience]. */
+    internal class TaskResilienceRuntime(
+        val runner: ToolCallRunner,
+        val loopDetector: LoopDetector,
+        val recoveryPlanner: RecoveryPlanner
+    )
+
     // ─── Public API: AgentEngine ────────────────────────────────────────────
 
     override fun execute(input: String): Flow<AgentEvent> =
@@ -191,6 +257,20 @@ class DefaultTaskOrchestrator(
         taskStartTimeMs = System.currentTimeMillis()
         taskGoal = input.text.take(200)
         conversationHistory.clear()
+        // A68.2/A68.3 — per-task fault-tolerance runtime from the config snapshot.
+        resilience = TaskResilienceRuntime(
+            runner = ToolCallRunner(
+                toolExecutor = toolExecutor,
+                classifier = FailureClassifier(),
+                retryPolicy = cfg.retryPolicy,
+                retryBudget = RetryBudget(cfg.retryPolicy.retryBudget)
+            ),
+            loopDetector = LoopDetector(
+                maxRepetitions = cfg.loopDetectionMaxRepetitions,
+                windowSize = cfg.loopDetectionWindow
+            ),
+            recoveryPlanner = RecoveryPlanner(maxRecoveries = cfg.maxRecoveries)
+        )
         if (memory != null) {
             try {
                 conversationHistory.addAll(memory.load())
@@ -363,6 +443,7 @@ class DefaultTaskOrchestrator(
             }
 
             isRunning = false
+            resilience = null
         }
     }
 
@@ -445,11 +526,12 @@ class DefaultTaskOrchestrator(
      *
      * State transitions happen inline via [transitionTo].
      */
-    private fun runBuildLoop(input: UserInput, cfg: TaskOrchestratorConfig): Flow<AgentEvent> = flow {
-        // Capture the FlowCollector so collectToolStream extension can be called
-        // from inside nested withTimeout { ... } lambdas (where `this` is a
-        // CoroutineScope, not the FlowCollector).
-        val collector = this
+    private fun runBuildLoop(input: UserInput, cfg: TaskOrchestratorConfig): Flow<AgentEvent> = channelFlow {
+        // A68.3: channelFlow (not flow) — its ProducerScope.send is safe to
+        // call from PARALLEL worker coroutines, which `FlowCollector.emit`
+        // is not ("Flow invariant is violated" otherwise). All events in the
+        // BUILD loop go through send(); the outer execute() flow forwards
+        // them to the real collector sequentially.
 
         // Ensure system prompt at history[0]
         if (conversationHistory.isEmpty() ||
@@ -465,13 +547,13 @@ class DefaultTaskOrchestrator(
         while (isRunning && iteration < agentConfig.maxIterations) {
             iteration++
             totalIterations = iteration
-            emit(AgentEvent.IterationStart(iteration))
+            send(AgentEvent.IterationStart(iteration))
             transitionTo(
                 TaskState.Planning(iteration, _progress.value.copy(completedIterations = iteration - 1))
             )
 
             if (agentConfig.thinkingLevel != ThinkingLevel.NONE) {
-                emit(AgentEvent.ThinkingStart(iteration, agentConfig.thinkingLevel))
+                send(AgentEvent.ThinkingStart(iteration, agentConfig.thinkingLevel))
             }
 
             // ── Call LLM streaming ──
@@ -486,7 +568,7 @@ class DefaultTaskOrchestrator(
                     chunk.content?.let { text ->
                         if (text.isNotEmpty()) {
                             contentBuilder.append(text)
-                            emit(AgentEvent.ThinkingChunk(text))
+                            send(AgentEvent.ThinkingChunk(text))
                         }
                     }
                     chunk.toolCalls.forEach { tc ->
@@ -500,14 +582,14 @@ class DefaultTaskOrchestrator(
                 throw e
             } catch (e: Throwable) {
                 val msg = "LLM error: ${e.message ?: e::class.simpleName}"
-                emit(AgentEvent.Error(msg, recoverable = false))
+                send(AgentEvent.Error(msg, recoverable = false))
                 transitionTo(TaskState.Finished.Failed(msg, _progress.value))
-                return@flow
+                return@channelFlow
             }
 
             val fullThought = contentBuilder.toString()
             if (agentConfig.thinkingLevel != ThinkingLevel.NONE) {
-                emit(AgentEvent.ThinkingComplete(fullThought))
+                send(AgentEvent.ThinkingComplete(fullThought))
             }
 
             val toolCalls: List<ToolCall> = toolCallAccumulators.values.map { it.build() }
@@ -519,146 +601,49 @@ class DefaultTaskOrchestrator(
                     LlmMessage.Assistant(content = fullThought, toolCalls = toolCalls)
                 )
 
-                for (tc in toolCalls) {
-                    if (!isRunning) break
+                // A68.3 — choose execution mode for this batch.
+                // Parallel only when: enabled, >1 call, no user interaction,
+                // and the dependency graph has no cycle (cycle → serial
+                // fallback preserves correctness).
+                val containsUserInteraction = toolCalls.any {
+                    it.name == "ask_user" || it.name == "ask_user_choice"
+                }
+                val graph = ToolCallGraph.fromToolCalls(
+                    toolCalls, chainSameTool = cfg.chainSameToolCalls
+                )
+                val useParallel = cfg.enableParallelToolExecution &&
+                    toolCalls.size > 1 &&
+                    !containsUserInteraction &&
+                    !graph.hasCycle
 
-                    // Built-in ask_user tool — suspend waiting for user input
-                    if (tc.name == "ask_user" || tc.name == "ask_user_choice") {
-                        val prompt = parseAskUserPrompt(tc.arguments)
-                        val inputType = if (tc.name == "ask_user_choice") InputType.CHOICE else InputType.TEXT
-                        emit(AgentEvent.UserInputRequired(prompt, inputType))
-                        transitionTo(
-                            TaskState.AwaitingUserInput(prompt, inputType, _progress.value)
-                        )
-                        val answer = awaitUserInput()
-                        if (!isRunning) {
-                            // Aborted while awaiting
-                            transitionTo(TaskState.Finished.Aborted)
-                            return@flow
+                val batchOutcome: BatchOutcome = if (useParallel) {
+                    executeBatchParallel(graph, iteration, cfg)
+                } else {
+                    executeBatchSerial(toolCalls, iteration, cfg)
+                }
+
+                when (batchOutcome) {
+                    is BatchOutcome.TaskFailed -> {
+                        send(AgentEvent.Error(batchOutcome.message, recoverable = false))
+                        transitionTo(TaskState.Finished.Failed(batchOutcome.message, _progress.value))
+                        return@channelFlow
+                    }
+                    is BatchOutcome.Aborted -> {
+                        // Either aborted while awaiting user input (state already
+                        // Aborted) or isRunning flipped mid-batch — return and let
+                        // the outer finally classify via wasAborted (A68.1 semantics).
+                        return@channelFlow
+                    }
+                    is BatchOutcome.Completed -> {
+                        // A68.2 — loop detection + recovery replanning after
+                        // every batch. Returns a failure message when the
+                        // recovery budget is exhausted.
+                        val loopFailure = detectLoopsAndRecover(cfg)
+                        if (loopFailure != null) {
+                            send(AgentEvent.Error(loopFailure, recoverable = false))
+                            transitionTo(TaskState.Finished.Failed(loopFailure, _progress.value))
+                            return@channelFlow
                         }
-                        conversationHistory.add(LlmMessage.ToolResult(tc.id, answer))
-                        emit(
-                            AgentEvent.ToolCallComplete(
-                                callId = tc.id,
-                                toolName = tc.name,
-                                arguments = tc.arguments,
-                                output = answer,
-                                fullOutput = answer,
-                                success = true,
-                                durationMs = 0L
-                            )
-                        )
-                        totalToolCalls++
-                        _progress.value = _progress.value.copy(
-                            completedToolCalls = totalToolCalls,
-                            attemptCount = _progress.value.attemptCount + 1,
-                            lastMeaningfulChangeMs = System.currentTimeMillis()
-                        )
-                        continue
-                    }
-
-                    // Execute tool via ToolExecutor with per-tool timeout
-                    emit(AgentEvent.ToolCallStart(tc.id, tc.name, tc.arguments))
-                    transitionTo(
-                        TaskState.Acting(iteration, tc.id, tc.name, _progress.value)
-                    )
-                    emitLifecycleSafe(
-                        TaskLifecycleEvent.ToolCallScheduled(
-                            callId = tc.id,
-                            toolName = tc.name,
-                            arguments = tc.arguments,
-                            timestampMs = System.currentTimeMillis()
-                        )
-                    )
-
-                    val toolStartMs = System.currentTimeMillis()
-                    val outputBuilder = StringBuilder()
-                    var success = true
-
-                    try {
-                        if (cfg.toolTimeoutMs > 0L) {
-                            withTimeout(cfg.toolTimeoutMs) {
-                                collector.collectToolStream(tc.id, tc.name, tc.arguments, outputBuilder) { v ->
-                                    success = v
-                                }
-                            }
-                        } else {
-                            collector.collectToolStream(tc.id, tc.name, tc.arguments, outputBuilder) { v ->
-                                success = v
-                            }
-                        }
-                    } catch (e: TimeoutCancellationException) {
-                        // Per-tool timeout — record failure and continue
-                        val msg = "Error: tool '${tc.name}' timed out after ${cfg.toolTimeoutMs}ms"
-                        outputBuilder.append(msg)
-                        success = false
-                        emitLifecycleSafe(
-                            TaskLifecycleEvent.Timeout(
-                                TaskLifecycleEvent.Timeout.Kind.PER_TOOL,
-                                callId = tc.id,
-                                timestampMs = System.currentTimeMillis()
-                            )
-                        )
-                    } catch (e: CancellationException) {
-                        // Cooperative abort — re-throw to outer
-                        throw e
-                    } catch (e: Throwable) {
-                        val msg = "Error: ${e.message ?: e::class.simpleName}"
-                        outputBuilder.append(msg)
-                        success = false
-                    }
-
-                    val output = outputBuilder.toString()
-                    val durationMs = System.currentTimeMillis() - toolStartMs
-
-                    emit(
-                        AgentEvent.ToolCallComplete(
-                            callId = tc.id,
-                            toolName = tc.name,
-                            arguments = tc.arguments,
-                            output = output,
-                            fullOutput = output,
-                            success = success,
-                            durationMs = durationMs
-                        )
-                    )
-                    transitionTo(
-                        TaskState.Observing(iteration, tc.id, tc.name, success, _progress.value)
-                    )
-                    emitLifecycleSafe(
-                        TaskLifecycleEvent.ToolCallFinished(
-                            callId = tc.id,
-                            toolName = tc.name,
-                            success = success,
-                            durationMs = durationMs,
-                            timestampMs = System.currentTimeMillis()
-                        )
-                    )
-
-                    conversationHistory.add(LlmMessage.ToolResult(tc.id, output))
-                    totalToolCalls++
-                    val newFailed = _progress.value.failedToolCalls + (if (success) 0 else 1)
-                    _progress.value = _progress.value.copy(
-                        completedToolCalls = totalToolCalls,
-                        failedToolCalls = newFailed,
-                        attemptCount = _progress.value.attemptCount + 1,
-                        currentObjective = "Tool $tc.name ${if (success) "ok" else "failed"}",
-                        lastMeaningfulChangeMs = System.currentTimeMillis()
-                    )
-
-                    // Memory observer hook — mirrors ApexAgentEngine's onActionExecuted call.
-                    try {
-                        memoryObserver?.onActionExecuted("${tc.name}(${tc.arguments})")
-                    } catch (e: Throwable) {
-                        log(LogLevel.WARN, "memoryObserver.onActionExecuted threw: ${e.message}")
-                    }
-
-                    // Fatal-on-error policy
-                    if (!success && cfg.failTaskOnToolError) {
-                        val msg = "Tool '${tc.name}' failed (failTaskOnToolError=true): $output"
-                        emit(AgentEvent.Error(msg, recoverable = false))
-                        transitionTo(TaskState.Finished.Failed(msg, _progress.value))
-                        return@flow
                     }
                 }
                 // Loop continues to next Planning iteration
@@ -666,65 +651,456 @@ class DefaultTaskOrchestrator(
                 // Final response — no tool calls
                 transitionTo(TaskState.Responding(iteration, _progress.value))
                 conversationHistory.add(LlmMessage.Assistant(fullThought, emptyList()))
-                emit(AgentEvent.ResponseChunk(fullThought))
-                emit(AgentEvent.ResponseComplete(fullThought))
+                send(AgentEvent.ResponseChunk(fullThought))
+                send(AgentEvent.ResponseComplete(fullThought))
                 _progress.value = _progress.value.copy(
                     currentObjective = "Response complete",
                     lastMeaningfulChangeMs = System.currentTimeMillis()
                 )
                 // Outer finally will emit Complete + transition to Completed
-                return@flow
+                return@channelFlow
             } else {
                 // Empty response — emit recoverable error and continue
-                emit(AgentEvent.Error("Empty response from LLM", recoverable = true))
+                send(AgentEvent.Error("Empty response from LLM", recoverable = true))
             }
         }
 
         // Max iterations exceeded
         if (iteration >= agentConfig.maxIterations) {
             val msg = "Max iterations (${agentConfig.maxIterations}) exceeded"
-            emit(AgentEvent.Error(msg, recoverable = false))
+            send(AgentEvent.Error(msg, recoverable = false))
             transitionTo(TaskState.Finished.Failed(msg, _progress.value))
         }
     }
 
+    // ─── A68.2/A68.3 — Batch execution ────────────────────────────────────
+
+    /** Outcome of executing one batch of tool calls (serial or parallel). */
+    private sealed interface BatchOutcome {
+        /** All calls processed (individual results may be success/failure). */
+        data object Completed : BatchOutcome
+        /** The task must fail with [message] (failTaskOnToolError policy). */
+        data class TaskFailed(val message: String) : BatchOutcome
+        /** Aborted mid-batch — caller returns, outer finally classifies. */
+        data object Aborted : BatchOutcome
+    }
+
     /**
-     * Collect a tool's [ToolStreamEvent] flow, translating each event into
-     * [AgentEvent]s emitted on the outer flow and appending output to
-     * [outputBuilder]. Calls [successFlag] with `false` on any error event.
-     *
-     * Implemented as an extension on [FlowCollector] so the outer flow's
-     * `emit` is in scope inside the collector lambda.
+     * Serial batch execution (A68.1 path, now with A68.2 retry/classification).
+     * Handles `ask_user` inline (suspends for user input, never parallelised).
      */
-    private suspend fun FlowCollector<AgentEvent>.collectToolStream(
-        callId: String,
-        toolName: String,
-        arguments: String,
-        outputBuilder: StringBuilder,
-        successFlag: (Boolean) -> Unit
-    ) {
-        toolExecutor.executeStream(toolName, arguments).collect { ev ->
-            when (ev) {
-                is ToolStreamEvent.Output -> {
-                    outputBuilder.append(ev.chunk)
-                    emit(AgentEvent.ToolOutputChunk(callId, ev.chunk))
+    private suspend fun ProducerScope<AgentEvent>.executeBatchSerial(
+        toolCalls: List<ToolCall>,
+        iteration: Int,
+        cfg: TaskOrchestratorConfig
+    ): BatchOutcome {
+        for (tc in toolCalls) {
+            if (!isRunning) break
+
+            // Built-in ask_user tool — suspend waiting for user input
+            if (tc.name == "ask_user" || tc.name == "ask_user_choice") {
+                val prompt = parseAskUserPrompt(tc.arguments)
+                val inputType = if (tc.name == "ask_user_choice") InputType.CHOICE else InputType.TEXT
+                send(AgentEvent.UserInputRequired(prompt, inputType))
+                transitionTo(
+                    TaskState.AwaitingUserInput(prompt, inputType, _progress.value)
+                )
+                val answer = awaitUserInput()
+                if (!isRunning) {
+                    // Aborted while awaiting
+                    transitionTo(TaskState.Finished.Aborted)
+                    return BatchOutcome.Aborted
                 }
-                is ToolStreamEvent.Progress -> {
-                    emit(AgentEvent.ToolProgress(callId, ev.percent, ev.message))
+                conversationHistory.add(LlmMessage.ToolResult(tc.id, answer))
+                send(
+                    AgentEvent.ToolCallComplete(
+                        callId = tc.id,
+                        toolName = tc.name,
+                        arguments = tc.arguments,
+                        output = answer,
+                        fullOutput = answer,
+                        success = true,
+                        durationMs = 0L
+                    )
+                )
+                totalToolCalls++
+                _progress.value = _progress.value.copy(
+                    completedToolCalls = totalToolCalls,
+                    attemptCount = _progress.value.attemptCount + 1,
+                    lastMeaningfulChangeMs = System.currentTimeMillis()
+                )
+                if (cfg.enableLoopDetection) {
+                    resilience?.loopDetector?.record(tc.name, tc.arguments)
                 }
-                is ToolStreamEvent.Complete -> {
-                    if (outputBuilder.isEmpty() && ev.output.isNotEmpty()) {
-                        outputBuilder.append(ev.output)
-                        emit(AgentEvent.ToolOutputChunk(callId, ev.output))
-                    }
-                }
-                is ToolStreamEvent.Error -> {
-                    outputBuilder.append(ev.message)
-                    emit(AgentEvent.ToolOutputChunk(callId, ev.message))
-                    successFlag(false)
-                }
+                continue
+            }
+
+            val outcome = executeSingleToolCall(tc, iteration, cfg)
+
+            // Fatal-on-error policy (A68.1 semantics preserved)
+            if (!outcome.success && cfg.failTaskOnToolError) {
+                return BatchOutcome.TaskFailed(
+                    "Tool '${tc.name}' failed (failTaskOnToolError=true): ${outcome.output}"
+                )
             }
         }
+        // Mid-batch abort (isRunning flipped) — outer finally classifies.
+        if (!isRunning) return BatchOutcome.Aborted
+        return BatchOutcome.Completed
+    }
+
+    /**
+     * Execute ONE tool call through the serial path: emits the exact A68.1
+     * event sequence (ToolCallStart → stream events (+ retries) →
+     * ToolCallComplete) plus the A68.2 retry lifecycle events.
+     */
+    private suspend fun ProducerScope<AgentEvent>.executeSingleToolCall(
+        tc: ToolCall,
+        iteration: Int,
+        cfg: TaskOrchestratorConfig
+    ): ToolCallOutcome {
+        val runtime = requireNotNull(resilience) { "executeSingleToolCall outside a task" }
+
+        send(AgentEvent.ToolCallStart(tc.id, tc.name, tc.arguments))
+        transitionTo(
+            TaskState.Acting(iteration, tc.id, tc.name, _progress.value)
+        )
+        emitLifecycleSafe(
+            TaskLifecycleEvent.ToolCallScheduled(
+                callId = tc.id,
+                toolName = tc.name,
+                arguments = tc.arguments,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+
+        val outcome = runtime.runner.run(
+            call = tc,
+            toolTimeoutMs = cfg.toolTimeoutMs,
+            eventSink = { e -> send(e) },
+            attemptListener = orchestratorAttemptListener()
+        )
+
+        send(
+            AgentEvent.ToolCallComplete(
+                callId = tc.id,
+                toolName = tc.name,
+                arguments = tc.arguments,
+                output = outcome.output,
+                fullOutput = outcome.output,
+                success = outcome.success,
+                durationMs = outcome.durationMs
+            )
+        )
+        transitionTo(
+            TaskState.Observing(iteration, tc.id, tc.name, outcome.success, _progress.value)
+        )
+        emitLifecycleSafe(
+            TaskLifecycleEvent.ToolCallFinished(
+                callId = tc.id,
+                toolName = tc.name,
+                success = outcome.success,
+                durationMs = outcome.durationMs,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+
+        conversationHistory.add(LlmMessage.ToolResult(tc.id, outcome.output))
+        totalToolCalls++
+        _progress.value = _progress.value.copy(
+            completedToolCalls = totalToolCalls,
+            failedToolCalls = _progress.value.failedToolCalls + (if (outcome.success) 0 else 1),
+            retriedToolCalls = _progress.value.retriedToolCalls + (outcome.attempts - 1),
+            attemptCount = _progress.value.attemptCount + outcome.attempts,
+            currentObjective = "Tool ${tc.name} ${if (outcome.success) "ok" else "failed"}",
+            lastMeaningfulChangeMs = System.currentTimeMillis()
+        )
+
+        // Memory observer hook — mirrors ApexAgentEngine's onActionExecuted call.
+        try {
+            memoryObserver?.onActionExecuted("${tc.name}(${tc.arguments})")
+        } catch (e: Throwable) {
+            log(LogLevel.WARN, "memoryObserver.onActionExecuted threw: ${e.message}")
+        }
+
+        // A68.2 — feed the loop detector
+        if (cfg.enableLoopDetection) {
+            runtime.loopDetector.record(tc.name, tc.arguments)
+        }
+        return outcome
+    }
+
+    /**
+     * A68.3 — Parallel batch execution through the dependency graph.
+     *
+     * Workers send [AgentEvent]s via the channelFlow [ProducerScope]
+     * (`send` is concurrency-safe; the flow's internal channel serializes
+     * emission to the collector). Levels execute sequentially (barrier per
+     * level); nodes within a level run concurrently bounded by a
+     * [Semaphore]. A failed node marks its transitive dependents SKIPPED —
+     * independent branches keep running (partial-failure isolation).
+     */
+    private suspend fun ProducerScope<AgentEvent>.executeBatchParallel(
+        graph: ToolCallGraph,
+        iteration: Int,
+        cfg: TaskOrchestratorConfig
+    ): BatchOutcome {
+        val runtime = requireNotNull(resilience) { "executeBatchParallel outside a task" }
+        val batchStartMs = System.currentTimeMillis()
+        val outcomeById = ConcurrentHashMap<String, ToolCallOutcome>()
+        val failedIds = ConcurrentHashMap.newKeySet<String>()
+        val semaphore = Semaphore(cfg.maxParallelToolCalls.coerceAtLeast(1))
+
+        // channelFlow's ProducerScope.send IS the concurrency-safe event sink —
+        // no extra Channel/drainer needed. Workers send directly; the flow's
+        // internal channel serializes emission to the collector.
+        val producerScope = this
+        coroutineScope {
+            for (level in graph.parallelLevels()) {
+                // Skip nodes whose (earlier-level) dependencies failed.
+                val runnable = mutableListOf<ToolCallGraph.Node>()
+                for (node in level) {
+                    val failedDep = node.dependencies.firstOrNull { it in failedIds }
+                    if (failedDep == null) {
+                        runnable.add(node)
+                        continue
+                    }
+                    val skippedOutcome = ToolCallOutcome(
+                        callId = node.callId,
+                        toolName = node.toolName,
+                        arguments = node.call.arguments,
+                        output = "Error: skipped — dependency '$failedDep' failed",
+                        success = false,
+                        durationMs = 0L,
+                        skipped = true,
+                        skipReason = failedDep
+                    )
+                    outcomeById[node.callId] = skippedOutcome
+                    failedIds.add(node.callId) // transitively skip dependents
+                    log(
+                        LogLevel.DEBUG,
+                        "Skipped ${node.callId} (${node.toolName}): dependency $failedDep failed"
+                    )
+                    // Bracket the skip with Start/Complete so the UI sees a
+                    // closed call lifecycle instead of a vanishing call.
+                    producerScope.send(
+                        AgentEvent.ToolCallStart(node.callId, node.toolName, node.call.arguments)
+                    )
+                    producerScope.send(
+                        AgentEvent.ToolCallComplete(
+                            callId = node.callId,
+                            toolName = node.toolName,
+                            arguments = node.call.arguments,
+                            output = skippedOutcome.output,
+                            fullOutput = skippedOutcome.output,
+                            success = false,
+                            durationMs = 0L
+                        )
+                    )
+                }
+                if (runnable.isEmpty()) continue
+
+                runnable.map { node ->
+                    async {
+                        semaphore.withPermit {
+                            executeNodeIntoChannel(
+                                producerScope, node, iteration, cfg, runtime, outcomeById, failedIds
+                            )
+                        }
+                    }
+                }.awaitAll() // level barrier: dependents only start when deps are done
+            }
+        }
+
+        // ── Aggregate (A68.3 partial-failure + result aggregation) ──
+        val outcomes = graph.nodes.mapNotNull { outcomeById[it.callId] }
+        val batchResult = ParallelBatchResult(outcomes)
+        val batchDurationMs = System.currentTimeMillis() - batchStartMs
+
+        // ToolResults in ORIGINAL emission order — the LLM sees one result
+        // per call, exactly as in serial execution.
+        outcomes.forEach { outcome ->
+            conversationHistory.add(LlmMessage.ToolResult(outcome.callId, outcome.output))
+        }
+        totalToolCalls += outcomes.size
+        _progress.value = _progress.value.copy(
+            completedToolCalls = totalToolCalls,
+            failedToolCalls = _progress.value.failedToolCalls + batchResult.failedCount + batchResult.skippedCount,
+            retriedToolCalls = _progress.value.retriedToolCalls + (batchResult.totalAttempts - outcomes.size),
+            attemptCount = _progress.value.attemptCount + batchResult.totalAttempts,
+            currentObjective = "Batch: ${batchResult.succeededCount} ok, " +
+                "${batchResult.failedCount} failed, ${batchResult.skippedCount} skipped",
+            lastMeaningfulChangeMs = System.currentTimeMillis()
+        )
+
+        outcomes.forEach { outcome ->
+            try {
+                memoryObserver?.onActionExecuted("${outcome.toolName}(${outcome.arguments})")
+            } catch (e: Throwable) {
+                log(LogLevel.WARN, "memoryObserver.onActionExecuted threw: ${e.message}")
+            }
+            if (cfg.enableLoopDetection) {
+                runtime.loopDetector.record(outcome.toolName, outcome.arguments)
+            }
+        }
+
+        log(
+            LogLevel.INFO,
+            "A68.3 ${batchResult.summaryLine(batchDurationMs)}"
+        )
+        emitLifecycleSafe(
+            TaskLifecycleEvent.ParallelBatchFinished(
+                totalCalls = batchResult.totalCalls,
+                succeededCount = batchResult.succeededCount,
+                failedCount = batchResult.failedCount,
+                skippedCount = batchResult.skippedCount,
+                totalAttempts = batchResult.totalAttempts,
+                durationMs = batchDurationMs,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+
+        // Fatal-on-error policy (A68.1 semantics preserved)
+        if (batchResult.hasPartialFailure && cfg.failTaskOnToolError) {
+            val failed = (batchResult.failed + batchResult.skipped).first()
+            return BatchOutcome.TaskFailed(
+                "Tool '${failed.toolName}' failed (failTaskOnToolError=true): ${failed.output}"
+            )
+        }
+        return BatchOutcome.Completed
+    }
+
+    /**
+     * Execute one graph node (worker coroutine). Events are sent on the
+     * channelFlow [scope] — [ProducerScope.send] is safe to call from
+     * multiple workers concurrently.
+     */
+    private suspend fun executeNodeIntoChannel(
+        scope: ProducerScope<AgentEvent>,
+        node: ToolCallGraph.Node,
+        iteration: Int,
+        cfg: TaskOrchestratorConfig,
+        runtime: TaskResilienceRuntime,
+        outcomeById: ConcurrentHashMap<String, ToolCallOutcome>,
+        failedIds: MutableSet<String>
+    ) {
+        val tc = node.call
+        scope.send(AgentEvent.ToolCallStart(tc.id, tc.name, tc.arguments))
+        transitionTo(TaskState.Acting(iteration, tc.id, tc.name, _progress.value))
+        emitLifecycleSafe(
+            TaskLifecycleEvent.ToolCallScheduled(
+                callId = tc.id, toolName = tc.name, arguments = tc.arguments,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+
+        val outcome = runtime.runner.run(
+            call = tc,
+            toolTimeoutMs = cfg.toolTimeoutMs,
+            eventSink = { e -> scope.send(e) },
+            attemptListener = orchestratorAttemptListener()
+        )
+
+        scope.send(
+            AgentEvent.ToolCallComplete(
+                callId = tc.id,
+                toolName = tc.name,
+                arguments = tc.arguments,
+                output = outcome.output,
+                fullOutput = outcome.output,
+                success = outcome.success,
+                durationMs = outcome.durationMs
+            )
+        )
+        transitionTo(TaskState.Observing(iteration, tc.id, tc.name, outcome.success, _progress.value))
+        emitLifecycleSafe(
+            TaskLifecycleEvent.ToolCallFinished(
+                callId = tc.id, toolName = tc.name, success = outcome.success,
+                durationMs = outcome.durationMs, timestampMs = System.currentTimeMillis()
+            )
+        )
+
+        outcomeById[tc.id] = outcome
+        if (!outcome.success) failedIds.add(tc.id)
+    }
+
+    /**
+     * Shared [AttemptListener] emitting A68.2 lifecycle events. Safe from
+     * parallel workers: [emitLifecycleSafe] publishes to a SharedFlow.
+     */
+    private fun orchestratorAttemptListener(): AttemptListener = object : AttemptListener {
+        override suspend fun onRetry(
+            callId: String,
+            toolName: String,
+            failedAttempt: Int,
+            nextAttempt: Int,
+            failureClass: FailureClass,
+            backoffMs: Long
+        ) {
+            log(
+                LogLevel.WARN,
+                "A68.2 retry $toolName#$callId attempt $failedAttempt→$nextAttempt ($failureClass, backoff ${backoffMs}ms)"
+            )
+            emitLifecycleSafe(
+                TaskLifecycleEvent.ToolCallRetried(
+                    callId = callId,
+                    toolName = toolName,
+                    failedAttempt = failedAttempt,
+                    nextAttempt = nextAttempt,
+                    failureClass = failureClass,
+                    backoffMs = backoffMs,
+                    timestampMs = System.currentTimeMillis()
+                )
+            )
+        }
+
+        override suspend fun onAttemptTimeout(callId: String, toolName: String) {
+            emitLifecycleSafe(
+                TaskLifecycleEvent.Timeout(
+                    TaskLifecycleEvent.Timeout.Kind.PER_TOOL,
+                    callId = callId,
+                    timestampMs = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * A68.2 — Loop detection + recovery replanning, run after every batch.
+     *
+     * @return null when the task may continue; non-null = failure message
+     *   (loop detected AND recovery budget exhausted → fail the task).
+     */
+    private suspend fun detectLoopsAndRecover(cfg: TaskOrchestratorConfig): String? {
+        if (!cfg.enableLoopDetection) return null
+        val runtime = resilience ?: return null
+        val signal = runtime.loopDetector.detect() ?: return null
+
+        emitLifecycleSafe(TaskLifecycleEvent.LoopDetected(signal, System.currentTimeMillis()))
+        log(LogLevel.WARN, "A68.2 loop detected: $signal")
+
+        if (!runtime.recoveryPlanner.canRecover()) {
+            return "Loop detected and recovery budget exhausted " +
+                "(${runtime.recoveryPlanner.recoveryCount}/${cfg.maxRecoveries}): $signal"
+        }
+
+        val prompt = runtime.recoveryPlanner.buildLoopRecoveryPrompt(signal)
+        conversationHistory.add(LlmMessage.System(prompt))
+        runtime.loopDetector.acknowledge()
+        _progress.value = _progress.value.copy(
+            recoveryCount = runtime.recoveryPlanner.recoveryCount
+        )
+        emitLifecycleSafe(
+            TaskLifecycleEvent.RecoveryTriggered(
+                recoveryCount = runtime.recoveryPlanner.recoveryCount,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+        log(
+            LogLevel.INFO,
+            "A68.2 recovery ${runtime.recoveryPlanner.recoveryCount}/${cfg.maxRecoveries} injected"
+        )
+        return null
     }
 
     // ─── State reduction from events (delegated modes) ─────────────────────
@@ -827,15 +1203,21 @@ class DefaultTaskOrchestrator(
         TaskState.Planning(iteration = 0, progress = _progress.value)
 
     private suspend fun transitionTo(newState: TaskState) {
-        val previous = _state.value
-        _state.value = newState
-        // Update progress snapshot
-        val nowMs = System.currentTimeMillis()
-        val elapsed = if (taskStartTimeMs > 0L) nowMs - taskStartTimeMs else 0L
-        _progress.value = _progress.value.copy(
-            elapsedMs = elapsed,
-            lastMeaningfulChangeMs = nowMs
-        )
+        // A68.3: parallel workers transition concurrently — guard the
+        // state+progress read-modify-write with a lock; the lifecycle emit
+        // (suspends) happens OUTSIDE the lock.
+        val (previous, nowMs) = synchronized(stateLock) {
+            val previous = _state.value
+            _state.value = newState
+            // Update progress snapshot
+            val nowMs = System.currentTimeMillis()
+            val elapsed = if (taskStartTimeMs > 0L) nowMs - taskStartTimeMs else 0L
+            _progress.value = _progress.value.copy(
+                elapsedMs = elapsed,
+                lastMeaningfulChangeMs = nowMs
+            )
+            previous to nowMs
+        }
         // Emit lifecycle StateChanged event
         if (currentOrchestratorConfig.emitLifecycleEvents) {
             try {

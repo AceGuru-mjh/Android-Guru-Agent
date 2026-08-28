@@ -1,5 +1,6 @@
 package com.apex.agent.core.tools.builtin.browser
 
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

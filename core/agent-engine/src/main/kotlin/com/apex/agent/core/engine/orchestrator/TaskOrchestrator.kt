@@ -46,25 +46,26 @@ import kotlinx.coroutines.flow.StateFlow
  *   those remain accessible only by down-casting to `ApexAgentEngine`,
  *   which is unchanged by A68.1.
  *
- * ### Scope (A68.1)
+ * ### Scope
  *
- * Phase 1 (this) implements:
+ * Phase 1 (A68.1) implemented:
  * - State machine + progress + lifecycle events
  * - Per-tool and task-level timeouts
  * - Cancellation propagation (cooperative flag + coroutine cancellation)
  * - Basic error propagation (tool errors feed back to LLM; critical
  *   errors fail the task)
  *
- * Phase 2 (A68.2) will add:
- * - Retry policy / retry budget / backoff
- * - Failure classification (transient / timeout / fatal / permission)
- * - Loop detection (repeated tool calls, periodic action patterns)
- * - Recovery strategy + replanning
+ * Phase 2 (A68.2) implemented:
+ * - [RetryPolicy] / [RetryBudget] / exponential backoff with jitter
+ * - [FailureClassifier] — TRANSIENT / TIMEOUT / FATAL / PERMISSION
+ * - [LoopDetector] — repeated tool calls + periodic action patterns
+ * - [RecoveryPlanner] — recovery prompt injection + bounded replanning
  *
- * Phase 3 (A68.3) will add:
- * - Dependency graph
- * - Parallel tool execution
- * - Partial failure + result aggregation
+ * Phase 3 (A68.3) implemented:
+ * - [ToolCallGraph] — explicit `depends_on` + conservative same-tool chaining
+ * - Parallel tool execution (bounded by `maxParallelToolCalls`)
+ * - Partial failure isolation (failed node → dependents SKIPPED) +
+ *   [ParallelBatchResult] aggregation
  */
 interface TaskOrchestrator : AgentEngine {
 

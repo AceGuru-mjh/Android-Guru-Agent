@@ -70,9 +70,10 @@ class PRootProcessProvider(
 
         return try {
             val process = pb.start()
-            // G1（P71 修正）：真实宿主 pid（Process.pid()），替代旧的 10000 起步计数器 ——
+            // G1（P71 修正）：真实宿主 pid（反射访问 —— Process.pid() 是 Java 9+/Android 34+ API，
+            // 直接调用会破坏低版本 Android 编译；不可得时 -1，绝不伪造），替代旧的 10000 起步计数器 ——
             // 快照/信号/日志才能对应真实进程。
-            val pid = LinuxPid(process.pid())
+            val pid = LinuxPid(ProcessPidAccessor.pidOf(process))
             val handle = PRootProcessHandle(pid, process, request.executable, request.arguments)
             processes[pid.value] = handle
             Result.success(handle)

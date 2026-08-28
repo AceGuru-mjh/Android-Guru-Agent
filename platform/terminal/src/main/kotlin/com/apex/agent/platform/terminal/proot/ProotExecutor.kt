@@ -74,7 +74,9 @@ class ProotExecutor(
         val exit = if (timedOut) -1 else proc.exitValue()
 
         return Execution(
-            pid = proc.pid(), // G1：真实宿主 pid
+            // G1：真实宿主 pid（反射访问 —— Process.pid() 是 Java 9+/Android 34+ API，
+            // 直接调用会破坏低版本 Android 编译；不可得时 -1，绝不伪造）
+            pid = ProcessPidAccessor.pidOf(proc),
             exitCode = exit,
             stdout = outBuf.toString(),
             stderr = errBuf.toString(),

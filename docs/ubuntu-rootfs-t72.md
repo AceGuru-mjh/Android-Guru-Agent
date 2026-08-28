@@ -115,9 +115,16 @@ WARN 级（如实入档不阻断）：CA 缺失、timezone 缺失。
 | 本地 E2E（真实下载 + 真实 proot + apt-get update） | ✅ 10/10（110s） |
 | 本地 proot smoke（修复后真跑） | ✅ 5/5 |
 | Android 真机 instrumentation | ⏳ NOT AVAILABLE（无设备；CI 编译，真机运行需 connectedDebugAndroidTest） |
-| GitHub Actions | ⏳ PR CI 验证中 |
+| GitHub Actions（PR #79 final，a9ca2d1） | ✅ 三项全绿；**788 tests PASSED / 0 FAILED**；E2E 10/10 真实执行（含 L3 `apt-get update` 真实网络成功）；ProotExecutorProotSmokeTest 5/5 **首次在 CI 真实执行**（P71 以来第一次）；测试级 SKIPPED 仅 PRootRuntimeIntegrationTest 3 项（P68 旧栈需 Termux proot 语法 → 真机 androidTest 覆盖，原因已在注释中更正） |
 
-## 6. 已知限制（诚实清单）
+## 6. CI 上的 proot 事实（第三轮修复后的终态）
+
+- GH Actions ubuntu-24.04 的 `apt install proot` = **upstream 5.1.0**：不认 `--kill-on-exit`/`--`/`-E`，且跑不了 glibc-2.39 的 Ubuntu 24.04 guest（未知 syscall）
+- CI 现从 Debian 安装 **proot 5.4.0**（dpkg + apt -f 回退 + 发行版回退）；5.4 + `PROOT_NO_SECCOMP=1` 可完整运行 Ubuntu 24.04 guest
+- E2E 探测用 `/bin/bash -c true`（与被测负载同级）——在 5.1.0 上 `/bin/true` 能过而 bash 会死，探测粒度必须匹配负载，否则该 skip 的会跑挂、该跑挂的会误报
+- host 适配层（去 `--`/`--kill-on-exit`、`-E` → ProcessBuilder env）只存在于测试代码；Termux proot 5.1.107 的原始 argv 契约由真机 androidTest 锁定
+
+## 7. 已知限制（诚实清单）
 - 真机 androidTest 未运行（无设备）——T79 的范围
 - E2E 的 Level 2/3 在 CI 依赖 runner 的网络与 proot 5.4 + `PROOT_NO_SECCOMP` 行为；本地已验证同版本组合可行
 - CA bundle 在 Android 生产上缺失（Ubuntu Base 基线如此；http apt 源不受影响，`apt install ca-certificates` 可补）

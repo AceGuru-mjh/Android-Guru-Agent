@@ -59,7 +59,9 @@ class ProotExecutorProotSmokeTest {
     private fun prootCanRun(): Boolean {
         val bin = prootBinary() ?: return false
         return try {
-            val pb = ProcessBuilder(bin.absolutePath, "-r", "/", "--kill-on-exit", "/bin/true")
+            // 最小公共语法：Ubuntu 24.04 archive 的 proot 5.1.0 连
+            // --kill-on-exit 都不认 —— 预检不带任何 Termux/5.2+ 扩展。
+            val pb = ProcessBuilder(bin.absolutePath, "-r", "/", "/bin/true")
                 .redirectErrorStream(true)
             pb.environment()["PROOT_NO_SECCOMP"] = "1"
             val proc = pb.start()
@@ -84,6 +86,7 @@ class ProotExecutorProotSmokeTest {
         while (i < argv.size) {
             when (argv[i]) {
                 "--" -> { /* upstream: no separator */ }
+                "--kill-on-exit" -> { /* Termux/5.2+ extension; one-shot exec tests don't need it */ }
                 "-E" -> {
                     val kv = argv[i + 1]
                     val eq = kv.indexOf('=')

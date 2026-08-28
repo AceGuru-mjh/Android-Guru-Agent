@@ -239,6 +239,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
             val a = argv[i]
             when {
                 a == "--" -> { /* upstream: no separator */ }
+                a == "--kill-on-exit" -> { /* Termux/5.2+ extension; one-shot exec doesn't need it */ }
                 a == "-E" -> {
                     val kv = argv[i + 1]
                     val eq = kv.indexOf('=')

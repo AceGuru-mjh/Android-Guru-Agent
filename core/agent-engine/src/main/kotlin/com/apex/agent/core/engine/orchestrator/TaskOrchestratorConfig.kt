@@ -1,18 +1,21 @@
 package com.apex.agent.core.engine.orchestrator
 
 /**
- * A68.1 — Orchestrator configuration.
+ * Orchestrator configuration (A68.1 core + A68.2 resilience + A68.3
+ * parallelism).
  *
  * Captures the per-task execution policy for the orchestrator:
  * - per-tool timeout (each tool call is bounded)
  * - task-level timeout (the whole task is bounded)
- * - whether tool failures are fatal (A68.1 default: false — the loop
- *   feeds the error back to the LLM, letting it decide the next step)
+ * - whether tool failures are fatal (default: false — the loop feeds the
+ *   error back to the LLM, letting it decide the next step)
+ * - A68.2: retry policy, failure classification, loop detection, recovery
+ *   budget
+ * - A68.3: parallel tool execution, dependency graph knobs
  *
- * This is intentionally minimal. A68.2 will extend this with
- * `retryPolicy`, `retryBudget`, `loopDetection` and failure-classification
- * knobs; A68.3 will add `parallelism`, `dependencyGraph`. Keeping the
- * shape additive preserves binary compatibility.
+ * All A68.2/A68.3 fields are additive with defaults, so existing
+ * constructions (A68.1 call sites, tests) keep compiling and keep their
+ * behaviour unless they opt in.
  */
 data class TaskOrchestratorConfig(
 
@@ -52,8 +55,9 @@ data class TaskOrchestratorConfig(
      * - `true`: the first tool error immediately transitions the task
      *   to [TaskState.Finished.Failed].
      *
-     * A68.2 will replace this boolean with a structured `RecoveryStrategy`
-     * that considers failure classification (transient / timeout / fatal).
+     * Note: with A68.2 active, a "tool failure" is only reported to the
+     * task AFTER retries (and the retry budget) were exhausted — transient
+     * failures never reach this policy.
      */
     val failTaskOnToolError: Boolean = false,
 
@@ -62,7 +66,82 @@ data class TaskOrchestratorConfig(
      * Default is `true`. Tests that assert only on the final state can
      * disable this to reduce noise.
      */
-    val emitLifecycleEvents: Boolean = true
+    val emitLifecycleEvents: Boolean = true,
+
+    // ═══ A68.2 — Fault tolerance ═══
+
+    /**
+     * Retry policy for failed tool calls (A68.2): per-call retry limit,
+     * exponential backoff with jitter, and a task-wide retry budget.
+     *
+     * Only [FailureClass.TRANSIENT] / [FailureClass.TIMEOUT] failures are
+     * retried by default — PERMISSION and FATAL failures fall straight
+     * through to the LLM.
+     *
+     * Set to [RetryPolicy.DISABLED] to restore exact A68.1 behaviour
+     * (one attempt per call).
+     */
+    val retryPolicy: RetryPolicy = RetryPolicy.DEFAULT,
+
+    /**
+     * Enable loop detection (A68.2): identical repeated calls and
+     * short-period oscillation patterns (A-B-A-B…) trigger a recovery
+     * prompt that forces the LLM to change strategy. Disable to restore
+     * A68.1 behaviour (no detection, no recovery).
+     */
+    val enableLoopDetection: Boolean = true,
+
+    /**
+     * Identical calls within the detector window needed to flag a
+     * repetition loop. Only used when [enableLoopDetection] is true.
+     */
+    val loopDetectionMaxRepetitions: Int = 3,
+
+    /**
+     * How many tool calls the loop detector considers (sliding window).
+     */
+    val loopDetectionWindow: Int = 10,
+
+    /**
+     * Max recovery prompts injected per task (A68.2). When the LLM keeps
+     * looping after this many explicit interventions, the task fails with
+     * a "recovery budget exhausted" error instead of looping forever.
+     */
+    val maxRecoveries: Int = 3,
+
+    // ═══ A68.3 — Parallel tool execution ═══
+
+    /**
+     * Enable parallel execution of MULTI-CALL LLM responses (A68.3).
+     * When true and the LLM emits several tool calls in one response,
+     * the orchestrator builds a [ToolCallGraph] (explicit `depends_on` +
+     * conservative same-tool chaining) and executes independent calls
+     * concurrently, bounded by [maxParallelToolCalls].
+     *
+     * Single-call responses always execute through the serial path —
+     * event ordering for the A68.1 tests is preserved exactly.
+     *
+     * When a batch contains `ask_user` / `ask_user_choice`, the whole
+     * batch falls back to serial execution (user interaction is never
+     * parallelised).
+     */
+    val enableParallelToolExecution: Boolean = true,
+
+    /**
+     * Upper bound of concurrently executing tool calls (A68.3). Even a
+     * level with 10 independent calls runs at most this many at once —
+     * protects the device (and remote APIs) from overload. Default 4.
+     */
+    val maxParallelToolCalls: Int = 4,
+
+    /**
+     * Chain same-tool calls in emission order (A68.3 conservative
+     * default). Two calls to the same tool may have hidden ordering
+     * dependencies (`file_write` then `file_read`), so the graph adds an
+     * implicit edge call#1 → call#2. Set to false to fan out same-tool
+     * calls (only for workloads known to be side-effect free).
+     */
+    val chainSameToolCalls: Boolean = true
 ) {
     companion object {
         /**
@@ -71,6 +150,9 @@ data class TaskOrchestratorConfig(
          * - no task-level timeout (rely on `AgentConfig.maxIterations`)
          * - tool failures are not fatal
          * - lifecycle events on
+         * - A68.2: retries on transient/timeout with backoff + budget,
+         *   loop detection + recovery on
+         * - A68.3: parallel multi-call execution, max 4 concurrent
          */
         val DEFAULT = TaskOrchestratorConfig()
 
@@ -80,11 +162,13 @@ data class TaskOrchestratorConfig(
          * - 30s task-level
          * - tool failures are fatal
          * - lifecycle events on
+         * - retries disabled (A68.1 semantics)
          */
         val STRICT = TaskOrchestratorConfig(
             toolTimeoutMs = 5_000L,
             taskTimeoutMs = 30_000L,
-            failTaskOnToolError = true
+            failTaskOnToolError = true,
+            retryPolicy = RetryPolicy.DISABLED
         )
 
         /**
@@ -95,6 +179,17 @@ data class TaskOrchestratorConfig(
             toolTimeoutMs = 0L,
             taskTimeoutMs = 0L,
             failTaskOnToolError = false
+        )
+
+        /**
+         * Exact A68.1 behaviour: no retries, no loop detection, no
+         * parallel execution. Every tool call runs once, serially.
+         * Used by legacy tests that pin A68.1 event ordering.
+         */
+        val LEGACY_A68_1 = TaskOrchestratorConfig(
+            retryPolicy = RetryPolicy.DISABLED,
+            enableLoopDetection = false,
+            enableParallelToolExecution = false
         )
     }
 }

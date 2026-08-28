@@ -13,38 +13,52 @@ import org.junit.Test
  */
 class BrowserScriptTest {
 
+    /**
+     * 从 snapshotJs 生成的脚本中提取实际的选择器条目列表。
+     *
+     * 修复说明：此前用 `js.contains("a,")` 做子串匹配，会被 `textarea,` 的
+     * 子串 `a,` 误命中（假阳性），“不应含裸 <a> 选择器”的断言因此永远失败；
+     * 反过来 INTERACTIVE_ONLY 的断言即使删掉真正的 `a` 选择器也会因
+     * `textarea,` 而侥幸通过（假阴性）。解析出真实条目才能验证意图。
+     */
+    private fun selectorEntries(js: String): List<String> {
+        val m = Regex("var interactiveSel = '([^']*)'").find(js)
+        return m?.groupValues?.get(1)?.split(',')?.map { it.trim() } ?: emptyList()
+    }
+
     // ---- snapshotJs：三策略选择器正确性 ----
 
     @Test
     fun `INTERACTIVE_ONLY 策略覆盖核心可交互控件选择器`() {
-        val js = BrowserScript.snapshotJs(DomParser.SnapshotStrategy.INTERACTIVE_ONLY)
+        val entries = selectorEntries(BrowserScript.snapshotJs(DomParser.SnapshotStrategy.INTERACTIVE_ONLY))
         // 意图：默认快照必须能抓到链接、按钮、表单控件与常见 ARIA 角色
-        for (sel in listOf("a,", "button,", "input,", "select,", "textarea,",
+        for (sel in listOf("a", "button", "input", "select", "textarea",
                            "[role=button]", "[role=link]", "[role=tab]", "[role=option]")) {
-            assertTrue("INTERACTIVE_ONLY 应含选择器 $sel", js.contains(sel))
+            assertTrue("INTERACTIVE_ONLY 应含选择器 $sel，实际：$entries", entries.contains(sel))
         }
     }
 
     @Test
     fun `FORM_FIELDS 策略收窄到表单域而非整页链接`() {
-        val js = BrowserScript.snapshotJs(DomParser.SnapshotStrategy.FORM_FIELDS)
+        val entries = selectorEntries(BrowserScript.snapshotJs(DomParser.SnapshotStrategy.FORM_FIELDS))
         // 意图：填表场景只保留 input/select/textarea 及表单类 ARIA 角色
-        assertTrue(js.contains("input,"))
-        assertTrue(js.contains("select,"))
-        assertTrue(js.contains("textarea,"))
-        assertTrue(js.contains("[role=checkbox]"))
-        // 不应把整页导航链接作为主要目标（a 不在 FORM_FIELDS 选择器内）
-        assertFalse("FORM_FIELDS 不应含裸 <a> 选择器", js.contains("a,"))
+        for (sel in listOf("input", "select", "textarea", "[role=checkbox]")) {
+            assertTrue("FORM_FIELDS 应含选择器 $sel，实际：$entries", entries.contains(sel))
+        }
+        // 不应把整页导航链接/按钮作为主要目标（裸 a / button 不在 FORM_FIELDS 选择器内）
+        assertFalse("FORM_FIELDS 不应含裸 <a> 选择器，实际：$entries", entries.contains("a"))
+        assertFalse("FORM_FIELDS 不应含裸 <button> 选择器，实际：$entries", entries.contains("button"))
     }
 
     @Test
     fun `CONTENT_SUMMARY 策略保留标题正文链接而非交互控件`() {
-        val js = BrowserScript.snapshotJs(DomParser.SnapshotStrategy.CONTENT_SUMMARY)
+        val entries = selectorEntries(BrowserScript.snapshotJs(DomParser.SnapshotStrategy.CONTENT_SUMMARY))
         // 意图：阅读/抽取场景保留 h1~h4、p、li、链接
-        for (sel in listOf("h1,", "h2,", "h3,", "h4,", "p,", "li,", "a[href]")) {
-            assertTrue("CONTENT_SUMMARY 应含选择器 $sel", js.contains(sel))
+        for (sel in listOf("h1", "h2", "h3", "h4", "p", "li", "a[href]")) {
+            assertTrue("CONTENT_SUMMARY 应含选择器 $sel，实际：$entries", entries.contains(sel))
         }
-        assertFalse("CONTENT_SUMMARY 不应含裸 button 选择器", js.contains("button,"))
+        assertFalse("CONTENT_SUMMARY 不应含裸 button 选择器，实际：$entries", entries.contains("button"))
+        assertFalse("CONTENT_SUMMARY 不应含裸 input 选择器，实际：$entries", entries.contains("input"))
     }
 
     // ---- 语义哈希 ref：抗 SPA 局部刷新错位的核心 ----
@@ -99,7 +113,7 @@ class BrowserScriptTest {
     // ---- 下拉选择：byText / byValue 两种匹配语义 ----
 
     @Test
-    fun `selectJs byValue 按 option.value 匹配`() {
+    fun `selectJs byValue 按 option 的 value 匹配`() {
         val js = BrowserScript.selectJs("r_abc", "cn", byText = false)
         assertTrue("按 value 匹配", js.contains("opt.value"))
         assertTrue(js.contains("[data-apex-hash='r_abc']"))
@@ -107,7 +121,7 @@ class BrowserScriptTest {
     }
 
     @Test
-    fun `selectJs byText 按 option.text 匹配`() {
+    fun `selectJs byText 按 option 的 text 匹配`() {
         val js = BrowserScript.selectJs("r_abc", "中国", byText = true)
         assertTrue("按 text 匹配", js.contains("opt.text"))
     }

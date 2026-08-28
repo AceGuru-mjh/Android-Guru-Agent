@@ -92,6 +92,62 @@ sealed interface TaskLifecycleEvent {
         override val timestampMs: Long
     ) : TaskLifecycleEvent
 
+    // ═══ A68.2 — Retry / loop detection / recovery ═══
+
+    /**
+     * A tool call attempt failed and will be retried (A68.2). Emitted
+     * between the failed attempt and the backoff delay.
+     */
+    data class ToolCallRetried(
+        val callId: String,
+        val toolName: String,
+        /** 1-based attempt that just failed. */
+        val failedAttempt: Int,
+        /** 1-based attempt that is about to run. */
+        val nextAttempt: Int,
+        /** Classification of the failure that triggered the retry. */
+        val failureClass: FailureClass,
+        /** Backoff delay before the next attempt. */
+        val backoffMs: Long,
+        override val timestampMs: Long
+    ) : TaskLifecycleEvent
+
+    /**
+     * The loop detector fired (A68.2): the recent tool-call pattern is
+     * repeating without progress. Usually followed by [RecoveryTriggered].
+     */
+    data class LoopDetected(
+        val signal: LoopSignal,
+        override val timestampMs: Long
+    ) : TaskLifecycleEvent
+
+    /**
+     * A recovery prompt was injected into the conversation history (A68.2),
+     * giving the LLM a structured chance to change strategy. `recoveryCount`
+     * is the 1-based index of this recovery within the task.
+     */
+    data class RecoveryTriggered(
+        val recoveryCount: Int,
+        override val timestampMs: Long
+    ) : TaskLifecycleEvent
+
+    // ═══ A68.3 — Parallel execution ═══
+
+    /**
+     * A batch of tool calls executed through the dependency graph finished
+     * (A68.3). Reports the partial-failure breakdown: how many calls
+     * succeeded, failed, or were skipped because a dependency failed.
+     */
+    data class ParallelBatchFinished(
+        val totalCalls: Int,
+        val succeededCount: Int,
+        val failedCount: Int,
+        val skippedCount: Int,
+        val totalAttempts: Int,
+        val durationMs: Long,
+        override val timestampMs: Long
+    ) : TaskLifecycleEvent
+
     /**
      * The task reached a terminal [TaskState.Finished].
      * Always the last lifecycle event for a task.

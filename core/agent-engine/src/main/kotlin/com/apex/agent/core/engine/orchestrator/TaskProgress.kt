@@ -7,10 +7,7 @@ package com.apex.agent.core.engine.orchestrator
  * (which encodes *what* the orchestrator is doing right now),
  * [TaskProgress] encodes *how much* has been done — useful for UI
  * timelines ("正在分析项目 → 正在读取文件 → 正在修改代码 → 正在验证")
- * and for the upcoming A68.2 retry-budget / A68.3 dependency tracking.
- *
- * A68.1 keeps the shape minimal: no attempt graph, no dependency DAG.
- * Those land in A68.3.
+ * and for the A68.2 retry-budget / A68.3 dependency tracking.
  */
 data class TaskProgress(
 
@@ -41,6 +38,20 @@ data class TaskProgress(
      */
     val attemptCount: Int = 0,
 
+    /**
+     * A68.2 — Number of RETRIES consumed so far (attempts beyond the
+     * initial one per logical call). Comes out of the task-wide retry
+     * budget ([RetryPolicy.retryBudget]).
+     */
+    val retriedToolCalls: Int = 0,
+
+    /**
+     * A68.2 — Number of recovery prompts injected so far (loop detected →
+     * replanning requested). Bounded by
+     * [TaskOrchestratorConfig.maxRecoveries].
+     */
+    val recoveryCount: Int = 0,
+
     /** Wall-clock elapsed since task start, in milliseconds. */
     val elapsedMs: Long = 0L,
 
@@ -64,6 +75,8 @@ data class TaskProgress(
             completedToolCalls = 0,
             failedToolCalls = 0,
             attemptCount = 0,
+            retriedToolCalls = 0,
+            recoveryCount = 0,
             elapsedMs = 0L,
             lastMeaningfulChangeMs = 0L
         )

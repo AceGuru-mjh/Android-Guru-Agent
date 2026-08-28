@@ -19,6 +19,22 @@ interface NativePty {
     /** Create a PTY session running [shell] in [cwd]. Returns the session id (≥1) or -1 on failure. */
     fun nativeCreateSession(shell: String, cwd: String, rows: Int, cols: Int, env: Array<String>): Int
 
+    /**
+     * P71 (N1): Create a PTY session whose child executes `execv(argv[0], argv)`.
+     *
+     * This is the generalized spawn entry: LOCAL sessions pass
+     * `["/system/bin/sh", "-i"]` (byte-identical to [nativeCreateSession]),
+     * LINUX sessions pass the full PRoot argv
+     * (`[libproot.so, "-r", rootfs, …, "--", "/bin/bash", "-i"]`).
+     *
+     * @param argv non-empty; argv[0] is the executable path. Empty list → -1.
+     * @param env explicit env overrides applied ON TOP of the C++-side safe
+     *   defaults (TERM/HOME/USER/SHELL/LANG/LC_ALL/PATH) — same semantics as
+     *   [nativeCreateSession].
+     * @return session id (≥1) or -1 on failure (empty argv, forkpty failure, exec failure → child exits 127).
+     */
+    fun nativeCreateSessionArgv(argv: List<String>, cwd: String, rows: Int, cols: Int, env: Map<String, String>): Int
+
     /** Write raw bytes to the session's master fd. Returns bytes written, or -1 on error. */
     fun nativeWrite(sessionId: Int, bytes: ByteArray, offset: Int, len: Int): Int
 

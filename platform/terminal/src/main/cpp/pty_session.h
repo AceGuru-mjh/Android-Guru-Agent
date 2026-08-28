@@ -38,9 +38,24 @@ struct ReadResult {
  */
 class PtySession {
 public:
+    /**
+     * P71 (N1)：通用 argv 构造 —— child 执行 execv(argv[0], argv)。
+     * 本地会话：argv = {"/system/bin/sh", "-i"}；
+     * Linux 会话：argv = {libproot.so, "-r", rootfs, ..., "--", "/bin/bash", "-i"}。
+     *
+     * env 语义：child 先设置与旧 shell 路径完全一致的安全默认值
+     *（TERM/HOME/USER/SHELL/LANG/LC_ALL/PATH，SHELL 默认取 argv[0]），
+     * 再以 envVars 覆盖 —— 调用方显式传入的值永远生效。
+     */
+    PtySession(int id, const std::vector<std::string>& argv, const std::string& workDir,
+               const std::vector<std::pair<std::string, std::string>>& envVars,
+               int rows, int cols);
+
+    /** Legacy shell 构造（P70 前唯一入口）。等价于 argv = {shell, "-i"}。 */
     PtySession(int id, const std::string& shell, const std::string& workDir,
                const std::vector<std::pair<std::string, std::string>>& envVars,
                int rows, int cols);
+
     ~PtySession();
 
     PtySession(const PtySession&) = delete;

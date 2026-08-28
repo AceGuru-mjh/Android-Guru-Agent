@@ -53,6 +53,52 @@ Java_com_apex_agent_platform_terminal_NativePty_nativeCreateSession(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// P71 (N1): 通用 argv 创建入口。
+//
+// child 执行 execv(argv[0], argv) —— 本地 shell（["/system/bin/sh","-i"]）
+// 与 proot Linux 会话（[libproot.so, "-r", rootfs, ..., "--", "/bin/bash", "-i"]）
+// 共用同一条 forkpty 路径。PTY/IO/信号/resize 全部复用现有机制。
+// env 语义与 legacy 入口一致：C++ 侧安全默认值 + envKeys/envVals 覆盖。
+// ─────────────────────────────────────────────────────────────────────────
+JNIEXPORT jint JNICALL
+Java_com_apex_agent_platform_terminal_NativePty_nativeCreateSessionArgv(
+    JNIEnv* env, jobject,
+    jobjectArray argv, jstring workDir,
+    jobjectArray envKeys, jobjectArray envVals,
+    jint rows, jint cols) {
+
+    if (argv == nullptr) return -1;
+    const jsize argvLen = env->GetArrayLength(argv);
+    if (argvLen <= 0) return -1;
+
+    std::vector<std::string> argvVec;
+    argvVec.reserve(static_cast<size_t>(argvLen));
+    for (jsize i = 0; i < argvLen; i++) {
+        auto elem = static_cast<jstring>(env->GetObjectArrayElement(argv, i));
+        if (elem == nullptr) return -1;  // argv 含 null —— 拒绝（宁可失败也不静默丢参数）
+        argvVec.emplace_back(jniGetString(env, elem));
+        env->DeleteLocalRef(elem);
+    }
+    if (argvVec[0].empty()) return -1;
+
+    std::string workDirStr = jniGetString(env, workDir);
+
+    std::vector<std::pair<std::string, std::string>> envVars;
+    if (envKeys != nullptr && envVals != nullptr) {
+        int count = env->GetArrayLength(envKeys);
+        for (int i = 0; i < count; i++) {
+            auto key = static_cast<jstring>(env->GetObjectArrayElement(envKeys, i));
+            auto val = static_cast<jstring>(env->GetObjectArrayElement(envVals, i));
+            envVars.emplace_back(jniGetString(env, key), jniGetString(env, val));
+            if (key != nullptr) env->DeleteLocalRef(key);
+            if (val != nullptr) env->DeleteLocalRef(val);
+        }
+    }
+
+    return PtyEngine::instance().createSessionArgv(argvVec, workDirStr, envVars, rows, cols);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // P70-2/P70-3: 二进制安全写通道。
 //
 // 旧 nativeWrite(String) 走 PtyEngine::writeLine —— 会额外追加 '\n'，

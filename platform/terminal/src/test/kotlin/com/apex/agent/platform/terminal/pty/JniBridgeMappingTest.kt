@@ -43,6 +43,12 @@ class JniBridgeMappingTest {
         var forcedReadError: Int? = null
         /** Record of (sessionId, bytes) passed to nativeWriteBytes — for P70-4 forwarding checks. */
         val writes = mutableListOf<Pair<Int, ByteArray>>()
+        /** P71: record of argv sessions were spawned with — for N1 forwarding checks. */
+        val spawnedArgv = mutableListOf<List<String>>()
+        /** P71: record of env (keys/vals) passed to nativeCreateSessionArgv. */
+        val spawnedEnv = mutableListOf<Map<String, String>>()
+        /** P71: record of workDir passed to nativeCreateSessionArgv. */
+        val spawnedCwd = mutableListOf<String>()
 
         fun create(initialOutput: String = ""): Int {
             val s = FakeJniSession(nextId++)
@@ -60,6 +66,23 @@ class JniBridgeMappingTest {
             envKeys: Array<String>?, envVals: Array<String>?,
             rows: Int, cols: Int
         ): Int = create()
+
+        override fun nativeCreateSessionArgv(
+            argv: Array<String>, workDir: String,
+            envKeys: Array<String>?, envVals: Array<String>?,
+            rows: Int, cols: Int
+        ): Int {
+            // 与 native 语义一致：空 argv / 空 argv[0] → -1。
+            if (argv.isEmpty() || argv[0].isEmpty()) return -1
+            spawnedArgv.add(argv.toList())
+            spawnedCwd.add(workDir)
+            val env = linkedMapOf<String, String>()
+            if (envKeys != null && envVals != null) {
+                for (i in envKeys.indices) env[envKeys[i]] = envVals.getOrElse(i) { "" }
+            }
+            spawnedEnv.add(env)
+            return create()
+        }
 
         override fun nativeReadBytes(sessionId: Int, maxBytes: Int, statusOut: IntArray): ByteArray {
             forcedReadError?.let { err ->
@@ -353,5 +376,42 @@ class JniBridgeMappingTest {
         val id = bridge.create()
         assertEquals(0, pty.nativeWrite(id, ByteArray(0), 0, 0))
         assertTrue(bridge.writes.isEmpty())
+    }
+
+    // ═══════════════════ P71 (N1): argv spawn forwarding ═══════════════════
+
+    @Test
+    fun `nativeCreateSessionArgv forwards argv verbatim`() {
+        val bridge = FakeJniBridge()
+        val pty = newPty(bridge)
+        val argv = listOf("/lib/libproot.so", "-r", "/rootfs", "--", "/bin/bash", "-i")
+
+        val id = pty.nativeCreateSessionArgv(argv, "/rootfs", 24, 80, mapOf("TERM" to "xterm-256color"))
+
+        assertTrue(id > 0)
+        assertEquals(argv, bridge.spawnedArgv.single())
+        assertEquals("/rootfs", bridge.spawnedCwd.single())
+        assertEquals(mapOf("TERM" to "xterm-256color"), bridge.spawnedEnv.single())
+    }
+
+    @Test
+    fun `nativeCreateSessionArgv rejects empty argv without JNI call`() {
+        val bridge = FakeJniBridge()
+        val pty = newPty(bridge)
+
+        assertEquals(-1, pty.nativeCreateSessionArgv(emptyList(), "/", 24, 80, emptyMap()))
+        assertEquals(-1, pty.nativeCreateSessionArgv(listOf(""), "/", 24, 80, emptyMap()))
+        assertTrue("no spawn must reach the bridge", bridge.spawnedArgv.isEmpty())
+    }
+
+    @Test
+    fun `nativeCreateSessionArgv empty env passes null keys`() {
+        val bridge = FakeJniBridge()
+        val pty = newPty(bridge)
+
+        val id = pty.nativeCreateSessionArgv(listOf("/system/bin/sh", "-i"), "/sdcard", 24, 80, emptyMap())
+
+        assertTrue(id > 0)
+        assertTrue("empty env → empty map recorded", bridge.spawnedEnv.single().isEmpty())
     }
 }

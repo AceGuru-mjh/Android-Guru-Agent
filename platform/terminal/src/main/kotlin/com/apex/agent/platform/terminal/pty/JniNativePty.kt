@@ -53,6 +53,20 @@ class JniNativePty(
         return jni.nativeCreateSession(shell, cwd, keys, vals, rows, cols)
     }
 
+    override fun nativeCreateSessionArgv(
+        argv: List<String>,
+        cwd: String,
+        rows: Int,
+        cols: Int,
+        env: Map<String, String>
+    ): Int {
+        // P71 (N1): argv 直传（空 argv / 空 argv[0] 由 native 侧拒绝，这里提前拒绝减少一次 JNI 往返）。
+        if (argv.isEmpty() || argv[0].isEmpty()) return -1
+        val keys: Array<String>? = if (env.isEmpty()) null else env.keys.toTypedArray()
+        val vals: Array<String>? = if (env.isEmpty()) null else env.values.toTypedArray()
+        return jni.nativeCreateSessionArgv(argv.toTypedArray(), cwd, keys, vals, rows, cols)
+    }
+
     override fun nativeWrite(sessionId: Int, bytes: ByteArray, offset: Int, len: Int): Int {
         // P70-2/P70-3: raw byte write. NO newline is appended here — LINE semantics
         // ("text + \n") are owned by TerminalInput.sendLine, which appends it exactly once.

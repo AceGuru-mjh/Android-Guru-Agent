@@ -43,6 +43,15 @@ public:
                       const std::vector<std::pair<std::string, std::string>>& envVars,
                       int rows, int cols);
 
+    /**
+     * P71 (N1)：通用 argv 创建 —— child 执行 execv(argv[0], argv)。
+     * 本地 shell 与 proot（Linux 会话）共用同一条 forkpty 路径。
+     * argv 为空时返回 -1。
+     */
+    int createSessionArgv(const std::vector<std::string>& argv, const std::string& workDir,
+                          const std::vector<std::pair<std::string, std::string>>& envVars,
+                          int rows, int cols);
+
     bool write(int sessionId, const char* data, size_t len);
     bool writeLine(int sessionId, const std::string& line);
 

@@ -19,6 +19,17 @@ interface NativePtyJniBridge {
     ): Int
 
     /**
+     * P71 (N1)：通用 argv 创建 —— child 执行 execv(argv[0], argv)。
+     * 本地 shell（["/system/bin/sh","-i"]）与 proot Linux 会话共用同一条 forkpty 路径。
+     * argv 为空或含空首元素时返回 -1。
+     */
+    fun nativeCreateSessionArgv(
+        argv: Array<String>, workDir: String,
+        envKeys: Array<String>?, envVals: Array<String>?,
+        rows: Int, cols: Int
+    ): Int
+
+    /**
      * 二进制安全读取（P70-1/P70-2）。
      * @param statusOut 长度 ≥3 的输出数组：[0]=状态，[1]=errno（仅 ERROR），[2]=字节数。
      * @return 本次读到的原始字节（可能为空数组；null 仅在 JNI 异常时）。
@@ -64,6 +75,13 @@ class NativePty : NativePtyJniBridge {
 
     override external fun nativeCreateSession(
         shell: String, workDir: String,
+        envKeys: Array<String>?, envVals: Array<String>?,
+        rows: Int, cols: Int
+    ): Int
+
+    /** P71 (N1): 通用 argv 创建入口（见 [NativePtyJniBridge.nativeCreateSessionArgv]）。 */
+    override external fun nativeCreateSessionArgv(
+        argv: Array<String>, workDir: String,
         envKeys: Array<String>?, envVals: Array<String>?,
         rows: Int, cols: Int
     ): Int

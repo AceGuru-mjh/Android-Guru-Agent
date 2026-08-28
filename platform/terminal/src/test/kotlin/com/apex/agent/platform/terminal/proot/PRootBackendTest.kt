@@ -134,7 +134,9 @@ class LinuxEnvironmentBuilderTest {
         rt.initialize()
         val env = builder.build(rt, LinuxProcessRequest(executable = "sh"))
         assertEquals("/usr/local/bin:/usr/bin:/bin", env["PATH"])
-        assertNotEquals(android.os.Build::class.java, env["PATH"]?.let { it.contains("data") })
+        // P71: 原断言把 Class 与 Boolean 比较（恒不等、无意义）且引用 android.os.Build
+        //（JVM 不可编译）。改为真实断言：Linux PATH 不得包含 Android data 目录。
+        assertFalse("PATH must not reference Android /data dir: ${env["PATH"]}", env["PATH"]!!.contains("/data"))
     }
 
     @Test fun `HOME is not Android data dir`() = runBlocking {

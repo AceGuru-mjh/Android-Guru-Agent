@@ -26,7 +26,9 @@ namespace apex {
 static constexpr int MAX_EAGAIN_RETRIES = 200;
 static constexpr useconds_t WRITE_BACKOFF_US = 1000;
 
-PtySession::PtySession(int id, const std::string& shell, const std::string& workDir,
+// ─── P71 (N1): 通用 argv 构造（主实现） ───
+PtySession::PtySession(int id, const std::vector<std::string>& argv,
+                       const std::string& workDir,
                        const std::vector<std::pair<std::string, std::string>>& envVars,
                        int rows, int cols)
     : id_(id) {
@@ -50,7 +52,7 @@ PtySession::PtySession(int id, const std::string& shell, const std::string& work
     }
 
     if (pid_ == 0) {
-        // ═══ 子进程（shell）═══
+        // ═══ 子进程 ═══
 
         // 重置信号处理
         signal(SIGINT, SIG_DFL);
@@ -65,32 +67,36 @@ PtySession::PtySession(int id, const std::string& shell, const std::string& work
             }
         }
 
-        // 设置环境变量
+        // 设置环境变量：先安全默认值（与旧 shell 路径逐字节一致），
+        // 再以调用方 envVars 覆盖 —— LocalShellBackend 显式传入同一组值，
+        // 本地路径行为保持完全不变（golden 契约）。
         setenv("TERM", "xterm-256color", 1);
         setenv("HOME", "/data/local/tmp", 1);
         setenv("USER", "shell", 1);
-        setenv("SHELL", shell.c_str(), 1);
+        setenv("SHELL", argv.empty() ? "/system/bin/sh" : argv[0].c_str(), 1);
         setenv("LANG", "en_US.UTF-8", 1);
         setenv("LC_ALL", "en_US.UTF-8", 1);
         setenv("PATH",
                "/system/bin:/system/xbin:/vendor/bin:"
                "/data/local/tmp/bin:/product/bin", 1);
 
-        // 自定义环境变量
+        // 自定义环境变量（覆盖默认值）
         for (const auto& [key, val] : envVars) {
             setenv(key.c_str(), val.c_str(), 1);
         }
 
-        // 执行shell
-        const char* shellPath = shell.empty() ? "/system/bin/sh" : shell.c_str();
+        // 执行 argv[0]（P71: execv 泛化 —— 本地 shell 与 proot 共用同一条路）
+        if (argv.empty()) {
+            _exit(127);
+        }
+        std::vector<char*> cargv;
+        cargv.reserve(argv.size() + 1);
+        for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
+        cargv.push_back(nullptr);
+        execv(cargv[0], cargv.data());
 
-        // 尝试以交互模式启动
-        execl(shellPath, shellPath, "-i", nullptr);
-
-        // 如果 -i 失败，尝试无参数
-        execl(shellPath, shellPath, nullptr);
-
-        // 不应到达这里
+        // execv 仅在失败时返回（ENOENT/EACCES/ENOEXEC...）—— 127 语义与 shell 一致。
+        LOGE("Session %d: execv(%s) failed: %s", id_, cargv[0], strerror(errno));
         _exit(127);
     }
 
@@ -111,8 +117,21 @@ PtySession::PtySession(int id, const std::string& shell, const std::string& work
         tcsetattr(masterFd, TCSANOW, &tio);
     }
 
-    LOGI("Session %d created: pid=%d fd=%d shell=%s cwd=%s",
-         id_, pid_, masterFd, shell.c_str(), workDir.c_str());
+    LOGI("Session %d created: pid=%d fd=%d argv0=%s cwd=%s",
+         id_, pid_, masterFd, argv.empty() ? "(empty)" : argv[0].c_str(),
+         workDir.c_str());
+}
+
+// ─── Legacy shell 构造：委托给 argv 构造 ───
+// 旧实现的 "execl(shell,shell,'-i') 失败后再 execl(shell,shell)" 回退是死代码
+//（execl 失败意味着二进制本身无法 exec，参数不改变结果），委托后行为等价。
+PtySession::PtySession(int id, const std::string& shell, const std::string& workDir,
+                       const std::vector<std::pair<std::string, std::string>>& envVars,
+                       int rows, int cols)
+    : PtySession(id,
+                 std::vector<std::string>{
+                     shell.empty() ? "/system/bin/sh" : shell, "-i"},
+                 workDir, envVars, rows, cols) {
 }
 
 PtySession::~PtySession() {

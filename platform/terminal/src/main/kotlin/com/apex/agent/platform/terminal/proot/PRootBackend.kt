@@ -87,9 +87,14 @@ class PRootCommandBuilderImpl : PRootCommandBuilder {
         args.add("-b")
         args.add("${workspacePath.value}:/workspace")
         // Working directory
-        if (request.workingDirectory != null) {
+        // P71 修正：-w 是 GUEST 路径。workspace 绑定在 guest /workspace ——
+        // WorkspacePath("workspace:/foo") 必须映射为 "/workspace/foo"，
+        // 而不是旧的 removePrefix 结果 "/foo"（那是 rootfs 相对路径，指向错位置）。
+        // 无前缀的值按 guest 绝对路径原样使用（如 "/root"）。
+        val guestCwd = request.workingDirectory?.let { toGuestPath(it.value) }
+        if (guestCwd != null) {
             args.add("-w")
-            args.add(request.workingDirectory.value.removePrefix("workspace:"))
+            args.add(guestCwd)
         }
         // Environment passthrough
         for ((key, value) in request.environment) {
@@ -101,6 +106,19 @@ class PRootCommandBuilderImpl : PRootCommandBuilder {
         args.add(request.executable)
         args.addAll(request.arguments)
         return PRootCommand(executable = prootBinary, arguments = args)
+    }
+
+    /** workspace: 前缀路径 → guest /workspace 下路径；无前缀 → guest 绝对路径。 */
+    internal fun toGuestPath(workspacePathValue: String): String {
+        val prefix = "workspace:"
+        return if (workspacePathValue.startsWith(prefix)) {
+            val rest = workspacePathValue.removePrefix(prefix)
+            if (rest.isEmpty() || rest == "/") "/workspace"
+            else if (rest.startsWith("/")) "/workspace$rest"
+            else "/workspace/$rest"
+        } else {
+            workspacePathValue
+        }
     }
 }
 

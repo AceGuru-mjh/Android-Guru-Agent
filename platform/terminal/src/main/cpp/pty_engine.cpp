@@ -24,9 +24,24 @@ PtySession* PtyEngine::getSession(int id) {
 int PtyEngine::createSession(const std::string& shell, const std::string& workDir,
                               const std::vector<std::pair<std::string, std::string>>& envVars,
                               int rows, int cols) {
+    // P71 (N1)：legacy shell 入口转发到通用 argv 路径（行为等价：
+    // child exec {shell, "-i"}，env 默认值由 PtySession 统一设置）。
+    return createSessionArgv(
+        std::vector<std::string>{shell.empty() ? "/system/bin/sh" : shell, "-i"},
+        workDir, envVars, rows, cols);
+}
+
+int PtyEngine::createSessionArgv(const std::vector<std::string>& argv,
+                                  const std::string& workDir,
+                                  const std::vector<std::pair<std::string, std::string>>& envVars,
+                                  int rows, int cols) {
+    if (argv.empty()) {
+        LOGI("createSessionArgv rejected: empty argv");
+        return -1;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     int id = nextId_++;
-    auto session = std::make_shared<PtySession>(id, shell, workDir, envVars, rows, cols);
+    auto session = std::make_shared<PtySession>(id, argv, workDir, envVars, rows, cols);
     if (session->pid() <= 0) {
         return -1; // 创建失败
     }

@@ -34,6 +34,8 @@ class FakeNativePty : NativePty {
         var rows: Int,
         var cols: Int,
         val pid: Int,
+        val argv: List<String> = emptyList(),
+        val spawnEnv: Map<String, String> = emptyMap(),
         val outputBuffer: StringBuilder = StringBuilder(),
         val commandQueue: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue(),
         var alive: AtomicBoolean = AtomicBoolean(true),
@@ -60,6 +62,28 @@ class FakeNativePty : NativePty {
         val s = Session(id, shell, cwd, rows, cols, pid)
         sessions[id] = s
         // emit initial prompt
+        s.outputBuffer.append("FakeNativePty shell ready\n\$ ")
+        return id
+    }
+
+    override fun nativeCreateSessionArgv(
+        argv: List<String>,
+        cwd: String,
+        rows: Int,
+        cols: Int,
+        env: Map<String, String>
+    ): Int {
+        // P71 (N1): argv 语义 —— 与 native 一致拒绝空 argv；argv[0] 作为 "shell 名"。
+        // 交互模拟行为与 nativeCreateSession 完全相同（LocalShellBackend 的
+        // ["/system/bin/sh", "-i"] 路径 byte-equal），另记录 argv/spawnEnv 供测试断言。
+        if (argv.isEmpty() || argv[0].isEmpty()) return -1
+        val id = idCounter.incrementAndGet()
+        val pid = pidCounter.incrementAndGet()
+        val s = Session(
+            id = id, shell = argv[0], cwd = cwd, rows = rows, cols = cols, pid = pid,
+            argv = argv, spawnEnv = env.toMap()
+        )
+        sessions[id] = s
         s.outputBuffer.append("FakeNativePty shell ready\n\$ ")
         return id
     }
@@ -278,4 +302,10 @@ class FakeNativePty : NativePty {
         val s = sessions[sessionId] ?: return
         synchronized(s.outputBuffer) { s.outputBuffer.append(text) }
     }
+
+    /** P71 test helper: the argv a session was spawned with (empty for the legacy shell entry). */
+    fun argvOf(sessionId: Int): List<String> = sessions[sessionId]?.argv ?: emptyList()
+
+    /** P71 test helper: the explicit spawn env a session was created with. */
+    fun spawnEnvOf(sessionId: Int): Map<String, String> = sessions[sessionId]?.spawnEnv ?: emptyMap()
 }

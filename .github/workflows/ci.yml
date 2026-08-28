@@ -126,6 +126,22 @@ jobs:
             exit 1
           fi
 
+      - name: Verify prebuilt PRoot binaries (P71)
+        run: |
+          # jniLibs 中的 proot/talloc/shmem 二进制由 proot-binary-provenance.md 记录来源，
+          # proot-binaries.sha256 锁定指纹 —— 每次 CI 重验，防止损坏/被篡改/误替换。
+          if [ ! -f platform/terminal/proot-binaries.sha256 ]; then
+            echo "❌ checksum manifest missing"
+            exit 1
+          fi
+          cd platform/terminal
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum --quiet -c proot-binaries.sha256
+            echo "✅ All $(wc -l < proot-binaries.sha256) prebuilt PRoot binaries verified (sha256)"
+          else
+            echo "⚠️ sha256sum unavailable — skipping digest verification"
+          fi
+
   app-compile:
     name: App Module Compile (Android SDK + Gradle)
     runs-on: ubuntu-latest

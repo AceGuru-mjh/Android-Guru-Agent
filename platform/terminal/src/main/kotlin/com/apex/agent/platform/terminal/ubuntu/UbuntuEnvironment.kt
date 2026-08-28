@@ -201,6 +201,22 @@ class UbuntuRuntime(
 }
 
 // ─── Section 3: Ubuntu Distribution Provider ───
+/**
+ * P64 legacy stub —— 保留仅为既有测试兼容。
+ *
+ * T72 审查结论：本类的 acquire()/install() 是 simulated download（无网络
+ * 行为），sha256 为 "placeholder-sha256"，与真实 Ubuntu 发布无关。生产
+ * 路径一律使用 [RootfsProvisionerImpl]（真实下载/校验/解压/激活）+
+ * [OfficialUbuntuRootfsSource]（真实 URL/SHA-256）。
+ *
+ * T73 将在 TerminalRuntime 接线时移除本类或将其改造为 provisioner 的
+ * 适配器；T72 不动 TerminalRuntime（范围纪律），只做诚实标注。
+ */
+@Deprecated(
+    "P64 legacy simulated provider — use RootfsProvisionerImpl (T72). " +
+        "This class never downloads anything; it fabricates results.",
+    level = DeprecationLevel.WARNING
+)
 class UbuntuDistributionProvider(
     private val rootfsValidator: com.apex.agent.platform.terminal.proot.RootfsValidator? = null,
     private val storagePreflight: StoragePreflight? = null,

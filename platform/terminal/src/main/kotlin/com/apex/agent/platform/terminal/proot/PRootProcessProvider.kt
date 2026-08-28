@@ -5,7 +5,6 @@ import com.apex.agent.platform.terminal.linux.*
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.WorkspacePath
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * PR #68: Real PRoot Process Provider.
@@ -38,7 +37,6 @@ class PRootProcessProvider(
     )
 
     private val processes = ConcurrentHashMap<Long, PRootProcessHandle>()
-    private val pidCounter = AtomicLong(10000)
 
     override suspend fun start(request: LinuxProcessRequest): Result<LinuxProcessHandle> {
         if (rootfs.location == null) {
@@ -62,19 +60,19 @@ class PRootProcessProvider(
         val commandList = listOf(command.executable.value) + command.arguments
         val pb = ProcessBuilder(commandList)
         pb.redirectErrorStream(false)   // keep stdout/stderr separate for observation
-        // Keep the host environment for the PRoot process itself (PRoot needs
-        // HOME/PATH/locale to function). The command builder's -E flag injects
-        // request.environment INTO the rootfs namespace for the child process,
-        // so the rootfs sees the right env without leaking host env into it.
-        // Only override host env with request env for the PRoot process.
-        val hostEnv = pb.environment()
-        for ((key, value) in request.environment) {
-            hostEnv[key] = value
-        }
+        // G4（P71 修正）：host/guest env 严格分离。
+        // guest 环境变量只经 argv 的 -E 传入 rootfs 命名空间（commandBuilder 已生成），
+        // host ProcessBuilder env 不再混入 request.environment —— 旧实现把 guest 变量
+        // 同时写进宿主 env，造成泄漏与语义混乱（如 HOME/PWD 指向 guest 路径却作用于宿主 proot）。
+        // proot 自身需要的宿主变量（PROOT_TMP_DIR/LOADER/LD_LIBRARY_PATH/PATH）由
+        // PRootHostEnvironment.hostEnv() 提供 —— 此处继承默认宿主 env 以兼容 JVM CI
+        //（宿主 proot 依赖 PATH 找到 loader）；Android 生产路径一律走 forkpty，不经此处。
 
         return try {
             val process = pb.start()
-            val pid = LinuxPid(pidCounter.incrementAndGet())
+            // G1（P71 修正）：真实宿主 pid（Process.pid()），替代旧的 10000 起步计数器 ——
+            // 快照/信号/日志才能对应真实进程。
+            val pid = LinuxPid(process.pid())
             val handle = PRootProcessHandle(pid, process, request.executable, request.arguments)
             processes[pid.value] = handle
             Result.success(handle)

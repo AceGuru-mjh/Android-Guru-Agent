@@ -126,8 +126,11 @@ class UbuntuRootfsEndToEndIntegrationTest {
             val rootfs = runBlocking { provisioner.current() } ?: return false
             val root = File(rootfs.location!!.value)
             return try {
+                // 最小公共语法：只 -r + command（不带 --kill-on-exit/--——它们
+                // 是 Termux/5.4+ 扩展；探测的是“这个 proot 能跑这个 rootfs”，
+                // 老 upstream proot 5.1 跑不了 glibc 2.39 guest → 如实 false）
                 val pb = ProcessBuilder(
-                    listOf(bin.absolutePath, "-r", root.absolutePath, "--kill-on-exit", "/bin/true")
+                    listOf(bin.absolutePath, "-r", root.absolutePath, "/bin/true")
                 )
                 pb.environment().clear()
                 // upstream proot 5.4 + glibc 2.39 guest needs this; Termux proot
@@ -319,7 +322,11 @@ class UbuntuRootfsEndToEndIntegrationTest {
 
     @Test
     fun `L2 workspace bind and guest env injected`() {
-        File(File(layout.baseDir.value, "workspace"), "marker.txt").writeText("bind-works")
+        // 依赖顺序防御：workspace 目录由 realBackend() 创建，但 JUnit 方法
+        // 执行顺序不定 —— 写 marker 前先 mkdirs（CI 上该测试首个执行时暴露）
+        val wsDir = File(layout.baseDir.value, "workspace")
+        wsDir.mkdirs()
+        File(wsDir, "marker.txt").writeText("bind-works")
         val exec = runInUbuntu(listOf(
             "/bin/bash", "-c",
             "cat /workspace/marker.txt && echo HOME=\$HOME && echo TERM=\$TERM"

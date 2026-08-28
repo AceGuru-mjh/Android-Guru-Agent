@@ -111,10 +111,10 @@ class PRootRuntimeIntegrationTest {
      *
      * T72 CORRECTION of the P68-era comment: GitHub Actions runners do NOT
      * restrict ptrace — the historical skips here had a different root cause:
-     * this preflight (and the P68 runtime's argv) use the `--` separator and
-     * `-E K=V` env flags, which are Termux-proot 5.1.107 extensions that
-     * upstream proot 5.4 (what `apt install proot` provides on CI) rejects
-     * with "unknown option '--'" → exit 1 → self-skip.
+     * this preflight (and the P68 runtime's argv) use `--kill-on-exit`, the
+     * `--` separator and `-E K=V` env flags, which are Termux-proot 5.1.107
+     * (and upstream 5.2+) extensions that the runner's proot (Ubuntu 24.04
+     * apt = upstream 5.1.0) rejects with "unknown option" → exit 1 → self-skip.
      *
      * The P68 PRootRuntime path therefore only truly executes on Termux-proot
      * hosts (real device androidTest). The T72 production chain (Ubuntu

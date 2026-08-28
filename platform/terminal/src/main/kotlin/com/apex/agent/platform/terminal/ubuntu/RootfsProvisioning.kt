@@ -42,7 +42,8 @@ data class RootfsArtifact(
     val sourceKind: RootfsSourceKind,
     val metadataVersion: Int = 1
 ) {
-    val isVerifiable: Boolean get() = sha256 != null && sha256!!.length == 64
+    /** T72: verifiable = 64 hex chars AND not the all-zeros placeholder. */
+    val isVerifiable: Boolean get() = OfficialUbuntuRootfsSource.isValidSha256(sha256)
 }
 
 enum class ArchiveFormat { TAR_GZ, TAR_XZ, TAR_ZSTD, TAR, SQUASHFS, UNKNOWN }
@@ -56,8 +57,15 @@ enum class RootfsSourceKind { OFFICIAL_MIRROR, CUSTOM_HTTP, BUNDLED, LOCAL_CACHE
 interface RootfsArtifactSource {
     val sourceKind: RootfsSourceKind
     suspend fun resolve(target: RootfsTarget): Result<RootfsArtifact>
-    /** Opens a streaming download stream for the artifact's archive. */
-    suspend fun open(artifact: RootfsArtifact): Result<java.io.InputStream>
+    /**
+     * Opens a streaming download stream for the artifact's archive.
+     * [offset] > 0 requests a byte-range resume (HTTP Range semantics:
+     * implementations SHOULD return a stream starting at [offset]; a source
+     * that cannot honor ranges may return the FULL stream from 0 — callers
+     * detect this and truncate any partial file. Offset beyond EOF yields an
+     * empty stream or an error the caller treats as "restart from scratch".)
+     */
+    suspend fun open(artifact: RootfsArtifact, offset: Long = 0): Result<java.io.InputStream>
 }
 
 // ─── Section 7: RootfsTarget + architecture detection ───
@@ -109,6 +117,10 @@ sealed interface ProvisioningResult {
     data class Failed(val error: ProvisioningError, val partialState: ProvisioningState) : ProvisioningResult
     data class Cancelled(val partialState: ProvisioningState) : ProvisioningResult
     data class Busy(val message: String) : ProvisioningResult
+    /** T72: remove() 成功后的终态（旧版误用 Ready 表达，语义错误）。 */
+    data class Removed(val cleanedDirs: List<String>) : ProvisioningResult
+    /** T72: invalidate() 成功 —— rootfs 被标记 CORRUPTED，current 停止指向它，但文件保留供 repair。 */
+    data class Invalidated(val reason: String) : ProvisioningResult
 }
 
 // ─── Section 25: Typed Error Model (14 codes) ───
@@ -173,10 +185,12 @@ data class RootfsInstallLayout(
 }
 
 // ─── Section 14/15: RootFS Metadata (persisted, schema-versioned) ───
+// T72 schema v2: + stageEvidence（每阶段完成的时间戳证据）+ health（健康检查摘要）。
+// v1 文件可读（新字段缺省），写出恒为 v2。
 data class RootfsMetadata(
     val schemaVersion: Int = CURRENT_SCHEMA,
     val distribution: String,       // "ubuntu"
-    val version: String,            // "24.04"
+    val version: String,            // "24.04.4"（完整 point 版本）
     val architecture: CpuArchitecture,
     val artifactId: String,
     val checksum: String?,          // SHA-256 of the source archive
@@ -185,10 +199,55 @@ data class RootfsMetadata(
     val activatedAt: Long,
     val state: ProvisioningState,
     val sourceKind: RootfsSourceKind,
-    val archiveFormat: ArchiveFormat
+    val archiveFormat: ArchiveFormat,
+    /** T72: 阶段完成证据（阶段名→完成时间戳）。DOWNLOADED/VERIFIED/EXTRACTED/CONFIGURED/READY。 */
+    val stageEvidence: Map<String, Long> = emptyMap(),
+    /** T72: 最近一次健康检查摘要（全部检查明细在 install 时刻计入，不逐次重写）。 */
+    val health: HealthSummary? = null,
+    /** T72: entry 数/字节数等解压统计（供诊断与容量规划）。 */
+    val entryCount: Int? = null
 ) {
-    companion object { const val CURRENT_SCHEMA = 1 }
+    companion object {
+        const val CURRENT_SCHEMA = 2
+
+        /** 阶段链（用户可见的 READY 证据链）。 */
+        val STAGE_CHAIN = listOf("DOWNLOADED", "VERIFIED", "EXTRACTED", "CONFIGURED", "READY")
+    }
 }
+
+/** T72: 健康检查状态。 */
+enum class HealthStatus { PASS, WARN, FAIL }
+
+/** T72: 单项健康检查。 */
+data class RootfsHealthCheck(
+    val name: String,               // 如 "shell:/bin/sh"
+    val status: HealthStatus,
+    val detail: String
+)
+
+/** T72: 健康报告 —— 检查结果进入 RootFS 状态（metadata），不只是日志。 */
+data class RootfsHealthReport(
+    val checks: List<RootfsHealthCheck>,
+    val passedAt: Long = System.currentTimeMillis()
+) {
+    val failures: List<RootfsHealthCheck> get() = checks.filter { it.status == HealthStatus.FAIL }
+    val warnings: List<RootfsHealthCheck> get() = checks.filter { it.status == HealthStatus.WARN }
+    val valid: Boolean get() = failures.isEmpty()
+    val summary: String
+        get() = "pass=${checks.count { it.status == HealthStatus.PASS }} " +
+            "warn=${warnings.size} fail=${failures.size}"
+}
+
+/** T72: metadata 内的健康摘要（v2）。 */
+@kotlinx.serialization.Serializable
+data class HealthSummary(
+    val valid: Boolean,
+    val passCount: Int,
+    val warnCount: Int,
+    val failCount: Int,
+    /** FAIL/WARN 项的 "name: detail" 列表（全部明细不进 metadata —— 只留异常）。 */
+    val issues: List<String> = emptyList()
+)
 
 // ─── Section 26: Storage Preflight ───
 data class ProvisioningStoragePreflight(
@@ -232,10 +291,20 @@ class RootfsInstallLock {
 // The orchestrator. Production code calls install() once; PRootRuntime's
 // RootfsProvider (ProvisionedRootfsProvider) reads the result via current().
 interface RootfsProvisioner {
-    suspend fun install(target: RootfsTarget): ProvisioningResult
+    /**
+     * [force]=true 绕过 AlreadyReady 短路（重装/版本迁移）。
+     * T72：下载前若 archives/ 已有 checksum 匹配的缓存则跳过网络（repair 复用）。
+     */
+    suspend fun install(target: RootfsTarget, force: Boolean = false): ProvisioningResult
     suspend fun cancel(): Result<Unit>
     suspend fun repair(): ProvisioningResult
     suspend fun remove(): ProvisioningResult
+    /**
+     * T72: 标记当前 rootfs 无效（CORRUPTED）—— current() 不再返回它，
+     * 但文件保留（repair() 可基于缓存 archive 重建）。与 remove() 的区别：
+     * remove 是删数据，invalidate 是停用但留档。
+     */
+    suspend fun invalidate(reason: String): ProvisioningResult
     suspend fun validate(): Result<RootfsVerification>
     suspend fun reconcile(): ReconciliationResult
     suspend fun current(): RootfsDescriptor?

@@ -145,7 +145,7 @@ jobs:
   app-compile:
     name: App Module Compile (Android SDK + Gradle)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -250,10 +250,29 @@ jobs:
           tail -30 compile.log
           exit 1
 
-      - name: Install proot (for PRootRuntimeIntegrationTest)
-        # P68: the integration test spawns REAL proot processes. Self-skips
-        # (assumeTrue) if proot is absent, so this install is what makes it run.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq proot 2>/dev/null || echo "proot install skipped (optional)"
+      - name: Install proot 5.4 (for T72 E2E + P71 smoke tests)
+        # T72: UbuntuRootfsEndToEndIntegrationTest downloads the REAL Ubuntu
+        # 24.04.4 amd64 archive and runs REAL proot processes against it
+        # (bash / apt / apt-get update inside the provisioned rootfs).
+        # ProotExecutorProotSmokeTest runs the P71 builder contract through
+        # the host-adapted argv.
+        #
+        # Ubuntu 24.04 archive ships proot 5.1.0 — it CANNOT run the glibc-2.39
+        # Ubuntu 24.04 guest (unsupported syscalls). Debian's 5.4.0 can (with
+        # PROOT_NO_SECCOMP=1, set by the tests). Install 5.4 from Debian, fall
+        # back to the distro version (tests then self-skip L2/L3 honestly).
+        run: |
+          set -x
+          if curl -sfL http://deb.debian.org/debian/pool/main/p/proot/proot_5.4.0-3_amd64.deb -o /tmp/proot54.deb; then
+            if sudo dpkg -i /tmp/proot54.deb 2>/tmp/dpkg.log; then
+              echo "proot 5.4 installed from Debian"
+            else
+              sudo apt-get install -f -y -qq || true
+              proot --version 2>/dev/null | head -1 || true
+            fi
+          fi
+          proot --version 2>/dev/null | head -1 || sudo apt-get install -y -qq proot
+          proot --version 2>&1 | head -3
         continue-on-error: true
 
       - name: Run platform:terminal unit tests

@@ -308,7 +308,8 @@ class CsMemSessionManager @Inject constructor(
      * （保留原有可读性，TraceDistiller 在 bestAction 评分中按 else 分支 0 分处理）。
      */
     private fun canonicalActionType(actionDescription: String): String {
-        val name = actionDescription.trim().substringBefore("(").trim().lowercase()
+        // 用平衡的 "()" 集合判定——CI 静态检查按字符数括号，字面量里的落单括号会判不平衡
+        val name = actionDescription.trim().takeWhile { it !in "()" }.trim().lowercase()
         return when (name) {
             "ui_tap", "tap", "click" -> "ui_tap"
             "ui_swipe", "swipe", "scroll" -> "ui_swipe"

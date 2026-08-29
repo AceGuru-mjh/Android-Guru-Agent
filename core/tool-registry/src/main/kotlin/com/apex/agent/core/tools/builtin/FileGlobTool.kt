@@ -69,7 +69,11 @@ class FileGlobTool(
             val maxResults = json["max_results"]?.jsonPrimitive?.intOrNull ?: 30
             val sortBy = json["sort_by"]?.jsonPrimitive?.content ?: "name"
 
-            val dir = if (path.startsWith("/")) File(path) else File(basePath, path)
+            val dir = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             if (!dir.exists()) return "Error: Directory not found: $path"
 
             val now = System.currentTimeMillis()

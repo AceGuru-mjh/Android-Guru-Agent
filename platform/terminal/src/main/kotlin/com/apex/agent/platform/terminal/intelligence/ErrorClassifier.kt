@@ -39,8 +39,12 @@ data class TerminalError(
 object ErrorClassifier {
 
     private val commandNotFoundPatterns = listOf(
-        Regex(".*: (\\S+): (command )?not found.*", RegexOption.IGNORE_CASE),
-        Regex(".*: (\\S+): No such file or directory.*", RegexOption.IGNORE_CASE)
+        // TM7: restricted to the explicit "command not found" / "not found" phrase.
+        // A prior `.*: (\S+): No such file or directory.*` pattern here caused every
+        // "cat: /etc/passwd2: No such file or directory" line to be classified as
+        // COMMAND_NOT_FOUND — it is now handled by fileNotFoundPatterns (which runs
+        // BEFORE this list, see classify()).
+        Regex(".*: (\\S+): (command )?not found.*", RegexOption.IGNORE_CASE)
     )
     private val permissionDeniedPatterns = listOf(
         Regex(".*[Pp]ermission denied.*"),
@@ -52,7 +56,11 @@ object ErrorClassifier {
     )
     private val invalidArgumentPatterns = listOf(
         Regex(".*[Ii]nvalid (option|argument).*"),
-        Regex(".*[Uu]sage:.*", RegexOption.IGNORE_CASE)
+        // TM7: tightened — the prior `.*[Uu]sage:.*` matched ANY help-text line,
+        // classifying benign `Usage:` banners as INVALID_ARGUMENT. Now require
+        // `Usage:` to be followed by whitespace + a command-name token (\S+),
+        // which is the form real CLIs print when invoked with bad arguments.
+        Regex(".*[Uu]sage:\\s+\\S+.*", RegexOption.IGNORE_CASE)
     )
 
     /**
@@ -78,7 +86,17 @@ object ErrorClassifier {
         }
 
         // 2. Output pattern matching (if output available)
+        // TM7: order matters — fileNotFound is checked BEFORE commandNotFound so that
+        // `cat: /etc/passwd2: No such file or directory` (matches both patterns) is
+        // classified as FILE_NOT_FOUND, not COMMAND_NOT_FOUND. permissionDenied is
+        // kept early (it never overlaps the others). invalidArgument runs last (its
+        // tightened `Usage:` pattern is the noisiest).
         if (recentOutput != null) {
+            for (rx in fileNotFoundPatterns) {
+                if (rx.containsMatchIn(recentOutput)) {
+                    return TerminalError(code = TerminalErrorCode.FILE_NOT_FOUND, message = "file not found", exitCode = exit ?: 1, signal = null)
+                }
+            }
             for (rx in commandNotFoundPatterns) {
                 if (rx.containsMatchIn(recentOutput)) {
                     return TerminalError(code = TerminalErrorCode.COMMAND_NOT_FOUND, message = "command not found", exitCode = exit ?: 127, signal = null)
@@ -87,11 +105,6 @@ object ErrorClassifier {
             for (rx in permissionDeniedPatterns) {
                 if (rx.containsMatchIn(recentOutput)) {
                     return TerminalError(code = TerminalErrorCode.PERMISSION_DENIED, message = "permission denied", exitCode = exit ?: 126, signal = null)
-                }
-            }
-            for (rx in fileNotFoundPatterns) {
-                if (rx.containsMatchIn(recentOutput)) {
-                    return TerminalError(code = TerminalErrorCode.FILE_NOT_FOUND, message = "file not found", exitCode = exit ?: 1, signal = null)
                 }
             }
             for (rx in invalidArgumentPatterns) {

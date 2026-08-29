@@ -1,6 +1,7 @@
 package com.apex.agent.github.tools
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.github.GithubApiException
 import com.apex.agent.github.GithubApiService
 import kotlinx.serialization.json.*
 
@@ -71,8 +72,27 @@ class GithubWriteFileTool(private val api: GithubApiService) : AgentTool {
         val content = json["content"]?.jsonPrimitive?.content ?: return "Error: 需要 content"
         val message = json["message"]?.jsonPrimitive?.content ?: "Update $path"
         val branch = json["branch"]?.jsonPrimitive?.contentOrNull
+        // 空值校验：避免拼接出 `/repos//contents/` 这种 URL 触发 GitHub 404/422。
+        if (owner.isBlank()) return "Error: owner 不能为空"
+        if (repo.isBlank()) return "Error: repo 不能为空"
+        if (path.isBlank()) return "Error: path 不能为空"
+        // TODO（private-fork 写保护）：若启用相关 config flag，应在此处调用
+        // api.listBranches 或 getFileContent 探测 repo.private=true，并要求用户二次确认。
+        // 当前没有该 config flag，先保留默认放行行为。
         var existingSha: String? = null
-        try { existingSha = api.getFileContent(owner, repo, path, branch).sha } catch (_: Exception) {}
+        try {
+            existingSha = api.getFileContent(owner, repo, path, branch).sha
+        } catch (e: GithubApiException) {
+            // 404 = 文件确实不存在 → existingSha 保持 null，走 create 路径；
+            // 其他状态码（5xx/422/网络层异常包装）必须向上抛出，否则会被当作"文件不存在"
+            // 走无 sha create，被 GitHub 422 拒绝（"sha missing"），且真实错误被静默吞掉。
+            if (e.code != 404) {
+                return "❌ 检查文件状态失败 (HTTP ${e.code ?: "?"}): ${e.message}"
+            }
+        } catch (e: Exception) {
+            // 网络/解码异常不应被误判为"文件不存在"（同上理由）。
+            return "❌ 检查文件状态失败: ${e.message}"
+        }
         api.createOrUpdateFile(owner, repo, path, content, message, branch, existingSha)
         val action = if (existingSha != null) "更新" else "创建"
         return "✅ 已${action}文件 $owner/$repo/$path\nCommit: $message"

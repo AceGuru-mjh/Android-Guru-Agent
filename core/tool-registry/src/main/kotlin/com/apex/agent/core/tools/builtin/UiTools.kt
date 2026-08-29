@@ -277,7 +277,9 @@ class ScreenshotTool(
         val json = Json.parseToJsonElement(arguments).jsonObject
         val path = json["path"]?.jsonPrimitive?.content ?: "/sdcard/Pictures/apex_screen.png"
 
-        val result = shellExecutor("screencap -p $path")
+        // Shell-escape the screenshot path — unescaped `;` / `$(...)` / `'` in the path
+        // would inject into `screencap -p $path`.
+        val result = shellExecutor("screencap -p ${ShellQuote.shellQuote(path)}")
         return if (result.contains("Error") && !result.contains("written")) {
             "Error: $result"
         } else {

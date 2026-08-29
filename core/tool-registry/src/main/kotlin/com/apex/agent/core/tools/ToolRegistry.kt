@@ -19,6 +19,15 @@ interface ToolRegistry {
     fun getTool(toolId: String): AgentTool?
     fun getAllTools(): List<AgentTool>
     fun getToolDefinitions(): List<ToolDefinition>
+
+    /**
+     * 当前已注册工具数量。作为 UI 刷新函数调用菜单的变更信号：
+     * [AgentChatScreen] 用它作为 `remember(key)` 的 key，避免菜单快照被永久缓存
+     * （注册表在启动期构建一次，进程内若热注册新工具，下次重组时 key 变化即刷新）。
+     * 提供默认实现以保持接口向后兼容（现有实现无需显式 override）。
+     */
+    val toolCount: Int
+        get() = getAllTools().size
 }
 
 /**
@@ -87,6 +96,10 @@ class DefaultToolRegistry : ToolRegistry {
             )
         }
     }
+
+    // O(1) 直接读 map 大小，避免 getAllTools() 复制整个 values 列表。
+    override val toolCount: Int
+        get() = tools.size
 }
 
 class DefaultToolExecutor(

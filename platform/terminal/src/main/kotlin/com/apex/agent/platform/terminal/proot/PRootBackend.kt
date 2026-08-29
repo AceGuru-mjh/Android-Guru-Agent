@@ -85,6 +85,15 @@ class PRootCommandBuilderImpl : PRootCommandBuilder {
         if (request.killOnExit) args.add("--kill-on-exit")
         // Binds
         for (bind in request.binds) {
+            // TM6: argument-injection guard — proot splits `-b host:guest[:options]`
+            // on the FIRST `:`, so a `:` embedded in guestPath shifts the remainder
+            // into the `:options` slot (e.g. `host:/etc:passwd:0` becomes
+            // host=/host, guest=/etc, options=passwd:0). Reject any `:` in guestPath.
+            // hostPath is an AbsolutePath (already validated to be absolute, no `:`).
+            require(bind.guestPath.indexOf(':') < 0) {
+                "PRootError:InvalidBind — guestPath must not contain ':' (got \"${bind.guestPath}\"), " +
+                    "otherwise proot's -b host:guest[:options] parser is argument-injected"
+            }
             args.add("-b")
             args.add("${bind.hostPath.value}:${bind.guestPath}" + if (bind.readOnly) ":0" else "")
         }
@@ -103,6 +112,13 @@ class PRootCommandBuilderImpl : PRootCommandBuilder {
         }
         // Environment passthrough
         for ((key, value) in request.environment) {
+            // TM6: argument-injection guard — proot's `-E KEY=VALUE` parser takes the
+            // raw string. A `\n` or NUL in the value would corrupt argv boundaries /
+            // confuse downstream parsers in the guest. Reject them explicitly.
+            require(value.indexOf('\n') < 0 && value.indexOf('\u0000') < 0) {
+                "PRootError:InvalidEnv — value for '$key' must not contain '\\n' or NUL " +
+                    "(got ${value.length} chars); proot -E KEY=VALUE parser is argument-injected"
+            }
             args.add("-E")
             args.add("$key=$value")
         }

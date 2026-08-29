@@ -47,8 +47,13 @@ class SettingsTool(
         val action = json["action"]?.jsonPrimitive?.content ?: return "Error: 'action' required"
         val namespace = json["namespace"]?.jsonPrimitive?.content ?: "system"
         val key = json["key"]?.jsonPrimitive?.content ?: return "Error: 'key' required"
+        // Validate the setting key — `key` is interpolated raw into `settings get/put`.
+        if (!ShellQuote.isValidSettingKey(key)) {
+            return "Error: invalid setting key '$key' (must match ^[A-Za-z0-9._:]+\$)"
+        }
         val value = json["value"]?.jsonPrimitive?.content
 
+        // namespace is constrained by the parameter enum, so it's safe to interpolate raw.
         return when (action) {
             "get" -> {
                 val result = shellExecutor("settings get $namespace $key")
@@ -56,7 +61,8 @@ class SettingsTool(
             }
             "set" -> {
                 if (value == null) return "Error: 'value' required for set action"
-                shellExecutor("settings put $namespace $key $value")
+                // Shell-escape the value — unescaped `'` / `;` / `$(...)` would inject.
+                shellExecutor("settings put $namespace $key ${ShellQuote.shellQuote(value)}")
                 "OK: Set $namespace/$key = $value"
             }
             else -> "Error: action must be 'get' or 'set'"
@@ -175,7 +181,10 @@ class ClipboardTool(
             }
             "write" -> {
                 if (content == null) return "Error: 'content' required for write"
-                shellExecutor("am broadcast -a clipper.set -e text '$content' 2>/dev/null || echo 'Clipboard write may need Clipper app or accessibility'")
+                // Shell-escape the clipboard text — the previous `'$content'` interpolation
+                // broke for any content containing `'` (e.g. an apostrophe) and allowed
+                // shell injection via `'; rm -rf / ; '`.
+                shellExecutor("am broadcast -a clipper.set -e text ${ShellQuote.shellQuote(content)} 2>/dev/null || echo 'Clipboard write may need Clipper app or accessibility'")
             }
             else -> "Error: action must be 'read' or 'write'"
         }
@@ -264,7 +273,10 @@ class LogcatTool(
         val cmd = buildString {
             append("logcat -d -t $lines")
             level?.let { append(" *:$it") }
-            filter?.let { append(" | grep -i '$it'") }
+            // Shell-escape the filter: an unescaped `'` in the filter used to break
+            // out of the single-quoted grep argument and run an arbitrary command
+            // (e.g. `'; rm -rf /data/data/com.apex.agent ; '`).
+            filter?.let { append(" | grep -i ${ShellQuote.shellQuote(it)}") }
         }
 
         return shellExecutor(cmd)

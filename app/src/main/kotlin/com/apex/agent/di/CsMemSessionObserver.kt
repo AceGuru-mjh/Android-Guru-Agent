@@ -34,8 +34,8 @@ class CsMemSessionObserver @Inject constructor(
         runCatching { sessionManager.startSession(goal, appPackage) }
     }
 
-    override suspend fun onActionExecuted(actionDescription: String) {
-        runCatching { sessionManager.afterAction(actionDescription) }
+    override suspend fun onActionExecuted(actionDescription: String, success: Boolean) {
+        runCatching { sessionManager.afterAction(actionDescription, success = success) }
     }
 
     override suspend fun onTaskFinish(success: Boolean) {

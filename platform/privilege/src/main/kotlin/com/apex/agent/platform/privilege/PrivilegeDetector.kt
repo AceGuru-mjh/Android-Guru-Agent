@@ -16,6 +16,20 @@ import java.util.concurrent.TimeUnit
  */
 object PrivilegeDetector {
 
+    // ★ 缓存：避免每次 shell_execute 都 fork `su --version` 子进程（3s 延迟）。
+    // 缓存 30s 或直到调用 [invalidateCache]（Shizuku binder 死亡 / 用户起停 Shizuku 时主动调用）。
+    @Volatile private var cachedLevel: PrivilegeLevel? = null
+    @Volatile private var cachedAt: Long = 0L
+    private const val CACHE_TTL_MS = 30_000L
+
+    /**
+     * 失效权限缓存。Shizuku binder 死亡 / 用户手动起停 Shizuku 时调用。
+     */
+    fun invalidateCache() {
+        cachedLevel = null
+        cachedAt = 0L
+    }
+
     /**
      * 检测Root是否可用
      */
@@ -60,14 +74,24 @@ object PrivilegeDetector {
     }
 
     /**
-     * 获取当前最高可用权限等级
+     * 获取当前最高可用权限等级。
+     *
+     * 30s 内重复调用返回缓存结果，避免每次都 fork `su --version`（3s/次延迟）。
      */
     fun getPrivilegeLevel(): PrivilegeLevel {
-        return when {
+        val now = System.currentTimeMillis()
+        val cached = cachedLevel
+        if (cached != null && (now - cachedAt) < CACHE_TTL_MS) {
+            return cached
+        }
+        val level = when {
             detectRoot() -> PrivilegeLevel.ROOT
             detectShizuku() -> PrivilegeLevel.SHIZUKU
             else -> PrivilegeLevel.NORMAL_SHELL
         }
+        cachedLevel = level
+        cachedAt = now
+        return level
     }
 
     /**
@@ -122,29 +146,37 @@ object PrivilegeDetector {
     ): ShellExecResult {
         return try {
             val process = Runtime.getRuntime().exec(cmdArray)
+            val stdoutReader = process.inputStream.bufferedReader()
+            val stderrReader = process.errorStream.bufferedReader()
+            try {
+                // 先读流再等待（避免管道阻塞）
+                val stdout = stdoutReader.readText()
+                val stderr = stderrReader.readText()
 
-            // 先读流再等待（避免管道阻塞）
-            val stdout = process.inputStream.bufferedReader().readText()
-            val stderr = process.errorStream.bufferedReader().readText()
+                val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                if (!completed) {
+                    process.destroyForcibly()
+                    return ShellExecResult(
+                        success = false,
+                        output = "Command timed out after ${timeoutMs}ms",
+                        exitCode = -1,
+                        via = via
+                    )
+                }
 
-            val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
-            if (!completed) {
-                process.destroyForcibly()
-                return ShellExecResult(
-                    success = false,
-                    output = "Command timed out after ${timeoutMs}ms",
-                    exitCode = -1,
+                val exitCode = process.exitValue()
+                ShellExecResult(
+                    success = exitCode == 0,
+                    output = stdout.ifBlank { stderr },
+                    exitCode = exitCode,
                     via = via
                 )
+            } finally {
+                // 原实现 reader 不在 .use{} 中：FD 会在每次调用后泄漏（process.inputStream.bufferedReader() 创建的 reader）。
+                runCatching { stdoutReader.close() }
+                runCatching { stderrReader.close() }
+                if (process.isAlive) process.destroyForcibly()
             }
-
-            val exitCode = process.exitValue()
-            ShellExecResult(
-                success = exitCode == 0,
-                output = stdout.ifBlank { stderr },
-                exitCode = exitCode,
-                via = via
-            )
         } catch (e: Exception) {
             ShellExecResult(false, "${via} exec failed: ${e.message}", -1, via)
         }

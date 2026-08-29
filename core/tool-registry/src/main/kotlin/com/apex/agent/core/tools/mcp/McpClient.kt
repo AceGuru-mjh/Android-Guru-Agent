@@ -232,7 +232,26 @@ class McpClient(
 
     private suspend fun sendRequest(request: McpRequest): JsonObject? {
         val body = json.encodeToString(request)
-        return sendHttp(body)
+        val response = sendHttp(body) ?: return null
+
+        // Verify the JSON-RPC response id matches the request id. Without this check,
+        // a stale / out-of-order / multiplexed response is silently applied to the
+        // current request and the agent sees the wrong tool's output.
+        val respId = response["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        if (request.id != null && respId != null && respId != request.id) {
+            throw McpException("JSON-RPC id mismatch: sent ${request.id}, received $respId")
+        }
+
+        // Surface server-side error responses as exceptions instead of collapsing them
+        // to empty-but-successful results. Previously `response?.get("result")` returned
+        // null on `{"error":...}`, which silently produced "tool ran, printed nothing".
+        response["error"]?.let { errEl ->
+            val msg = (errEl as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+                ?: errEl.toString()
+            throw McpException(msg)
+        }
+
+        return response
     }
 
     private suspend fun sendNotification(method: String, params: JsonObject) {
@@ -256,17 +275,20 @@ class McpClient(
     }
 
     private fun sendHttp(body: String): JsonObject? {
-        val httpRequest = Request.Builder()
+        val builder = Request.Builder()
             .url(config.url)
             .addHeader("Content-Type", "application/json")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
 
-        // Add API key header if configured
+        // Attach the configured API key as a Bearer token. Without this header every
+        // request to an authenticated MCP server silently 401s, and initialize() then
+        // flips initialized=true with empty capabilities — the agent sees "connected,
+        // no tools" instead of an auth failure.
         config.apiKey?.let { key ->
-            // Note: addHeader vs header — we use the builder before building
+            builder.addHeader("Authorization", "Bearer $key")
         }
 
+        val httpRequest = builder.build()
         val response = httpClient.newCall(httpRequest).execute()
         val responseBody = response.body?.string() ?: return null
 
@@ -285,6 +307,13 @@ class McpClient(
             .build()
     }
 }
+
+/**
+ * Thrown when an MCP server returns a JSON-RPC error response, or when the response `id`
+ * does not match the request `id`. Surfaces server-side failures instead of collapsing
+ * them into empty-but-successful results.
+ */
+class McpException(message: String) : Exception(message)
 
 // ═══ 数据类 ═══
 

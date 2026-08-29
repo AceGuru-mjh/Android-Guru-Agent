@@ -1,6 +1,8 @@
 package com.apex.agent.core.llm
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -15,9 +17,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-
 /**
  * OpenAI兼容流式客户端
  * 支持任何 /v1/chat/completions 端点
@@ -54,31 +56,48 @@ class StreamingOpenAiClient(
     ): Flow<LlmStreamChunk> = flow {
         val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = true)
         val request = buildRequest(body)
-        
-        val response = httpClient.newCall(request).await()
-        
+
+        val call = httpClient.newCall(request)
+        val response = call.await()
+
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: "Unknown error"
+            response.close()
             throw LlmException("API error ${response.code}: $errorBody")
         }
-        
-        val reader = BufferedReader(InputStreamReader(response.body!!.byteStream(), Charsets.UTF_8))
-        
+
+        val responseBody = response.body ?: run {
+            response.close()
+            throw LlmException("Empty response body")
+        }
+        val reader = BufferedReader(InputStreamReader(responseBody.byteStream(), Charsets.UTF_8))
+
+        // 修复取消传播：当收集者取消 flow 时，把 OkHttp 响应体关闭，
+        // 这样 readLine() 会立即抛出 IOException 而不是阻塞到 readTimeoutMs
+        // （旧实现等 await() 返回后便不再监听取消，取消后还要阻塞最多 120s）。
+        val cancelHandle = coroutineContext[Job]
+            ?.invokeOnCompletion { runCatching { response.close() } }
+
         try {
             var line: String?
             while (reader.readLine().also { line = it } != null) {
+                // 每行检查一次取消状态（readLine 阻塞期间靠上面的 invokeOnCompletion 兜底）
+                coroutineContext.ensureActive()
                 val currentLine = line ?: break
-                if (!currentLine.startsWith("data: ")) continue
-                
-                val data = currentLine.removePrefix("data: ").trim()
+                // 兼容 OpenAI SSE 规范允许的两种前缀：`data:` 与 `data: `。
+                // 旧实现只认 `data: `（带一个空格），部分代理发 `data:{...}` 会被静默丢弃。
+                if (!currentLine.startsWith("data:")) continue
+
+                val data = currentLine.removePrefix("data:").trim()
                 if (data == "[DONE]") {
                     emit(LlmStreamChunk(isFinish = true))
                     break
                 }
-                
+
                 parseStreamChunk(data)?.let { emit(it) }
             }
         } finally {
+            cancelHandle?.dispose()
             reader.close()
             response.close()
         }
@@ -112,10 +131,18 @@ class StreamingOpenAiClient(
         maxTokens: Int,
         stream: Boolean
     ): JsonObject {
+        // 客户侧预校验 maxTokens：超出 contextWindow - reservedOutputTokens 的请求
+        // 会被服务端以模糊的 HTTP 400 拒绝，用户难以定位。这里提前裁减并保留安全余量。
+        val effectiveMaxTokens = if (config.contextWindow > 0) {
+            val cap = (config.contextWindow - config.reservedOutputTokens).coerceAtLeast(256)
+            maxTokens.coerceAtMost(cap)
+        } else {
+            maxTokens
+        }
         return buildJsonObject {
             put("model", config.model)
             put("temperature", temperature)
-            put("max_tokens", maxTokens)
+            put("max_tokens", effectiveMaxTokens)
             put("stream", stream)
 
             // ── Sampling 参数（完整开放）─────────────────────────
@@ -251,28 +278,37 @@ class StreamingOpenAiClient(
             val json = Json.parseToJsonElement(data).jsonObject
             val choices = json["choices"]?.jsonArray ?: return null
             if (choices.isEmpty()) return null
-            
+
             val choice = choices[0].jsonObject
             val delta = choice["delta"]?.jsonObject
             val finishReason = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
-            
+
             val content = delta?.get("content")?.jsonPrimitive?.contentOrNull
-            
+
+            // 原生思考内容（DeepSeek-R1 `reasoning_content`、部分 Anthropic 代理 `reasoning`）。
+            // 旧实现丢弃，导致思考类模型的思维链在 UI 上不可见。
+            val reasoningContent = delta?.get("reasoning_content")?.jsonPrimitive?.contentOrNull
+                ?: delta?.get("reasoning")?.jsonPrimitive?.contentOrNull
+
             // 流式tool_calls
             val toolCalls = mutableListOf<ToolCall>()
             delta?.get("tool_calls")?.jsonArray?.forEach { tc ->
                 val tcObj = tc.jsonObject
                 val func = tcObj["function"]?.jsonObject
+                // 读取 index（并行工具调用必需），默认 -1 表示非流式/不适用。
+                val idx = tcObj["index"]?.jsonPrimitive?.intOrNull ?: -1
                 toolCalls.add(ToolCall(
                     id = tcObj["id"]?.jsonPrimitive?.content ?: "",
                     name = func?.get("name")?.jsonPrimitive?.content ?: "",
-                    arguments = func?.get("arguments")?.jsonPrimitive?.content ?: ""
+                    arguments = func?.get("arguments")?.jsonPrimitive?.content ?: "",
+                    index = idx
                 ))
             }
-            
+
             LlmStreamChunk(
                 content = content,
                 toolCalls = toolCalls,
+                reasoningContent = reasoningContent,
                 isFinish = finishReason == "stop" || finishReason == "tool_calls"
             )
         } catch (e: Exception) {

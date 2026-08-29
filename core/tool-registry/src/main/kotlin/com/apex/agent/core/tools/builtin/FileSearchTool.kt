@@ -78,7 +78,11 @@ class FileSearchTool(
             val page = json["page"]?.jsonPrimitive?.intOrNull ?: 1
             val caseSensitive = json["case_sensitive"]?.jsonPrimitive?.booleanOrNull ?: false
 
-            val dir = if (path.startsWith("/")) File(path) else File(basePath, path)
+            val dir = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             if (!dir.exists()) return "Error: Directory not found: $path"
 
             // 构建正则

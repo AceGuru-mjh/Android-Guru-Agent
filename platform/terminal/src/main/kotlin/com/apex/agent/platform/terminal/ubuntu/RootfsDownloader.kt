@@ -159,19 +159,26 @@ class RootfsDownloader(
     ): DownloadResult {
         var totalBytes = resumedFrom
         return coroutineScope {
-            FileOutputStream(partFile, append).use { out ->
-                val buf = ByteArray(bufferBytes)
-                while (true) {
-                    currentCoroutineContext().ensureActive()   // §8: cancellation check
-                    val n = input.read(buf)
-                    if (n <= 0) break
-                    out.write(buf, 0, n)
-                    totalBytes += n
-                    progress?.invoke(totalBytes, artifact.expectedSize)
+            // TM5: wrap the copy in input.use { } so the source InputStream is closed on
+            // ANY exit path (read error, cancellation, normal completion). Previously
+            // input.close() lived OUTSIDE the out.use { } block — a network reset / TLS
+            // error thrown by input.read(buf) propagated out of coroutineScope while the
+            // HTTP stream / connection was leaked (only the FileOutputStream was closed
+            // by `use`). Both streams are now closed regardless of which read/write throws.
+            input.use { src ->
+                FileOutputStream(partFile, append).use { out ->
+                    val buf = ByteArray(bufferBytes)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()   // §8: cancellation check
+                        val n = src.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        totalBytes += n
+                        progress?.invoke(totalBytes, artifact.expectedSize)
+                    }
+                    out.fd.sync()   // flush to disk before hash + rename
                 }
-                out.fd.sync()   // flush to disk before hash + rename
             }
-            input.close()
 
             // §9: SHA-256 on the COMPLETE .part — exactly one pass. Resume
             // integrity is implied: the entire file (old + new bytes) is

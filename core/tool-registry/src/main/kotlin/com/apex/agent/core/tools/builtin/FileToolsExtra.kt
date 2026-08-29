@@ -46,10 +46,18 @@ class CopyMoveFileTool(
             val dest = json["dest"]?.jsonPrimitive?.content ?: return "Error: 'dest' required"
             val action = json["action"]?.jsonPrimitive?.content ?: "copy"
 
-            val srcFile = resolve(source)
+            val srcFile = try {
+                FilePathSafety.safeResolve(basePath, source)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             if (!srcFile.exists()) return "Error: Source not found: $source"
 
-            val destFile = resolve(dest)
+            val destFile = try {
+                FilePathSafety.safeResolve(basePath, dest)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             destFile.parentFile?.mkdirs()
 
             when (action) {
@@ -77,7 +85,4 @@ class CopyMoveFileTool(
             "Error: ${e.message}"
         }
     }
-
-    private fun resolve(path: String): File =
-        if (path.startsWith("/")) File(path) else File(basePath, path)
 }

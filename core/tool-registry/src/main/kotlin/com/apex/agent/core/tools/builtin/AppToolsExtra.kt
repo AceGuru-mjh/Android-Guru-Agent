@@ -37,7 +37,8 @@ class AppInstallTool(
     override suspend fun execute(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val path = json["path"]?.jsonPrimitive?.content ?: return "Error: 'path' required"
-        return shellExecutor("pm install -r $path")
+        // Shell-escape the APK path — unescaped `;` / `$(...)` would inject into `pm install -r $path`.
+        return shellExecutor("pm install -r ${ShellQuote.shellQuote(path)}")
     }
 }
 
@@ -76,6 +77,9 @@ class AppUninstallTool(
     override suspend fun execute(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val pkg = json["package"]?.jsonPrimitive?.content ?: return "Error: 'package' required"
+        if (!ShellQuote.isValidPackageName(pkg)) {
+            return "Error: invalid package name '$pkg' (must match ^[A-Za-z0-9._]+\$)"
+        }
         val keepData = json["keep_data"]?.jsonPrimitive?.booleanOrNull ?: false
 
         val cmd = if (keepData) "pm uninstall -k $pkg" else "pm uninstall $pkg"
@@ -107,6 +111,9 @@ class AppForceStopTool(
     override suspend fun execute(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val pkg = json["package"]?.jsonPrimitive?.content ?: return "Error: 'package' required"
+        if (!ShellQuote.isValidPackageName(pkg)) {
+            return "Error: invalid package name '$pkg' (must match ^[A-Za-z0-9._]+\$)"
+        }
         return shellExecutor("am force-stop $pkg")
     }
 }
@@ -143,6 +150,9 @@ class AppInfoTool(
     override suspend fun execute(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val pkg = json["package"]?.jsonPrimitive?.content ?: return "Error: 'package' required"
+        if (!ShellQuote.isValidPackageName(pkg)) {
+            return "Error: invalid package name '$pkg' (must match ^[A-Za-z0-9._]+\$)"
+        }
         val section = json["section"]?.jsonPrimitive?.content ?: "all"
 
         return when (section) {

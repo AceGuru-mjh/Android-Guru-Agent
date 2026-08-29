@@ -70,7 +70,12 @@ data class WorkspaceSnapshot(
     val sharing: WorkspaceSharing,
     val layout: WorkspaceLayout,
     val sessionCount: Int,
-    val createdAt: Long
+    val createdAt: Long,
+    // ── T75: LinuxWorkspaceManager 扩展（加法字段，P61 语义不变）──
+    val name: String? = null,
+    val lastUsedAt: Long? = null,
+    /** 仅 inspect（按需遍历）填充；list() 恒 null。 */
+    val detailSizeBytes: Long? = null
 )
 
 // ─── Section 14: Workspace Ownership ───

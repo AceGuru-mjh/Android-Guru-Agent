@@ -141,15 +141,29 @@ fun AgentChatScreen(
         }
     }
 
-    // 仅在用户处于底部 或 未进入阅读模式时自动滚动
-    LaunchedEffect(uiState.messages.size, uiState.currentResponse) {
+    // 仅在用户处于底部 或 未进入阅读模式时自动滚动。
+    // key 只含"列表结构变化"（消息数 / 流式项出现与消失 / 加载态），
+    // 不含 currentResponse 文本——否则每 token 重启动画导致抖动。
+    // 流式期间用即时 scrollToItem（跟手、无动画叠加）；非流式收尾保留动画。
+    LaunchedEffect(
+        uiState.messages.size,
+        uiState.isLoading,
+        uiState.currentThinking.isNotEmpty(),
+        uiState.currentResponse.isNotEmpty(),
+        uiState.currentToolCall != null,
+        pendingQuestion != null
+    ) {
         val total = uiState.messages.size +
             (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
             (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
             (if (uiState.currentToolCall != null) 1 else 0) +
             (if (pendingQuestion != null) 1 else 0)
         if (total > 0 && (isAtBottom || !userScrolledUp)) {
-            listState.animateScrollToItem(total - 1)
+            if (uiState.isLoading) {
+                listState.scrollToItem(total - 1)
+            } else {
+                listState.animateScrollToItem(total - 1)
+            }
             userScrolledUp = false
         }
     }
@@ -224,7 +238,7 @@ fun AgentChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            itemsIndexed(uiState.messages, key = { index, _ -> index }) { _, message ->
+            itemsIndexed(uiState.messages, key = { _, m -> m.id }) { _, message ->
                 AgentMessageItem(
                     message = message,
                     vm = viewModel,

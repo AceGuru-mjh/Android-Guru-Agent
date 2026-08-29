@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,7 @@ import java.util.Date
  * 工具来源分类的视觉规格：图标 + 标签 + 主题色。
  * 集中管理，保证 ToolCallCard / RunningToolCallCard / ErrorBlock 一致。
  */
+@Immutable
 internal data class ToolKindStyle(
     val label: String,
     val icon: ImageVector,
@@ -392,6 +394,7 @@ internal fun extractSearchQuery(text: String): String? {
     return m.groupValues[1].trim().takeIf { it.isNotBlank() }
 }
 
+@Immutable
 internal data class WebSearchItem(val title: String, val url: String, val snippet: String)
 
 /**
@@ -499,10 +502,13 @@ internal fun ToolStepTimeline(
     val listState = rememberLazyListState()
     val dateFmt = remember { SimpleDateFormat("HH:mm:ss", java.util.Locale.US) }
 
-    // 运行态：有新步骤时自动滚到底部。
+    // 运行态：有新步骤（或"活输出"步骤被原地替换）时自动滚到底部。
+    // key 用最后一步的 seq 而非 steps.size——步骤被 200 条 cap 截断后 size 恒定，
+    // 原地替换时 size 也不变，size 无法感知更新；seq 单调递增即可。
+    // 流式期间用即时 scrollToItem，避免动画叠加抖动。
     if (autoScroll) {
-        LaunchedEffect(steps.size) {
-            if (steps.isNotEmpty()) listState.animateScrollToItem(steps.lastIndex)
+        LaunchedEffect(steps.lastOrNull()?.seq) {
+            if (steps.isNotEmpty()) listState.scrollToItem(steps.lastIndex)
         }
     }
 

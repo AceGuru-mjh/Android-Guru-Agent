@@ -1,6 +1,7 @@
 package com.apex.agent.platform.terminal.di
 
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.tools.v2.TerminalBackendsTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalObserveTool
@@ -8,6 +9,7 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalResizeTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalRunTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuInstallTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyCloseTool
@@ -94,6 +96,16 @@ object ToolRegistrationGuide {
         TerminalCloseTool(rt)
     )
 
+    /**
+     * T73: 后端能力发现 + Ubuntu rootfs 安装引导 —— Agent 自主进入 Ubuntu 的两个入口。
+     * 构造需要 RootfsProvisioner/RootfsTarget（app TerminalModule 提供），
+     * 因此不进 newTools(rt)，由 ToolModule 直接注册。
+     */
+    fun backendTools(rt: TerminalRuntime, provisioner: com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner, target: com.apex.agent.platform.terminal.ubuntu.RootfsTarget) = listOf(
+        TerminalBackendsTool(rt),
+        TerminalUbuntuInstallTool(provisioner, target)
+    )
+
     /** Construct all 6 legacy compat aliases (call once during Hilt init). */
     fun legacyTools(rt: TerminalRuntime) = listOf(
         LegacyExecTool(rt),
@@ -106,7 +118,7 @@ object ToolRegistrationGuide {
 
     /** Tool id → spec section, for documentation / introspection. */
     val TOOL_SPEC_MAP: Map<String, String> = mapOf(
-        "terminal.create" to "§34.1",
+        "terminal.create" to "§34.1 + T73 backend routing",
         "terminal.run" to "§34.2",
         "terminal.observe" to "§34.3",
         "terminal.wait" to "§34.4",
@@ -115,6 +127,8 @@ object ToolRegistrationGuide {
         "terminal.resize" to "§34.7",
         "terminal.snapshot" to "§34.8",
         "terminal.close" to "§34.9",
+        "terminal.backends" to "T73（后端能力发现：availability 三态）",
+        "terminal.ubuntu.install" to "T73（Ubuntu rootfs 安装引导）",
         "terminal_exec" to "§35 (compat → run+wait+observe)",
         "terminal_read" to "§35 (compat → observe RAW)",
         "terminal_send" to "§35 (compat → write)",

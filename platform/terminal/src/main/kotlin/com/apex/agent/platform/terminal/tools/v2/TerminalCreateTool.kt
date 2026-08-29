@@ -8,26 +8,25 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.jsonArray
 
 /**
  * Agent tool: terminal.create
  *
- * Spec ref: ATR 2.0 Final Spec §34.1
+ * Spec ref: ATR 2.0 Final Spec §34.1 + T73 backend routing
  *
  * Creates a long-lived Session (PTY + shell). A Session is a workspace, not a single command.
  * Returns sessionId for subsequent run/observe/wait/write calls.
  *
  * JSON Schema (input):
  *   { shell?: string="/system/bin/sh", cwd?: string="/sdcard", rows?: int=24, cols?: int=80,
- *     env?: object<string,string>, privilege?: "NORMAL"|"SHIZUKU"|"ROOT"=NORMAL }
+ *     env?: object<string,string>, privilege?: "NORMAL"|"SHIZUKU"|"ROOT"=NORMAL,
+ *     backend?: string="local" }   // T73: "local" | "linux-ubuntu"（先用 terminal.backends 探测）
  * JSON Schema (output):
  *   { sessionId: int, pid: int, shell: string, cwd: string, rows: int, cols: int,
- *     privilege: string, state: "READY"|"STARTING"|"BROKEN", cursor: int }
- * Errors: PtyUnavailable, InvalidInput, PermissionDenied
- *
- * Phase 2 status: IMPLEMENTED (internal test only — NOT registered to ToolRegistry yet,
- * per Spec §45 Phase 2 "新 9 工具实现，但不注册到 ToolRegistry").
+ *     privilege: string, state: "READY"|"STARTING"|"BROKEN", cursor: int,
+ *     backendId: string, runtimeType: string, rootfsId?: string, guestCwd?: string }
+ * Errors: PtyUnavailable, InvalidInput, PermissionDenied, BackendNotFound,
+ *         RootfsNotReady（先调 terminal.ubuntu.install）, BackendFailed
  */
 class TerminalCreateTool(
     private val runtime: TerminalRuntime
@@ -37,11 +36,13 @@ class TerminalCreateTool(
     override val description: String = """
         Create a long-lived terminal Session (PTY + shell). A Session is a workspace, not a single
         command. Returns sessionId for subsequent run/observe/wait/write calls.
+        backend="local" runs the Android shell; backend="linux-ubuntu" runs Ubuntu 24.04 via PRoot
+        (requires the rootfs to be installed — check terminal.backends, install via terminal.ubuntu.install).
     """.trimIndent()
 
     override val parametersSchema: String = """
-{"type":"object","properties":{"shell":{"type":"string","default":"/system/bin/sh"},"cwd":{"type":"string","default":"/sdcard"},"rows":{"type":"integer","default":24},"cols":{"type":"integer","default":80}},"required":[]}
-""".trimIndent()
+{"type":"object","properties":{"shell":{"type":"string","default":"/system/bin/sh","description":"Android shell path (local backend only; linux-ubuntu always uses /bin/bash)"},"cwd":{"type":"string","default":"/sdcard","description":"Initial working directory. linux-ubuntu: guest path (/workspace default; relative paths land under /workspace)"},"rows":{"type":"integer","default":24},"cols":{"type":"integer","default":80},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Extra environment variables (local: appended to defaults; linux-ubuntu: passed into the guest)"},"backend":{"type":"string","default":"local","enum":["local","linux-ubuntu"],"description":"Execution backend: local = Android shell, linux-ubuntu = Ubuntu 24.04 via PRoot"}},"required":[]}
+    """.trimIndent()
 
     suspend fun execute(input: Input): Output {
         val result = runtime.create(
@@ -50,13 +51,16 @@ class TerminalCreateTool(
             rows = input.rows,
             cols = input.cols,
             env = input.env,
-            privilege = input.privilege
+            privilege = input.privilege,
+            backendId = input.backend
         )
         return result.fold(
             onSuccess = { r -> Output(
                 sessionId = r.sessionId, pid = r.pid, shell = r.shell, cwd = r.cwd,
                 rows = r.rows, cols = r.cols, privilege = r.privilege.name,
-                state = r.state, cursor = r.cursor
+                state = r.state, cursor = r.cursor,
+                backendId = r.backendId, runtimeType = r.runtimeType,
+                rootfsId = r.rootfsId, guestCwd = r.guestCwd
             ) },
             onFailure = { throw it }
         )
@@ -68,8 +72,20 @@ class TerminalCreateTool(
         val cwd = json["cwd"]?.jsonPrimitive?.content ?: "/sdcard"
         val rows = json["rows"]?.jsonPrimitive?.content?.toIntOrNull() ?: 24
         val cols = json["cols"]?.jsonPrimitive?.content?.toIntOrNull() ?: 80
-        val out = execute(Input(shell, cwd, rows, cols))
-        return buildJsonObject { put("sessionId", JsonPrimitive(out.sessionId)); put("pid", JsonPrimitive(out.pid)); put("shell", JsonPrimitive(out.shell)); put("cwd", JsonPrimitive(out.cwd)); put("state", JsonPrimitive(out.state)); put("cursor", JsonPrimitive(out.cursor)) }.toString()
+        val backend = json["backend"]?.jsonPrimitive?.content ?: "local"
+        val env = json["env"]?.jsonObject?.entries?.associate {
+            it.key to (it.value as? JsonPrimitive ?: JsonPrimitive("")).content
+        } ?: emptyMap()
+        val out = execute(Input(shell, cwd, rows, cols, env, PrivilegeLevel.NORMAL, backend))
+        return buildJsonObject {
+            put("sessionId", JsonPrimitive(out.sessionId)); put("pid", JsonPrimitive(out.pid))
+            put("shell", JsonPrimitive(out.shell)); put("cwd", JsonPrimitive(out.cwd))
+            put("state", JsonPrimitive(out.state)); put("cursor", JsonPrimitive(out.cursor))
+            put("backendId", JsonPrimitive(out.backendId))
+            put("runtimeType", JsonPrimitive(out.runtimeType))
+            out.rootfsId?.let { put("rootfsId", JsonPrimitive(it)) }
+            out.guestCwd?.let { put("guestCwd", JsonPrimitive(it)) }
+        }.toString()
     }
 
     data class Input(
@@ -78,7 +94,8 @@ class TerminalCreateTool(
         val rows: Int = 24,
         val cols: Int = 80,
         val env: Map<String, String> = emptyMap(),
-        val privilege: PrivilegeLevel = PrivilegeLevel.NORMAL
+        val privilege: PrivilegeLevel = PrivilegeLevel.NORMAL,
+        val backend: String = "local"
     )
 
     data class Output(
@@ -90,6 +107,10 @@ class TerminalCreateTool(
         val cols: Int,
         val privilege: String,
         val state: String,
-        val cursor: Long
+        val cursor: Long,
+        val backendId: String = "local",
+        val runtimeType: String = "ANDROID_LOCAL",
+        val rootfsId: String? = null,
+        val guestCwd: String? = null
     )
 }

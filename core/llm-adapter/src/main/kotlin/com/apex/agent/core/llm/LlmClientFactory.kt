@@ -31,6 +31,13 @@ object LlmClientFactory {
      *
      * 仅对 [LlmConfig.retryOnCodes] 中的状态码（如 429/500/503）重试，
      * 对 4xx 客户端错误（400/401/403/404）不重试。重试次数与退避上限由配置控制。
+     *
+     * 修复点：
+     * - 旧实现在重试耗尽后返回 `response.close()` 之后的 Response，调用方
+     *   `response.body?.string()` 会抛 `IllegalStateException: closed` 而非
+     *   携带真实状态码/错误体的 `LlmException`。现在重试耗尽时 **不** close，
+     *   直接返回错误响应，让调用方看到真实状态码与错误体。
+     * - 遵守 HTTP `Retry-After` 头（429/503），避免被服务端拉黑。
      */
     private class RetryInterceptor(private val config: LlmConfig) : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
@@ -38,23 +45,46 @@ object LlmClientFactory {
             var attempt = 0
             var lastException: IOException? = null
             while (attempt <= config.retryCount) {
-                try {
-                    val response = chain.proceed(request)
-                    if (response.isSuccessful || !config.retryOnCodes.contains(response.code)) {
-                        return response
-                    }
-                    response.close()
-                    if (attempt == config.retryCount) return response
+                val response: Response = try {
+                    chain.proceed(request)
                 } catch (e: IOException) {
                     lastException = e
                     if (attempt == config.retryCount) throw e
+                    delayBackoff(attempt, retryAfterMs = -1L)
+                    attempt++
+                    continue
                 }
-                val delay = (config.retryDelayMs * (1L shl attempt))
-                    .coerceAtMost(config.maxRetryDelayMs)
-                Thread.sleep(delay)
+
+                if (response.isSuccessful || !config.retryOnCodes.contains(response.code)) {
+                    return response
+                }
+                // 可重试状态码：计算退避时间（遵徵 Retry-After），最后一次不 close，直接返回。
+                if (attempt == config.retryCount) {
+                    return response  // 保留响应体供调用方读取错误详情
+                }
+                val retryAfter = parseRetryAfterMs(response)
+                response.close()
+                delayBackoff(attempt, retryAfterMs = retryAfter)
                 attempt++
             }
             throw lastException ?: IOException("Retry exhausted")
+        }
+
+        private fun delayBackoff(attempt: Int, retryAfterMs: Long) {
+            val sleepMs = if (retryAfterMs > 0) {
+                retryAfterMs.coerceAtMost(config.maxRetryDelayMs)
+            } else {
+                (config.retryDelayMs * (1L shl attempt)).coerceAtMost(config.maxRetryDelayMs)
+            }
+            // OkHttp 拦截器是同步执行的，只能用 Thread.sleep；
+            // 重试次数与退避时间均受限，不会长期占用调度线程。
+            Thread.sleep(sleepMs)
+        }
+
+        private fun parseRetryAfterMs(response: Response): Long {
+            val header = response.header("Retry-After") ?: return -1L
+            // 两种格式：秒数（"120"）或 HTTP-date（"Wed, 21 Oct 2026 07:28:00 GMT"）。
+            return header.toLongOrNull()?.let { it * 1000L } ?: -1L
         }
     }
 }

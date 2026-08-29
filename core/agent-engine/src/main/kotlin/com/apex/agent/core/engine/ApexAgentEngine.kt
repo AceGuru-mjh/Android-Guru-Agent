@@ -207,11 +207,20 @@ class ApexAgentEngine(
         var totalIterations = 0
         var taskHadFailure = false
 
-        // 隐式记忆采集（报告 P2）：任务开始。
-        // memoryObserver 内部自行处理无障碍未开启等异常，不会阻断主流程。
-        memoryObserver?.onTaskStart(input.text, null)
-
         try {
+            // 隐式记忆采集（报告 P2）：任务开始。
+            // memoryObserver 内部自行处理无障碍未开启等异常，不会阻断主流程；
+            // 此处再包一层 try/catch 防止观察者异常泄漏导致 isRunning 卡死、
+            // onTaskFinish 永不调用（与 DefaultTaskOrchestrator 的防护保持一致）。
+            try {
+                memoryObserver?.onTaskStart(input.text, null)
+            } catch (e: Throwable) {
+                AppLogger.instance.warn(
+                    LogCategory.ENGINE, "ApexAgentEngine",
+                    "memoryObserver.onTaskStart threw: ${e.message}"
+                )
+            }
+
             val userText = buildUserText(input)
             val userMessage = LlmMessage.User(content = userText, images = input.images)
 
@@ -285,7 +294,15 @@ class ApexAgentEngine(
             isRunning = false
             // 隐式记忆采集（报告 P2）：任务结束，提交 episode。
             // 放在 finally 保证无论成功/失败/中止都会关闭会话。
-            memoryObserver?.onTaskFinish(success = !taskHadFailure && !anyActionFailed)
+            // 观察者异常同样兜底，避免吞掉后续 Complete 事件发射。
+            try {
+                memoryObserver?.onTaskFinish(success = !taskHadFailure && !anyActionFailed)
+            } catch (e: Throwable) {
+                AppLogger.instance.warn(
+                    LogCategory.ENGINE, "ApexAgentEngine",
+                    "memoryObserver.onTaskFinish threw: ${e.message}"
+                )
+            }
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
             planConfirmationDeferred?.complete(false)
             planConfirmationDeferred = null
@@ -503,10 +520,12 @@ class ApexAgentEngine(
 
     private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
-        var thinkingEmittedForIteration = false
 
         while (isRunning && iteration < config.maxIterations) {
             iteration++
+            // 每轮迭代都需要重新触发 ThinkingStart，否则 UI 的思考指示器
+            // 在第 2..N 轮迭代不会刷新（与 orchestrator 路径行为一致）。
+            var thinkingEmittedForIteration = false
             emit(AgentEvent.IterationStart(iteration))
 
             // P7: 每轮迭代前检查是否需要压缩
@@ -546,6 +565,10 @@ class ApexAgentEngine(
             }
 
             val contentBuilder = StringBuilder()
+            val reasoningBuilder = StringBuilder()
+            // 累加器键策略：OpenAI 并行工具调用的首个片段携带 id + index，后续片段只带
+            // index 而 id 为空。旧实现以 id 为键，导致后续片段被误开新累加器、
+            // 参数拼不全。现在以 "id || idx_N" 为复合键，保证同一工具的片段都能落到同一累加器。
             val toolCallsAccumulator = mutableMapOf<String, StreamingToolCallAccumulator>()
 
             llmClient.chatStream(
@@ -557,12 +580,27 @@ class ApexAgentEngine(
                     contentBuilder.append(it)
                     emit(AgentEvent.ResponseChunk(it))
                 }
+                // 原生思考内容（DeepSeek-R1 / Qwen3-thinking / OpenAI o-series 等）：
+                // 透传为 ThinkingChunk，让 UI 显示思维链。
+                chunk.reasoningContent?.let {
+                    reasoningBuilder.append(it)
+                    emit(AgentEvent.ThinkingChunk(it))
+                }
                 for (tc in chunk.toolCalls) {
-                    val acc = toolCallsAccumulator.getOrPut(tc.id) {
-                        StreamingToolCallAccumulator(tc.id, tc.name)
+                    // 并行工具调用：首个片段带 id+index，后续片段只带 index 而 id 为空。
+                    // 以 "id || _idx_N" 为复合键，保证同一工具的片段落到同一累加器。
+                    val key = tc.id.ifBlank { if (tc.index >= 0) "_idx_${tc.index}" else "" }
+                    if (key.isBlank()) continue  // 既无 id 又无 index 的畸形片段，跳过
+                    val acc = toolCallsAccumulator.getOrPut(key) {
+                        StreamingToolCallAccumulator(tc.id.ifBlank { key }, tc.name)
                     }
                     acc.append(tc.name, tc.arguments)
                 }
+            }
+
+            // 若本轮收到了原生思考内容，发射 ThinkingComplete 让 UI 收尾。
+            if (reasoningBuilder.isNotEmpty()) {
+                emit(AgentEvent.ThinkingComplete(reasoningBuilder.toString()))
             }
 
             val toolCalls = toolCallsAccumulator.values.map { it.build() }
@@ -712,6 +750,10 @@ class ApexAgentEngine(
         val toolStart = System.currentTimeMillis()
         val outputBuilder = StringBuilder()
 
+        // 以流式事件信号为主判定成败：收到 ToolStreamEvent.Error 或捕获异常
+        // 即视为失败。这样工具合法输出以 "Error" 开头（如 "Error: foo not found" 这类
+        // 真实数据）也不会被误判为执行失败。
+        var hadStreamError = false
         try {
             toolExecutor.executeStream(toolCall.name, toolCall.arguments).collect { event ->
                 when (event) {
@@ -746,6 +788,7 @@ class ApexAgentEngine(
                         }
                     }
                     is ToolStreamEvent.Error -> {
+                        hadStreamError = true
                         outputBuilder.append(event.message)
                         emit(
                             AgentEvent.ToolOutputChunk(
@@ -759,6 +802,7 @@ class ApexAgentEngine(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
+            hadStreamError = true
             outputBuilder.append("Error: ${e.message ?: "tool execution failed"}")
         }
 
@@ -769,6 +813,12 @@ class ApexAgentEngine(
         val truncationResult = toolTruncator.smartTruncate(rawOutput, toolCall.name)
         val result = truncationResult.text
 
+        // 成功判定：优先采用流式事件信号；仅当工具未发任何 Error 事件且
+        // 异常分支未触发时，才回退到文本前缀检测（兼容只返回 "Error: ..." 文本
+        // 而不发 Error 事件的旧工具）。
+        val actionSuccess = !hadStreamError && !result.startsWith("Error")
+        if (!actionSuccess) anyActionFailed = true
+
         emit(
             AgentEvent.ToolCallComplete(
                 callId = toolCall.id,
@@ -776,7 +826,7 @@ class ApexAgentEngine(
                 arguments = toolCall.arguments,
                 output = result.take(config.maxToolOutputLength),
                 fullOutput = rawOutput.take(100_000),
-                success = !result.startsWith("Error"),
+                success = actionSuccess,
                 durationMs = duration
             )
         )
@@ -787,10 +837,11 @@ class ApexAgentEngine(
         )
 
         // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
-        val actionSuccess = !result.startsWith("Error")
-        if (!actionSuccess) anyActionFailed = true
+        // 传入 actionSuccess 供 CS-Mem 蒸馏时过滤失败动作（避免"鼠标连点失败"
+        // 也被压进 FSM 宏技能，使学到的宏技能必然无法回放）。
         memoryObserver?.onActionExecuted(
-            "${toolCall.name}(${toolCall.arguments.take(120)})"
+            "${toolCall.name}(${toolCall.arguments.take(120)})",
+            success = actionSuccess
         )
     }
 
@@ -878,7 +929,15 @@ class ApexAgentEngine(
         val deferred = CompletableDeferred<String>()
         userInputDeferred = deferred
         return try {
-            deferred.await()
+            // 与 awaitPlanConfirmation / awaitSpecConfirmation 保持一致：
+            // 5 分钟超时，避免 ask_user 工具因用户遗忘而把引擎永久挂起。
+            withTimeout(PLAN_CONFIRMATION_TIMEOUT_MS) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            AppLogger.instance.warn(
+                LogCategory.ENGINE, "ApexAgentEngine",
+                "ask_user 输入超时 (${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s)，自动以空串恢复"
+            )
+            ""
         } finally {
             userInputDeferred = null
         }
@@ -903,7 +962,13 @@ class ApexAgentEngine(
                 preserveRecent = config.preserveRecentTurns
             )
         } catch (e: Exception) {
-            // 压缩失败不应该中断主流程
+            // 压缩失败不应该中断主流程，但必须留痕：否则每轮迭代都会无日志地
+            // 反复触发同一个失败的压缩器，且 UI 无法感知上下文已逼近上限。
+            AppLogger.instance.error(
+                LogCategory.ENGINE, "ApexAgentEngine",
+                "上下文压缩失败，本轮跳过压缩（tokens=${currentTokens}，阈值=${thresholdTokens}）: ${e.message}",
+                e
+            )
             return
         }
 

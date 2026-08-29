@@ -36,7 +36,16 @@ class SemanticStateReducer(
     private val pid: Int,
     private val rows: Int,
     private val cols: Int,
-    private val createdAt: Long = System.currentTimeMillis()
+    private val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * TM2: recent-output provider. Returns the session's recent PTY bytes (UTF-8
+     * String) so ErrorClassifier.classify can apply its regex patterns. The reducer
+     * only sees TerminalEvent instances (no bytes), so it queries the per-session
+     * RingBuffer via this hook. Wired by SessionManagerImpl to
+     * `ringBuffer.latest(4096).bytes.toString(UTF_8)`. Default returns "" → the
+     * classifier falls back to exit-code-only lookup (existing behavior).
+     */
+    private val recentOutputProvider: () -> String = { "" }
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(initialState())
@@ -127,8 +136,12 @@ class SemanticStateReducer(
                         val fg = if (event.jobId == foregroundJobId) updated else s.foregroundJob
                         val bg = s.backgroundJobs.map { if (it.id == event.jobId) updated else it }
                         // PR #50: classify error if process failed (exit != 0 or signal)
+                        // TM2: pass the accumulated recent output (last 4 KB from the
+                        // per-session RingBuffer) instead of `null` — otherwise every
+                        // regex pattern in ErrorClassifier is dead code in production
+                        // and the classifier falls through to exit-code-only lookup.
                         val classifiedError: TerminalError? = if (event.exitCode != null && event.exitCode != 0 || event.signal != null) {
-                            ErrorClassifier.classify(event, recentOutput = null)
+                            ErrorClassifier.classify(event, recentOutput = recentOutputProvider())
                         } else null
                         s.copy(
                             session = s.session.copy(

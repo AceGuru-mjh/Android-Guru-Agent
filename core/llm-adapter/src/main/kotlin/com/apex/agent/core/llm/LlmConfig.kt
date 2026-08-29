@@ -104,7 +104,11 @@ data class LlmConfig(
     val capabilities: ModelCapabilities = ModelCapabilities(),
 ) {
     val isValid: Boolean
-        get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
+        get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank() &&
+            // 强制 http/https scheme：旧实现仅检查非空，导致 file://、ftp://、
+            // 或无 scheme 的字符串通过校验，延迟到 OkHttp 构造 Request 时才以
+            // 原始 IllegalArgumentException 抛出，用户难以定位。
+            (baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))
     
     companion object {
         /** 预设：OpenAI */

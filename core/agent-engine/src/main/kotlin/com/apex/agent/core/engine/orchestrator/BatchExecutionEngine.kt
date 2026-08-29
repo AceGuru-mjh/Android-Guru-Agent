@@ -195,8 +195,9 @@ internal class BatchExecutionEngine(
         }
 
         // Memory observer hook — mirrors ApexAgentEngine's onActionExecuted call.
+        // 传入 outcome.success 供 CS-Mem 蒸馏时过滤失败动作。
         try {
-            memoryObserver?.onActionExecuted("${tc.name}(${tc.arguments})")
+            memoryObserver?.onActionExecuted("${tc.name}(${tc.arguments})", success = outcome.success)
         } catch (e: Throwable) {
             OrchestratorLog.log(LogLevel.WARN, "memoryObserver.onActionExecuted threw: ${e.message}")
         }
@@ -317,7 +318,7 @@ internal class BatchExecutionEngine(
 
         outcomes.forEach { outcome ->
             try {
-                memoryObserver?.onActionExecuted("${outcome.toolName}(${outcome.arguments})")
+                memoryObserver?.onActionExecuted("${outcome.toolName}(${outcome.arguments})", success = outcome.success)
             } catch (e: Throwable) {
                 OrchestratorLog.log(LogLevel.WARN, "memoryObserver.onActionExecuted threw: ${e.message}")
             }

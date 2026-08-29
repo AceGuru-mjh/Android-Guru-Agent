@@ -34,7 +34,11 @@ object CsMemModule {
             "cs_mem_graph.db"
         )
         .addMigrations(MemoryGraphDatabase.MIGRATION_1_2) // v1→v2 保留旧数据
-        .fallbackToDestructiveMigration() // 未知版本跃迁时降级重建（开发期）
+        // 仅在版本降级时允许 destructive 重建；升级必须显式提供 Migration，
+        // 否则任何未来 schema 升级缺失 Migration 都会静默清空长期记忆 DB。
+        // 注：@Database(exportSchema = false)，未来应配置 ksp room.schemaLocation
+        // 并切换 exportSchema = true，导出 schema JSON 以做迁移审计/自动测试。
+        .fallbackToDestructiveMigrationOnDowngrade()
         .build()
     }
 

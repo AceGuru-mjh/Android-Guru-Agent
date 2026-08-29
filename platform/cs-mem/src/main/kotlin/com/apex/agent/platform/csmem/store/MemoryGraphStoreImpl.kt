@@ -73,14 +73,26 @@ class MemoryGraphStoreImpl @Inject constructor(
     override suspend fun ingestNodes(nodes: List<SemanticNode>, appPackage: String?) {
         if (nodes.isEmpty()) return
 
+        // 递归展平语义树（顶层 + 所有 children），否则后代节点永不落库 →
+        // ingestEdges 中 getIdByFingerprint 查不到子节点 → mapNotNull 丢弃所有父-子边。
+        val flat = ArrayList<SemanticNode>(nodes.size * 2)
+        fun collect(n: SemanticNode) {
+            flat.add(n)
+            n.children.forEach { collect(it) }
+        }
+        for (n in nodes) collect(n)
+        // 同一指纹在树中可能多次出现（共享子树），按指纹去重避免重复 NodeEntity 行。
+        val deduped = flat.distinctBy { it.fingerprint }
+        if (deduped.isEmpty()) return
+
         val now = System.currentTimeMillis()
         val existingFps = db.nodeDao()
-            .getByFingerprints(nodes.map { it.fingerprint })
+            .getByFingerprints(deduped.map { it.fingerprint })
             .map { it.fingerprint }
             .toSet()
 
-        val newNodes = nodes.filter { it.fingerprint !in existingFps }
-        val existingNodes = nodes.filter { it.fingerprint in existingFps }
+        val newNodes = deduped.filter { it.fingerprint !in existingFps }
+        val existingNodes = deduped.filter { it.fingerprint in existingFps }
 
         // 插入新节点（appVersion 由调用方透传，落库以供跨版本迁移分组）
         if (newNodes.isNotEmpty()) {
@@ -103,7 +115,7 @@ class MemoryGraphStoreImpl @Inject constructor(
             db.nodeDao().upsertAll(entities)
         }
 
-        // 更新已有节点的 seen 记录
+        // 更新已有节点（含后代）的 seen 记录
         for (node in existingNodes) {
             db.nodeDao().recordSeen(node.fingerprint, now)
         }
@@ -377,7 +389,8 @@ class MemoryGraphStoreImpl @Inject constructor(
             successCount = successCount,
             failureCount = failureCount,
             energy = energy,
-            isCrystallized = isCrystallized
+            isCrystallized = isCrystallized,
+            lastExecutedAt = lastExecutedAt
         )
     }
 

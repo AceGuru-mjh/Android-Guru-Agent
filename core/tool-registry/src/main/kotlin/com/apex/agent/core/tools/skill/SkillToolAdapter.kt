@@ -60,6 +60,10 @@ class SkillToolAdapter(
 
             lastOutput = try {
                 toolExecutor.execute(step.tool, resolvedArgs)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Rethrow: toolExecutor.execute is a suspend call; CancellationException
+                // must propagate so abort() works through composite skill execution.
+                throw e
             } catch (e: Exception) {
                 return "Error in step '${step.tool}': ${e.message}"
             }
@@ -95,12 +99,16 @@ class SkillToolAdapter(
     }
 
     private suspend fun executeScript(script: String, lang: String): String {
-        // 通过 shell_execute 运行脚本
+        // Build the shell command, then JSON-encode the argument via kotlinx.serialization
+        // so any '"', '\\', newline, or tab in the script is escaped correctly. The previous
+        // string-interpolation form `"""{"command": "$cmd"}""" produced invalid JSON for any
+        // non-trivial script and could even inject a second tool argument.
         val cmd = when (lang) {
             "python" -> "python3 -c '${script.replace("'", "'\\''")}'"
             "shell" -> script
             else -> script
         }
-        return toolExecutor.execute("shell_execute", """{"command": "$cmd"}""")
+        val args = JsonObject(mapOf("command" to JsonPrimitive(cmd)))
+        return toolExecutor.execute("shell_execute", args.toString())
     }
 }

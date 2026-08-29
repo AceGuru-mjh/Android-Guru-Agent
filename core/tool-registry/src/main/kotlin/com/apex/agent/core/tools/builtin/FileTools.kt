@@ -63,7 +63,11 @@ class ListFilesTool(
             val showSize = json["show_size"]?.jsonPrimitive?.booleanOrNull ?: true
             val maxItems = json["max_items"]?.jsonPrimitive?.intOrNull ?: 50
 
-            val dir = if (path.startsWith("/")) File(path) else File(basePath, path)
+            val dir = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             if (!dir.exists()) return "Error: Not found: $path"
             if (!dir.isDirectory) return "Error: Not a directory: $path"
 
@@ -178,7 +182,11 @@ class DeleteFileTool(
             val path = json["path"]?.jsonPrimitive?.content
                 ?: return "Error: 'path' parameter is required"
 
-            val file = if (path.startsWith("/")) File(path) else File(basePath, path)
+            val file = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
 
             if (!file.exists()) {
                 return "Error: File not found: $path"

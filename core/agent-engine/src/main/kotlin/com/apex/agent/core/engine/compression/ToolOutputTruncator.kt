@@ -55,9 +55,20 @@ class ToolOutputTruncator(
             // 代码输出：保留头部（通常包含关键信息）
             toolName in listOf("read_file", "project_read_file") -> truncateHead(output)
 
-            // 错误输出：完整保留（通常不长但很重要）
-            output.startsWith("Error") && output.length < maxChars * 2 -> {
-                TruncationResult(output.take(maxChars * 2), output.length > maxChars * 2)
+            // 错误输出：尽量完整保留（通常不长但很重要）。修复两个 bug：
+            // (1) 旧实现的 truncated 标志恒为 false（条件 output.length < maxChars*2 已保证
+            //     output.length > maxChars*2 不成立），即便发生截断也不会上报；
+            // (2) take(maxChars*2) 可返回 2× 名义上限，使截断器失效。
+            // 现在统一截到 maxChars，并正确标记 truncated。
+            output.startsWith("Error") -> {
+                if (output.length <= maxChars) {
+                    TruncationResult(output, truncated = false)
+                } else {
+                    TruncationResult(
+                        output.take(maxChars) + "\n\n[... error output truncated at $maxChars chars, total ${output.length} chars]",
+                        truncated = true
+                    )
+                }
             }
 
             // 默认：head + tail

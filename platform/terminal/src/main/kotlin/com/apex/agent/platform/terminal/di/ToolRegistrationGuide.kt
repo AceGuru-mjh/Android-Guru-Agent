@@ -11,6 +11,7 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuInstallTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWorkspacesTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyCloseTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyExecTool
@@ -106,6 +107,14 @@ object ToolRegistrationGuide {
         TerminalUbuntuInstallTool(provisioner, target)
     )
 
+    /**
+     * T75: workspace 管理（list/create/inspect/delete）。构造需要 LinuxWorkspaceManager
+     * （app TerminalModule 提供），由 ToolModule 直接注册。
+     */
+    fun workspaceTools(workspaces: com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager) = listOf(
+        TerminalWorkspacesTool(workspaces)
+    )
+
     /** Construct all 6 legacy compat aliases (call once during Hilt init). */
     fun legacyTools(rt: TerminalRuntime) = listOf(
         LegacyExecTool(rt),
@@ -129,6 +138,7 @@ object ToolRegistrationGuide {
         "terminal.close" to "§34.9",
         "terminal.backends" to "T73（后端能力发现：availability 三态）",
         "terminal.ubuntu.install" to "T73（Ubuntu rootfs 安装引导）",
+        "terminal.workspaces" to "T75（workspace 管理：隔离文件区生命周期）",
         "terminal_exec" to "§35 (compat → run+wait+observe)",
         "terminal_read" to "§35 (compat → observe RAW)",
         "terminal_send" to "§35 (compat → write)",

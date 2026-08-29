@@ -111,10 +111,33 @@ T73 wiring: `TerminalRuntime.create()` routes through the registry (default
 ExecutionBackendGoldenTest). Agent discovers backends via `terminal.backends()`
 (availability: READY / NEEDS_ROOTFS / FAILED) and provisions the Ubuntu rootfs
 via `terminal.ubuntu.install` (idempotent, resumable). Backend session metadata
-(`backendId`/`rootfsId`/`guestCwd`/workspace binds) is persisted with the session
-(SessionRecord schema v2) so crash recovery distinguishes local vs Ubuntu sessions.
+(`backendId`/`rootfsId`/`workspaceId`/`guestCwd`/workspace binds) is persisted
+with the session (SessionRecord schema v3) so crash recovery distinguishes local
+vs Ubuntu sessions.
 
 Agent never knows which backend is active. Backend swap = zero Agent code changes.
+
+## Workspace & User Model (T75)
+
+Linux sessions get two host-backed persistent mounts on top of the rootfs:
+
+```
+<filesDir>/linux/workspaces/<id>/  --bind-->  guest /workspace   (per-workspace isolation)
+<filesDir>/linux/home/              --bind-->  guest /root        (persistent user home)
+```
+
+- **Workspaces** (`terminal.workspaces` tool: list / create / inspect / delete):
+  each `terminal.create(backend="linux-ubuntu", workspaceId=…)` session binds its
+  own isolated area at guest `/workspace`. Unknown valid ids
+  (`^[a-z0-9][a-z0-9_-]{0,63}$`) are auto-created (workspace-per-task with zero
+  friction). `delete` refuses while sessions are attached (close first). The
+  P71/T73 single-directory workspace is atomically migrated to `default` on
+  first use.
+- **User home**: guest `/root` is a host-side bind, NOT inside the rootfs — user
+  files survive rootfs version replacement (invalidate / reinstall). First use
+  seeds `/etc/skel` from the rootfs (or a minimal `.bashrc` fallback). Guest env
+  carries `HOME=/root`, `USER=root`, `LOGNAME=root`.
+- LOCAL sessions reject `workspaceId` (InvalidInput — explicit over silent).
 
 ## API Freeze Rules
 

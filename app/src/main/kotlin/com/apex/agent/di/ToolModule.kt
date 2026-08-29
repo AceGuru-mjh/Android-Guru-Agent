@@ -30,6 +30,7 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuInstallTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWorkspacesTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
@@ -106,6 +107,7 @@ object ToolModule {
         terminalRuntime: TerminalRuntime,
         rootfsProvisioner: RootfsProvisioner,
         rootfsTarget: RootfsTarget,
+        workspaceManager: com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager,
         githubTokenManager: GithubTokenManager,
         githubApiService: GithubApiService,
         userQuestionGateway: UserQuestionGateway,
@@ -234,6 +236,8 @@ object ToolModule {
         registry.register(SafeAgentTool(TerminalToolAdapter(
             TerminalUbuntuInstallTool(rootfsProvisioner, rootfsTarget)
         )))
+        // T75: workspace 管理（list/create/inspect/delete —— 隔离文件区生命周期）。
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWorkspacesTool(workspaceManager))))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))

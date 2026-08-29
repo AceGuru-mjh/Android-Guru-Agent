@@ -163,6 +163,8 @@ class LinuxPRootBackendTest {
         assertEquals("/root", b.mapGuestCwd("/root"))
         assertEquals("/workspace/project", b.mapGuestCwd("project"))
         assertEquals("/workspace/a/b", b.mapGuestCwd("/workspace/a/b"))
+        // T73: LOCAL 默认 cwd（/sdcard）在 guest 无意义 → /workspace
+        assertEquals("/workspace", b.mapGuestCwd("/sdcard"))
     }
 
     @Test

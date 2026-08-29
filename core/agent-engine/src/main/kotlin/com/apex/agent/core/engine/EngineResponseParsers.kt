@@ -68,14 +68,22 @@ internal object EngineResponseParsers {
     }
 
     fun extractJsonFromResponse(response: String): String? {
-        // Try fenced ```json ... ``` first.
-        val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(response)
-        val candidate = fenced?.groupValues?.get(1)?.trim() ?: response.trim()
-        // Find first '{' and last '}' to extract the JSON object.
-        val first = candidate.indexOf('{')
-        val last = candidate.lastIndexOf('}')
-        if (first < 0 || last < 0 || last <= first) return null
-        return candidate.substring(first, last + 1)
+        // Try fenced ```json ... ``` first. 一段 LLM 响应里可能出现多个国栏代码块（如先一个 ```text 说明、再一个 ```json 真正计划），
+        // 旧实现只取第一个，若第一个不是 JSON 就静默退化为单步 fallback 计划。
+        // 这里改为遍历所有国栏块 + 裸响应，返回第一个能被 kotlinx.serialization 成功解析为 JSON 对象的候选。
+        val fenceRegex = Regex("```(?:json)?\\s*([\\s\\S]*?)```")
+        val candidates = fenceRegex.findAll(response).map { it.groupValues[1].trim() }.toList() +
+            listOf(response.trim())
+
+        for (candidate in candidates) {
+            val first = candidate.indexOf('{')
+            val last = candidate.lastIndexOf('}')
+            if (first < 0 || last < 0 || last <= first) continue
+            val slice = candidate.substring(first, last + 1)
+            // 预校验：能解析为 JSON 对象才算候选命中；这样国栏里的 ```text``` 等非 JSON 块会被跳过。
+            if (runCatching { Json.parseToJsonElement(slice).jsonObject }.isSuccess) return slice
+        }
+        return null
     }
 
     fun parseRiskLevel(s: String): RiskLevel = when (s.lowercase().trim()) {

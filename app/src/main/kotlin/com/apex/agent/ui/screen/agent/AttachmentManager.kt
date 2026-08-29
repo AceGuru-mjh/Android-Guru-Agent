@@ -42,9 +42,16 @@ internal class AttachmentManager(
 
     /**
      * 附件处理 Job 追踪，支持取消（缺陷 1 修复）。
+     * key = [attachmentIdCounter] 分配的唯一 id，与占位项 [Attachment.attachmentId] 一一对应。
      */
     private val attachmentJobs = mutableMapOf<Int, Job>()
     private var attachmentIdCounter = 0
+
+    /**
+     * 附件大小上限：50 MB。超过即拒绝拷贝，避免大文件静默耗尽内部存储
+     * （取 50 MB 而非 Runtime.maxMemory()/4，以获得稳定可预期的大小阈值）。
+     */
+    private val maxAttachmentBytes: Long = 50L * 1024L * 1024L
 
     init {
         // 启动预测性附件预处理清理循环（每 5 分钟清理 30 分钟前的预拷贝文件）
@@ -57,7 +64,8 @@ internal class AttachmentManager(
      */
     fun attachFile(uri: Uri) {
         val id = attachmentIdCounter++
-        // 先添加一个 UPLOADING 状态的占位项，UI 立即响应
+        // 先添加一个 UPLOADING 状态的占位项，UI 立即响应；
+        // 用 id 标记占位项，异步回填时按 id 精确匹配（缺陷 2 修复：避免 lastIndex 竞态）。
         _attachments.update {
             it + Attachment(
                 uri = uri,
@@ -66,19 +74,36 @@ internal class AttachmentManager(
                 sizeBytes = 0,
                 type = AttachmentType.FILE,
                 uploadProgress = 0f,
-                status = UploadStatus.UPLOADING
+                status = UploadStatus.UPLOADING,
+                attachmentId = id
             )
         }
 
         attachmentJobs[id] = scope.launch(Dispatchers.IO) {
             try {
-                val info = getFileMetadataSafe(uri).copy(
+                val meta = getFileMetadataSafe(uri)
+                // 缺陷 3 修复：超限文件直接置 ERROR，不启动后续拷贝/预处理。
+                if (meta.sizeBytes > maxAttachmentBytes) {
+                    _attachments.update { list ->
+                        list.map { att ->
+                            if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
+                                att.copy(
+                                    status = UploadStatus.ERROR,
+                                    name = "文件过大（${meta.sizeBytes} bytes，上限 ${maxAttachmentBytes} bytes）"
+                                )
+                            } else att
+                        }
+                    }
+                    return@launch
+                }
+                val info = meta.copy(
                     uploadProgress = 1.0f,
-                    status = UploadStatus.SUCCESS
+                    status = UploadStatus.SUCCESS,
+                    attachmentId = id
                 )
                 _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
+                    list.map { att ->
+                        if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
                             info
                         } else att
                     }
@@ -87,8 +112,8 @@ internal class AttachmentManager(
                 preprocessor.preprocess(uri, info.name)
             } catch (e: Exception) {
                 _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
+                    list.map { att ->
+                        if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
                             att.copy(status = UploadStatus.ERROR, name = "读取失败")
                         } else att
                     }
@@ -111,20 +136,37 @@ internal class AttachmentManager(
                 sizeBytes = 0,
                 type = AttachmentType.IMAGE,
                 uploadProgress = 0f,
-                status = UploadStatus.UPLOADING
+                status = UploadStatus.UPLOADING,
+                attachmentId = id
             )
         }
 
         attachmentJobs[id] = scope.launch(Dispatchers.IO) {
             try {
-                val info = getFileMetadataSafe(uri).copy(
+                val meta = getFileMetadataSafe(uri)
+                // 缺陷 3 修复：超限图片直接置 ERROR，不启动后续拷贝/预处理。
+                if (meta.sizeBytes > maxAttachmentBytes) {
+                    _attachments.update { list ->
+                        list.map { att ->
+                            if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
+                                att.copy(
+                                    status = UploadStatus.ERROR,
+                                    name = "文件过大（${meta.sizeBytes} bytes，上限 ${maxAttachmentBytes} bytes）"
+                                )
+                            } else att
+                        }
+                    }
+                    return@launch
+                }
+                val info = meta.copy(
                     type = AttachmentType.IMAGE,
                     uploadProgress = 1.0f,
-                    status = UploadStatus.SUCCESS
+                    status = UploadStatus.SUCCESS,
+                    attachmentId = id
                 )
                 _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
+                    list.map { att ->
+                        if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
                             info
                         } else att
                     }
@@ -133,8 +175,8 @@ internal class AttachmentManager(
                 preprocessor.preprocess(uri, info.name)
             } catch (e: Exception) {
                 _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
+                    list.map { att ->
+                        if (att.attachmentId == id && att.status == UploadStatus.UPLOADING) {
                             att.copy(status = UploadStatus.ERROR, name = "读取失败")
                         } else att
                     }
@@ -147,9 +189,13 @@ internal class AttachmentManager(
      * 移除附件。同时取消对应的元数据读取 Job 和预测性预拷贝。
      */
     fun removeAttachment(index: Int) {
-        attachmentJobs.values.forEach { it.cancel() }
-        // 取消被移除附件的预测性预拷贝
         val removed = _attachments.value.getOrNull(index)
+        // 缺陷 1 修复：只取消被移除附件对应的 Job，不影响其它进行中的元数据读取。
+        // 旧实现 attachmentJobs.values.forEach { it.cancel() } 会取消全部附件的 Job。
+        removed?.attachmentId?.let { id ->
+            attachmentJobs.remove(id)?.cancel()
+        }
+        // 取消被移除附件的预测性预拷贝
         removed?.uri?.let { preprocessor.cancel(it) }
         _attachments.update { list ->
             list.filterIndexed { i, _ -> i != index }
@@ -234,6 +280,21 @@ internal class AttachmentManager(
         uri: Uri,
         fileName: String
     ): String = withContext(Dispatchers.IO) {
+        // 缺陷 3 修复：拷贝前再做一次大小校验（防御性）。attachFile/attachImage 已在
+        // 读取元数据时拒绝超限文件，但发送时若附件仍处于 ERROR 状态或预拷贝缺失，
+        // 会走到这里；超限则抛异常，由 executeNormalMessage 的 try/catch 转 Error 提示，
+        // 避免大文件被 64KB 流式拷入 filesDir 静默耗尽内部存储。
+        val size = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                if (c.moveToFirst() && idx >= 0) c.getLong(idx) else -1L
+            } ?: -1L
+        }.getOrDefault(-1L)
+        // size<0 表示查不到 SIZE 列（如某些 content:// 协议），放行由后续拷贝自然失败。
+        if (size >= 0 && size > maxAttachmentBytes) {
+            throw IllegalStateException("文件过大（$size bytes，上限 $maxAttachmentBytes bytes）")
+        }
+
         val targetDir = java.io.File(context.filesDir, "attachments")
         targetDir.mkdirs()
         val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$fileName")

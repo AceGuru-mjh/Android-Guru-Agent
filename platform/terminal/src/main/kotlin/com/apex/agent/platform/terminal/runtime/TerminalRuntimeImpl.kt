@@ -131,6 +131,16 @@ class TerminalRuntimeImpl(
         // is rebuilt in-process (Kotlin counter resets, native counter never does) —
         // writes/signals then landed on the WRONG native session.
         inputManager.nativeIdResolver = { sid -> sessionManager.assembly(sid)?.nativeSessionId }
+
+        // TM1: wire a recent-output provider into the WaitEngine so OutputMatch.pattern
+        // is tested against real PTY bytes (the last 4 KB from the per-session
+        // RingBuffer). Without this, WaitEngineImpl.matchOutput returned true on ANY
+        // OutputProduced event, making the pattern field dead (every wait(OutputMatch)
+        // completed instantly). The RingBuffer is per-session, owned by SessionManager.
+        waitEngine.recentOutputProvider = { sid ->
+            sessionManager.assembly(sid)?.ringBuffer
+                ?.latest(4096)?.bytes?.toString(Charsets.UTF_8) ?: ""
+        }
     }
 
     // ───────── create ─────────

@@ -68,11 +68,21 @@ class FileReadTool(
             val tail = json["tail"]?.jsonPrimitive?.intOrNull
             val offset = json["offset"]?.jsonPrimitive?.intOrNull
 
-            val file = resolveFile(path)
+            val file = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
             if (!file.exists()) return "Error: File not found: $path"
             if (!file.canRead()) return "Error: Permission denied: $path"
             if (file.isDirectory) return "Error: '$path' is a directory. Use list_files."
             if (isBinary(file)) return "Binary file (${formatSize(file.length())}). Use shell_execute for inspection."
+
+            // Size cap: a multi-GB logcat dump would otherwise OOM the agent on readLines().
+            if (file.length() > MAX_FILE_BYTES) {
+                return "Error: file too large (${file.length()} bytes, max ${MAX_FILE_BYTES} bytes). " +
+                    "Use offset/limit or shell_execute with grep/sed/tail."
+            }
 
             val lines = file.readLines()
             val total = lines.size
@@ -145,11 +155,17 @@ class FileReadTool(
     }
 
     private fun resolveFile(path: String): File =
-        if (path.startsWith("/")) File(path) else File(basePath, path)
+        FilePathSafety.safeResolve(basePath, path)
 
     private fun formatSize(b: Long): String = when {
         b < 1024 -> "${b}B"
         b < 1048576 -> "${b / 1024}KB"
         else -> "${b / 1048576}MB"
+    }
+
+    companion object {
+        // 16 MB cap: prevents a multi-GB logcat dump / dataset from OOM-killing the
+        // agent when readLines() materializes the whole file as a List<String>.
+        private const val MAX_FILE_BYTES = 16L * 1024 * 1024
     }
 }

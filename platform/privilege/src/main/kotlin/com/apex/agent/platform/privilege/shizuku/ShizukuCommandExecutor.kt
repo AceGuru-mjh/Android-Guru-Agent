@@ -2,11 +2,12 @@ package com.apex.agent.platform.privilege.shizuku
 
 import android.content.pm.PackageManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 /**
  * Shizuku命令执行器
@@ -64,11 +65,10 @@ object ShizukuCommandExecutor {
     }
 
     /**
-     * 通过Shizuku执行Shell命令
+     * 通过Shizuku执行Shell命令。
      *
-     * 原理：
-     * Shizuku.newProcess() 创建一个以shell用户(uid=2000)运行的进程，
-     * 等同于 adb shell 执行命令。
+     * 超时语义：[timeoutMs] 到期后强杀子进程（Process.waitFor() 非可中断，
+     * 仅靠 withTimeout 取消协程不能让进程退出，必须显式 destroyForcibly）。
      */
     suspend fun execute(
         command: String,
@@ -90,49 +90,43 @@ object ShizukuCommandExecutor {
             )
         }
 
+        // 持有 Process / reader 引用，便于超时、异常、正常返回三路都走 finally 清理。
+        var process: Process? = null
+        var stdoutReader: BufferedReader? = null
+        var stderrReader: BufferedReader? = null
         try {
-            withTimeoutOrNull(timeoutMs) {
-                executeBlocking(command)
-            } ?: ShizukuExecResult(
-                success = false,
-                output = "Command timed out after ${timeoutMs}ms",
-                exitCode = -1
-            )
-        } catch (e: Exception) {
-            ShizukuExecResult(
-                success = false,
-                output = "Shizuku exec error: ${e.message}",
-                exitCode = -1
-            )
-        }
-    }
-
-    /**
-     * 阻塞式执行（内部方法）
-     *
-     * TODO: Shizuku v13 将 newProcess() 设为 private，需要迁移到 IShellService AIDL
-     * 当前先使用 Runtime.exec() 作为 fallback，PrivilegeDetector 已有 Root→Shizuku→Shell 三级降级
-     */
-    private fun executeBlocking(command: String): ShizukuExecResult {
-        return try {
             // 使用 Runtime.exec() 执行命令
             // 注意：此处不经过 Shizuku shell 提权，实际提权由 PrivilegeDetector 链路处理
-            val process = Runtime.getRuntime().exec(
-                arrayOf("sh", "-c", command)
-            )
+            val proc = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            process = proc
+            val stdoutR = BufferedReader(InputStreamReader(proc.inputStream))
+            val stderrR = BufferedReader(InputStreamReader(proc.errorStream))
+            stdoutReader = stdoutR
+            stderrReader = stderrR
 
-            // 读取stdout / stderr
-            val stdoutReader = BufferedReader(InputStreamReader(process.inputStream))
-            val stderrReader = BufferedReader(InputStreamReader(process.errorStream))
+            // 后台并发排空 stdout/stderr，避免管道缓冲写满导致 waitFor 死锁。
+            val stdoutDeferred = async(Dispatchers.IO) { runCatching { stdoutR.readText() }.getOrDefault("") }
+            val stderrDeferred = async(Dispatchers.IO) { runCatching { stderrR.readText() }.getOrDefault("") }
 
-            val stdout = stdoutReader.readText()
-            val stderr = stderrReader.readText()
+            // 关键：原实现用 withTimeoutOrNull { executeBlocking(command) }，但 Process.waitFor()
+            // 是非可中断的 JVM 阻塞调用 —— withTimeout 取消协程时 waitFor 不会返回，IO 线程和
+            // sh 子进程都泄漏。改用 waitFor(timeoutMs, MILLISECONDS)（JDK 内部用 wait/notify
+            // 循环实现，可超时返回 false），超时后显式 destroyForcibly 让 readText 拿到 EOF。
+            val completed = proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            if (!completed) {
+                proc.destroyForcibly()
+                stdoutDeferred.await()
+                stderrDeferred.await()
+                return@withContext ShizukuExecResult(
+                    success = false,
+                    output = "Command timed out after ${timeoutMs}ms",
+                    exitCode = -1
+                )
+            }
 
-            val exitCode = process.waitFor()
-
-            stdoutReader.close()
-            stderrReader.close()
-
+            val stdout = stdoutDeferred.await()
+            val stderr = stderrDeferred.await()
+            val exitCode = proc.exitValue()
             ShizukuExecResult(
                 success = exitCode == 0,
                 output = stdout.ifBlank { stderr },
@@ -150,6 +144,12 @@ object ShizukuCommandExecutor {
                 output = "Shizuku error: ${e.message}",
                 exitCode = -1
             )
+        } finally {
+            // 三个出口（成功、超时、异常）都走这里：关闭 reader + 强杀进程。
+            // 原实现 reader 只在 happy path close，proc 从不被 destroyForcibly。
+            runCatching { stdoutReader?.close() }
+            runCatching { stderrReader?.close() }
+            process?.let { if (it.isAlive) it.destroyForcibly() }
         }
     }
 }

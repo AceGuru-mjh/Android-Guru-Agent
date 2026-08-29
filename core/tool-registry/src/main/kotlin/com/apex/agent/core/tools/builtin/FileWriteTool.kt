@@ -57,7 +57,11 @@ class FileWriteTool(
             val mode = json["mode"]?.jsonPrimitive?.content ?: "write"
             val createDirs = json["create_dirs"]?.jsonPrimitive?.booleanOrNull ?: true
 
-            val file = resolveFile(path)
+            val file = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
 
             if (createDirs) file.parentFile?.mkdirs()
 
@@ -88,7 +92,7 @@ class FileWriteTool(
     }
 
     private fun resolveFile(path: String): File =
-        if (path.startsWith("/")) File(path) else File(basePath, path)
+        FilePathSafety.safeResolve(basePath, path)
 
     private fun formatSize(b: Long): String = when {
         b < 1024 -> "${b}B"

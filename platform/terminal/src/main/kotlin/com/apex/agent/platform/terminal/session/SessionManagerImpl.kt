@@ -139,7 +139,12 @@ class SessionManagerImpl(
         val vt = virtualTerminalFactory(rows, cols)
         val reducer = SemanticStateReducer(
             sessionId = sessionId, shell = shell, initialCwd = initialCwd, privilege = privilege,
-            pid = pid, rows = rows, cols = cols
+            pid = pid, rows = rows, cols = cols,
+            // TM2: feed the reducer the session's recent PTY bytes (last 4 KB from the
+            // RingBuffer) so ErrorClassifier.classify can apply its regex patterns.
+            // Previously classify() was always called with recentOutput=null → every
+            // pattern in ErrorClassifier was dead code in production.
+            recentOutputProvider = { ringBuffer.latest(4096).bytes.toString(Charsets.UTF_8) }
         )
         val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
             eventLog, ringBuffer, vt, reducer

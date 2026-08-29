@@ -45,7 +45,16 @@ class CalculateTool : AgentTool {
         return try {
             // 尝试用 bc 计算（Android 上通常可用）
             val bcExpr = expr.replace("^", "^")
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", "echo '$bcExpr' | bc -l 2>/dev/null"))
+            // Feed the expression to `bc -l` via stdin instead of `sh -c "echo '$expr' | bc -l"`.
+            // The previous form interpolated the expression into a single-quoted shell argument
+            // with no escaping, so any `'` in the expression (e.g. `'); rm -rf /sdcard; echo ('`)
+            // broke out of the quotes and ran an arbitrary command. Writing to stdin avoids
+            // the shell entirely.
+            val process = Runtime.getRuntime().exec(arrayOf("bc", "-l"))
+            process.outputStream.bufferedWriter().use {
+                it.write(bcExpr)
+                it.flush()
+            }
             val output = process.inputStream.bufferedReader().readText().trim()
             process.waitFor()
             if (output.isNotEmpty()) "$expr = $output"

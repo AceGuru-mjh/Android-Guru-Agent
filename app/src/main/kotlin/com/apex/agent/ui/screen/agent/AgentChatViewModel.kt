@@ -21,6 +21,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -407,8 +408,9 @@ class AgentChatViewModel @Inject constructor(
     /**
      * 错误重试：重新执行上一条用户消息。
      *
-     * 附件已在历史气泡中保留，重试聚焦"重新发起文本指令"触发 AgentEngine 重跑，
-     * 不再重新落盘附件（其本地路径在 [executeNormalMessage] 中通过 FileRef 复用）。
+     * 附件已在历史气泡中保留（[MessageAttachment.localPath] 已落盘），
+     * 重试直接复用其本地路径，不再重新落盘——透传给 [runEngine] 即可。
+     * （缺陷 5 修复：旧实现传 emptyList()，导致重试丢失原始附件上下文。）
      */
     fun retry(text: String, attachments: List<MessageAttachment>) {
         val trimmed = text.trim()
@@ -416,7 +418,7 @@ class AgentChatViewModel @Inject constructor(
         currentJob?.cancel()
         updateInputText("")
         currentJob = viewModelScope.launch {
-            executeNormalMessage(trimmed, emptyList())
+            runEngine(trimmed, attachments)
         }
     }
 
@@ -425,6 +427,10 @@ class AgentChatViewModel @Inject constructor(
      *
      * 创新优化：优先使用预测性预处理的预拷贝结果（零等待），
      * 未预拷贝的附件回退到 [AttachmentManager.copyToSandboxSafe]（64KB buffer + ensureActive）。
+     *
+     * 缺陷 4 修复：附件落盘（IO）外包 try/catch，失败时发 [AgentUiMessage.Error]
+     * 并复位 isLoading，避免异常冒泡到 viewModelScope 导致崩溃或 isLoading 卡死；
+     * [CancellationException] 重抛以保留协程取消语义。
      */
     private suspend fun executeNormalMessage(
         text: String,
@@ -432,23 +438,50 @@ class AgentChatViewModel @Inject constructor(
     ) {
         // 异步落盘附件（IO 线程）
         // 优先使用预拷贝结果，未预拷贝的回退到同步拷贝
-        val persistedAttachments = withContext(Dispatchers.IO) {
-            currentAttachments.map { att ->
-                // 尝试从预拷贝缓存获取（零等待）
-                val preprocessedPath = preprocessor.getSandboxPath(att.uri)
-                val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
+        val persistedAttachments = try {
+            withContext(Dispatchers.IO) {
+                currentAttachments.map { att ->
+                    // 尝试从预拷贝缓存获取（零等待）
+                    val preprocessedPath = preprocessor.getSandboxPath(att.uri)
+                    val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
 
-                MessageAttachment(
-                    name = att.name,
-                    mimeType = att.mimeType,
-                    sizeBytes = att.sizeBytes,
-                    type = att.type,
-                    localPath = localPath,
-                    thumbnailUri = if (att.type == AttachmentType.IMAGE) att.uri else null
+                    MessageAttachment(
+                        name = att.name,
+                        mimeType = att.mimeType,
+                        sizeBytes = att.sizeBytes,
+                        type = att.type,
+                        localPath = localPath,
+                        thumbnailUri = if (att.type == AttachmentType.IMAGE) att.uri else null
+                    )
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e // 协程取消必须重抛，不得吞掉
+        } catch (e: Exception) {
+            _uiState.update { s ->
+                s.copy(
+                    messages = s.messages + AgentUiMessage.Error(
+                        message = "附件处理失败：${e.message ?: e::class.simpleName}",
+                        canRetry = true
+                    ),
+                    isLoading = false
                 )
             }
+            return
         }
 
+        runEngine(text, persistedAttachments)
+    }
+
+    /**
+     * 执行引擎（附件已落盘）。供 [executeNormalMessage]（新发送）与 [retry]（重试，
+     * 附件已带 localPath，无需重新落盘）共用，避免重试时丢失附件上下文。
+     *
+     * 缺陷 4 修复：引擎流 [agentEngine.execute] 的 collect 包 try/catch，
+     * 引擎在发射 AgentEvent.Error 之前抛异常时（如 LLM IO 异常）发
+     * [AgentUiMessage.Error] 并复位 isLoading；[CancellationException] 重抛。
+     */
+    private suspend fun runEngine(text: String, persistedAttachments: List<MessageAttachment>) {
         _uiState.update { state ->
             state.copy(
                 messages = state.messages + AgentUiMessage.User(
@@ -508,8 +541,22 @@ class AgentChatViewModel @Inject constructor(
             )
         }
 
-        agentEngine.execute(userInput).collect { event ->
-            handleEvent(event)
+        try {
+            agentEngine.execute(userInput).collect { event ->
+                handleEvent(event)
+            }
+        } catch (e: CancellationException) {
+            throw e // 协程取消必须重抛（用户发送新消息会 cancel 旧 job）
+        } catch (e: Exception) {
+            _uiState.update { s ->
+                s.copy(
+                    messages = s.messages + AgentUiMessage.Error(
+                        message = "执行失败：${e.message ?: e::class.simpleName}",
+                        canRetry = true
+                    ),
+                    isLoading = false
+                )
+            }
         }
     }
 
@@ -964,6 +1011,14 @@ class AgentChatViewModel @Inject constructor(
     /** 函数调用二级菜单候选：全部已注册工具（id + 显示名）。 */
     fun availableTools(): List<Pair<String, String>> =
         toolRegistry.getAllTools().map { it.id to it.name }.sortedBy { it.first }
+
+    /**
+     * 已注册工具数量（透传 [ToolRegistry.toolCount]）。供 [AgentChatScreen] 作为
+     * `remember(toolCount)` 的 key——注册表变更后下次重组即重新读取 [availableTools]，
+     * 避免函数调用菜单快照被永久缓存（缺陷 6 修复）。
+     */
+    val toolCount: Int
+        get() = toolRegistry.toolCount
 
     /** "小圆环"工具菜单状态仓库（UI 直接读写开关/规则/格式）。 */
     val toolkitStore: ChatToolkitStore = chatToolkit

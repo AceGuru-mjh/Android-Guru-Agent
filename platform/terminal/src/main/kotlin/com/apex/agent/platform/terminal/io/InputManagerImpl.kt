@@ -69,6 +69,9 @@ class InputManagerImpl(
 
     private val writers = ConcurrentHashMap<Long, SessionWriter>()
     private val regLock = Mutex()
+    // TM4: track unmapped TerminalKeys we have already warned about, so each key
+    // logs at most once per InputManagerImpl instance (avoids stderr spam on repeats).
+    private val warnedUnmappedKeys = java.util.Collections.newSetFromMap(ConcurrentHashMap<TerminalKey, Boolean>())
 
     private fun writerFor(sessionId: Long): SessionWriter = writers.computeIfAbsent(sessionId) {
         val ch = Channel<WriteOp.WriteBytes>(Channel.UNLIMITED)
@@ -232,13 +235,37 @@ class InputManagerImpl(
         TerminalKey.PAGE_UP -> byteArrayOf(0x1B, 0x5B, 0x35, 0x7E)
         TerminalKey.PAGE_DOWN -> byteArrayOf(0x1B, 0x5B, 0x36, 0x7E)
         TerminalKey.INSERT -> byteArrayOf(0x1B, 0x5B, 0x32, 0x7E)
-        else -> byteArrayOf(0x0D)  // F-keys omitted for brevity (CSI sequences)
+        // TM4: unmapped keys (F1-F12, etc.) MUST NOT silently send ENTER — that could
+        // confirm a destructive prompt ("Remove file? [y/N]") the Agent intended to
+        // inspect. Send nothing and warn once per unmapped key for diagnosis.
+        else -> {
+            warnUnmappedKeyOnce(key)
+            byteArrayOf()
+        }
+    }
+
+    /** TM4: emit a one-shot stderr warning for an unmapped TerminalKey. */
+    private fun warnUnmappedKeyOnce(key: TerminalKey) {
+        if (warnedUnmappedKeys.add(key)) {
+            // This module has no logging framework dependency; System.err is the
+            // lightest diagnostic channel (consistent with the existing diagnostic
+            // prints elsewhere in the IO layer).
+            System.err.println(
+                "[InputManagerImpl] WARN: unmapped TerminalKey '$key' — no bytes sent " +
+                    "(was previously silently ENTER, which could confirm destructive prompts)"
+            )
+        }
     }
 
     /** Drop writer state for a session (called on Session close). */
     fun drop(sessionId: Long) {
-        writers.remove(sessionId)
+        // TM3: close the channel so the writer coroutine's `for (op in channel)` loop
+        // terminates naturally — otherwise the writer stays suspended on the channel
+        // forever (one leaked coroutine per closed session). Channel.close() drains
+        // remaining elements then completes the iterator, letting the writer exit.
+        val w = writers.remove(sessionId)
         started.remove(sessionId)
+        w?.channel?.close()
     }
 }
 

@@ -92,7 +92,11 @@ class FileEditTool(
             val editsArray = json["edits"]?.jsonArray ?: return "Error: 'edits' required"
             val createIfMissing = json["create_if_missing"]?.jsonPrimitive?.booleanOrNull ?: false
 
-            val file = resolveFile(path)
+            val file = try {
+                FilePathSafety.safeResolve(basePath, path)
+            } catch (e: SecurityException) {
+                return "Error: ${e.message}"
+            }
 
             if (!file.exists()) {
                 if (createIfMissing) {
@@ -101,6 +105,12 @@ class FileEditTool(
                 } else {
                     return "Error: File not found: $path. Use write_file to create, or set create_if_missing=true."
                 }
+            }
+
+            // Size cap: a multi-GB file would otherwise OOM the agent on readText().
+            if (file.length() > MAX_FILE_BYTES) {
+                return "Error: file too large (${file.length()} bytes, max ${MAX_FILE_BYTES} bytes). " +
+                    "Use shell_execute with sed/awk for large files."
             }
 
             var content = file.readText()
@@ -175,11 +185,16 @@ class FileEditTool(
     }
 
     private fun resolveFile(path: String): File =
-        if (path.startsWith("/")) File(path) else File(basePath, path)
+        FilePathSafety.safeResolve(basePath, path)
 
     private fun formatSize(b: Long): String = when {
         b < 1024 -> "${b}B"
         b < 1048576 -> "${b / 1024}KB"
         else -> "${b / 1048576}MB"
+    }
+
+    companion object {
+        // 16 MB cap: prevents a multi-GB file from OOM-killing the agent on readText().
+        private const val MAX_FILE_BYTES = 16L * 1024 * 1024
     }
 }

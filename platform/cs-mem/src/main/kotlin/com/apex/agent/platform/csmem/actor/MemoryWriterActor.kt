@@ -7,7 +7,6 @@ import com.apex.agent.platform.csmem.model.SemanticNode
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.Channel.Factory.UNLIMITED
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -16,7 +15,7 @@ import javax.inject.Singleton
  *
  * 设计要点：
  * 1. 单例 Actor 协程串行消费所有写入请求，避免 SQLite "Database is locked"
- * 2. 无界 Channel 保证写入请求不会丢失
+ * 2. 有界 Channel（256）施加背压，避免突发流量打爆邮箱导致 OOM
  * 3. 批量(Batch)写入优化：积累一定数量的事件后一次性刷入
  * 4. 支持紧急刷新(Emergency Flush)：Agent 紧急停止时确保数据不丢失
  *
@@ -38,7 +37,9 @@ class MemoryWriterActor @Inject constructor(
         object EmergencyFlush : WriteEvent
     }
 
-    private val eventChannel = Channel<WriteEvent>(UNLIMITED)
+    // 有界 256：限制邮箱上限，防止突发写入打爆内存。Actor 主循环以
+    // for(event in channel) 持续 drain，send 满载时挂起发送端施加背压，不会死锁。
+    private val eventChannel = Channel<WriteEvent>(capacity = 256)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var actorJob: Job? = null
 
@@ -119,33 +120,36 @@ class MemoryWriterActor @Inject constructor(
     }
 
     /**
-     * 发送事件到 Channel（非阻塞）。
+     * 发送事件到 Channel（挂起式，施加背压）。
+     * 有界 Channel 满载时挂起发送端，直到 Actor 主循环 drain 出空位再恢复；
+     * Actor 主循环以 for(event in channel) 持续消费，不会因等待而饥饿死锁。
+     * 旧实现用 trySend 静默吞失败，邮箱又无界，突发流量下既会 OOM 也会丢事件。
      */
-    fun send(event: WriteEvent) {
-        eventChannel.trySend(event)
+    suspend fun send(event: WriteEvent) {
+        eventChannel.send(event)
     }
 
     // ---- 便捷方法 ----
 
     /** 异步写入完整 MemoryGraph */
-    fun ingestGraph(graph: MemoryGraph) = send(WriteEvent.IngestGraph(graph))
+    suspend fun ingestGraph(graph: MemoryGraph) = send(WriteEvent.IngestGraph(graph))
 
     /** 异步写入图差分 */
-    fun ingestDelta(delta: GraphDelta, appPackage: String?) =
+    suspend fun ingestDelta(delta: GraphDelta, appPackage: String?) =
         send(WriteEvent.IngestDelta(delta, appPackage))
 
     /** 记录宏技能执行结果 */
-    fun recordMacro(skillId: String, success: Boolean) =
+    suspend fun recordMacro(skillId: String, success: Boolean) =
         send(WriteEvent.RecordMacro(skillId, success))
 
     /** 触发全局能量衰减 */
-    fun decayEnergy() = send(WriteEvent.DecayEnergy)
+    suspend fun decayEnergy() = send(WriteEvent.DecayEnergy)
 
     /** 触发低能剪枝 */
-    fun pruneLowEnergy() = send(WriteEvent.PruneLowEnergy)
+    suspend fun pruneLowEnergy() = send(WriteEvent.PruneLowEnergy)
 
     /** 紧急刷新（Agent 停止前调用） */
-    fun emergencyFlush() = send(WriteEvent.EmergencyFlush)
+    suspend fun emergencyFlush() = send(WriteEvent.EmergencyFlush)
 
     // ==================== Private ====================
 

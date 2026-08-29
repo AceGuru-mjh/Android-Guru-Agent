@@ -76,27 +76,42 @@ class ApexAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 通过resource-id查找节点
+     * 通过resource-id查找节点。
+     *
+     * 所有权约定：返回的节点由 caller 负责 recycle；root 在本方法内回收
+     * （除非返回的恰好是 root 本身，此时 root 的生命周期由 caller 接管）。
      */
     fun findNodeById(resourceId: String): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        return findNodeByResourceId(root, resourceId)
+        val found = findNodeByResourceId(root, resourceId)
+        // 若返回 root 本身，root 的生命周期由 caller 负责；若返回 child/null，root 由本方法回收。
+        if (found !== root) root.recycle()
+        return found
     }
 
     /**
-     * 通过文本查找节点
+     * 通过文本查找节点。
+     *
+     * 所有权约定同 [findNodeById]。
      */
     fun findNodeByText(text: String): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        return findNodeByText(root, text)
+        val found = findNodeByText(root, text)
+        if (found !== root) root.recycle()
+        return found
     }
 
     /**
-     * 获取当前前台应用包名
+     * 获取当前前台应用包名。
      */
     fun getForegroundPackage(): String? {
         val root = rootInActiveWindow ?: return null
-        return root.packageName?.toString()
+        return try {
+            root.packageName?.toString()
+        } finally {
+            // root 仅用于读取 packageName，用完立即 recycle，避免泄漏。
+            root.recycle()
+        }
     }
 
     // ═══ 公开API：UI操作 ═══

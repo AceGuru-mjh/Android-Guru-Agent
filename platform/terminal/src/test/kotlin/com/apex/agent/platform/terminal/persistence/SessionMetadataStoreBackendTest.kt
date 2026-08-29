@@ -29,24 +29,30 @@ class SessionMetadataStoreBackendTest {
         backend = BackendSessionMetadata(
             backendId = "linux-ubuntu",
             rootfsId = "ubuntu-24.04.4-arm64",
-            workspaceDir = "/data/user/0/app/files/linux/workspace",
-            binds = listOf("/data/user/0/app/files/linux/workspace:/workspace"),
+            workspaceId = "task-42",
+            workspaceDir = "/data/user/0/app/files/linux/workspaces/task-42",
+            binds = listOf(
+                "/data/user/0/app/files/linux/workspaces/task-42:/workspace",
+                "/data/user/0/app/files/linux/home:/root"
+            ),
             guestCwd = "/workspace"
         )
     )
 
     @Test
-    fun `backend metadata round-trips through v2 record`() = runBlocking {
+    fun `backend metadata round-trips through v3 record`() = runBlocking {
         val store = SessionMetadataStore(tmp.newFolder())
         store.save(linuxSession(), emptyList(), emptyList())
 
         val loaded = store.load(42L)!!
-        assertEquals(2, loaded.schemaVersion)
+        assertEquals(3, loaded.schemaVersion)
         assertEquals("linux-ubuntu", loaded.backendId)
         assertEquals("ubuntu-24.04.4-arm64", loaded.rootfsId)
-        assertEquals("/data/user/0/app/files/linux/workspace", loaded.workspaceDir)
+        assertEquals("task-42", loaded.workspaceId)
+        assertEquals("/data/user/0/app/files/linux/workspaces/task-42", loaded.workspaceDir)
         assertEquals("/workspace", loaded.guestCwd)
-        assertEquals(listOf("/data/user/0/app/files/linux/workspace:/workspace"), loaded.binds)
+        assertEquals(2, loaded.binds.size)
+        assertTrue(loaded.binds.any { it.endsWith(":/root") })
     }
 
     @Test
@@ -86,5 +92,27 @@ class SessionMetadataStoreBackendTest {
         assertNull(loaded.rootfsId)
         assertEquals("/system/bin/sh", loaded.shell)
         assertEquals(55L, loaded.cursor)
+    }
+
+    @Test
+    fun `v2 record without workspaceId still loads (T75 backward compat)`() = runBlocking {
+        // 模拟 T73 时代写出的 v2 文件（无 workspaceId 字段）—— T75 升级后旧记录可读
+        val dir = tmp.newFolder()
+        val v2Json = """
+            {"schemaVersion":2,"id":9,"shell":"/bin/bash","initialCwd":"/workspace",
+             "pid":77,"rows":24,"cols":80,"privilege":"NORMAL","state":"READY",
+             "createdAt":1700000000000,"lastActivityAt":1700000000000,
+             "lastExitCode":null,"cursor":10,"jobs":[],"recentEvents":[],
+             "backendId":"linux-ubuntu","rootfsId":"ubuntu-24.04.4-arm64",
+             "workspaceDir":"/files/linux/workspace","guestCwd":"/workspace",
+             "binds":["/files/linux/workspace:/workspace"]}
+        """.trimIndent()
+        java.io.File(dir, "session-9.json").writeText(v2Json)
+
+        val loaded = SessionMetadataStore(dir).load(9L)!!
+        assertEquals(2, loaded.schemaVersion)
+        assertEquals("linux-ubuntu", loaded.backendId)
+        assertNull(loaded.workspaceId)   // v2 无此字段 → 默认 null
+        assertEquals("/workspace", loaded.guestCwd)
     }
 }

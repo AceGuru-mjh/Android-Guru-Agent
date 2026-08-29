@@ -191,7 +191,12 @@ class RootfsProvisioningInstrumentationTest {
                 supportedAbis = { android.os.Build.SUPPORTED_ABIS.toList() }
             ),
             rootfsProvider = ProvisionedRootfsProvider(provisioner),
-            workspaceHostDir = AbsolutePath(File(ctx.filesDir, "t72-workspace").apply { mkdirs() }.absolutePath),
+            workspaces = com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager(
+                File(ctx.filesDir, "t75-workspaces")
+            ),
+            userHome = com.apex.agent.platform.terminal.workspace.GuestUserHome(
+                File(ctx.filesDir, "t75-home")
+            ),
             hostEnv = hostEnv
         )
         val spec = runBlocking {

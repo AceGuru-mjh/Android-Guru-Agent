@@ -8,6 +8,8 @@ import com.apex.agent.platform.terminal.proot.PRootVersion
 import com.apex.agent.platform.terminal.proot.ProotExecutor
 import com.apex.agent.platform.terminal.runtime.SessionSpawnRequest
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
+import com.apex.agent.platform.terminal.workspace.GuestUserHome
+import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import com.apex.agent.platform.terminal.linux.RootfsProvider
 import com.apex.agent.platform.terminal.linux.RootfsVerification
 import com.apex.agent.platform.terminal.linux.RootfsDescriptor
@@ -272,11 +274,13 @@ class UbuntuRootfsEndToEndIntegrationTest {
             )
         }
         val rootfsProvider = ProvisionedRootfsProvider(provisioner)
-        val ws = File(layout.baseDir.value, "workspace").apply { mkdirs() }
+        val workspaces = LinuxWorkspaceManager(File(layout.baseDir.value, "workspaces"))
+        val userHome = GuestUserHome(File(layout.baseDir.value, "home"))
         return LinuxPRootBackend(
             binaryProvider = binaryProvider,
             rootfsProvider = rootfsProvider,
-            workspaceHostDir = AbsolutePath(ws.absolutePath)
+            workspaces = workspaces,
+            userHome = userHome
         )
     }
 
@@ -323,9 +327,10 @@ class UbuntuRootfsEndToEndIntegrationTest {
 
     @Test
     fun `L2 workspace bind and guest env injected`() {
-        // 依赖顺序防御：workspace 目录由 realBackend() 创建，但 JUnit 方法
-        // 执行顺序不定 —— 写 marker 前先 mkdirs（CI 上该测试首个执行时暴露）
-        val wsDir = File(layout.baseDir.value, "workspace")
+        // 依赖顺序防御：workspace 目录由 realBackend() 的 resolve 懒创建，但 JUnit
+        // 方法执行顺序不定 —— 写 marker 前先 mkdirs（CI 上该测试首个执行时暴露）。
+        // T75: default workspace 位于 workspaces/default。
+        val wsDir = File(layout.baseDir.value, "workspaces/default")
         wsDir.mkdirs()
         File(wsDir, "marker.txt").writeText("bind-works")
         val exec = runInUbuntu(listOf(
@@ -336,6 +341,32 @@ class UbuntuRootfsEndToEndIntegrationTest {
         assertTrue("bind mounted: '${exec.stdout}'", exec.stdout.contains("bind-works"))
         assertTrue("guest HOME injected: '${exec.stdout}'", exec.stdout.contains("HOME=/root"))
         assertTrue("guest TERM injected: '${exec.stdout}'", exec.stdout.contains("TERM=xterm-256color"))
+    }
+
+    @Test
+    fun `L2b user home survives full rootfs replacement`() = runBlocking {
+        // T75 用户模型的核心性质：guest /root 是 host 侧持久 bind —— rootfs 换版本
+        // （invalidate + 重装，archive 缓存复用不重新下载）后用户数据仍在。
+        assumeTrue("install failed: $installError", installed)
+        assumeTrue("proot unavailable — L2b skipped", prootBinary != null)
+
+        // 1. 在 guest /root 写持久标记
+        val write = runInUbuntu(listOf("/bin/bash", "-c", "echo survive-rootfs > /root/SURVIVE.txt"))
+        assertEquals("exit: ${write.stderr}", 0, write.exitCode)
+        // host 侧确认落在持久 home 目录（而非 rootfs 内部）
+        val hostHome = File(layout.baseDir.value, "home")
+        assertEquals("survive-rootfs", File(hostHome, "SURVIVE.txt").readText().trim())
+
+        // 2. rootfs 失效 + 重装（archive 命中缓存 → 不走网络）
+        val inv = provisioner.invalidate(reason = "T75 E2E: simulated version replacement")
+        assertTrue("invalidate: $inv", inv is ProvisioningResult.Invalidated)
+        val reinstall = provisioner.install(RootfsTarget("ubuntu", "24.04", CpuArchitecture.X86_64))
+        assertTrue("reinstall: $reinstall", reinstall is ProvisioningResult.Ready)
+
+        // 3. 新 rootfs 会话仍能看到 home 文件
+        val read = runInUbuntu(listOf("/bin/bash", "-c", "cat /root/SURVIVE.txt"))
+        assertEquals("exit: ${read.stderr}", 0, read.exitCode)
+        assertTrue("home survived rootfs replacement: '${read.stdout}'", read.stdout.contains("survive-rootfs"))
     }
 
     // ─── Level 3: apt actually usable against the real network ───

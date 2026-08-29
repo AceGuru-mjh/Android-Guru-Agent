@@ -133,8 +133,11 @@ class UbuntuTerminalRuntimeInstrumentationTest {
                 supportedAbis = { android.os.Build.SUPPORTED_ABIS.toList() }
             ),
             rootfsProvider = ProvisionedRootfsProvider(provisioner),
-            workspaceHostDir = AbsolutePath(
-                File(ctx.filesDir, "t73-runtime-workspace").apply { mkdirs() }.absolutePath
+            workspaces = com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager(
+                File(ctx.filesDir, "t75-workspaces")
+            ),
+            userHome = com.apex.agent.platform.terminal.workspace.GuestUserHome(
+                File(ctx.filesDir, "t75-home")
             ),
             hostEnv = hostEnv
         )
@@ -214,14 +217,15 @@ class UbuntuTerminalRuntimeInstrumentationTest {
         assumeTrue("install failed: $installFailure", installFailure == null)
         assumeTrue("ptrace restricted on this device", ptraceCapable)
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        val ws = File(ctx.filesDir, "t73-runtime-workspace").apply { mkdirs() }
-        File(ws, "t73-marker.txt").writeText("workspace-bind-ok")
+        // T75: default workspace 位于 t75-workspaces/default（LinuxWorkspaceManager）
+        val ws = File(ctx.filesDir, "t75-workspaces/default").apply { mkdirs() }
+        File(ws, "t75-marker.txt").writeText("workspace-bind-ok")
 
         val rt = newRuntime()
         val created = runBlocking { rt.create(cwd = "/workspace", backendId = "linux-ubuntu").getOrThrow() }
         try {
             val job = runBlocking {
-                rt.run(created.sessionId, "cat /workspace/t73-marker.txt", InputOwner.AGENT)
+                rt.run(created.sessionId, "cat /workspace/t75-marker.txt", InputOwner.AGENT)
             }.getOrThrow()
             val saw = runBlocking {
                 withTimeoutOrNull(60_000) {
@@ -238,6 +242,82 @@ class UbuntuTerminalRuntimeInstrumentationTest {
                 }
             }
             assertTrue("workspace bind not visible in guest: ", saw == true)
+        } finally {
+            runBlocking { rt.close(created.sessionId) }
+        }
+    }
+    @Test
+    fun `L4 two workspaces are isolated on device`() {
+        assumeTrue("install failed: $installFailure", installFailure == null)
+        assumeTrue("ptrace restricted on this device", ptraceCapable)
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val wsRoot = File(ctx.filesDir, "t75-workspaces")
+        File(wsRoot, "alpha").mkdirs()
+        File(wsRoot, "beta").mkdirs()
+        File(wsRoot, "alpha/iso.txt").writeText("ALPHA-ONLY")
+
+        val rt = newRuntime()
+        // beta 会话（懒创建）不应看到 alpha 的文件
+        val created = runBlocking {
+            rt.create(cwd = "/workspace", backendId = "linux-ubuntu", workspaceId = "beta").getOrThrow()
+        }
+        try {
+            assertEquals("beta", created.workspaceId)
+            val job = runBlocking {
+                rt.run(created.sessionId, "ls /workspace/iso.txt || echo NOT-VISIBLE", InputOwner.AGENT)
+            }.getOrThrow()
+            val saw = runBlocking {
+                withTimeoutOrNull(60_000) {
+                    while (true) {
+                        val obs = rt.observe(
+                            created.sessionId,
+                            TerminalRuntime.ObserveMode.RAW, job.startCursor, 65536
+                        ).getOrThrow()
+                        if (obs.raw?.contains("NOT-VISIBLE") == true) return@withTimeoutOrNull true
+                        kotlinx.coroutines.delay(200)
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    false
+                }
+            }
+            assertTrue("alpha file must not leak into beta workspace", saw == true)
+        } finally {
+            runBlocking { rt.close(created.sessionId) }
+        }
+    }
+
+    @Test
+    fun `L5 user home persists on host across sessions`() {
+        assumeTrue("install failed: $installFailure", installFailure == null)
+        assumeTrue("ptrace restricted on this device", ptraceCapable)
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val rt = newRuntime()
+        val created = runBlocking {
+            rt.create(cwd = "/workspace", backendId = "linux-ubuntu").getOrThrow()
+        }
+        try {
+            val job = runBlocking {
+                rt.run(created.sessionId, "echo persist > /root/PERSIST.txt && cat /root/PERSIST.txt", InputOwner.AGENT)
+            }.getOrThrow()
+            val saw = runBlocking {
+                withTimeoutOrNull(60_000) {
+                    while (true) {
+                        val obs = rt.observe(
+                            created.sessionId,
+                            TerminalRuntime.ObserveMode.RAW, job.startCursor, 65536
+                        ).getOrThrow()
+                        if (obs.raw?.contains("persist") == true) return@withTimeoutOrNull true
+                        kotlinx.coroutines.delay(200)
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    false
+                }
+            }
+            assertTrue("in-guest write failed", saw == true)
+            // T75 核心性质：文件落在 host 侧持久 home（跨 rootfs 版本存活）
+            val hostFile = File(File(ctx.filesDir, "t75-home"), "PERSIST.txt")
+            assertTrue("host home file exists at ${hostFile.absolutePath}", hostFile.exists())
+            assertEquals("persist", hostFile.readText().trim())
         } finally {
             runBlocking { rt.close(created.sessionId) }
         }

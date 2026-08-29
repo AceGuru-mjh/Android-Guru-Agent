@@ -8,6 +8,8 @@ import com.apex.agent.platform.terminal.linux.RootfsVerification
 import com.apex.agent.platform.terminal.runtime.BackendAvailability
 import com.apex.agent.platform.terminal.runtime.SessionSpawnRequest
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
+import com.apex.agent.platform.terminal.workspace.GuestUserHome
+import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -70,11 +72,13 @@ class LinuxPRootBackendTest {
     private fun backend(
         binaryProvider: PRootBinaryProvider = FakeBinaryProvider(),
         rootfsProvider: RootfsProvider = FakeRootfsProvider(),
-        workspaceDir: String = "/fake/workspace"
+        workspaceRoot: File = File(tmp.root, "workspaces"),
+        homeRoot: File = File(tmp.root, "home")
     ) = LinuxPRootBackend(
         binaryProvider = binaryProvider,
         rootfsProvider = rootfsProvider,
-        workspaceHostDir = AbsolutePath(workspaceDir),
+        workspaces = LinuxWorkspaceManager(workspaceRoot),
+        userHome = GuestUserHome(homeRoot),
         commandBuilder = PRootCommandBuilderImpl(),
         hostEnv = null // JVM: 无 PRootHostEnvironment → 最小 env
     )
@@ -82,9 +86,10 @@ class LinuxPRootBackendTest {
     // ─── argv 契约（§5.2） ───
 
     @Test
-    fun `argv is proot -r rootfs -0 kill-on-exit bind workspace -w guestCwd -E env -- bash -i`() = runBlocking {
-        val ws = tmp.newFolder("ws").absolutePath
-        val b = backend(workspaceDir = ws)
+    fun `argv is proot -r rootfs -0 kill-on-exit binds home+workspace -w guestCwd -E env -- bash -i`() = runBlocking {
+        val wsRoot = File(tmp.root, "ws")
+        val homeRoot = File(tmp.root, "home")
+        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot)
         val spec = b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80, env = emptyMap())).getOrThrow()
 
         val argv = spec.argv
@@ -92,10 +97,12 @@ class LinuxPRootBackendTest {
         assertEquals("-r", argv[1]); assertEquals("/fake/rootfs", argv[2])
         assertEquals("-0", argv[3])
         assertEquals("--kill-on-exit", argv[4])
-        // workspace bind
-        val bindIdx = argv.indexOfFirst { it == "-b" }
-        assertTrue(bindIdx > 0)
-        assertEquals("$ws:/workspace", argv[bindIdx + 1])
+        // T75: binds —— home:/root（request.binds，先）+ workspace:/workspace（builder 追加）
+        val bindArgs = argv.zipWithNext().filter { (a, _) -> a == "-b" }.map { it.second }
+        assertEquals(
+            listOf("${homeRoot.absolutePath}:/root", "${File(wsRoot, "default").absolutePath}:/workspace"),
+            bindArgs
+        )
         // guest cwd（默认 /workspace）
         val wIdx = argv.indexOf("-w")
         assertTrue(wIdx > 0)
@@ -151,6 +158,62 @@ class LinuxPRootBackendTest {
         assertEquals("/workspace/project", spec.metadata.guestCwd)
         assertEquals("ubuntu-24.04", spec.metadata.rootfsId)
         assertNotNull(spec.metadata.workspaceDir)
+    }
+
+    // ─── T75: workspace 路由 + 用户 home 持久化 ───
+
+    @Test
+    fun `workspaceId routes to per-workspace bind dir and metadata`() = runBlocking {
+        val wsRoot = File(tmp.root, "ws")
+        val homeRoot = File(tmp.root, "home")
+        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot)
+        val spec = b.prepare(
+            SessionSpawnRequest(cwd = "", rows = 24, cols = 80, workspaceId = "task-42")
+        ).getOrThrow()
+
+        // bind 指向 <root>/task-42（懒创建）
+        val wsBind = spec.argv.zipWithNext().first { p -> p.first == "-b" && p.second.endsWith(":/workspace") }.second
+        assertEquals("${File(wsRoot, "task-42").absolutePath}:/workspace", wsBind)
+        assertTrue(File(wsRoot, "task-42").isDirectory)
+        // 元数据携带 workspaceId + 双 bind
+        assertEquals("task-42", spec.metadata.workspaceId)
+        assertEquals(File(wsRoot, "task-42").absolutePath, spec.metadata.workspaceDir)
+        assertEquals(2, spec.metadata.binds.size)
+        assertTrue(spec.metadata.binds.any { it.endsWith(":/root") })
+    }
+
+    @Test
+    fun `invalid workspaceId fails with WorkspaceError`() = runBlocking {
+        val b = backend()
+        val r = b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80, workspaceId = "Bad Id!"))
+
+        assertTrue(r.isFailure)
+        assertTrue(r.exceptionOrNull()!!.message!!.contains("WorkspaceError:InvalidId"))
+    }
+
+    @Test
+    fun `guest env has USER and LOGNAME for fake-root view`() = runBlocking {
+        val b = backend()
+        val env = b.buildGuestEnv(emptyMap())
+        assertEquals("root", env["USER"])
+        assertEquals("root", env["LOGNAME"])
+        assertEquals("/root", env["HOME"])
+    }
+
+    @Test
+    fun `user home is seeded once and bind source persists`() = runBlocking {
+        val homeRoot = File(tmp.root, "home")
+        val b = backend(homeRoot = homeRoot)
+        b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80)).getOrThrow()
+
+        // 无 skel 的 rootfs（/fake/rootfs 不存在）→ 最小 .bashrc 兑底
+        val bashrc = File(homeRoot, ".bashrc")
+        assertTrue(bashrc.exists())
+        assertTrue(bashrc.readText().contains("PS1"))
+        // 已有内容 → 不再覆盖（幂等）
+        val content = bashrc.readText()
+        b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80)).getOrThrow()
+        assertEquals(content, bashrc.readText())
     }
 
     // ─── -w 修正映射（P71 修复的旧 removePrefix bug） ───

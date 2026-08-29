@@ -63,7 +63,12 @@ data class SessionSpawnRequest(
     val cols: Int,
     /** 调用方显式 env（LOCAL: 追加覆盖默认值；LINUX: 进入 -E guest env）。 */
     val env: Map<String, String> = emptyMap(),
-    val privilege: PrivilegeLevel = PrivilegeLevel.NORMAL
+    val privilege: PrivilegeLevel = PrivilegeLevel.NORMAL,
+    /**
+     * T75: LINUX 后端的 workspace id（null/blank → "default"）。合法 id 懒创建
+     * （workspace-per-task 零摩擦）。LOCAL 后端不支持 —— runtime 层提前拒绝。
+     */
+    val workspaceId: String? = null
 )
 
 /**
@@ -101,6 +106,8 @@ data class SpawnSpec(
 data class BackendSessionMetadata(
     val backendId: String,
     val rootfsId: String? = null,
+    /** T75: workspace id（懒创建后的规范化 id；LOCAL 恒 null）。 */
+    val workspaceId: String? = null,
     /** host 侧 workspace 目录（bind 到 guest /workspace）。 */
     val workspaceDir: String? = null,
     val binds: List<String> = emptyList(),

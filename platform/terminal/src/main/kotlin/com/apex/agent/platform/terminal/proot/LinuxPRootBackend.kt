@@ -9,6 +9,8 @@ import com.apex.agent.platform.terminal.runtime.ExecutionBackend
 import com.apex.agent.platform.terminal.runtime.SessionSpawnRequest
 import com.apex.agent.platform.terminal.runtime.SpawnSpec
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
+import com.apex.agent.platform.terminal.workspace.GuestUserHome
+import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import java.io.File
 
 /**
@@ -25,6 +27,7 @@ import java.io.File
  *   -0                        # fake root
  *   --kill-on-exit            # proot 退出时杀光 guest 进程树
  *   -b <workspaceDir>:/workspace
+ *   -b <userHomeDir>:/root    # T75: 持久化用户 home（跨 rootfs 版本）
  *   -w /workspace             # guest 初始 cwd（request.cwd 映射）
  *   -E TERM=… -E LANG=… -E HOME=/root -E SHELL=/bin/bash -E PATH=… -E TMPDIR=/tmp
  *   -- /bin/bash -i           # 长生命周期交互 bash
@@ -40,8 +43,10 @@ import java.io.File
 class LinuxPRootBackend(
     private val binaryProvider: PRootBinaryProvider,
     private val rootfsProvider: RootfsProvider,
-    /** host 侧 workspace 目录（bind 到 guest /workspace）。P71: 由 DI 传入固定目录。 */
-    private val workspaceHostDir: AbsolutePath,
+    /** T75: workspace 管理（per-session 隔离 + 生命周期；取代单一固定目录）。 */
+    private val workspaces: LinuxWorkspaceManager,
+    /** T75: 持久化用户 home（bind → guest /root，跨 rootfs 版本存活）。 */
+    private val userHome: GuestUserHome,
     private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl(),
     /** proot 宿主环境（Android 生产必传；JVM 测试可传 null → env 仅含 PATH 兜底）。 */
     private val hostEnv: PRootHostEnvironment? = null,
@@ -90,14 +95,22 @@ class LinuxPRootBackend(
                 RuntimeException("TerminalError:RootfsNotReady — rootfs 无 location")
             )
 
-        // 3. workspace host 目录确保存在（bind 源必须存在，否则 proot -b 报错）
-        runCatching { File(workspaceHostDir.value).mkdirs() }
+        // 3. T75: 解析 workspace（懒创建；非法 id → WorkspaceError:InvalidId 失败）
+        val workspaceId = request.workspaceId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: LinuxWorkspaceManager.DEFAULT_ID
+        val workspaceDir = workspaces.resolve(workspaceId).getOrElse { e ->
+            return Result.failure(e)
+        }
+        // T75: 持久化用户 home（首次初始化播种 skel/最小 bashrc）
+        val userHomeDir = userHome.ensureReady(File(rootfsPath.value)).getOrElse { e ->
+            return Result.failure(e)
+        }
 
         // 4. guest cwd：request.cwd 是 guest 语义路径 ——
         //    "/workspace..." 直通；相对路径落 /workspace/<cwd>；其他绝对路径（/root 等）直通。
         val guestCwd = mapGuestCwd(request.cwd)
 
-        // 5. 构造 launch request（guest env 只经 -E）
+        // 5. 构造 launch request（guest env 只经 -E；T75: 用户 home → /root 持久化 bind）
         val guestEnv = buildGuestEnv(request.env)
         val launch = PRootLaunchRequest(
             rootfs = rootfs,
@@ -105,13 +118,14 @@ class LinuxPRootBackend(
             arguments = listOf("-i"),
             workingDirectory = com.apex.agent.platform.terminal.workspace.WorkspacePath(guestCwd),
             environment = guestEnv,
-            binds = emptyList(),          // P72: resolv.conf/CA 等 bind 在 rootfs configure 后接入
+            binds = listOf(PRootBind(AbsolutePath(userHomeDir.absolutePath), GuestUserHome.GUEST_PATH)),
             terminalMode = com.apex.agent.platform.terminal.api.TerminalMode.AUTO,
             fakeRoot = true,
             killOnExit = true
         )
 
-        // 6. argv（PRootCommandBuilder 已修正 -w 映射）
+        // 6. argv（PRootCommandBuilder：request.binds + workspace bind）
+        val workspaceHostDir = AbsolutePath(workspaceDir.absolutePath)
         val command = commandBuilder.build(launch, binaryPath, rootfsPath, workspaceHostDir)
         val argv = listOf(command.executable.value) + command.arguments
 
@@ -133,8 +147,12 @@ class LinuxPRootBackend(
                 metadata = BackendSessionMetadata(
                     backendId = id,
                     rootfsId = rootfs.id,
+                    workspaceId = workspaceId,
                     workspaceDir = workspaceHostDir.value,
-                    binds = listOf("${workspaceHostDir.value}:/workspace"),
+                    binds = listOf(
+                        "${workspaceHostDir.value}:/workspace",
+                        "${userHomeDir.absolutePath}:${GuestUserHome.GUEST_PATH}"
+                    ),
                     guestCwd = guestCwd
                 )
             )
@@ -149,7 +167,9 @@ class LinuxPRootBackend(
         val env = linkedMapOf(
             "TERM" to "xterm-256color",
             "LANG" to "C.UTF-8",
-            "HOME" to "/root",
+            "HOME" to GuestUserHome.GUEST_PATH,
+            "USER" to "root",        // T75: fake root 视图（proot -0），部分工具需要
+            "LOGNAME" to "root",     // T75: 同上（cron/su 类工具探测）
             "SHELL" to GUEST_SHELL,
             "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TMPDIR" to "/tmp"

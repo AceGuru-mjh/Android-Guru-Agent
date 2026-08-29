@@ -85,7 +85,13 @@ class TerminalRuntimeImpl(
      */
     private val pumpScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /** Optional persistence (Spec §39). If set, auto-saves session metadata + enables recover(). */
-    private val persistenceStore: SessionMetadataStore? = null
+    private val persistenceStore: SessionMetadataStore? = null,
+    /**
+     * T75: 会话 ↔ workspace 绑定钩子（LINUX 会话）。create 成功后 bind、
+     * close 成功后 unbind —— LinuxWorkspaceManager 的活跃计数由此驱动
+     * （delete 拒绝有活跃会话的 workspace）。生产 DI 注入；测试可传 fake。
+     */
+    private val workspaceBinder: com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder? = null
 ) : TerminalRuntime {
 
     private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
@@ -137,7 +143,7 @@ class TerminalRuntimeImpl(
     override suspend fun create(
         shell: String, cwd: String, rows: Int, cols: Int,
         env: Map<String, String>, privilege: PrivilegeLevel,
-        backendId: String
+        backendId: String, workspaceId: String?
     ): Result<CreateResult> {
         // T73: 后端路由。local 默认 —— 与历史行为一致（golden）；
         // linux-ubuntu —— 失败时给出可行动错误（引导 Agent 先装 rootfs）。
@@ -148,6 +154,15 @@ class TerminalRuntimeImpl(
                         backendRegistry.list().joinToString(", ") { it.id } + "）"
                 )
             )
+        // T75: workspace 是 LINUX 后端概念 —— LOCAL 会话拒绝（显式报错优于静默忽略）。
+        if (!workspaceId.isNullOrBlank() && backend.runtimeType != BackendRuntimeType.LINUX) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "TerminalError:InvalidInput — workspaceId 仅支持 LINUX 后端" +
+                        "（当前 backend='${backend.id}'）。workspace 管理见 terminal.workspaces。"
+                )
+            )
+        }
         when (val av = backend.availability()) {
             is BackendAvailability.Ready -> Unit
             is BackendAvailability.NeedsRootfs -> return Result.failure(
@@ -164,13 +179,16 @@ class TerminalRuntimeImpl(
         }
         val request = SessionSpawnRequest(
             shellHint = shell.takeIf { backendId == LocalShellBackend.ID },
-            cwd = cwd, rows = rows, cols = cols, env = env, privilege = privilege
+            cwd = cwd, rows = rows, cols = cols, env = env, privilege = privilege,
+            workspaceId = workspaceId
         )
         val spec = backend.prepare(request).getOrElse { e ->
             return Result.failure(RuntimeException("TerminalError:BackendPrepareFailed — ${e.message}", e))
         }
         val r = sessionManager.createFromSpec(spec, rows, cols, privilege)
         return r.map { s ->
+            // T75: LINUX 会话创建成功 → 绑定 workspace（活跃计数；delete 门禁）
+            spec.metadata.workspaceId?.let { wsId -> workspaceBinder?.bind(s.id, wsId) }
             // start a JobManager listener for this session
             startSessionListener(s.id)
             // Register the session's process group (v1: pgid == shell pid — forkpty makes the
@@ -184,7 +202,8 @@ class TerminalRuntimeImpl(
                 backendId = backend.id,
                 runtimeType = backend.runtimeType.name,
                 rootfsId = s.backend?.rootfsId,
-                guestCwd = s.backend?.guestCwd
+                guestCwd = s.backend?.guestCwd,
+                workspaceId = s.backend?.workspaceId
             )
         }
     }
@@ -393,7 +412,11 @@ class TerminalRuntimeImpl(
             for (job in active) cancellationController.cancel(sessionId, job.id)
         }
         val r = sessionManager.close(sessionId, force)
-        if (r.isSuccess) processController.unregister(sessionId)
+        if (r.isSuccess) {
+            processController.unregister(sessionId)
+            // T75: 会话关闭 → 释放 workspace 活跃绑定（delete 门禁解除）
+            workspaceBinder?.unbind(sessionId)
+        }
         timeoutController.cancelAll()
         return r.map {
             val cause = when {

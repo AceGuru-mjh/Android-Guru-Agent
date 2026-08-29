@@ -67,6 +67,8 @@ data class ProviderConfig(
     val authType: AuthType = AuthType.BEARER,
     /** 支持多个 Key（[KeyRotationMode] 决定如何轮换）。 */
     val apiKeys: List<String> = emptyList(),
+    /** 多 Key 轮换策略（数据预埋：客户端轮换逻辑由 LLM client 层后续接入）。 */
+    val keyRotationMode: KeyRotationMode = KeyRotationMode.DISABLED,
     val organization: String = "",
     val project: String = "",
     /** Provider 级默认请求头；会与 Profile 级 [ModelProfile.customHeaders] 合并（Profile 优先）。 */

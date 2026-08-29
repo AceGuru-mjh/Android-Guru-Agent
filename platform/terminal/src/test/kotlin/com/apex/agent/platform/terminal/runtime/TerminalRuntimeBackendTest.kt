@@ -229,4 +229,98 @@ class TerminalRuntimeBackendTest {
         val closed = rt.close(r.sessionId)
         assertTrue(closed.isSuccess)
     }
+
+    // ─── 6. T75: workspace 路由 + 会话绑定生命周期 ───
+
+    @Test
+    fun `local create with workspaceId is rejected as InvalidInput`() = runBlocking {
+        val (rt, _) = newRuntime()
+        val err = rt.create(backendId = "local", workspaceId = "alpha").exceptionOrNull()
+        assertNotNull(err)
+        assertTrue(err!!.message!!.contains("TerminalError:InvalidInput"))
+        assertTrue(err.message!!.contains("workspaceId"))
+    }
+
+    @Test
+    fun `linux create forwards workspaceId to backend request`() = runBlocking {
+        val linux = StubLinuxBackend()
+        val (rt, _) = newRuntime(linux = linux)
+        rt.create(backendId = "linux-ubuntu", workspaceId = "task-42").getOrThrow()
+
+        assertEquals("task-42", linux.lastRequest!!.workspaceId)
+    }
+
+    @Test
+    fun `linux create result carries backend workspaceId`() = runBlocking {
+        val linux = object : ExecutionBackend {
+            override val id: String = "linux-ubuntu"
+            override val runtimeType: BackendRuntimeType = BackendRuntimeType.LINUX
+            override suspend fun availability(): BackendAvailability = BackendAvailability.Ready
+            override suspend fun prepare(request: SessionSpawnRequest): Result<SpawnSpec> =
+                Result.success(
+                    SpawnSpec(
+                        argv = listOf("/libproot.so", "--", "/bin/bash", "-i"),
+                        env = emptyMap(),
+                        cwd = "/rootfs",
+                        cwdIsGuestPath = true,
+                        metadata = BackendSessionMetadata(
+                            backendId = id, workspaceId = "task-42",
+                            workspaceDir = "/ws/task-42", guestCwd = "/workspace"
+                        )
+                    )
+                )
+        }
+        val (rt, _) = newRuntime(linux = linux)
+        val r = rt.create(backendId = "linux-ubuntu", workspaceId = "task-42").getOrThrow()
+        assertEquals("task-42", r.workspaceId)
+    }
+
+    @Test
+    fun `binder binds on linux create and unbinds on close`() = runBlocking {
+        val binder = RecordingBinder()
+        // backend metadata 带 workspaceId → create 成功后 bind
+        val linux = object : ExecutionBackend {
+            override val id: String = "linux-ubuntu"
+            override val runtimeType: BackendRuntimeType = BackendRuntimeType.LINUX
+            override suspend fun availability(): BackendAvailability = BackendAvailability.Ready
+            override suspend fun prepare(request: SessionSpawnRequest): Result<SpawnSpec> =
+                Result.success(
+                    SpawnSpec(
+                        argv = listOf("/libproot.so", "--", "/bin/bash", "-i"),
+                        env = emptyMap(),
+                        cwd = "/rootfs",
+                        cwdIsGuestPath = true,
+                        metadata = BackendSessionMetadata(
+                            backendId = id, workspaceId = "ws-a", guestCwd = "/workspace"
+                        )
+                    )
+                )
+        }
+        val rt = TerminalRuntimeImpl(
+            native = FakeNativePty(),
+            policy = TerminalPolicyImpl(),
+            backendRegistry = ExecutionBackendRegistry.of(LocalShellBackend(), linux),
+            workspaceBinder = binder
+        )
+
+        val r = rt.create(backendId = "linux-ubuntu", workspaceId = "ws-a").getOrThrow()
+        assertEquals(listOf(r.sessionId to "ws-a"), binder.bound)
+
+        // close 成功 → unbind（delete 门禁解除）
+        rt.close(r.sessionId).getOrThrow()
+        assertEquals(listOf(r.sessionId), binder.unbound)
+
+        // LOCAL 会话不 bind；close 时 unbind 是无害 no-op（会调用但不影响计数）
+        val local = rt.create(backendId = "local").getOrThrow()
+        rt.close(local.sessionId).getOrThrow()
+        assertEquals(1, binder.bound.size)
+        assertEquals(listOf(r.sessionId, local.sessionId), binder.unbound)
+    }
+
+    private class RecordingBinder : com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder {
+        val bound = mutableListOf<Pair<Long, String>>()
+        val unbound = mutableListOf<Long>()
+        override fun bind(sessionId: Long, workspaceId: String) { bound += sessionId to workspaceId }
+        override fun unbind(sessionId: Long) { unbound += sessionId }
+    }
 }

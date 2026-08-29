@@ -18,6 +18,8 @@ import com.apex.agent.platform.terminal.ubuntu.RootfsInstallLayout
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisionerImpl
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
+import com.apex.agent.platform.terminal.workspace.GuestUserHome
+import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -136,11 +138,13 @@ class UbuntuTerminalRuntimeWiringTest {
                 PRootBinaryInfo(binary, PRootVersion(5, 4, 0), CpuArchitecture.X86_64, true)
             )
         }
-        val ws = File(layout.baseDir.value, "workspace").apply { mkdirs() }
+        val workspaces = LinuxWorkspaceManager(File(layout.baseDir.value, "workspaces"))
+        val userHome = GuestUserHome(File(layout.baseDir.value, "home"))
         val linux = LinuxPRootBackend(
             binaryProvider = binaryProvider,
             rootfsProvider = ProvisionedRootfsProvider(provisioner),
-            workspaceHostDir = AbsolutePath(ws.absolutePath)
+            workspaces = workspaces,
+            userHome = userHome
         )
         return TerminalRuntimeImpl(
             native = pty,
@@ -209,8 +213,8 @@ class UbuntuTerminalRuntimeWiringTest {
             "head -1 /etc/os-release && test -L /bin && echo SYMLINK-OK && " +
                 "echo HOME=\$HOME && echo TERM=\$TERM && cat /workspace/marker.txt"))
 
-        // marker 文件（workspace bind 证明）
-        File(layout.baseDir.value, "workspace").apply { mkdirs() }
+        // marker 文件（workspace bind 证明；T75: default workspace 在 workspaces/default）
+        File(layout.baseDir.value, "workspaces/default").apply { mkdirs() }
             .let { File(it, "marker.txt").writeText("bind-works") }
 
         val (adaptedArgv, guestEnv) = adaptForUpstreamProot(argv)
@@ -236,6 +240,88 @@ class UbuntuTerminalRuntimeWiringTest {
         assertEquals("ANDROID_LOCAL", r.runtimeType)
         val nativeId = rt.sessionManager.assembly(r.sessionId)!!.nativeSessionId
         assertEquals("golden argv preserved", listOf("/system/bin/sh", "-i"), pty.argvOf(nativeId))
+    }
+
+    // ─── T75: W5 workspace 隔离 + W6 用户 home 持久化（真 proot）───
+
+    @Test
+    fun `W5 two workspaces are isolated through real proot`() = runBlocking {
+        assumeTrue("install failed: $installError", installed)
+        assumeTrue("proot unavailable — W5 skipped", prootBinary != null)
+        val pty = FakeNativePty()
+        val rt = newRuntime(pty)
+
+        // 两个不同 workspace 的会话（懒创建）
+        val a = rt.create(backendId = "linux-ubuntu", workspaceId = "alpha").getOrThrow()
+        assertEquals("alpha", a.workspaceId)
+
+        // host 侧分别写 marker
+        val wsRoot = File(layout.baseDir.value, "workspaces")
+        File(wsRoot, "alpha").mkdirs()
+        File(wsRoot, "beta").mkdirs()
+        File(wsRoot, "alpha/marker.txt").writeText("ALPHA-ONLY")
+        File(wsRoot, "beta/marker.txt").writeText("BETA-ONLY")
+
+        // 取 alpha 会话的 argv → 一次性命令验证隔离
+        val nativeId = rt.sessionManager.assembly(a.sessionId)!!.nativeSessionId
+        val argv = pty.argvOf(nativeId).toMutableList()
+        assertEquals(listOf("/bin/bash", "-i"), argv.takeLast(2))
+        argv.removeAt(argv.size - 1)
+        argv.addAll(listOf("-c", "cat /workspace/marker.txt"))
+
+        val (adaptedArgv, guestEnv) = adaptForUpstreamProot(argv)
+        val exec = executorWith(guestEnv).execute(
+            PRootCommand(AbsolutePath(adaptedArgv[0]), adaptedArgv.drop(1)),
+            timeoutMs = 120_000
+        )
+        assertEquals("proot exit: ${exec.stderr}", 0, exec.exitCode)
+        assertTrue("alpha marker visible: '${exec.stdout}'", exec.stdout.contains("ALPHA-ONLY"))
+        assertFalse("beta marker must NOT leak: '${exec.stdout}'", exec.stdout.contains("BETA-ONLY"))
+    }
+
+    @Test
+    fun `W6 user home persists on host and survives sessions`() = runBlocking {
+        assumeTrue("install failed: $installError", installed)
+        assumeTrue("proot unavailable — W6 skipped", prootBinary != null)
+        val pty = FakeNativePty()
+        val rt = newRuntime(pty)
+
+        // 首个 linux 会话触发 home 初始化（skel/最小 bashrc 播种）
+        val r = rt.create(backendId = "linux-ubuntu").getOrThrow()
+        val nativeId = rt.sessionManager.assembly(r.sessionId)!!.nativeSessionId
+        val argv = pty.argvOf(nativeId).toMutableList()
+        argv.removeAt(argv.size - 1)
+        argv.addAll(listOf("-c",
+            "echo persist-me > /root/PERSIST.txt && cat /root/PERSIST.txt && " +
+                "test -f /root/.bashrc && echo BASHRC-OK"))
+
+        val (adaptedArgv, guestEnv) = adaptForUpstreamProot(argv)
+        val exec = executorWith(guestEnv).execute(
+            PRootCommand(AbsolutePath(adaptedArgv[0]), adaptedArgv.drop(1)),
+            timeoutMs = 120_000
+        )
+        assertEquals("proot exit: ${exec.stderr}", 0, exec.exitCode)
+        assertTrue("in-guest readback: '${exec.stdout}'", exec.stdout.contains("persist-me"))
+        assertTrue("bashrc seeded: '${exec.stdout}'", exec.stdout.contains("BASHRC-OK"))
+
+        // T75 核心性质：guest /root 写入落在 host 侧持久目录（bind 而非 rootfs 内部）
+        val hostHome = File(layout.baseDir.value, "home")
+        assertEquals("persist-me", File(hostHome, "PERSIST.txt").readText().trim())
+        assertTrue(".bashrc on host", File(hostHome, ".bashrc").exists())
+
+        // 第二个会话仍看到同一 home（跨会话持久）
+        val pty2 = FakeNativePty()
+        val rt2 = newRuntime(pty2)
+        val r2 = rt2.create(backendId = "linux-ubuntu").getOrThrow()
+        val nid2 = rt2.sessionManager.assembly(r2.sessionId)!!.nativeSessionId
+        val argv2 = pty2.argvOf(nid2).toMutableList()
+        argv2.removeAt(argv2.size - 1)
+        argv2.addAll(listOf("-c", "cat /root/PERSIST.txt"))
+        val (a2, ge2) = adaptForUpstreamProot(argv2)
+        val exec2 = executorWith(ge2).execute(
+            PRootCommand(AbsolutePath(a2[0]), a2.drop(1)), timeoutMs = 120_000
+        )
+        assertTrue("second session sees home: '${exec2.stdout}'", exec2.stdout.contains("persist-me"))
     }
 
     // ─── upstream proot 5.4 host adaptation（与 T72 E2E 相同的语义等价层）───

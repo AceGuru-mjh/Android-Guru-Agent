@@ -33,7 +33,7 @@ class TerminalBackendsToolTest {
     private class FakeRuntime(private val statuses: List<TerminalRuntime.BackendStatus>) : TerminalRuntime {
         override suspend fun backends(): List<TerminalRuntime.BackendStatus> = statuses
         // 其余门面操作在工具测试中不可达 —— 工具只调 backends()。
-        override suspend fun create(shell: String, cwd: String, rows: Int, cols: Int, env: Map<String, String>, privilege: com.apex.agent.platform.terminal.policy.PrivilegeLevel, backendId: String): Result<TerminalRuntime.CreateResult> = throw UnsupportedOperationException()
+        override suspend fun create(shell: String, cwd: String, rows: Int, cols: Int, env: Map<String, String>, privilege: com.apex.agent.platform.terminal.policy.PrivilegeLevel, backendId: String, workspaceId: String?): Result<TerminalRuntime.CreateResult> = throw UnsupportedOperationException()
         override suspend fun run(sessionId: Long, command: String, owner: com.apex.agent.platform.terminal.io.InputOwner, background: Boolean, timeoutMs: Long): Result<TerminalRuntime.RunResult> = Result.failure(UnsupportedOperationException())
         override suspend fun observe(sessionId: Long, mode: TerminalRuntime.ObserveMode, afterCursor: Long, maxBytes: Int, maxEvents: Int): Result<TerminalRuntime.ObserveResult> = Result.failure(UnsupportedOperationException())
         override suspend fun wait(sessionId: Long, condition: com.apex.agent.platform.terminal.wait.WaitCondition, timeoutMs: Long): Result<com.apex.agent.platform.terminal.wait.WaitResult> = Result.failure(UnsupportedOperationException())

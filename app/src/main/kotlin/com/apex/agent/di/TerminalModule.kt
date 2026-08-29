@@ -26,6 +26,8 @@ import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisionerImpl
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
+import com.apex.agent.platform.terminal.workspace.GuestUserHome
+import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import com.apex.agent.core.tools.ToolRegistry
 import dagger.Module
 import dagger.Provides
@@ -125,21 +127,45 @@ object TerminalModule {
     )
 
     /**
+     * T75: Linux workspace 管理 —— per-session 隔离文件区（bind → guest /workspace）。
+     * legacyDir = P71/T73 的单 workspace 目录（首次使用时原子迁移为 default）。
+     */
+    @Provides
+    @Singleton
+    fun provideLinuxWorkspaceManager(@ApplicationContext context: Context): LinuxWorkspaceManager =
+        LinuxWorkspaceManager(
+            rootDir = File(context.filesDir, "linux/workspaces"),
+            legacyDir = File(context.filesDir, "linux/workspace")
+        )
+
+    /**
+     * T75: Guest 用户 home —— host 侧持久目录 bind → guest /root。
+     * 用户数据与 rootfs 镜像分离：rootfs 换版本/重装不丢 /root 下的文件。
+     */
+    @Provides
+    @Singleton
+    fun provideGuestUserHome(@ApplicationContext context: Context): GuestUserHome =
+        GuestUserHome(File(context.filesDir, "linux/home"))
+
+    /**
      * P71 Linux 后端：availability() 三态（Ready/NeedsRootfs/Failed）+
      * prepare() → SpawnSpec（forkpty → execv(libproot.so … /bin/bash -i)）。
-     * workspace：host filesDir/linux/workspace ↔ guest /workspace bind。
+     * T75: workspace 经 LinuxWorkspaceManager 解析（per-session 隔离 + 懒创建）；
+     * 用户 home 经 GuestUserHome 持久化 bind → guest /root。
      */
     @Provides
     @Singleton
     fun provideLinuxPRootBackend(
-        @ApplicationContext context: Context,
         binaryProvider: NativeLibraryPRootBinaryProvider,
         rootfsProvider: ProvisionedRootfsProvider,
+        workspaces: LinuxWorkspaceManager,
+        userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment
     ): LinuxPRootBackend = LinuxPRootBackend(
         binaryProvider = binaryProvider,
         rootfsProvider = rootfsProvider,
-        workspaceHostDir = AbsolutePath(File(context.filesDir, "linux/workspace").absolutePath),
+        workspaces = workspaces,
+        userHome = userHome,
         hostEnv = hostEnv
     )
 
@@ -153,18 +179,22 @@ object TerminalModule {
         linuxBackend
     )
 
-    /** TerminalRuntime —— T73: 注入后端注册表，create(backendId=…) 路由生效。 */
+    /** TerminalRuntime —— T73: 注入后端注册表，create(backendId=…) 路由生效。
+     *  T75: 注入 workspaceBinder（LinuxWorkspaceManager）—— 会话创建/关闭时
+     *  维护活跃绑定计数（workspace delete 门禁）。 */
     @Provides
     @Singleton
     fun provideTerminalRuntime(
         native: NativePty,
         policy: TerminalPolicy,
         store: SessionMetadataStore,
-        backends: ExecutionBackendRegistry
+        backends: ExecutionBackendRegistry,
+        workspaceBinder: LinuxWorkspaceManager
     ): TerminalRuntime = TerminalRuntimeImpl(
         native, policy,
         backendRegistry = backends,
-        persistenceStore = store
+        persistenceStore = store,
+        workspaceBinder = workspaceBinder
     )
 
     /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */

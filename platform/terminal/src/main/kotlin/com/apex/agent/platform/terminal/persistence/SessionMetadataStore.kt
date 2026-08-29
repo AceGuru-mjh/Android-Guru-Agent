@@ -41,7 +41,8 @@ class SessionMetadataStore(
 
     @Serializable
     data class SessionRecord(
-        val schemaVersion: Int = 2,   // T73: v2 adds backend fields; v1 files still load (defaults)
+        // T73: v2 adds backend fields; T75: v3 adds workspaceId. v1/v2 files still load (defaults)
+        val schemaVersion: Int = 3,
         val id: Long, val shell: String, val initialCwd: String, val pid: Int,
         val rows: Int, val cols: Int, val privilege: String, val state: String,
         val createdAt: Long, val lastActivityAt: Long = createdAt,  // PR #54 §25: activity tracking
@@ -51,11 +52,13 @@ class SessionMetadataStore(
         // ── T73 (schema v2): 执行后端元数据（crash 后恢复时可区分本地/Ubuntu 会话）──
         val backendId: String? = null,       // null = v1 记录（语义上等同 "local"）
         val rootfsId: String? = null,
+        // ── T75 (schema v3): 会话绑定的 workspace id（LINUX）──
+        val workspaceId: String? = null,
         val workspaceDir: String? = null,
         val guestCwd: String? = null,
         val binds: List<String> = emptyList()
     ) {
-        companion object { const val CURRENT_SCHEMA = 2 }
+        companion object { const val CURRENT_SCHEMA = 3 }
     }
 
     @Serializable
@@ -84,6 +87,7 @@ class SessionMetadataStore(
             recentEvents = recentEvents.takeLast(maxRecentEvents).map { it.toRecord() },
             backendId = session.backend?.backendId,
             rootfsId = session.backend?.rootfsId,
+            workspaceId = session.backend?.workspaceId,
             workspaceDir = session.backend?.workspaceDir,
             guestCwd = session.backend?.guestCwd,
             binds = session.backend?.binds ?: emptyList()

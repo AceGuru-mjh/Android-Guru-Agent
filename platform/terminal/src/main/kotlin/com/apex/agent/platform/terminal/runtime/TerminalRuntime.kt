@@ -49,7 +49,12 @@ interface TerminalRuntime {
         cols: Int = 80,
         env: Map<String, String> = emptyMap(),
         privilege: PrivilegeLevel = PrivilegeLevel.NORMAL,
-        backendId: String = "local"
+        backendId: String = "local",
+        /**
+         * T75: workspace id（仅 LINUX 后端；null/blank → "default"）。合法格式
+         * （^[a-z0-9][a-z0-9_-]{0,63}$）的 id 懒创建。LOCAL + 非空 → InvalidInput。
+         */
+        workspaceId: String? = null
     ): RuntimeResult<CreateResult>
 
     data class CreateResult(
@@ -66,7 +71,9 @@ interface TerminalRuntime {
         val backendId: String = "local",
         val runtimeType: String = "ANDROID_LOCAL",   // BackendRuntimeType name
         val rootfsId: String? = null,                // LINUX: 已就绪 rootfs 的 id
-        val guestCwd: String? = null                 // LINUX: guest 语义 cwd
+        val guestCwd: String? = null,                // LINUX: guest 语义 cwd
+        // ── T75: workspace（LINUX 会话的隔离文件区）──
+        val workspaceId: String? = null              // LINUX: 会话绑定的 workspace id
     )
 
     // ───────── backends（T73：Agent 后端能力发现）─────────

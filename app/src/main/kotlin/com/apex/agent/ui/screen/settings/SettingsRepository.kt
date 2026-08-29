@@ -265,10 +265,18 @@ class SettingsRepository @Inject constructor(
 /**
  * Agent 运行参数（扩展版）。
  *
- * 字段中已真正打通到 [com.apex.agent.core.engine.AgentConfig] 的有：
- * defaultMode / thinkLevel / maxIterations / streaming(flag) / reflection。
- * 其余（loopDetection / planning / replanning / backgroundExecution 等）为数据预埋，
- * 由 Agent 引擎后续接入，UI 上已逐项暴露。
+ * 字段中已真正打通到 [com.apex.agent.core.engine.AgentConfig] 的有（DI 一次性快照，
+ * 设置变更需重启应用生效）：
+ * defaultMode / thinkLevel / maxIterations / reflection / reflectionRounds /
+ * maxContextTokens / compressionThreshold / preserveRecentTurns / maxToolOutputLength
+ * （streaming / temperature 则来自选中的模型 Profile）。
+ *
+ * 其余字段为数据预埋，由对应层后续接入：
+ *  - loopDetection / planning / replanning / backgroundExecution / keepAlive /
+ *    autoRetry 等 → Agent 引擎后续接入（UI 已逐项暴露）；
+ *  - visionEnabled / screenshotQuality / maxScreenshots → 视觉管线后续接入；
+ *  - themeMode / dynamicColor / fontScale / showTimestamps → 界面/主题层消费
+ *    （fontScale / showTimestamps 设计为立即生效）。
  */
 @kotlinx.serialization.Serializable
 data class AgentSettings(
@@ -296,4 +304,19 @@ data class AgentSettings(
     val visionEnabled: Boolean = true,
     val screenshotQuality: String = "auto",   // auto | low | medium | high
     val maxScreenshots: Int = 3,
+
+    // ── 上下文压缩（对应 AgentConfig，重启应用/新会话后生效）──
+    val maxContextTokens: Int = 128_000,
+    val compressionThreshold: Float = 0.8f,   // 0.5..0.95
+    val preserveRecentTurns: Int = 5,
+    val maxToolOutputLength: Int = 2000,
+
+    // ── 反思 ──
+    val reflectionRounds: Int = 1,            // 1..3
+
+    // ── 界面 ──
+    val themeMode: String = "system",         // system | dark | light
+    val dynamicColor: Boolean = false,
+    val fontScale: Float = 1.0f,              // 0.8..1.4
+    val showTimestamps: Boolean = true,
 )

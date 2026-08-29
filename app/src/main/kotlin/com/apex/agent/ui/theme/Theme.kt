@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -101,3 +102,6 @@ fun ApexTheme(
         content = content
     )
 }
+
+/** 是否在聊天气泡旁显示时间戳（由设置中心驱动，MainActivity 提供）。 */
+val LocalShowTimestamps = staticCompositionLocalOf { true }

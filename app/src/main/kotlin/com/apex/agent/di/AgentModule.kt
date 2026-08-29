@@ -31,31 +31,46 @@ object AgentModule {
         return AndroidPrivilegeInfoProvider()
     }
 
+    /**
+     * AgentConfig 组装（@Provides @Singleton 一次性快照）。
+     * 注意：设置变更需重启应用生效（Singleton 快照），新会话不会重读设置。
+     */
     @Provides
     @Singleton
     fun provideAgentConfig(repo: SettingsRepository): AgentConfig {
         val agent = repo.agentSettings.value
         val profile = repo.defaultProfile()
-        // Execution Mode → AgentMode（chat 偏重质量评审，auto/build 走自主构建）
+        // Execution Mode → AgentMode（全档位映射；"auto"/"chat" 为旧值兼容）
         val mode = when (agent.defaultMode) {
-            "chat" -> AgentMode.REFLECTION
-            else -> AgentMode.BUILD
+            "build" -> AgentMode.BUILD
+            "plan" -> AgentMode.PLAN
+            "spec" -> AgentMode.SPEC
+            "reflect" -> AgentMode.REFLECTION
+            "assist" -> AgentMode.HUMAN_ASSIST
+            "custom" -> AgentMode.CUSTOM
+            "chat" -> AgentMode.REFLECTION   // 旧值兼容：chat 偏重质量评审
+            else -> AgentMode.BUILD          // "auto" 及未知旧值走自主构建
         }
-        // 思考深度
+        // 思考深度（全档位映射）
         val thinkingLevel = when (agent.thinkLevel) {
-            "deep" -> ThinkingLevel.DEEP
             "minimal" -> ThinkingLevel.NONE
+            "light" -> ThinkingLevel.LIGHT
+            "deep" -> ThinkingLevel.DEEP
+            "maximum" -> ThinkingLevel.MAXIMUM
             else -> ThinkingLevel.STANDARD
         }
         return AgentConfig(
             mode = mode,
             thinkingLevel = thinkingLevel,
             maxIterations = agent.maxIterations,
-            maxContextTokens = profile.contextWindow,
+            // 上下文压缩（对应 AgentSettings 同名字段，重启应用/新会话后生效）
+            maxContextTokens = agent.maxContextTokens,
+            compressionThreshold = agent.compressionThreshold,
+            preserveRecentTurns = agent.preserveRecentTurns,
+            maxToolOutputLength = agent.maxToolOutputLength,
             streaming = profile.streaming,
             temperature = profile.temperature,
-            maxToolOutputLength = profile.maxToolResultTokens,
-            reflectionRounds = if (agent.reflection) 1 else 0,
+            reflectionRounds = if (agent.reflection) agent.reflectionRounds.coerceIn(0, 5) else 0,
         )
     }
 
@@ -67,18 +82,24 @@ object AgentModule {
         return SharedPrefsConversationMemory(context)
     }
 
+    /**
+     * 上下文压缩器（与 AgentConfig 同源：从设置中心读取压缩阈值与工具输出上限，
+     * 设置变更需重启应用生效）。
+     */
     @Provides
     @Singleton
-    fun provideContextCompressor(llmClient: LlmClient): ContextCompressor {
+    fun provideContextCompressor(llmClient: LlmClient, repo: SettingsRepository): ContextCompressor {
+        val agent = repo.agentSettings.value
+        val maxChars = agent.maxToolOutputLength.coerceIn(200, 100_000)
         return HybridCompressor(
             llmClient = llmClient,
             toolTruncator = ToolOutputTruncator(
-                maxChars = 2000,
-                headChars = 1200,
-                tailChars = 600
+                maxChars = maxChars,
+                headChars = (maxChars * 0.6f).toInt().coerceAtLeast(100),
+                tailChars = (maxChars * 0.3f).toInt().coerceAtLeast(50)
             ),
-            maxContextTokens = 128000,
-            threshold = 0.8f
+            maxContextTokens = agent.maxContextTokens,
+            threshold = agent.compressionThreshold
         )
     }
 

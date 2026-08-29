@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.component.MessageAttachmentList
+import com.apex.agent.ui.theme.LocalShowTimestamps
 import java.time.format.DateTimeFormatter
 
 // ═══ 消息组件 ═══
@@ -132,12 +133,15 @@ internal fun UserBubble(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = timeStr,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                    )
+                    // 时间戳可由设置中心关闭（关闭时不渲染，行内其余元素对齐不变）
+                    if (LocalShowTimestamps.current) {
+                        Text(
+                            text = timeStr,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                        )
+                    }
                 }
 
                 // 附件展示（如果有）
@@ -226,12 +230,14 @@ internal fun AgentBubble(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        text = timeStr,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (LocalShowTimestamps.current) {
+                        Text(
+                            text = timeStr,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）

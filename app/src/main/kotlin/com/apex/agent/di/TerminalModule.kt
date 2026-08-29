@@ -163,7 +163,7 @@ object TerminalModule {
         backends: ExecutionBackendRegistry
     ): TerminalRuntime = TerminalRuntimeImpl(
         native, policy,
-        backends = backends,
+        backendRegistry = backends,
         persistenceStore = store
     )
 

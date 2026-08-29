@@ -240,7 +240,7 @@ class GithubApiService @Inject constructor(
             return when {
                 kClass == JsonObject::class -> JsonObject(emptyMap()) as T
                 kClass == JsonArray::class -> JsonArray(emptyList()) as T
-                List::class.isAssignableFrom(kClass) -> emptyList<Any>() as T
+                List::class.java.isAssignableFrom(kClass.java) -> emptyList<Any>() as T
                 else -> throw GithubApiException("GitHub API returned empty body (HTTP $code) but expected $kClass", code)
             }
         }

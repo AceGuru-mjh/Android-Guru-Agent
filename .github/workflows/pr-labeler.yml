@@ -1,0 +1,30 @@
+name: PR Labeler
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Automatically labels PRs by the paths they touch (config: .github/labeler.yml).
+# Labels make triage/review faster: filter by area (core/android/terminal/ui),
+# by risk surface (ci/build), or by docs-only changes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label by changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          sync-labels: true

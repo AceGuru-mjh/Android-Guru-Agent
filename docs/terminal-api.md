@@ -101,11 +101,18 @@ State mutation → event queued → lock released → callback dispatched.
 ## Backend Contract
 
 ```
-Terminal → ExecutionBackend
-  ├── AndroidBackend (forkpty + JNI)
-  ├── TermuxBackend (future)
-  └── UbuntuBackend (future, via PRoot)
+TerminalRuntime.create(backendId=…) → ExecutionBackendRegistry
+  ├── LocalShellBackend  (id="local", forkpty + execv("/system/bin/sh","-i"))  [P71, golden]
+  └── LinuxPRootBackend  (id="linux-ubuntu", forkpty + execv(libproot.so … /bin/bash -i))  [P71+T73]
 ```
+
+T73 wiring: `TerminalRuntime.create()` routes through the registry (default
+`backendId="local"` — byte-identical to the pre-P71 spawn, locked by
+ExecutionBackendGoldenTest). Agent discovers backends via `terminal.backends()`
+(availability: READY / NEEDS_ROOTFS / FAILED) and provisions the Ubuntu rootfs
+via `terminal.ubuntu.install` (idempotent, resumable). Backend session metadata
+(`backendId`/`rootfsId`/`guestCwd`/workspace binds) is persisted with the session
+(SessionRecord schema v2) so crash recovery distinguishes local vs Ubuntu sessions.
 
 Agent never knows which backend is active. Backend swap = zero Agent code changes.
 

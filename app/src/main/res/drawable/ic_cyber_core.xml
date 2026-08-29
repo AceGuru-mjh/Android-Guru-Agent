@@ -1,16 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AI 核心符号 — 圆角渐变三角（青→深青）+ 暗色内芯 + 白色核心点，外层青晕。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- AI 核心符号：外环三角 + 中心实心点 -->
+
+    <!-- 外层柔晕 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M12,3 L20,19 L4,19 Z" />
+        android:pathData="M12,4 L20,19 L4,19 Z"
+        android:strokeColor="#3300F0FF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 主体：填充 + 同色圆角描边（round join 产生圆角） -->
     <path
-        android:fillColor="#0F1218"
-        android:pathData="M12,8 L16.2,17 L7.8,17 Z" />
+        android:pathData="M12,5.2 L19.2,18.2 L4.8,18.2 Z"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="12" android:startY="5.2"
+                android:endX="12" android:endY="18.2">
+                <item android:offset="0" android:color="#FF67E8FF" />
+                <item android:offset="1" android:color="#FF0099C7" />
+            </gradient>
+        </aapt:attr>
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="12" android:startY="5.2"
+                android:endX="12" android:endY="18.2">
+                <item android:offset="0" android:color="#FF67E8FF" />
+                <item android:offset="1" android:color="#FF0099C7" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 暗色内芯 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M12,12.5 m-2.2,0 a2.2,2.2 0 1,1 4.4,0 a2.2,2.2 0 1,1 -4.4,0" />
+        android:fillColor="#FF0F1218"
+        android:pathData="M12,9.4 L15.9,16.4 L8.1,16.4 Z" />
+
+    <!-- 核心点 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,13.4 m-2.1,0 a2.1,2.1 0 1,1 4.2,0 a2.1,2.1 0 1,1 -4.2,0" />
 </vector>

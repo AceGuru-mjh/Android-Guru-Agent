@@ -109,8 +109,11 @@ class DreamRenderer @Inject constructor(
         // 3. 宏技能保鲜检查：验证高频宏技能的有效性
         try {
             val topMacros = store.getTopMacros(limit = 10)
+            // 修复：旧公式 (now - successCount * 86_400_000L) > 7*86_400_000L 把"次数"当成"毫秒时间戳"
+            // 相减，几乎永远为真 → 所有宏都被误判过期。改为按 lastExecutedAt 时间戳比较，
+            // 7 天内成功回放过的视为新鲜。lastExecutedAt=0（从未回放）视为已过期，触发保鲜降能。
             val staleMacros = topMacros.filter { macro ->
-                (now - macro.successCount * 86_400_000L) > 7 * 86_400_000L // 7天未成功
+                (now - macro.lastExecutedAt) > 7 * 86_400_000L // 7天未成功回放
             }
             result.staleMacroCount = staleMacros.size
             // 降低过期宏技能的能量

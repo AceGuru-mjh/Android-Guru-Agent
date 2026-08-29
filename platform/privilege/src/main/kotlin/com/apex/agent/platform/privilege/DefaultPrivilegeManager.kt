@@ -4,13 +4,16 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.os.Build
 import com.apex.agent.platform.privilege.accessibility.ApexAccessibilityService
+import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,25 +64,54 @@ class DefaultPrivilegeManager @Inject constructor(
         )
     }
 
-    private suspend fun executeViaRoot(command: String, timeoutMs: Long): ShellResult {
-        return withContext(Dispatchers.IO) {
+    // 之前 timeoutMs 被静默忽略：`process.waitFor()` 无超时，stdout/stderr 的 bufferedReader 也从不 close。
+    // 一个 su 提示被拒绝/`tail -f` 之类阻塞命令会让调用方永久挂起并泄漏 FD。
+    // 现在：用 `waitFor(timeoutMs)` 兑现超时；finally 中关闭 reader + 强杀进程，杜绝 FD 泄漏。
+    private suspend fun executeViaRoot(command: String, timeoutMs: Long): ShellResult =
+        withContext(Dispatchers.IO) {
+            val process: Process = try {
+                Runtime.getRuntime().exec(arrayOf("su", "-c", command))
+            } catch (e: Exception) {
+                return@withContext ShellResult(false, "Root exec error: ${e.message}", -1, ExecutionVia.ROOT)
+            }
+            val stdout = process.inputStream.bufferedReader()
+            val stderr = process.errorStream.bufferedReader()
             try {
-                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-                val output = process.inputStream.bufferedReader().readText()
-                val error = process.errorStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
-                
-                ShellResult(
-                    success = exitCode == 0,
-                    output = if (output.isNotBlank()) output else error,
-                    exitCode = exitCode,
-                    executedVia = ExecutionVia.ROOT
-                )
+                // 后台并发排空 stdout/stderr，避免管道缓冲写满导致 waitFor 死锁。
+                val stdoutDeferred = async(Dispatchers.IO) { runCatching { stdout.readText() }.getOrDefault("") }
+                val stderrDeferred = async(Dispatchers.IO) { runCatching { stderr.readText() }.getOrDefault("") }
+                val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                if (!completed) {
+                    // 超时：强杀 su 子进程，让阻塞中的 readText 自然返回 EOF。
+                    process.destroyForcibly()
+                    stdoutDeferred.await()
+                    stderrDeferred.await()
+                    ShellResult(
+                        success = false,
+                        output = "Root command timed out after ${timeoutMs}ms",
+                        exitCode = -1,
+                        executedVia = ExecutionVia.ROOT
+                    )
+                } else {
+                    val output = stdoutDeferred.await()
+                    val error = stderrDeferred.await()
+                    val exitCode = process.exitValue()
+                    ShellResult(
+                        success = exitCode == 0,
+                        output = if (output.isNotBlank()) output else error,
+                        exitCode = exitCode,
+                        executedVia = ExecutionVia.ROOT
+                    )
+                }
             } catch (e: Exception) {
                 ShellResult(false, "Root exec error: ${e.message}", -1, ExecutionVia.ROOT)
+            } finally {
+                // 无论正常返回、超时、异常，都关闭 reader + 杀进程，避免 FD 泄漏与僵尸 su 子进程。
+                runCatching { stdout.close() }
+                runCatching { stderr.close() }
+                if (process.isAlive) process.destroyForcibly()
             }
         }
-    }
 
     private suspend fun executeViaShizuku(command: String, timeoutMs: Long): ShellResult {
         // Shizuku执行逻辑
@@ -177,17 +209,27 @@ class DefaultPrivilegeManager @Inject constructor(
         // UI树只能通过无障碍获取
         val a11yService = ApexAccessibilityService.instance
             ?: return UiTreeResult(false, "Accessibility service not running")
-        
+
         // 遍历root节点
         val rootNode = a11yService.rootInActiveWindow
             ?: return UiTreeResult(false, "No active window")
-        
-        val nodes = mutableListOf<UiNode>()
-        traverseNode(rootNode, nodes)
-        
-        return UiTreeResult(success = true, nodes = nodes)
+
+        // rootInActiveWindow 拿到的 ref 必须由本方法 recycle，否则每次 getUiTree 泄漏一个 AccessibilityNodeInfo。
+        try {
+            val nodes = mutableListOf<UiNode>()
+            traverseNode(rootNode, nodes)
+            return UiTreeResult(success = true, nodes = nodes)
+        } finally {
+            rootNode.recycle()
+        }
     }
 
+    /**
+     * 递归展平节点为 UiNode 列表。
+     *
+     * 所有权约定：node 自身由 caller 负责 recycle（这里是 [getUiTree] 在 finally 中 recycle rootNode）；
+     * 本方法在递归时获取的每个 child 在用完后立即 recycle，避免 AccessibilityNodeInfo 泄漏。
+     */
     private fun traverseNode(
         node: android.view.accessibility.AccessibilityNodeInfo,
         result: MutableList<UiNode>,
@@ -207,9 +249,15 @@ class DefaultPrivilegeManager @Inject constructor(
             clickable = node.isClickable,
             scrollable = node.isScrollable
         ))
-        
+
         for (i in 0 until node.childCount) {
-            node.getChild(i)?.let { traverseNode(it, result, depth + 1) }
+            // child 必须在本循环内 recycle，否则递归遍历会累积泄漏所有中间节点。
+            val child = node.getChild(i) ?: continue
+            try {
+                traverseNode(child, result, depth + 1)
+            } finally {
+                child.recycle()
+            }
         }
     }
 
@@ -233,10 +281,14 @@ class DefaultPrivilegeManager @Inject constructor(
     }
 
     private fun checkShizuku(): Boolean {
+        // 之前是 TODO stub，永远返回 false；现在委托给 ShizukuCommandExecutor 真实探测
+        // binder 存活 + 已授权（内部调用 Shizuku.pingBinder() + checkSelfPermission）。
+        //
+        // TODO（听众接线）：ApexApp.initShizuku() 已注册 addBinderReceivedListenerSticky /
+        // addBinderDeadListener，但只 LOG，未把 binder 状态回灌 _shizukuAvailable；
+        // 应在那些回调里触发 refreshStatus() 让 StateFlow 实时反映 Shizuku 启停。
         return try {
-            Class.forName("rikka.shizuku.Shizuku")
-            // 实际检查需要Shizuku API
-            false // TODO
+            ShizukuCommandExecutor.isAvailable() && ShizukuCommandExecutor.hasPermission()
         } catch (e: Exception) {
             false
         }

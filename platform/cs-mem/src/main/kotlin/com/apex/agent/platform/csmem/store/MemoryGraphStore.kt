@@ -149,7 +149,9 @@ data class FSMMacro(
     val successCount: Int = 0,
     val failureCount: Int = 0,
     val energy: Float = 1.0f,
-    val isCrystallized: Boolean = false
+    val isCrystallized: Boolean = false,
+    /** 最近一次执行时间戳（ms）；0 表示尚未被实际回放过。供 DreamRenderer 判定过期。 */
+    val lastExecutedAt: Long = 0
 )
 
 /**

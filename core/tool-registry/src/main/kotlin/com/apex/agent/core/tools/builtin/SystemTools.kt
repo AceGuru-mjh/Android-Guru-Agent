@@ -174,10 +174,15 @@ class AppLaunchTool(
         val json = Json.parseToJsonElement(arguments).jsonObject
         val pkg = json["package"]?.jsonPrimitive?.content
             ?: return "Error: 'package' parameter is required"
+        if (!ShellQuote.isValidPackageName(pkg)) {
+            return "Error: invalid package name '$pkg' (must match ^[A-Za-z0-9._]+\$)"
+        }
         val activity = json["activity"]?.jsonPrimitive?.content
 
         return if (activity != null) {
-            shellExecutor("am start -n $pkg/$activity")
+            // Shell-escape the activity component — an unescaped `;`/`$` in the activity
+            // string would inject into the `am start -n pkg/activity` shell command.
+            shellExecutor("am start -n ${ShellQuote.shellQuote("$pkg/$activity")}")
         } else {
             // monkey命令启动app（不需要知道具体Activity）
             shellExecutor("monkey -p $pkg -c android.intent.category.LAUNCHER 1 2>/dev/null || am start $pkg")

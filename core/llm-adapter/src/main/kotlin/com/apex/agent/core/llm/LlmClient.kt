@@ -44,13 +44,33 @@ data class LlmResponse(
 data class LlmStreamChunk(
     val content: String? = null,
     val toolCalls: List<ToolCall> = emptyList(),
-    val isFinish: Boolean = false
+    val isFinish: Boolean = false,
+    /**
+     * 原生推理/思考内容（流式增量）。
+     *
+     * OpenAI o-series 返回 `delta.reasoning_content`；DeepSeek-R1 返回
+     * `delta.reasoning_content`；部分 Anthropic 代理返回 `delta.reasoning`。
+     * 旧实现完全丢弃该字段，导致思考类模型（R1/Qwen3-thinking/GLM-Z1）
+     * 的思维链在 UI 上不可见。这里透传给上层（引擎）自行决定如何呈现
+     * （如作为 [com.apex.agent.core.engine.AgentEvent.ThinkingChunk] 发射）。
+     */
+    val reasoningContent: String? = null
 )
 
 data class ToolCall(
     val id: String,
     val name: String,
-    val arguments: String  // JSON string
+    val arguments: String,  // JSON string
+    /**
+     * 流式片段在并行工具调用中的索引位置（OpenAI `tool_calls[].index`）。
+     *
+     * - 非流式响应：恒为 -1（不适用）。
+     * - 流式响应：OpenAI 在并行工具调用的首个片段携带 `index` 与 `id`，
+     *   后续片段只携带 `index` 而 `id` 为空。旧实现以 `id` 作为累加器键，
+     *   导致后续片段被误开一个新累加器、参数被裁断、工具调用永远拼不成。
+     *   现在透传 `index`，由累加侧在 `id` 为空时回退到 `index` 作为键。
+     */
+    val index: Int = -1
 )
 
 data class Usage(

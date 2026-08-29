@@ -111,6 +111,12 @@ class ShellExecuteTool(
                     appendLine("   Use | head -N, | tail -N, or | grep to filter.")
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Must rethrow CancellationException — `executor` is a suspend call, and
+            // kotlinx.coroutines.CancellationException is a subtype of Exception, so
+            // the generic catch below would otherwise swallow abort() signals and
+            // break SafeAgentTool's outer cancellation handling.
+            throw e
         } catch (e: Exception) {
             "❌ Execution error: ${e.message}"
         }

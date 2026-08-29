@@ -29,8 +29,10 @@ interface ExecutionMemoryObserver {
      * Agent 每执行完一个工具/动作后调用。对应 CsMemSessionManager.afterAction()。
      *
      * @param actionDescription 刚执行的动作描述（如 "ui_tap(540,1200)"）
+     * @param success 该动作是否执行成功；用于 CS-Mem 蒸馏时过滤失败动作，避免把
+     *  "鼠标连点失败"也压进 FSM 宏技能。默认 true 以兼容未更新的调用方。
      */
-    suspend fun onActionExecuted(actionDescription: String) {
+    suspend fun onActionExecuted(actionDescription: String, success: Boolean = true) {
         // 默认空实现
     }
 

@@ -47,6 +47,17 @@ class WaitEngineImpl(
     private val waiters = ConcurrentHashMap<Long, MutableList<Waiter>>()
     private val locks = ConcurrentHashMap<Long, Mutex>()
 
+    /**
+     * TM1: recent-output provider. Returns up to the last few KB of PTY output for a
+     * session (as a UTF-8 String) so OutputMatch.pattern can be tested against real
+     * bytes — OutputProduced events only carry cursor refs (Spec §19/§20), NOT bytes.
+     * Wired by TerminalRuntimeImpl to
+     * `sessionManager.assembly(sid)?.ringBuffer?.latest(4096)?.bytes?.toString(UTF_8)`.
+     * Default returns "" → OutputMatch never matches (fail-closed: no false positives).
+     */
+    @Volatile
+    internal var recentOutputProvider: (Long) -> String = { "" }
+
     private fun lockFor(sessionId: Long): Mutex =
         locks.computeIfAbsent(sessionId) { Mutex() }
 
@@ -71,11 +82,20 @@ class WaitEngineImpl(
     }
 
     private fun matchOutput(c: WaitCondition.OutputMatch, e: TerminalEvent.OutputProduced): Boolean {
-        // NOTE: OutputProduced carries cursor refs, not bytes (Spec §19/§20).
-        // For Phase 1 we match against the cursor delta as a proxy; full byte matching
-        // requires RingBuffer access (inject in Phase 2). This is a known v1 limitation.
-        // Real matching will be done by the ObservationEngine layer.
-        return e.endCursor > e.startCursor  // any output produced
+        // TM1: apply c.pattern against the recent output bytes. OutputProduced events
+        // carry only cursor refs (Spec §19/§20) — the bytes live in the per-session
+        // RingBuffer, accessed via [recentOutputProvider]. The previous implementation
+        // returned `e.endCursor > e.startCursor` (true on ANY output) which made
+        // OutputMatch.pattern dead and caused every wait(OutputMatch) to complete
+        // instantly on the first OutputProduced event (silent false positive).
+        val recent = recentOutputProvider(e.sessionId)
+        if (recent.isEmpty()) return false
+        return if (c.isRegex) {
+            // Compile each call (waits are infrequent; cache only if profiling demands).
+            runCatching { Regex(c.pattern).containsMatchIn(recent) }.getOrDefault(false)
+        } else {
+            recent.contains(c.pattern)
+        }
     }
 
     override suspend fun await(sessionId: Long, condition: WaitCondition, timeoutMs: Long): WaitResult {

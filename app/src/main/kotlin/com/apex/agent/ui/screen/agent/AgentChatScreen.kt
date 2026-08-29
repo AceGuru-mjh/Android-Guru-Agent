@@ -91,8 +91,9 @@ fun AgentChatScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
-    // 函数调用二级菜单候选工具（注册表快照，静态即可）
-    val availableTools = remember {
+    // 函数调用二级菜单候选工具（注册表快照）。缺陷 6 修复：用 viewModel.toolCount 作 key，
+    // 注册表变更后下次重组即重新读取，避免 remember{} 永久缓存导致新装 Skill/插件不出现。
+    val availableTools = remember(viewModel.toolCount) {
         viewModel.availableTools().map { ToolRef(it.first, it.second) }
     }
 

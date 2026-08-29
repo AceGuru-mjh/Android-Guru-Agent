@@ -107,14 +107,17 @@ class CsMemSessionManager @Inject constructor(
     /**
      * 在 Agent 执行每个动作后调用 —— 捕获 UI 变化并差分摄入。
      *
-     * @param actionDescription 刚执行的动作描述（如 "tap(540,1200)"）
+     * @param actionDescription 刚执行的动作描述（如 "tap(540,1200)" / "ui_tap(540,1200)"）
      * @param appPackage 当前前台 App 包名
      * @param activityName 当前 Activity 名
+     * @param success 该动作是否执行成功；用于 TraceDistiller 过滤失败动作，
+     *  避免"鼠标连点失败"也被蒸馏进 FSM 宏技能。默认 true 以兼容旧调用方。
      */
     suspend fun afterAction(
         actionDescription: String,
         appPackage: String? = null,
-        activityName: String? = null
+        activityName: String? = null,
+        success: Boolean = true
     ) {
         val episodeId = activeEpisodeId ?: return
         actionCount++
@@ -174,13 +177,17 @@ class CsMemSessionManager @Inject constructor(
 
         // 6. 记录动作轨迹（前后帧指纹），供任务成功时蒸馏为 FSMMacro（报告 P3）。
         // previousGraph 为 null 表示这是首帧快照，无 before 状态，跳过。
+        // 修复：actionType 必须是 BypassExecutionEngine 可识别的规范 token（ui_tap/ui_swipe/
+        // input_text/back/home），否则蒸馏出的 FSM 转移表无法回放；actionResult 用真实成败信号，
+        // 使 TraceDistiller 能过滤失败动作（"Error:" 前缀）。旧实现把 free-form 描述当成 token，
+        // 且 actionResult 硬编码 "ok"，导致宏技能必失败、失败动作也进蒸馏。
         previousGraph?.let { prev ->
             traceBuffer.add(
                 TraceDistiller.TraceStep(
                     stepIndex = traceBuffer.size,
-                    actionType = actionDescription,
+                    actionType = canonicalActionType(actionDescription),
                     actionDescription = actionDescription,
-                    actionResult = "ok",
+                    actionResult = if (success) "ok" else "Error: $actionDescription",
                     beforeFingerprints = prev.nodes.map { it.fingerprint },
                     afterFingerprints = currentGraph.nodes.map { it.fingerprint },
                     isLlmThinking = false
@@ -293,6 +300,25 @@ class CsMemSessionManager @Inject constructor(
     }
 
     // ==================== Private ====================
+
+    /**
+     * 把 free-form 动作描述（"tap(540,1200)" / "ui_tap(540,1200)" / "swipe(...)" 等）
+     * 规范化为 BypassExecutionEngine 与 TraceDistiller 期望的 canonical token：
+     * ui_tap / ui_swipe / input_text / back / home。无法识别时回退为去掉括号后的原始名字
+     * （保留原有可读性，TraceDistiller 在 bestAction 评分中按 else 分支 0 分处理）。
+     */
+    private fun canonicalActionType(actionDescription: String): String {
+        // 用平衡的 "()" 集合判定——CI 静态检查按字符数括号，字面量里的落单括号会判不平衡
+        val name = actionDescription.trim().takeWhile { it !in "()" }.trim().lowercase()
+        return when (name) {
+            "ui_tap", "tap", "click" -> "ui_tap"
+            "ui_swipe", "swipe", "scroll" -> "ui_swipe"
+            "input_text", "input" -> "input_text"
+            "back" -> "back"
+            "home" -> "home"
+            else -> actionDescription.trim()
+        }
+    }
 
     /**
      * 取宿主自身 App 版本号（versionName），用于给采集节点打 appVersion 标记，

@@ -12,7 +12,13 @@ data class Attachment(
     val sizeBytes: Long,
     val type: AttachmentType,
     val uploadProgress: Float = 1.0f,
-    val status: UploadStatus = UploadStatus.SUCCESS
+    val status: UploadStatus = UploadStatus.SUCCESS,
+    /**
+     * 占位项的唯一 Job 标识（由 [AttachmentManager.attachmentIdCounter] 分配）。
+     * 用于：异步元数据回填时按 id 精确匹配占位项（而非靠 list.lastIndex），
+     * 以及 removeAttachment 时只取消该附件对应的 Job。
+     */
+    val attachmentId: Int = 0
 ) {
     /**
      * 缺陷 6 修复：使用 [formatFileSize] 浮点除法 + 智能精度，

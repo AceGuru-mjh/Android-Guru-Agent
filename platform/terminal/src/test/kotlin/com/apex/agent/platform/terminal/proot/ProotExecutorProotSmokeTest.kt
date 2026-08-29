@@ -104,7 +104,11 @@ class ProotExecutorProotSmokeTest {
     private fun execAdapted(cmd: PRootCommand): ProotExecutor.Execution {
         val argv = listOf(cmd.executable.value) + cmd.arguments
         val (adapted, guestEnv) = adaptForHostProot(argv)
-        val withEnv = ProotExecutor(hostEnv = { guestEnv })
+        val hostEnv = guestEnv.toMutableMap()
+        // 用户目录安装的 proot（非 ldconfig 注册）需要 LD_LIBRARY_PATH 解析 libtalloc ——
+        // CI 的 dpkg 安装无此变量时为 no-op（与 T72 E2E 的 executorWith 一致）。
+        System.getenv("LD_LIBRARY_PATH")?.let { hostEnv["LD_LIBRARY_PATH"] = it }
+        val withEnv = ProotExecutor(hostEnv = { hostEnv })
         return withEnv.execute(PRootCommand(AbsolutePath(adapted[0]), adapted.drop(1)))
     }
 

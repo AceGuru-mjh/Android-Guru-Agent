@@ -20,6 +20,7 @@ import com.apex.agent.platform.terminal.tools.legacy.LegacyExecTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyReadTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacySendTool
 import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalBackendsTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalObserveTool
@@ -27,9 +28,12 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalResizeTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalRunTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSignalTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuInstallTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
+import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
+import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
@@ -100,6 +104,8 @@ object ToolModule {
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
         terminalRuntime: TerminalRuntime,
+        rootfsProvisioner: RootfsProvisioner,
+        rootfsTarget: RootfsTarget,
         githubTokenManager: GithubTokenManager,
         githubApiService: GithubApiService,
         userQuestionGateway: UserQuestionGateway,
@@ -212,7 +218,7 @@ object ToolModule {
         registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
 
-        // ═══ 10. Terminal PTY — ATR 2.0 (9 new Agent-Native + 4 legacy compat) ═══
+        // ═══ 10. Terminal PTY — ATR 2.0 (9 new Agent-Native + 4 legacy compat + T73 ×2) ═══
         // 9 new Agent-Native tools (Spec §34) — non-blocking, incremental, event-driven.
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalCreateTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalRunTool(terminalRuntime))))
@@ -223,6 +229,11 @@ object ToolModule {
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalResizeTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalSnapshotTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalCloseTool(terminalRuntime))))
+        // T73: 后端能力发现 + Ubuntu rootfs 安装引导（Agent 自主进入 Ubuntu 的入口）。
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalBackendsTool(terminalRuntime))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            TerminalUbuntuInstallTool(rootfsProvisioner, rootfsTarget)
+        )))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))
@@ -241,7 +252,7 @@ object ToolModule {
         }
 
         return registry
-        // 总计：44 基础 + 7 GitHub(条件) = 51
+        // 总计：44 基础 + 2 T73（backends/ubuntu-install） + 7 GitHub(条件) = 53
     }
 
     @Provides

@@ -288,8 +288,9 @@ class RootfsInstallLock {
 }
 
 // ─── Section 24: RootfsProvisioner API ───
-// The orchestrator. Production code calls install() once; PRootRuntime's
-// RootfsProvider (ProvisionedRootfsProvider) reads the result via current().
+// The orchestrator. Production code calls install() once (Agent 入口 =
+// terminal.ubuntu.install 工具, T73); LinuxPRootBackend's RootfsProvider
+// (ProvisionedRootfsProvider) reads the result via current().
 interface RootfsProvisioner {
     /**
      * [force]=true 绕过 AlreadyReady 短路（重装/版本迁移）。

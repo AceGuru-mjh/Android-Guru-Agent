@@ -2,6 +2,7 @@ package com.apex.agent.platform.terminal.session
 
 import com.apex.agent.platform.terminal.errors.TerminalError
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
+import com.apex.agent.platform.terminal.runtime.SpawnSpec
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -28,6 +29,20 @@ interface SessionManager {
         env: Map<String, String> = emptyMap(),
         privilege: PrivilegeLevel = PrivilegeLevel.NORMAL
     ): Result<TerminalSession>
+
+    /**
+     * T73: 从 [SpawnSpec]（ExecutionBackend.prepare 的产物）创建会话 ——
+     * 生产路径：TerminalRuntime.create(backendId=…) → backend.prepare() →
+     * 本方法 → forkpty(nativeCreateSessionArgv) → execv(argv[0], argv)。
+     *
+     * 与 [create] 的差异仅在 spawn 点：argv/env/cwd 来自后端翻译
+     * （LOCAL: ["/system/bin/sh","-i"]；LINUX: [libproot.so,"-r",…,"--","/bin/bash","-i"]），
+     * 其余（装配/pump/事件/状态机）完全共用。
+     *
+     * TerminalSession.shell/cwd 采用 spec 的展示语义（shellDisplay/cwdDisplay，
+     * 回退 argv[0]/spec.cwd）；backend 元数据进入 TerminalSession.backend 并持久化。
+     */
+    suspend fun createFromSpec(spec: SpawnSpec, rows: Int, cols: Int, privilege: PrivilegeLevel): Result<TerminalSession>
 
     /** Get current Session snapshot (state may have changed since creation). */
     suspend fun get(id: Long): TerminalSession?

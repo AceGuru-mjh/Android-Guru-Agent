@@ -7,17 +7,17 @@ import com.apex.agent.platform.terminal.proot.RootfsValidator
 
 /**
  * PR #69 §21: ProvisionedRootfsProvider — the concrete RootfsProvider that
- * PRootRuntime consumes.
+ * LinuxPRootBackend (P71) consumes.
  *
- * This is the bridge between the Provisioning layer (P69) and the Runtime
- * layer (P68). PRootRuntime's constructor takes a `RootfsProvider?`;
- * production passes an instance of THIS class. Its `current()` returns the
- * active, provisioned Ubuntu rootfs (or null if not yet installed); its
- * `verify()` validates the active rootfs's layout.
+ * This is the bridge between the Provisioning layer (T72) and the execution
+ * backend layer (P71). LinuxPRootBackend's constructor takes a `RootfsProvider`;
+ * production passes an instance of THIS class (T73 DI wiring). Its `current()`
+ * returns the active, provisioned Ubuntu rootfs (or null if not yet installed);
+ * its `verify()` validates the active rootfs's layout.
  *
  * §21: RootfsProvider and RootfsProvisioner are DECOUPLED. The provisioner
  * installs + manages the rootfs lifecycle; the provider is a thin read-only
- * facade the runtime queries. The runtime never knows about download/
+ * facade the backend queries. The backend never knows about download/
  * extract/activate — those live in the provisioner.
  *
  * §4: NO TerminalCore / Session / PTY modification. This class only
@@ -30,8 +30,8 @@ class ProvisionedRootfsProvider(
 
     /**
      * §21: returns the currently-active rootfs, or null if none installed.
-     * PRootRuntime.initialize() calls this; if null, the runtime fails with
-     * ROOTFS_UNAVAILABLE (caller should invoke the provisioner first).
+     * LinuxPRootBackend.availability() calls this; if null, the backend reports
+     * NeedsRootfs (caller should invoke the provisioner via terminal.ubuntu.install).
      */
     override suspend fun current(): RootfsDescriptor? = provisioner.current()
 

@@ -1,0 +1,60 @@
+# Path-based labels applied by .github/workflows/pr-labeler.yml (actions/labeler v5).
+# Keep labels coarse and useful for triage — this is a routing aid, not a taxonomy.
+
+core-engine:
+  - changed-files:
+      - any-glob-to-any-file: core/agent-engine/**
+
+core-tools:
+  - changed-files:
+      - any-glob-to-any-file: core/tool-registry/**
+llm:
+  - changed-files:
+      - any-glob-to-any-file: core/llm-adapter/**
+
+memory:
+  - changed-files:
+      - any-glob-to-any-file: platform/cs-mem/**
+
+android-app:
+  - changed-files:
+      - any-glob-to-any-file: app/**
+
+terminal:
+  - changed-files:
+      - any-glob-to-any-file:
+          - platform/terminal/**
+          - terminal-emulator/**
+
+plugins:
+  - changed-files:
+      - any-glob-to-any-file:
+          - plugins/**
+          - plugin-sdk/**
+
+ui:
+  - changed-files:
+      - any-glob-to-any-file: app/src/main/kotlin/**/ui/**
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**
+          - scripts/**
+
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.gradle.kts"
+          - gradle/**
+          - settings.gradle.kts
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
+
+orchestrator:
+  - changed-files:
+      - any-glob-to-any-file: core/agent-engine/**/orchestrator/**

@@ -45,7 +45,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * All modes:
  * - Stream every LLM response token-by-token via [AgentEvent.ResponseChunk] / [AgentEvent.ThinkingChunk].
  * - Honor [AgentConfig.thinkingLevel] by injecting [ThinkingLevel.toPromptInstruction] into the system prompt.
- * - Accumulate streamed tool-call argument fragments via [ToolCallAccumulator].
+ * - Accumulate streamed tool-call argument fragments via [StreamingToolCallAccumulator].
  */
 class ApexAgentEngine(
     private val llmClient: LlmClient,
@@ -57,7 +57,7 @@ class ApexAgentEngine(
     private val skillRegistry: SkillRegistry? = null,
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null
-) : AgentEngine {
+) : AgentEngine, ConfirmationSink {
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
     private val toolTruncator = ToolOutputTruncator(
@@ -170,16 +170,18 @@ class ApexAgentEngine(
     /**
      * Called from the UI (e.g. `ChatViewModel.confirmPlan`) to resume the suspended
      * plan-mode execution. No-op if no plan is currently awaiting confirmation.
+     * Exposed to the orchestrator via the [ConfirmationSink] interface.
      */
-    fun submitPlanConfirmation(confirmed: Boolean) {
+    override fun submitPlanConfirmation(confirmed: Boolean) {
         planConfirmationDeferred?.complete(confirmed)
     }
 
     /**
      * Called from the UI (e.g. `ChatViewModel.submitSpecConfirmation`) to resume the
      * suspended spec-mode execution. No-op if no spec is currently awaiting confirmation.
+     * Exposed to the orchestrator via the [ConfirmationSink] interface.
      */
-    fun submitSpecConfirmation(confirmed: Boolean) {
+    override fun submitSpecConfirmation(confirmed: Boolean) {
         specConfirmationDeferred?.complete(confirmed)
     }
 
@@ -352,7 +354,7 @@ class ApexAgentEngine(
         emit(AgentEvent.ThinkingComplete(planResponse))
 
         // Phase 2: parse plan
-        val plan = parseExecutionPlan(planResponse, input)
+        val plan = EngineResponseParsers.parseExecutionPlan(planResponse, input)
         emit(AgentEvent.PlanGenerated(plan))
 
         // Phase 3: await user confirmation
@@ -441,7 +443,7 @@ class ApexAgentEngine(
         emit(AgentEvent.ThinkingComplete(specResponse))
 
         // Phase 2: parse spec
-        val spec = parseExecutionSpec(specResponse, input)
+        val spec = EngineResponseParsers.parseExecutionSpec(specResponse, input)
         emit(AgentEvent.SpecGenerated(spec))
 
         // Phase 3: await user confirmation
@@ -544,7 +546,7 @@ class ApexAgentEngine(
             }
 
             val contentBuilder = StringBuilder()
-            val toolCallsAccumulator = mutableMapOf<String, ToolCallAccumulator>()
+            val toolCallsAccumulator = mutableMapOf<String, StreamingToolCallAccumulator>()
 
             llmClient.chatStream(
                 messages = messages,
@@ -557,16 +559,13 @@ class ApexAgentEngine(
                 }
                 for (tc in chunk.toolCalls) {
                     val acc = toolCallsAccumulator.getOrPut(tc.id) {
-                        ToolCallAccumulator(tc.id, tc.name)
+                        StreamingToolCallAccumulator(tc.id, tc.name)
                     }
-                    acc.arguments.append(tc.arguments)
-                    if (tc.name.isNotBlank()) acc.name = tc.name
+                    acc.append(tc.name, tc.arguments)
                 }
             }
 
-            val toolCalls = toolCallsAccumulator.values.map {
-                ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString())
-            }
+            val toolCalls = toolCallsAccumulator.values.map { it.build() }
 
             when {
                 toolCalls.isNotEmpty() -> {
@@ -806,447 +805,56 @@ class ApexAgentEngine(
         return messages
     }
 
-    private fun buildSystemPrompt(): String {
-        val thinking = config.thinkingLevel.toPromptInstruction()
-        val privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL"
-        return buildString {
-            appendLine("You are Apex Agent, an AI assistant running on an Android device.")
-            appendLine("You have access to tools for: shell commands, file operations, web browsing, memory, and device control.")
-            appendLine()
+    private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
+        config = config,
+        privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL",
+        visibleTools = toolRegistry.getAllTools().let { all ->
+            config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
+        },
+        skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()
+    )
 
-            // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
-            appendLine("## Device Privilege Level: $privilegeLevel")
-            when (privilegeLevel) {
-                "ROOT" -> {
-                    appendLine("You have ROOT access. You can execute any command with su.")
-                    appendLine("Full system access: /system, /data, mount, SELinux, iptables, etc.")
-                }
-                "SHIZUKU" -> {
-                    appendLine("You have SHIZUKU (ADB-level) access — shell user uid=2000.")
-                    appendLine("You CAN: pm install/uninstall, am start/stop, settings put/get, dumpsys,")
-                    appendLine("          input tap/swipe/text/keyevent, screencap, read/write /sdcard/, getprop.")
-                    appendLine("You CANNOT: modify /system, access other apps' /data/data, mount, iptables,")
-                    appendLine("           modify SELinux, or ptrace other processes.")
-                }
-                else -> {
-                    appendLine("You have NORMAL SHELL access only (no Root, no Shizuku).")
-                    appendLine("Limited to: basic file ops in /sdcard and your own sandbox.")
-                    appendLine("Suggest the user install Shizuku (https://shizuku.rikka.app/) for more capabilities.")
-                }
-            }
-            appendLine()
-
-            when (config.mode) {
-                AgentMode.PLAN -> {
-                    appendLine("## Mode: PLAN")
-                    appendLine("You are in planning mode. Analyze the task and produce a detailed execution plan.")
-                    appendLine("Do NOT execute any tools yet. Only output the plan as JSON.")
-                }
-                AgentMode.SPEC -> {
-                    appendLine("## Mode: SPEC")
-                    appendLine("You are in spec mode. Analyze the task and produce a detailed requirement specification")
-                    appendLine("(goal, requirements, constraints, acceptance criteria, deliverables).")
-                    appendLine("Do NOT execute any tools yet. Only output the spec as JSON.")
-                }
-                AgentMode.REFLECTION -> {
-                    appendLine("## Mode: REFLECTION")
-                    appendLine("You are in reflection mode. Quality matters more than speed: after drafting an answer,")
-                    appendLine("the engine will ask you to review it critically, then revise it into the final output.")
-                    appendLine("When drafting, aim for completeness, correctness, and clarity.")
-                }
-                AgentMode.HUMAN_ASSIST -> {
-                    appendLine("## Mode: HUMAN_ASSIST (human-in-the-loop)")
-                    appendLine("You are in human-assisted mode. Whenever the task involves MULTIPLE viable options —")
-                    appendLine("different approaches, multiple targets/apps/files, ambiguous intent, risky or irreversible")
-                    appendLine("actions, or user preference — you MUST call ask_user_choice BEFORE proceeding and wait")
-                    appendLine("for the user's selection. NEVER guess when the choice materially changes the result.")
-                    appendLine("Keep questions short and provide 2-6 clear options. If the user skips, pick the safest")
-                    appendLine("reasonable default or stop and explain.")
-                }
-                AgentMode.CUSTOM -> {
-                    appendLine("## Mode: CUSTOM")
-                    appendLine("You are in custom mode. Follow the user's custom instructions below in addition to the")
-                    appendLine("general rules. Custom instructions take priority over generic behavior guidance.")
-                }
-                AgentMode.BUILD -> {
-                    appendLine("## Mode: BUILD")
-                    appendLine("You are in build mode. Act directly. Use tools when needed.")
-                    appendLine("Be efficient: prefer fewer steps, verify results between calls.")
-                }
-            }
-            // 自定义模式：附加用户指令（拼入 system prompt）。
-            if (config.mode == AgentMode.CUSTOM && !config.customInstruction.isNullOrBlank()) {
-                appendLine()
-                appendLine("## Custom Instructions")
-                appendLine(config.customInstruction)
-            }
-            if (thinking.isNotBlank()) {
-                appendLine()
-                appendLine("## Thinking Instructions")
-                appendLine(thinking)
-            }
-            // 「函数调用」白名单：system prompt 工具清单与实际下发的 ToolDefinition 保持一致
-            val visibleTools = toolRegistry.getAllTools().let { all ->
-                config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
-            }
-            appendLine()
-            appendLine("## Available Tools (${visibleTools.size})")
-            // 动态读取当前注册的工具，不硬编码
-            visibleTools.forEach { tool ->
-                val firstLine = tool.description
-                    .lineSequence()
-                    .firstOrNull()
-                    ?.trim()
-                    ?.take(160)
-                    ?: ""
-                appendLine("- ${tool.id}: ${tool.name} — $firstLine")
-            }
-
-            // Skill prompt 注入
-            val skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()
-            if (skillPrompts.isNotEmpty()) {
-                appendLine()
-                appendLine("## Active Skills")
-                skillPrompts.forEach { prompt ->
-                    appendLine(prompt)
-                    appendLine()
-                }
-            }
-
-            // 会话级动态上下文（当前时间 / 用户规则 / 结构化输出 / 联网搜索指令等），
-            // 由 UI 层在每次发送前组装，任意模式下生效。
-            if (config.additionalSystemContext.isNotBlank()) {
-                appendLine()
-                appendLine("## Session Context")
-                appendLine(config.additionalSystemContext.trim())
-            }
-            appendLine()
-            appendLine("## File Operation Strategy")
-            appendLine("1. DISCOVER: Use glob_files or list_files to find relevant files")
-            appendLine("2. UNDERSTAND: Use read_file (first 80 lines) to see structure")
-            appendLine("3. LOCATE: Use search_files to find specific code/config")
-            appendLine("4. READ: Use read_file with 'around' to see target area")
-            appendLine("5. EDIT: Use edit_file with search-replace (never blind overwrite)")
-            appendLine("6. VERIFY: Use read_file again to confirm changes are correct")
-            appendLine()
-            appendLine("## Output Management")
-            appendLine("- All tools limit output. Check truncation notices.")
-            appendLine("- For large outputs, use pagination (offset, page, scroll)")
-            appendLine("- Prefer targeted queries over broad ones")
-            appendLine("- Use shell pipes (| head, | grep, | tail) to pre-filter")
-            appendLine()
-            appendLine("## Rules")
-            appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
-            appendLine("- Always verify command output before proceeding.")
-            appendLine("- If a command fails, analyze the error and try an alternative approach.")
-            appendLine("- Keep prose concise; let tool output speak for itself.")
-            appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
-            appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")
-        }
-    }
-
-    private fun buildPlanPrompt(input: String): String = buildString {
-        appendLine("Analyze this task and create a detailed execution plan:")
-        appendLine()
-        appendLine("Task: $input")
-        appendLine()
-        appendLine("Available tools:")
-        toolRegistry.getAllTools().forEach { tool ->
-            appendLine("- ${tool.id}: ${tool.description.take(120)}")
-        }
-        appendLine()
-        appendLine("Output a JSON plan with EXACTLY this structure (no prose, no markdown fences):")
-        appendLine(
-            """
-            {
-              "goal": "<one-sentence goal>",
-              "reasoning": "<why this approach>",
-              "risk_level": "low|medium|high|critical",
-              "estimated_tool_calls": <int>,
-              "steps": [
-                {
-                  "index": 0,
-                  "description": "<what this step does>",
-                  "tool": "<tool_id or null>",
-                  "estimated_args": "<rough args as string, may be null>",
-                  "depends_on": []
-                }
-              ]
-            }
-            """.trimIndent()
-        )
-    }
+    private fun buildPlanPrompt(input: String): String =
+        EnginePrompts.buildPlanPrompt(input, toolRegistry.getAllTools())
 
     private fun buildStepExecutionPrompt(
         plan: ExecutionPlan,
         step: PlanStep,
         stepIndex: Int
-    ): String = buildString {
-        appendLine("Execute step ${stepIndex + 1} of the plan:")
-        appendLine("Step: ${step.description}")
-        step.toolName?.let { appendLine("Suggested tool: $it") }
-        step.estimatedArgs?.let { appendLine("Suggested args: $it") }
-        appendLine()
-        appendLine("Full plan context:")
-        plan.steps.forEach { s ->
-            val marker = if (s.index == stepIndex) "→ " else "  "
-            appendLine("$marker${s.index + 1}. ${s.description}")
-        }
-        appendLine()
-        appendLine("Execute this step now using the appropriate tool. Be concise.")
-    }
+    ): String = EnginePrompts.buildStepExecutionPrompt(plan, step, stepIndex)
 
-    private fun buildReflectionPrompt(plan: ExecutionPlan): String = buildString {
-        appendLine("The following plan has been executed:")
-        appendLine("Goal: ${plan.goal}")
-        plan.steps.forEach { step ->
-            appendLine("  ${step.index + 1}. ${step.description}")
-        }
-        appendLine()
-        appendLine(
-            "Summarize what was accomplished in 2-4 sentences. Note any issues, " +
-                "partial completions, or follow-ups the user should know about."
-        )
-    }
+    private fun buildReflectionPrompt(plan: ExecutionPlan): String =
+        EnginePrompts.buildReflectionPrompt(plan)
 
     // ═══════════════════════════════════════════════════════
-    // SPEC mode prompt builders
+    // SPEC mode prompt builders — delegated to [EnginePrompts]
     // ═══════════════════════════════════════════════════════
 
-    private fun buildSpecPrompt(input: String): String = buildString {
-        appendLine("Analyze this task and create a detailed requirement specification:")
-        appendLine()
-        appendLine("Task: $input")
-        appendLine()
-        appendLine("Available tools:")
-        toolRegistry.getAllTools().forEach { tool ->
-            appendLine("- ${tool.id}: ${tool.description.take(120)}")
-        }
-        appendLine()
-        appendLine("Output a JSON spec with EXACTLY this structure (no prose, no markdown fences):")
-        appendLine(
-            """
-            {
-              "goal": "<one-sentence goal>",
-              "reasoning": "<why this approach / key design decisions>",
-              "risk_level": "low|medium|high|critical",
-              "estimated_tool_calls": <int>,
-              "requirements": ["<functional requirement 1>", "..."],
-              "constraints": ["<constraint 1>", "..."],
-              "acceptance_criteria": ["<how to verify success 1>", "..."],
-              "deliverables": ["<concrete deliverable 1>", "..."]
-            }
-            """.trimIndent()
-        )
-        appendLine()
-        appendLine("Be specific: each requirement/criterion must be verifiable. Empty arrays are allowed but avoid them when possible.")
-    }
+    private fun buildSpecPrompt(input: String): String =
+        EnginePrompts.buildSpecPrompt(input, toolRegistry.getAllTools())
 
     private fun buildSpecStepPrompt(
         spec: ExecutionSpec,
         stepText: String,
         stepIndex: Int
-    ): String = buildString {
-        appendLine("Execute deliverable ${stepIndex + 1} of the spec:")
-        appendLine("Deliverable: $stepText")
-        appendLine()
-        appendLine("Full spec context:")
-        appendLine("Goal: ${spec.goal}")
-        if (spec.requirements.isNotEmpty()) {
-            appendLine("Requirements:")
-            spec.requirements.forEach { appendLine("  - $it") }
-        }
-        if (spec.constraints.isNotEmpty()) {
-            appendLine("Constraints:")
-            spec.constraints.forEach { appendLine("  - $it") }
-        }
-        if (spec.acceptanceCriteria.isNotEmpty()) {
-            appendLine("Acceptance criteria:")
-            spec.acceptanceCriteria.forEach { appendLine("  - $it") }
-        }
-        appendLine()
-        appendLine("Deliver this item now using the appropriate tools. Verify against the acceptance criteria. Be concise.")
-    }
+    ): String = EnginePrompts.buildSpecStepPrompt(spec, stepText, stepIndex)
 
-    private fun buildSpecReflectionPrompt(spec: ExecutionSpec): String = buildString {
-        appendLine("The following spec has been executed:")
-        appendLine("Goal: ${spec.goal}")
-        spec.deliverables.forEachIndexed { index, d ->
-            appendLine("  ${index + 1}. $d")
-        }
-        appendLine()
-        appendLine(
-            "Summarize what was delivered in 2-4 sentences. Report any unmet acceptance " +
-                "criteria, issues, or follow-ups the user should know about."
-        )
-    }
+    private fun buildSpecReflectionPrompt(spec: ExecutionSpec): String =
+        EnginePrompts.buildSpecReflectionPrompt(spec)
 
     // ═══════════════════════════════════════════════════════
-    // Reflection mode prompt builders
+    // Reflection mode prompt builders — delegated to [EnginePrompts]
     // ═══════════════════════════════════════════════════════
 
-    private fun buildReviewPrompt(draft: String): String = buildString {
-        appendLine("You are a strict reviewer. Critically evaluate the following draft answer:")
-        appendLine()
-        appendLine("--- DRAFT START ---")
-        appendLine(draft)
-        appendLine("--- DRAFT END ---")
-        appendLine()
-        appendLine(
-            "Check for: factual errors, logical gaps, incomplete steps, unclear or ambiguous " +
-                "wording, missing edge cases, and deviations from the user's request. " +
-                "Output ONLY the review: a concise list of concrete, actionable issues " +
-                "(max 6 items). Do not rewrite the answer here."
-        )
-    }
+    private fun buildReviewPrompt(draft: String): String =
+        EnginePrompts.buildReviewPrompt(draft)
 
-    private fun buildRevisePrompt(draft: String, review: String, round: Int): String = buildString {
-        appendLine("Revise the draft answer below to address the reviewer's issues.")
-        appendLine("Round $round revision.")
-        appendLine()
-        appendLine("--- DRAFT START ---")
-        appendLine(draft)
-        appendLine("--- DRAFT END ---")
-        appendLine()
-        appendLine("--- REVIEW START ---")
-        appendLine(review)
-        appendLine("--- REVIEW END ---")
-        appendLine()
-        appendLine(
-            "Output ONLY the final revised answer (complete, self-contained, no meta commentary). " +
-                "Fix every actionable issue in the review while preserving what was already good."
-        )
-    }
+    private fun buildRevisePrompt(draft: String, review: String, round: Int): String =
+        EnginePrompts.buildRevisePrompt(draft, review, round)
 
     // ═══════════════════════════════════════════════════════
-    // Plan parsing
+    // Plan / Spec parsing — delegated to [EngineResponseParsers]
     // ═══════════════════════════════════════════════════════
-
-    private fun parseExecutionPlan(response: String, originalTask: String): ExecutionPlan {
-        val jsonStr = extractJsonFromResponse(response) ?: return fallbackPlan(response, originalTask)
-        return try {
-            val json = Json.parseToJsonElement(jsonStr).jsonObject
-
-            val goal = json["goal"]?.jsonPrimitive?.contentOrNull ?: originalTask
-            val reasoning = json["reasoning"]?.jsonPrimitive?.contentOrNull
-                ?: "Auto-generated plan (LLM did not provide reasoning)."
-            val estimatedToolCalls = json["estimated_tool_calls"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                ?: 1
-            val riskLevel = json["risk_level"]?.jsonPrimitive?.contentOrNull
-                ?.let { parseRiskLevel(it) } ?: RiskLevel.MEDIUM
-
-            val stepsArray = json["steps"]?.jsonArray ?: emptyList()
-            val steps = stepsArray.mapIndexed { i, el ->
-                val obj = el.jsonObject
-                PlanStep(
-                    index = obj["index"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: i,
-                    description = obj["description"]?.jsonPrimitive?.contentOrNull
-                        ?: "Step ${i + 1}",
-                    toolName = obj["tool"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
-                    estimatedArgs = obj["estimated_args"]?.jsonPrimitive?.contentOrNull,
-                    dependsOn = (obj["depends_on"] as? JsonArray)
-                        ?.mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
-                        ?: emptyList()
-                )
-            }.ifEmpty {
-                listOf(PlanStep(0, "Execute: $originalTask", null, null))
-            }
-
-            ExecutionPlan(
-                goal = goal,
-                steps = steps,
-                estimatedToolCalls = estimatedToolCalls,
-                riskLevel = riskLevel,
-                reasoning = reasoning
-            )
-        } catch (e: Exception) {
-            fallbackPlan(response, originalTask)
-        }
-    }
-
-    private fun extractJsonFromResponse(response: String): String? {
-        // Try fenced ```json ... ``` first.
-        val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(response)
-        val candidate = fenced?.groupValues?.get(1)?.trim() ?: response.trim()
-        // Find first '{' and last '}' to extract the JSON object.
-        val first = candidate.indexOf('{')
-        val last = candidate.lastIndexOf('}')
-        if (first < 0 || last < 0 || last <= first) return null
-        return candidate.substring(first, last + 1)
-    }
-
-    private fun parseRiskLevel(s: String): RiskLevel = when (s.lowercase().trim()) {
-        "low" -> RiskLevel.LOW
-        "medium" -> RiskLevel.MEDIUM
-        "high" -> RiskLevel.HIGH
-        "critical" -> RiskLevel.CRITICAL
-        else -> RiskLevel.MEDIUM
-    }
-
-    private fun fallbackPlan(response: String, originalTask: String): ExecutionPlan = ExecutionPlan(
-        goal = originalTask,
-        steps = listOf(PlanStep(0, "Execute: $originalTask", null, null)),
-        estimatedToolCalls = 1,
-        riskLevel = RiskLevel.MEDIUM,
-        reasoning = "Could not parse LLM's plan JSON; falling back to single-step execution. " +
-            "Raw LLM response kept for reference in the engine log.\n\n$response".take(500)
-    )
-
-    // ═══════════════════════════════════════════════════════
-    // Spec parsing
-    // ═══════════════════════════════════════════════════════
-
-    private fun parseExecutionSpec(response: String, originalTask: String): ExecutionSpec {
-        val jsonStr = extractJsonFromResponse(response) ?: return fallbackSpec(response, originalTask)
-        return try {
-            val json = Json.parseToJsonElement(jsonStr).jsonObject
-
-            val goal = json["goal"]?.jsonPrimitive?.contentOrNull ?: originalTask
-            val reasoning = json["reasoning"]?.jsonPrimitive?.contentOrNull
-                ?: "Auto-generated spec (LLM did not provide reasoning)."
-            val estimatedToolCalls = json["estimated_tool_calls"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                ?: 1
-            val riskLevel = json["risk_level"]?.jsonPrimitive?.contentOrNull
-                ?.let { parseRiskLevel(it) } ?: RiskLevel.MEDIUM
-
-            fun parseList(key: String): List<String> = (json[key] as? JsonArray)
-                ?.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { s -> s.isNotBlank() } }
-                ?: emptyList()
-
-            val requirements = parseList("requirements")
-            val constraints = parseList("constraints")
-            val acceptanceCriteria = parseList("acceptance_criteria")
-            val deliverables = parseList("deliverables")
-
-            if (requirements.isEmpty() && acceptanceCriteria.isEmpty() && deliverables.isEmpty()) {
-                return fallbackSpec(response, originalTask)
-            }
-
-            ExecutionSpec(
-                goal = goal,
-                requirements = requirements,
-                constraints = constraints,
-                acceptanceCriteria = acceptanceCriteria,
-                deliverables = deliverables,
-                estimatedToolCalls = estimatedToolCalls,
-                riskLevel = riskLevel,
-                reasoning = reasoning
-            )
-        } catch (e: Exception) {
-            fallbackSpec(response, originalTask)
-        }
-    }
-
-    private fun fallbackSpec(response: String, originalTask: String): ExecutionSpec = ExecutionSpec(
-        goal = originalTask,
-        requirements = listOf("完成：$originalTask"),
-        acceptanceCriteria = listOf("任务目标达成，结果可直接使用或验证。"),
-        deliverables = listOf(originalTask),
-        estimatedToolCalls = 1,
-        riskLevel = RiskLevel.MEDIUM,
-        reasoning = "Could not parse LLM's spec JSON; falling back to goal-only execution. " +
-            "Raw LLM response kept for reference in the engine log.\n\n$response".take(500)
-    )
 
     override suspend fun abort() {
         isRunning = false
@@ -1320,9 +928,3 @@ class ApexAgentEngine(
         const val PLAN_CONFIRMATION_TIMEOUT_MS: Long = 5L * 60 * 1000 // 5 minutes
     }
 }
-
-private data class ToolCallAccumulator(
-    val id: String,
-    var name: String = "",
-    val arguments: StringBuilder = StringBuilder()
-)

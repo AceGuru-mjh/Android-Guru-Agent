@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -20,6 +21,8 @@ import java.io.File
  * 因此这里直接 startActivity 并捕获 [ActivityNotFoundException]，比 resolveActivity 更可靠。
  */
 object FileOpener {
+
+    private const val TAG = "FileOpener"
 
     /**
      * 唤起外部应用打开文件。
@@ -60,9 +63,9 @@ object FileOpener {
         } catch (e: IllegalArgumentException) {
             // FileProvider 路径越界（理论上 file_paths.xml 覆盖全路径后不会触发）
             Toast.makeText(context, "文件路径不被 FileProvider 支持", Toast.LENGTH_SHORT).show()
-            e.printStackTrace()
+            Log.w(TAG, "FileProvider rejected path: ${e.message}")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w(TAG, "Failed to open file: ${e.message}")
         }
     }
 

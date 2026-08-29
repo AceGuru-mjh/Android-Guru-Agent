@@ -5,6 +5,11 @@ on:
     branches: [main, 'feat/**']
   pull_request:
     branches: [main, 'feat/**']
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   static-analysis:
@@ -19,15 +24,39 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Cache Kotlin compiler + Maven jars
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/kotlinc
+            /tmp/apex-libs
+          key: kotlinc-2.0.21-libs-v1
+
       - name: Install Kotlin compiler
         run: |
-          curl -sL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip -o /tmp/kotlin.zip
-          unzip -q /tmp/kotlin.zip -d $HOME/
+          if [ ! -x "$HOME/kotlinc/bin/kotlinc" ]; then
+            curl -sL https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip -o /tmp/kotlin.zip
+            unzip -q /tmp/kotlin.zip -d $HOME/
+          fi
           echo "$HOME/kotlinc/bin" >> $GITHUB_PATH
 
       - name: Download Maven dependencies
         run: |
           mkdir -p /tmp/apex-libs
+          # Skip downloads when the cache hit already provisioned every jar.
+          NEED_DL=0
+          for jar in kotlin-stdlib-2.0.21.jar \
+                     kotlinx-coroutines-core-jvm-1.9.0.jar \
+                     kotlinx-serialization-json-jvm-1.7.3.jar \
+                     kotlinx-serialization-core-jvm-1.7.3.jar \
+                     okhttp-4.12.0.jar \
+                     okio-jvm-3.6.0.jar; do
+            [ -f "/tmp/apex-libs/$jar" ] || NEED_DL=1
+          done
+          if [ "$NEED_DL" -eq 0 ]; then
+            echo "✅ All Maven jars restored from cache"
+            exit 0
+          fi
           KOTLIN_VER=2.0.21
           COROUTINES_VER=1.9.0
           SERIALIZATION_VER=1.7.3
@@ -321,6 +350,9 @@ jobs:
     name: Build Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write  # APK size report comment (no-op outside PRs)
     steps:
       - uses: actions/checkout@v4
 
@@ -378,3 +410,56 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: APK size report
+        if: always()
+        run: |
+          APK=$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            SIZE_BYTES=$(stat -c%s "$APK")
+            SIZE_MB=$(awk "BEGIN{printf \"%.2f\", $SIZE_BYTES/1048576}")
+            {
+              echo ""
+              echo "## 📱 APK size report"
+              echo ""
+              echo "- APK: \`$(basename "$APK")\`"
+              echo "- Size: **${SIZE_MB} MB** ($SIZE_BYTES bytes)"
+              echo "- Retention: 14 days (artifact \`app-debug-apk\`)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "APK $(basename "$APK"): ${SIZE_MB} MB"
+            echo "APK_SIZE_BYTES=$SIZE_BYTES" >> "$GITHUB_ENV"
+            echo "APK_SIZE_MB=$SIZE_MB" >> "$GITHUB_ENV"
+          else
+            echo "No APK produced — build failed upstream." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Comment APK size on PR
+        if: github.event_name == 'pull_request' && env.APK_SIZE_MB != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sizeMb = process.env.APK_SIZE_MB;
+            const sizeBytes = process.env.APK_SIZE_BYTES;
+            const header = '### 📱 APK size report';
+            const body = `${header}\nDebug APK: **${sizeMb} MB** (${sizeBytes} bytes) — artifact \`app-debug-apk\`, retained 14 days.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith(header));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

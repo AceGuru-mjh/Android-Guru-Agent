@@ -2,7 +2,6 @@ package com.apex.agent.ui.screen.agent
 
 import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -16,9 +15,6 @@ import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
-import com.apex.agent.slash.SlashCommandParser
-import com.apex.agent.slash.SlashCommandRouter
-import com.apex.agent.slash.SlashRouteContext
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,7 +22,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -215,8 +210,17 @@ class AgentChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
 
-    private val _attachments = MutableStateFlow<List<Attachment>>(emptyList())
-    val attachments: StateFlow<List<Attachment>> = _attachments.asStateFlow()
+    /**
+     * 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人
+     * （从本类抽出的单一职责协作类，逻辑逐行等价；scope 即 viewModelScope）。
+     */
+    private val attachmentManager = AttachmentManager(
+        context = context,
+        preprocessor = preprocessor,
+        scope = viewModelScope
+    )
+
+    val attachments: StateFlow<List<Attachment>> get() = attachmentManager.attachments
 
     /**
      * One-shot signal emitted when a slash command needs the user to complete
@@ -360,17 +364,6 @@ class AgentChatViewModel @Inject constructor(
     private var skillContext: String? = null
 
     /**
-     * 附件处理 Job 追踪，支持取消（缺陷 1 修复）。
-     */
-    private val attachmentJobs = mutableMapOf<Int, Job>()
-    private var attachmentIdCounter = 0
-
-    init {
-        // 启动预测性附件预处理清理循环（每 5 分钟清理 30 分钟前的预拷贝文件）
-        preprocessor.startCleanupLoop(viewModelScope)
-    }
-
-    /**
      * 发送消息（含附件）。
      *
      * 修复点：
@@ -380,14 +373,13 @@ class AgentChatViewModel @Inject constructor(
      */
     fun sendMessage(text: String) {
         val trimmedText = text.trim()
-        if (trimmedText.isEmpty() && _attachments.value.isEmpty()) return
+        if (trimmedText.isEmpty() && attachmentManager.attachments.value.isEmpty()) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
 
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
-        val currentAttachments = _attachments.value.toList()
-        _attachments.value = emptyList()
+        val currentAttachments = attachmentManager.drainAttachments()
 
         // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）
         updateInputText("")
@@ -432,7 +424,7 @@ class AgentChatViewModel @Inject constructor(
      * 普通消息发送：附件落盘 + UI 追加 User 气泡 + 调用 AgentEngine。
      *
      * 创新优化：优先使用预测性预处理的预拷贝结果（零等待），
-     * 未预拷贝的附件回退到 [copyToSandboxSafe]（64KB buffer + ensureActive）。
+     * 未预拷贝的附件回退到 [AttachmentManager.copyToSandboxSafe]（64KB buffer + ensureActive）。
      */
     private suspend fun executeNormalMessage(
         text: String,
@@ -444,7 +436,7 @@ class AgentChatViewModel @Inject constructor(
             currentAttachments.map { att ->
                 // 尝试从预拷贝缓存获取（零等待）
                 val preprocessedPath = preprocessor.getSandboxPath(att.uri)
-                val localPath = preprocessedPath ?: copyToSandboxSafe(att.uri, att.name)
+                val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
 
                 MessageAttachment(
                     name = att.name,
@@ -977,118 +969,29 @@ class AgentChatViewModel @Inject constructor(
     val toolkitStore: ChatToolkitStore = chatToolkit
 
     // ═══════════════════════════════════════════════════════════
-    // 附件处理（缺陷 1 修复：全部异步化）
+    // 附件处理（缺陷 1 修复：全部异步化）—— 已抽出至 [AttachmentManager]
     // ═══════════════════════════════════════════════════════════
 
     /**
      * 处理文件附件。立即添加 UPLOADING 占位项，IO 线程读取真实元数据后回填。
      * 同时触发预测性预处理（后台拷贝到沙箱），发送时零等待。
      */
-    fun attachFile(uri: Uri) {
-        val id = attachmentIdCounter++
-        // 先添加一个 UPLOADING 状态的占位项，UI 立即响应
-        _attachments.update {
-            it + Attachment(
-                uri = uri,
-                name = "读取中...",
-                mimeType = "application/octet-stream",
-                sizeBytes = 0,
-                type = AttachmentType.FILE,
-                uploadProgress = 0f,
-                status = UploadStatus.UPLOADING
-            )
-        }
-
-        attachmentJobs[id] = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val info = getFileMetadataSafe(uri).copy(
-                    uploadProgress = 1.0f,
-                    status = UploadStatus.SUCCESS
-                )
-                _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
-                            info
-                        } else att
-                    }
-                }
-                // ★ 触发预测性预处理：后台拷贝到沙箱，用户编辑文本时同步进行
-                preprocessor.preprocess(uri, info.name)
-            } catch (e: Exception) {
-                _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
-                            att.copy(status = UploadStatus.ERROR, name = "读取失败")
-                        } else att
-                    }
-                }
-            }
-        }
-    }
+    fun attachFile(uri: Uri) = attachmentManager.attachFile(uri)
 
     /**
      * 处理图片附件。立即添加 UPLOADING 占位项，IO 线程读取真实元数据后回填。
      * 同时触发预测性预处理（后台拷贝到沙箱），发送时零等待。
      */
-    fun attachImage(uri: Uri) {
-        val id = attachmentIdCounter++
-        _attachments.update {
-            it + Attachment(
-                uri = uri,
-                name = "读取中...",
-                mimeType = "image/*",
-                sizeBytes = 0,
-                type = AttachmentType.IMAGE,
-                uploadProgress = 0f,
-                status = UploadStatus.UPLOADING
-            )
-        }
-
-        attachmentJobs[id] = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val info = getFileMetadataSafe(uri).copy(
-                    type = AttachmentType.IMAGE,
-                    uploadProgress = 1.0f,
-                    status = UploadStatus.SUCCESS
-                )
-                _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
-                            info
-                        } else att
-                    }
-                }
-                // ★ 触发预测性预处理
-                preprocessor.preprocess(uri, info.name)
-            } catch (e: Exception) {
-                _attachments.update { list ->
-                    list.mapIndexed { index, att ->
-                        if (index == list.lastIndex && att.status == UploadStatus.UPLOADING) {
-                            att.copy(status = UploadStatus.ERROR, name = "读取失败")
-                        } else att
-                    }
-                }
-            }
-        }
-    }
+    fun attachImage(uri: Uri) = attachmentManager.attachImage(uri)
 
     /**
      * 移除附件。同时取消对应的元数据读取 Job 和预测性预拷贝。
      */
-    fun removeAttachment(index: Int) {
-        attachmentJobs.values.forEach { it.cancel() }
-        // 取消被移除附件的预测性预拷贝
-        val removed = _attachments.value.getOrNull(index)
-        removed?.uri?.let { preprocessor.cancel(it) }
-        _attachments.update { list ->
-            list.filterIndexed { i, _ -> i != index }
-        }
-    }
+    fun removeAttachment(index: Int) = attachmentManager.removeAttachment(index)
 
     override fun onCleared() {
         super.onCleared()
-        attachmentJobs.values.forEach { it.cancel() }
-        preprocessor.stopCleanupLoop()
+        attachmentManager.dispose()
     }
 
     // ═══ 斜杠指令处理 ═══
@@ -1098,10 +1001,10 @@ class AgentChatViewModel @Inject constructor(
      *
      * 解析格式：`/skill:code_interpreter [key=value ...] 附加的用户要求...`
      *
-     * 解析与路由职责已下沉到 [SlashCommandParser] + [SlashCommandRouter]，
-     * 本方法只负责：
-     * - 把当前 GitHub 连接状态快照成 [SlashRouteContext] 传给路由器；
-     * - 把路由结果（systemMessage + agentPrompt）应用到 UI 状态；
+     * 解析与路由职责已下沉到 [SlashCommands]（其内部再委托
+     * SlashCommandParser + SlashCommandRouter），本方法只负责：
+     * - 把解析/路由结果（banner + agentPrompt）应用到 UI 状态；
+     * - GitHub 未连接特例下发射 [requestGithubConnect] 信号；
      * - 把 agentPrompt 交给 [agentEngine] 执行。
      *
      * 特例：当路由器返回 `requestGithubConnect = true`（目前仅 `/mcp:github`
@@ -1112,30 +1015,20 @@ class AgentChatViewModel @Inject constructor(
      * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
-        val parsed = SlashCommandParser.parse(command)
-        val githubState = githubTokenManager.connectionState.value
-        val context = SlashRouteContext(
-            githubConnected = githubState.isConnected,
-            githubUsername = githubState.username
-        )
-        val route = SlashCommandRouter.route(parsed, context)
+        val result = SlashCommands.handle(command, githubTokenManager)
 
         // 始终追加反馈消息，让用户看到指令被识别 + 当前状态：
         // Skill 指令使用专用横幅（SkillStart），其余指令用 System 行。
-        val skillName = route.skillName
         _uiState.update { s ->
             s.copy(
-                messages = s.messages + (
-                    if (skillName != null) AgentUiMessage.SkillStart(skillName)
-                    else AgentUiMessage.System(route.systemMessage)
-                    ),
-                isLoading = !route.requestGithubConnect,
+                messages = s.messages + result.banner,
+                isLoading = result.isLoading,
                 currentThinking = "",
                 currentResponse = ""
             )
         }
 
-        if (route.requestGithubConnect) {
+        if (result is SlashCommands.Result.RequestGithubConnect) {
             // 请求 UI 打开 GitHub 连接流程；不进入 Agent 主循环。
             // tryEmit 因为 extraBufferCapacity=1，订阅者存在时一定成功；
             // 即便 UI 尚未订阅（冷启动竞态），缓冲区也会保留一次事件。
@@ -1144,91 +1037,14 @@ class AgentChatViewModel @Inject constructor(
         }
 
         // 记录 Skill 上下文，循环内产生的工具调用会被标为 SKILL 来源。
-        skillContext = skillName
+        val execute = result as SlashCommands.Result.Execute
+        skillContext = execute.skillName
 
         currentJob = viewModelScope.launch {
-            agentEngine.execute(route.agentPrompt).collect { event -> handleEvent(event) }
+            agentEngine.execute(execute.agentPrompt).collect { event -> handleEvent(event) }
         }.apply {
             invokeOnCompletion { skillContext = null }
         }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // 异步 I/O 工具方法（缺陷 1 修复）
-    // ═══════════════════════════════════════════════════════════
-
-    /**
-     * 异步读取附件元数据。必须在 IO 调度器中调用。
-     *
-     * ContentResolver.query() 走 Binder IPC 到 MediaProvider，可能阻塞 2-5 秒。
-     */
-    private suspend fun getFileMetadataSafe(uri: Uri): Attachment = withContext(Dispatchers.IO) {
-        val resolver = context.contentResolver
-        var name = "unknown_file"
-        var mimeType = "application/octet-stream"
-        var size = 0L
-
-        try {
-            resolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (cursor.moveToFirst()) {
-                    if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: name
-                    if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
-                }
-            }
-        } catch (e: Exception) {
-            // ContentProvider 可能已失效（如临时权限过期）
-            name = "file_${System.currentTimeMillis()}"
-        }
-
-        mimeType = try {
-            resolver.getType(uri) ?: mimeType
-        } catch (e: Exception) {
-            mimeType
-        }
-
-        val type = when {
-            mimeType.startsWith("image/") -> AttachmentType.IMAGE
-            mimeType.startsWith("audio/") -> AttachmentType.AUDIO
-            mimeType.startsWith("video/") -> AttachmentType.VIDEO
-            mimeType.contains("zip") || mimeType.contains("tar") || mimeType.contains("rar") -> AttachmentType.ARCHIVE
-            else -> AttachmentType.FILE
-        }
-
-        Attachment(uri, name, mimeType, size, type)
-    }
-
-    /**
-     * 异步拷贝附件到应用沙箱。
-     *
-     * 修复点：
-     * - 64KB buffer（比默认 8KB 快 8 倍，匹配 UFS/eMMC optimal I/O block）；
-     * - [ensureActive] 协程取消检查点，用户移除附件时立即停止拷贝；
-     * - 落盘失败抛出异常，由调用方处理。
-     */
-    private suspend fun copyToSandboxSafe(
-        uri: Uri,
-        fileName: String
-    ): String = withContext(Dispatchers.IO) {
-        val targetDir = java.io.File(context.filesDir, "attachments")
-        targetDir.mkdirs()
-        val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$fileName")
-
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            targetFile.outputStream().use { output ->
-                val buffer = ByteArray(64 * 1024) // 64KB buffer
-                var len: Int
-                while (input.read(buffer).also { len = it } != -1) {
-                    // 协程取消检查点
-                    ensureActive()
-                    output.write(buffer, 0, len)
-                }
-                output.flush()
-            }
-        } ?: throw IllegalStateException("Cannot open input stream for $uri")
-
-        targetFile.absolutePath
     }
 
     companion object {

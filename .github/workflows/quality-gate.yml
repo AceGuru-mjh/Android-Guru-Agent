@@ -1,0 +1,81 @@
+name: Quality Gate
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Structural quality gates that complement ci.yml:
+#   • file-size budget  — blocks God-files (SRP enforcement, 1200/1600 lines)
+#   • anti-pattern gate — blocks `javaClass.getMethod` reflective dispatch &
+#                          `printStackTrace()` in main sources
+#   • audit report      — empty catch blocks + TODO/FIXME census (job summary)
+#
+# Runs fast (<30s, no compilation) on every push & PR, and manually via
+# workflow_dispatch. Findings land in the run's Job Summary page.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main, 'feat/**', 'refactor/**', 'fix/**']
+  pull_request:
+    branches: [main, 'feat/**']
+  workflow_dispatch:
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  structural-quality:
+    name: Structural Quality (SRP budget + anti-patterns)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: File-size budget gate (God-file prevention)
+        run: |
+          chmod +x scripts/check_file_size.sh
+          # Budgets: main ≤1200 lines, test ≤1600 lines per .kt file.
+          # To raise a budget, justify it in the PR — but prefer splitting
+          # the file along responsibility seams instead.
+          ./scripts/check_file_size.sh
+
+      - name: Anti-pattern gate (reflection dispatch / printStackTrace)
+        run: |
+          chmod +x scripts/check_code_quality.sh
+          ./scripts/check_code_quality.sh
+
+      - name: Kotlin source inventory
+        run: |
+          MAIN=$(find . -name "*.kt" -path "*/src/main/*" -not -path "./.git/*" -not -path "*/build/*" | wc -l)
+          TEST=$(find . -name "*.kt" \( -path "*/src/test/*" -o -path "*/src/androidTest/*" \) -not -path "./.git/*" -not -path "*/build/*" | wc -l)
+          TOTAL_LINES=$(find . -name "*.kt" -not -path "./.git/*" -not -path "*/build/*" | xargs wc -l | tail -1 | awk '{print $1}')
+          {
+            echo ""
+            echo "## 📦 Kotlin source inventory"
+            echo ""
+            echo "- Main source files: **$MAIN**"
+            echo "- Test source files: **$TEST**"
+            echo "- Total Kotlin lines: **$TOTAL_LINES**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Main: $MAIN files / Test: $TEST files / $TOTAL_LINES total lines"
+
+  workflow-metadata:
+    name: Run Metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Record run context
+        run: |
+          {
+            echo ""
+            echo "## ℹ️ Run context"
+            echo ""
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- Ref: \`${{ github.ref_name }}\`"
+            echo "- SHA: \`${{ github.sha }}\`"
+            echo "- Actor: \`${{ github.actor }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

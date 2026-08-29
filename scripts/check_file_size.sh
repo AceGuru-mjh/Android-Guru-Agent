@@ -61,10 +61,19 @@ SUMMARY_FILE="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 if [ ${#MAIN_FILES[@]} -gt 0 ]; then
     echo "── Top 10 largest MAIN sources (budget: $MAX_MAIN_LINES) ──"
-    printf '%s\n' "${MAIN_FILES[@]}" | xargs wc -l | grep -v ' total$' | sort -rn | head -10 | while read -r LINES FILE; do
+    # NB: sort into a variable first — piping into `head` would SIGPIPE `sort`
+    # and, under `set -o pipefail`, fail the whole script spuriously.
+    ALL_SORTED=$(printf '%s\n' "${MAIN_FILES[@]}" | xargs wc -l 2>/dev/null | grep -v ' total$' | sort -rn || true)
+    count=0
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        count=$((count + 1))
+        [ "$count" -gt 10 ] && break
+        LINES=${line%% *}
+        FILE=${line#* }
         echo "  $LINES  $FILE"
         echo "| $LINES | \`$FILE\` |" >> "$SUMMARY_FILE" 2>/dev/null || true
-    done
+    done <<< "$ALL_SORTED"
 fi
 
 TOTAL_MAIN=${#MAIN_FILES[@]}

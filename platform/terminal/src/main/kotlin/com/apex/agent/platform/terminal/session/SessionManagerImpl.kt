@@ -16,6 +16,7 @@ import com.apex.agent.platform.terminal.pty.NativePty
 import com.apex.agent.platform.terminal.policy.PrivilegeLevel
 import com.apex.agent.platform.terminal.policy.TerminalCapability
 import com.apex.agent.platform.terminal.policy.TerminalPolicy
+import com.apex.agent.platform.terminal.runtime.SpawnSpec
 import com.apex.agent.platform.terminal.screen.VirtualTerminal
 import com.apex.agent.platform.terminal.state.SemanticStateReducer
 import com.apex.agent.platform.terminal.wait.WaitEngineImpl
@@ -82,18 +83,62 @@ class SessionManagerImpl(
         env: Map<String, String>, privilege: PrivilegeLevel
     ): Result<TerminalSession> = mutex.withLock {
         val sessionId = idCounter.incrementAndGet()
-        // 1. forkpty
+        // 1. forkpty（旧路径：单 shell + env 数组；与 LocalShellBackend.prepare
+        //    产出的 argv 路径在 C++ 层逐字节等价 —— T73 统一路由后仅作兼容入口保留）
         val envArray = env.map { "${it.key}=${it.value}" }.toTypedArray()
         val nativeId = native.nativeCreateSession(shell, cwd, rows, cols, envArray)
         if (nativeId < 0) {
             return@withLock Result.failure(RuntimeException("TerminalError:PtyUnavailable"))
         }
+        assembleAndStart(
+            sessionId = sessionId, nativeId = nativeId,
+            shell = shell, initialCwd = cwd,
+            rows = rows, cols = cols, privilege = privilege,
+            backend = null
+        )
+    }
+
+    /**
+     * T73: SpawnSpec 路径 —— TerminalRuntime.create(backendId=…) 的生产入口。
+     * spawn 走 [NativePty.nativeCreateSessionArgv]（forkpty → execv(argv[0], argv)）。
+     */
+    override suspend fun createFromSpec(
+        spec: SpawnSpec, rows: Int, cols: Int, privilege: PrivilegeLevel
+    ): Result<TerminalSession> = mutex.withLock {
+        val sessionId = idCounter.incrementAndGet()
+        if (spec.argv.isEmpty()) {
+            return@withLock Result.failure(RuntimeException("TerminalError:InvalidInput — empty argv"))
+        }
+        val nativeId = native.nativeCreateSessionArgv(
+            spec.argv, spec.cwd, rows, cols, spec.env
+        )
+        if (nativeId < 0) {
+            return@withLock Result.failure(RuntimeException("TerminalError:PtyUnavailable"))
+        }
+        // 展示语义：LINUX 会话 shell=/bin/bash、cwd=guest -w；LOCAL 与旧路径一致。
+        val shellDisplay = spec.shellDisplay ?: spec.argv[0]
+        val cwdDisplay = spec.cwdDisplay ?: spec.metadata.guestCwd ?: spec.cwd
+        assembleAndStart(
+            sessionId = sessionId, nativeId = nativeId,
+            shell = shellDisplay, initialCwd = cwdDisplay,
+            rows = rows, cols = cols, privilege = privilege,
+            backend = spec.metadata
+        )
+    }
+
+    /** 共享装配：deps 组装 → pump 启动 → READY → SessionCreated → exit watcher。 */
+    private suspend fun assembleAndStart(
+        sessionId: Long, nativeId: Int,
+        shell: String, initialCwd: String,
+        rows: Int, cols: Int, privilege: PrivilegeLevel,
+        backend: com.apex.agent.platform.terminal.runtime.BackendSessionMetadata?
+    ): Result<TerminalSession> {
         val pid = native.nativeGetPid(nativeId)
         // 2. assemble deps
         val ringBuffer = RingTerminalBuffer()
         val vt = virtualTerminalFactory(rows, cols)
         val reducer = SemanticStateReducer(
-            sessionId = sessionId, shell = shell, initialCwd = cwd, privilege = privilege,
+            sessionId = sessionId, shell = shell, initialCwd = initialCwd, privilege = privilege,
             pid = pid, rows = rows, cols = cols
         )
         val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
@@ -109,9 +154,10 @@ class SessionManagerImpl(
             scope = scope  // P70: shared session-manager scope (injectable in tests; pump.stop cancels only its own job)
         )
         val session = TerminalSession(
-            id = sessionId, shell = shell, initialCwd = cwd, pid = pid,
+            id = sessionId, shell = shell, initialCwd = initialCwd, pid = pid,
             rows = rows, cols = cols, privilege = privilege, state = SessionState.STARTING,
-            createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L
+            createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L,
+            backend = backend
         )
         assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump, observationEngine)
         stateFlows[sessionId] = MutableStateFlow(SessionState.STARTING)
@@ -122,13 +168,13 @@ class SessionManagerImpl(
         // 5. emit SessionCreated
         val ev = TerminalEvent.SessionCreated(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
-            shell = shell, cwd = cwd, pid = pid, rows = rows, cols = cols, privilege = privilege
+            shell = shell, cwd = initialCwd, pid = pid, rows = rows, cols = cols, privilege = privilege
         )
         val eid = eventLog.append(ev)
         eventBus.emit(ev.copy(id = eid))
         // 6. start exit watcher
         startExitWatcher(sessionId, nativeId)
-        Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
+        return Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
     }
 
     override suspend fun get(id: Long): TerminalSession? {

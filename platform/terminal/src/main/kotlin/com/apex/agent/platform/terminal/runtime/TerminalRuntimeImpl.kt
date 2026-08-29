@@ -50,10 +50,16 @@ import kotlinx.coroutines.launch
  *
  * Spec ref: ATR 2.0 Final Spec §6.1 / §33 / §34
  *
+ * T73: create() 统一经 [ExecutionBackendRegistry] 路由 —— backendId="local" 走
+ * LocalShellBackend（与旧硬编码 spawn 逐字节一致，ExecutionBackendGoldenTest 锁定），
+ * backendId="linux-ubuntu" 走 LinuxPRootBackend（forkpty → proot → Ubuntu bash）。
+ * 会话的后端元数据进 TerminalSession.backend 并持久化（SessionRecord schema v2）。
+ *
  * Construction (Hilt in real repo; manual here):
  *   val runtime = TerminalRuntimeImpl(
  *       native = FakeNativePty() or JniNativePty(),
  *       policy = TerminalPolicyImpl(),
+ *       backendRegistry = ExecutionBackendRegistry.of(LocalShellBackend(), linuxBackend),
  *       virtualTerminalFactory = { r, c -> RealVirtualTerminal(r, c) }   // Phase 2: real VT
  *   )
  *
@@ -65,6 +71,7 @@ import kotlinx.coroutines.launch
 class TerminalRuntimeImpl(
     private val native: NativePty,
     private val policy: TerminalPolicy,
+    private val backendRegistry: ExecutionBackendRegistry = ExecutionBackendRegistry.of(LocalShellBackend()),
     private val virtualTerminalFactory: (Int, Int) -> VirtualTerminal = { r, c ->
         com.apex.agent.platform.terminal.screen.RealVirtualTerminal(r, c)
     },
@@ -129,9 +136,40 @@ class TerminalRuntimeImpl(
     // ───────── create ─────────
     override suspend fun create(
         shell: String, cwd: String, rows: Int, cols: Int,
-        env: Map<String, String>, privilege: PrivilegeLevel
+        env: Map<String, String>, privilege: PrivilegeLevel,
+        backendId: String
     ): Result<CreateResult> {
-        val r = sessionManager.create(shell, cwd, rows, cols, env, privilege)
+        // T73: 后端路由。local 默认 —— 与历史行为一致（golden）；
+        // linux-ubuntu —— 失败时给出可行动错误（引导 Agent 先装 rootfs）。
+        val backend = backendRegistry.get(backendId)
+            ?: return Result.failure(
+                RuntimeException(
+                    "TerminalError:BackendNotFound — '$backendId'（可用: " +
+                        backendRegistry.list().joinToString(", ") { it.id } + "）"
+                )
+            )
+        when (val av = backend.availability()) {
+            is BackendAvailability.Ready -> Unit
+            is BackendAvailability.NeedsRootfs -> return Result.failure(
+                RuntimeException(
+                    "TerminalError:RootfsNotReady — backend '${backend.id}' 需要 Ubuntu rootfs" +
+                        "（state=${av.state}）。先用 terminal.ubuntu.install 引导安装，再重试 create。"
+                )
+            )
+            is BackendAvailability.Failed -> return Result.failure(
+                RuntimeException(
+                    "TerminalError:BackendFailed — backend '${backend.id}' 不可用: ${av.reason}"
+                )
+            )
+        }
+        val request = SessionSpawnRequest(
+            shellHint = shell.takeIf { backendId == LocalShellBackend.ID },
+            cwd = cwd, rows = rows, cols = cols, env = env, privilege = privilege
+        )
+        val spec = backend.prepare(request).getOrElse { e ->
+            return Result.failure(RuntimeException("TerminalError:BackendPrepareFailed — ${e.message}", e))
+        }
+        val r = sessionManager.createFromSpec(spec, rows, cols, privilege)
         return r.map { s ->
             // start a JobManager listener for this session
             startSessionListener(s.id)
@@ -142,10 +180,34 @@ class TerminalRuntimeImpl(
             CreateResult(
                 sessionId = s.id, pid = s.pid, shell = s.shell, cwd = s.initialCwd,
                 rows = s.rows, cols = s.cols, privilege = s.privilege,
-                state = s.state.name, cursor = s.cursor
+                state = s.state.name, cursor = s.cursor,
+                backendId = backend.id,
+                runtimeType = backend.runtimeType.name,
+                rootfsId = s.backend?.rootfsId,
+                guestCwd = s.backend?.guestCwd
             )
         }
     }
+
+    // ───────── backends（T73：Agent 能力发现）─────────
+    override suspend fun backends(): List<TerminalRuntime.BackendStatus> =
+        backendRegistry.list().map { b ->
+            when (val av = b.availability()) {
+                is BackendAvailability.Ready -> TerminalRuntime.BackendStatus(
+                    id = b.id, runtimeType = b.runtimeType.name,
+                    available = true, state = "READY", detail = null
+                )
+                is BackendAvailability.NeedsRootfs -> TerminalRuntime.BackendStatus(
+                    id = b.id, runtimeType = b.runtimeType.name,
+                    available = false, state = "NEEDS_ROOTFS:${av.state}",
+                    detail = "Ubuntu rootfs 未就绪 —— 调用 terminal.ubuntu.install 安装后重试"
+                )
+                is BackendAvailability.Failed -> TerminalRuntime.BackendStatus(
+                    id = b.id, runtimeType = b.runtimeType.name,
+                    available = false, state = "FAILED", detail = av.reason
+                )
+            }
+        }
 
     // ───────── run ─────────
     override suspend fun run(

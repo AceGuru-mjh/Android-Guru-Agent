@@ -34,8 +34,8 @@ import java.io.File
  * （PGID==proot PID）→ 现有 kill(-PGID)/TIOCSWINSZ/tcgetpgrp 语义直接成立；
  * bash 拿到的是真 PTY slave（经 proot 翻译）→ SIGWINCH/Ctrl-C 全为内核真实行为。
  *
- * P71 范围：本类 + availability + prepare（产出 SpawnSpec）。TerminalRuntime 的
- * create(backend=…) 接线与 rootfs 下载引导属于 P73。
+ * P71 范围：本类 + availability + prepare（产出 SpawnSpec）。T73 已把
+ * TerminalRuntime.create(backendId=…) 接到本后端（runtime 路由 + 生产 DI）。
  */
 class LinuxPRootBackend(
     private val binaryProvider: PRootBinaryProvider,
@@ -128,6 +128,8 @@ class LinuxPRootBackend(
                 // proot 忽略 host cwd（-w 为准）—— chdir 落到 rootfs 目录（必然存在）
                 cwd = rootfsPath.value,
                 cwdIsGuestPath = true,
+                shellDisplay = GUEST_SHELL,     // T73: argv[0] 是 libproot.so，语义 shell 是 /bin/bash
+                cwdDisplay = guestCwd,          // T73: 语义 cwd 是 guest 路径（-w 的值）
                 metadata = BackendSessionMetadata(
                     backendId = id,
                     rootfsId = rootfs.id,
@@ -156,10 +158,17 @@ class LinuxPRootBackend(
         return env
     }
 
-    /** request.cwd → guest cwd。"/" 或空 → /workspace。 */
+    /**
+     * request.cwd → guest cwd。"/" 或空 → /workspace。
+     * T73: "/sdcard" 是 TerminalRuntime 的 LOCAL 默认 cwd（Android host 路径）——
+     * 在 guest 内无意义，落 /workspace（与 "" 同语义）。显式 guest 绝对路径仍直通。
+     */
     internal fun mapGuestCwd(cwd: String): String {
         val trimmed = cwd.trim()
         if (trimmed.isEmpty() || trimmed == "/") return "/workspace"
+        if (trimmed == com.apex.agent.platform.terminal.runtime.LocalShellBackend.LEGACY_DEFAULT_CWD) {
+            return "/workspace"
+        }
         return if (trimmed.startsWith("/")) trimmed else "/workspace/$trimmed"
     }
 

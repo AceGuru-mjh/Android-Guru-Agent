@@ -39,14 +39,17 @@ import com.apex.agent.platform.terminal.wait.WaitResult
 interface TerminalRuntime {
 
     // ───────── create ─────────
-    // Spec §34.1
+    // Spec §34.1 + T73: backendId 路由（ExecutionBackendRegistry）。
+    // "local" = Android 本地 shell（默认，与历史行为一致）；"linux-ubuntu" =
+    // PRoot + Ubuntu RootFS 会话（需 rootfs 已 provision，否则失败并携带引导信息）。
     suspend fun create(
         shell: String = "/system/bin/sh",
         cwd: String = "/sdcard",
         rows: Int = 24,
         cols: Int = 80,
         env: Map<String, String> = emptyMap(),
-        privilege: PrivilegeLevel = PrivilegeLevel.NORMAL
+        privilege: PrivilegeLevel = PrivilegeLevel.NORMAL,
+        backendId: String = "local"
     ): RuntimeResult<CreateResult>
 
     data class CreateResult(
@@ -58,7 +61,27 @@ interface TerminalRuntime {
         val cols: Int,
         val privilege: PrivilegeLevel,
         val state: String,         // SessionState name
-        val cursor: Long
+        val cursor: Long,
+        // ── T73: 后端路由结果（Agent 可感知会话落在哪个执行环境）──
+        val backendId: String = "local",
+        val runtimeType: String = "ANDROID_LOCAL",   // BackendRuntimeType name
+        val rootfsId: String? = null,                // LINUX: 已就绪 rootfs 的 id
+        val guestCwd: String? = null                 // LINUX: guest 语义 cwd
+    )
+
+    // ───────── backends（T73：Agent 后端能力发现）─────────
+    // Spec §33（Agent 只依赖 TerminalRuntime 门面）：列出所有已注册执行后端及
+    // 其真实可用性。Agent 据此决定 create(backendId=…) 的目标，或在
+    // NEEDS_ROOTFS 时先调 terminal.ubuntu.install 引导安装。
+    suspend fun backends(): List<BackendStatus>
+
+    /** 单个后端的可用性快照（T73）。 */
+    data class BackendStatus(
+        val id: String,
+        val runtimeType: String,        // BackendRuntimeType.name: ANDROID_LOCAL | LINUX
+        val available: Boolean,         // availability is Ready
+        val state: String,              // READY | NEEDS_ROOTFS[:state] | FAILED
+        val detail: String? = null      // 失败原因 / 引导提示
     )
 
     // ───────── run ─────────

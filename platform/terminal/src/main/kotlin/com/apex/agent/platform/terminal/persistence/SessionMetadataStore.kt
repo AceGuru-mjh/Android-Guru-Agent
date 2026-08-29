@@ -17,6 +17,7 @@ import java.io.File
  *
  * What's persisted:
  *   - Session metadata (id, shell, cwd, pid, rows, cols, privilege, state, cursor, createdAt, lastExitCode)
+ *   - T73 (v2): backend metadata (backendId/rootfsId/workspaceDir/guestCwd/binds)
  *   - Job metadata (id, sessionId, command, owner, background, startCursor, endCursor, state, exitCode, startedAt, finishedAt)
  *   - Recent events (last N per session — default 100)
  *
@@ -40,15 +41,21 @@ class SessionMetadataStore(
 
     @Serializable
     data class SessionRecord(
-        val schemaVersion: Int = 1,   // PR #54 §17: versioned for future migration
+        val schemaVersion: Int = 2,   // T73: v2 adds backend fields; v1 files still load (defaults)
         val id: Long, val shell: String, val initialCwd: String, val pid: Int,
         val rows: Int, val cols: Int, val privilege: String, val state: String,
         val createdAt: Long, val lastActivityAt: Long = createdAt,  // PR #54 §25: activity tracking
         val exitReason: String? = null,  // PR #54 §11: why session ended
         val lastExitCode: Int?, val cursor: Long,
-        val jobs: List<JobRecord>, val recentEvents: List<EventRecord>
+        val jobs: List<JobRecord>, val recentEvents: List<EventRecord>,
+        // ── T73 (schema v2): 执行后端元数据（crash 后恢复时可区分本地/Ubuntu 会话）──
+        val backendId: String? = null,       // null = v1 记录（语义上等同 "local"）
+        val rootfsId: String? = null,
+        val workspaceDir: String? = null,
+        val guestCwd: String? = null,
+        val binds: List<String> = emptyList()
     ) {
-        companion object { const val CURRENT_SCHEMA = 1 }
+        companion object { const val CURRENT_SCHEMA = 2 }
     }
 
     @Serializable
@@ -74,7 +81,12 @@ class SessionMetadataStore(
             exitReason = null,  // set on close/reconcile by SessionManager
             lastExitCode = session.lastExitCode, cursor = session.cursor,
             jobs = jobs.map { it.toRecord() },
-            recentEvents = recentEvents.takeLast(maxRecentEvents).map { it.toRecord() }
+            recentEvents = recentEvents.takeLast(maxRecentEvents).map { it.toRecord() },
+            backendId = session.backend?.backendId,
+            rootfsId = session.backend?.rootfsId,
+            workspaceDir = session.backend?.workspaceDir,
+            guestCwd = session.backend?.guestCwd,
+            binds = session.backend?.binds ?: emptyList()
         )
         // PR #54 §18: atomic write — temp file + flush + rename (avoid corruption on mid-write crash)
         val target = File(storageDir, "session-${session.id}.json")

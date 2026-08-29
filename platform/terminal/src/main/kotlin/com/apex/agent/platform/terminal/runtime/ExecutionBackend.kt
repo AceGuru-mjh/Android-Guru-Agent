@@ -82,7 +82,18 @@ data class SpawnSpec(
     val cwd: String,
     /** true = request.cwd 是 guest 路径（已通过 argv 的 -w 表达，host cwd 仅作安全落点）。 */
     val cwdIsGuestPath: Boolean,
-    /** 进 SessionRecord 的后端元数据（P73 持久化接入）。 */
+    /**
+     * T73: 展示语义的 shell 路径（进 TerminalSession.shell / SessionCreated 事件）。
+     * null → argv[0]（LOCAL = shell 路径本身）；LINUX = "/bin/bash"（argv[0] 是
+     * libproot.so 路径，对 Agent/UI 无意义）。
+     */
+    val shellDisplay: String? = null,
+    /**
+     * T73: 展示语义的 cwd（进 TerminalSession.initialCwd / SessionCreated 事件）。
+     * null → spec.cwd（host 路径）；LINUX 由 metadata.guestCwd 承担。
+     */
+    val cwdDisplay: String? = null,
+    /** 进 SessionRecord 的后端元数据（T73 已持久化：SessionRecord schema v2）。 */
     val metadata: BackendSessionMetadata = BackendSessionMetadata(backendId = "local")
 )
 
@@ -133,12 +144,18 @@ class LocalShellBackend : ExecutionBackend {
 
     override suspend fun prepare(request: SessionSpawnRequest): Result<SpawnSpec> {
         val shell = request.shellHint?.takeIf { it.isNotBlank() } ?: DEFAULT_SHELL
+        // T73: 显式 request.env 叠加在默认值之上（调用方意图优先）。此前 request.env
+        // 被静默丢弃 —— 统一路由后 TerminalRuntime.create(env=...) 的变量会全部丢失。
+        // env 为空时与 golden 快照逐字节一致（ExecutionBackendGoldenTest 不受影响）。
+        val env = defaultEnv(shell) + request.env
         return Result.success(
             SpawnSpec(
                 argv = listOf(shell, "-i"),
-                env = defaultEnv(shell),
+                env = env,
                 cwd = request.cwd.ifBlank { DEFAULT_CWD },
                 cwdIsGuestPath = false,
+                shellDisplay = null,           // argv[0] 即 shell 路径
+                cwdDisplay = null,             // host cwd 即语义 cwd
                 metadata = BackendSessionMetadata(backendId = id, guestCwd = null)
             )
         )

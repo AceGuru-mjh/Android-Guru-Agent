@@ -21,6 +21,16 @@ sealed interface MarkdownNode {
     data class OrderedItem(val index: Int, val text: String) : MarkdownNode
 }
 
+// ═══ 预编译正则（性能：原先在逐行/逐段循环内 toRegex()，流式输出时每个 token
+// 都会触发全量重解析并反复编译正则；提升到顶层只编译一次）═══
+private val HEADING_REGEX = Regex("^#{1,3}\\s+(.*)$")
+private val ORDERED_LIST_REGEX = Regex("^(\\d+)\\.\\s+(.*)$")
+private val BULLET_LIST_REGEX = Regex("^[-*]\\s+(.*)$")
+private val BULLET_LINE_REGEX = Regex("^[-*]\\s+.*$")
+private val ORDERED_LINE_REGEX = Regex("^\\d+\\.\\s+.*$")
+private val INLINE_CODE_REGEX = Regex("`([^`]+)`")
+private val BOLD_REGEX = Regex("\\*\\*([^*]+)\\*\\*")
+
 /** 行内片段：普通文本或行内代码。 */
 sealed interface InlineSegment {
     data class Text(val text: String) : InlineSegment
@@ -51,7 +61,7 @@ fun parseMarkdown(input: String): List<MarkdownNode> {
         }
 
         // ═══ 标题 ═══
-        val heading = "^#{1,3}\\s+(.*)$".toRegex().find(line)
+        val heading = HEADING_REGEX.find(line)
         if (heading != null) {
             val level = line.takeWhile { it == '#' }.length
             nodes.add(MarkdownNode.Heading(level, heading.groupValues[1].trim()))
@@ -60,7 +70,7 @@ fun parseMarkdown(input: String): List<MarkdownNode> {
         }
 
         // ═══ 有序列表 ═══
-        val ordered = "^(\\d+)\\.\\s+(.*)$".toRegex().find(line)
+        val ordered = ORDERED_LIST_REGEX.find(line)
         if (ordered != null) {
             nodes.add(
                 MarkdownNode.OrderedItem(
@@ -73,7 +83,7 @@ fun parseMarkdown(input: String): List<MarkdownNode> {
         }
 
         // ═══ 无序列表 ═══
-        val bullet = "^[-*]\\s+(.*)$".toRegex().find(line)
+        val bullet = BULLET_LIST_REGEX.find(line)
         if (bullet != null) {
             nodes.add(MarkdownNode.BulletItem(bullet.groupValues[1].trim()))
             i++
@@ -91,8 +101,8 @@ fun parseMarkdown(input: String): List<MarkdownNode> {
         while (i < lines.size && lines[i].isNotBlank() &&
             !lines[i].trim().startsWith("```") &&
             !lines[i].trim().startsWith("#") &&
-            "^[-*]\\s+.*$".toRegex().matches(lines[i].trim()).not() &&
-            "^\\d+\\.\\s+.*$".toRegex().matches(lines[i].trim()).not()
+            BULLET_LINE_REGEX.matches(lines[i].trim()).not() &&
+            ORDERED_LINE_REGEX.matches(lines[i].trim()).not()
         ) {
             para.add(lines[i])
             i++
@@ -108,9 +118,8 @@ fun parseMarkdown(input: String): List<MarkdownNode> {
 /** 解析行内片段：先拆出行内代码，再对剩余文本拆出 **bold**。 */
 private fun parseInline(text: String): List<InlineSegment> {
     val segments = mutableListOf<InlineSegment>()
-    val codeRegex = "`([^`]+)`".toRegex()
     var lastIndex = 0
-    codeRegex.findAll(text).forEach { match ->
+    INLINE_CODE_REGEX.findAll(text).forEach { match ->
         if (match.range.first > lastIndex) {
             segments.addAll(parseBold(text.substring(lastIndex, match.range.first)))
         }
@@ -125,9 +134,8 @@ private fun parseInline(text: String): List<InlineSegment> {
 
 private fun parseBold(text: String): List<InlineSegment> {
     val segments = mutableListOf<InlineSegment>()
-    val boldRegex = "\\*\\*([^*]+)\\*\\*".toRegex()
     var lastIndex = 0
-    boldRegex.findAll(text).forEach { match ->
+    BOLD_REGEX.findAll(text).forEach { match ->
         if (match.range.first > lastIndex) {
             segments.add(InlineSegment.Text(text.substring(lastIndex, match.range.first)))
         }

@@ -5,6 +5,7 @@ import com.apex.agent.core.code.CodeContextProvider
 import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.code.CodeOrchestrationPolicy
 import com.apex.agent.core.codetools.tools.WorkspaceFsProvider
+import com.apex.agent.core.codetools.problems.ProblemsAggregator
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ApexAgentEngine
@@ -17,9 +18,15 @@ import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
+import com.apex.agent.platform.code.intel.CodeContextProviderImpl
+import com.apex.agent.platform.code.intel.ProblemsAggregatorImpl
 import com.apex.agent.platform.code.intel.git.CodeWorkspaceIdProvider
 import com.apex.agent.platform.code.ws.AndroidCodeWorkspaceMemory
 import com.apex.agent.platform.code.ws.CodeWorkspaceManager
+import com.apex.agent.platform.terminal.environment.BuiltInProfileRegistry
+import com.apex.agent.platform.terminal.environment.DefaultProjectEnvironmentAnalyzer
+import com.apex.agent.platform.terminal.environment.EnvironmentProfileRegistry
+import com.apex.agent.platform.terminal.environment.ProjectEnvironmentAnalyzer
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -139,4 +146,32 @@ object CodeModule {
     @Singleton
     fun provideCodeWorkspaceIdProvider(wsManager: CodeWorkspaceManager): CodeWorkspaceIdProvider =
         CodeWorkspaceIdProvider { wsManager.activeId() }
+
+    // ═══ Interface → Impl bindings (Hilt requires explicit binding for interfaces ═══
+    // even when the impl has @Inject constructor). These unblock the entire Code DI graph:
+    // CodeWorkspaceManager ← ProjectEnvironmentAnalyzer ← EnvironmentProfileRegistry + BuiltInProfileRegistry
+    // CodeContextProviderImpl ← CodeContextProvider
+    // ProblemsAggregatorImpl ← ProblemsAggregator
+    // Without these, Hilt reports "Missing binding for <interface>" at each consumer.
+
+    /** @see com.apex.agent.platform.terminal.environment.BuiltInProfileRegistry */
+    @Provides
+    @Singleton
+    fun provideEnvironmentProfileRegistry(): EnvironmentProfileRegistry = BuiltInProfileRegistry()
+
+    /** @see com.apex.agent.platform.terminal.environment.DefaultProjectEnvironmentAnalyzer */
+    @Provides
+    @Singleton
+    fun provideProjectEnvironmentAnalyzer(reg: EnvironmentProfileRegistry): ProjectEnvironmentAnalyzer =
+        DefaultProjectEnvironmentAnalyzer(reg)
+
+    /** @see com.apex.agent.platform.code.intel.ProblemsAggregatorImpl */
+    @Provides
+    @Singleton
+    fun provideProblemsAggregator(impl: ProblemsAggregatorImpl): ProblemsAggregator = impl
+
+    /** @see com.apex.agent.platform.code.intel.CodeContextProviderImpl */
+    @Provides
+    @Singleton
+    fun provideCodeContextProvider(impl: CodeContextProviderImpl): CodeContextProvider = impl
 }

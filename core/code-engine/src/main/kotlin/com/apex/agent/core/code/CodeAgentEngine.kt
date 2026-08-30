@@ -83,7 +83,7 @@ class CodeAgentEngine(
         val ws = currentWorkspaceId ?: return
         val ctx = contextProvider.provide(ws, currentActiveFile, currentSelection, task)
         val codePrompt = buildCodeSystemPrompt(ws) + ctx
-        delegate.updateConfig { it.copy(additionalSystemContext = codePrompt) }
+        delegate.updateConfig(delegate.currentConfig().copy(additionalSystemContext = codePrompt))
     }
 
     /** 清当前 workspace 的对话历史（Spec §11 隔离）。 */

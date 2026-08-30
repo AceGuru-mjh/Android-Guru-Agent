@@ -2,6 +2,7 @@ package com.apex.agent.platform.code.ws
 
 import android.content.Context
 import com.apex.agent.core.codetools.fs.CodeWorkspaceFileSystem
+import com.apex.agent.platform.terminal.environment.ProjectAnalysis
 import com.apex.agent.platform.terminal.environment.ProjectEnvironmentAnalyzer
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
 import kotlinx.serialization.encodeToString
@@ -68,7 +69,7 @@ class CodeWorkspaceManager @Inject constructor(
         )).copy(
             hostRootPath = hostDir.absolutePath,
             detectedEnvironment = analysis?.detectedLanguages?.joinToString("/")?.ifBlank { null },
-            detectedLanguages = analysis?.detectedLanguages ?: emptyList(),
+            detectedLanguages = analysis?.detectedLanguages?.toList() ?: emptyList(),
             buildSystem = inferBuildSystem(analysis, hostDir),
             sessionState = CodeWorkspace.SessionState.OPEN,
             lastUsedAt = now
@@ -165,7 +166,7 @@ class CodeWorkspaceManager @Inject constructor(
         if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
     }
 
-    private fun inferBuildSystem(analysis: ProjectEnvironmentAnalyzer.ProjectAnalysis?, hostDir: File): String? {
+    private fun inferBuildSystem(analysis: ProjectAnalysis?, hostDir: File): String? {
         if (analysis == null) return null
         return when {
             File(hostDir, "settings.gradle").exists() || File(hostDir, "settings.gradle.kts").exists() ||

@@ -163,7 +163,7 @@ class CodeViewModel @Inject constructor(
     private fun handleEvent(ev: AgentEvent, msgs: MutableList<CodeUiMessage>, currentAssistant: StringBuilder) {
         when (ev) {
             is AgentEvent.ThinkingStart -> _uiState.update { it.copy(currentThinking = "thinking…") }
-            is AgentEvent.ThinkingChunk -> _uiState.update { it.copy(currentThinking = it.currentThinking + ev.chunk) }
+            is AgentEvent.ThinkingChunk -> _uiState.update { it.copy(currentThinking = it.currentThinking + ev.text) }
             is AgentEvent.ThinkingComplete -> {
                 if (_uiState.value.currentThinking.isNotBlank()) msgs.add(CodeUiMessage.Thinking(_uiState.value.currentThinking))
                 _uiState.update { it.copy(currentThinking = "") }
@@ -174,7 +174,7 @@ class CodeViewModel @Inject constructor(
                 msgs.add(CodeUiMessage.Tool(ev.toolName, ev.arguments, ev.output.take(2000), ev.success))
                 _uiState.update { it.copy(currentToolCall = "") }
             }
-            is AgentEvent.ResponseChunk -> { currentAssistant.append(ev.chunk); _uiState.update { it.copy(currentResponse = currentAssistant.toString()) } }
+            is AgentEvent.ResponseChunk -> { currentAssistant.append(ev.text); _uiState.update { it.copy(currentResponse = currentAssistant.toString()) } }
             is AgentEvent.ResponseComplete -> { /* final assistant assembled below */ }
             is AgentEvent.Complete -> _uiState.update { it.copy(isLoading = false) }
             is AgentEvent.Error -> _uiState.update { it.copy(isLoading = false, error = ev.message) }

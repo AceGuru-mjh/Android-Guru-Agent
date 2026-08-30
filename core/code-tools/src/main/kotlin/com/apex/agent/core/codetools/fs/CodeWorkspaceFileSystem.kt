@@ -280,8 +280,8 @@ class CodeWorkspaceFileSystem(
                         if (mr != null) {
                             all.add(SearchMatch(
                                 file = childRel, line = idx + 1, column = mr.range.first + 1, text = line.trim().take(200),
-                                contextBefore = if (contextLines > 0 && idx > 0) lines[(idx - contextLines).coerceAtLeast(0) until idx].joinToString("\n") else null,
-                                contextAfter = if (contextLines > 0 && idx < lines.size - 1) lines[(idx + 1)..(idx + contextLines).coerceAtMost(lines.size - 1)].joinToString("\n") else null
+                                contextBefore = if (contextLines > 0 && idx > 0) lines.subList((idx - contextLines).coerceAtLeast(0), idx).joinToString("\n") else null,
+                                contextAfter = if (contextLines > 0 && idx < lines.size - 1) lines.subList(idx + 1, (idx + contextLines + 1).coerceAtMost(lines.size)).joinToString("\n") else null
                             ))
                         }
                     }

@@ -39,16 +39,16 @@ interface LspClient {
 class UnavailableLspClient : LspClient {
     override val isReady: Boolean = false
     override val capabilities: LspServerCapabilities? = null
-    override suspend fun initialize(rootUri: String) = Result.failure(UnsupportedOperationException("LSP unavailable"))
+    override suspend fun initialize(rootUri: String): Result<LspServerCapabilities> = Result.failure(UnsupportedOperationException("LSP unavailable"))
     override suspend fun initialized() {}
     override suspend fun shutdown() {}
     override suspend fun didOpen(uri: String, languageId: String, text: String) {}
     override suspend fun didChange(uri: String, version: Int, text: String) {}
     override suspend fun didClose(uri: String) {}
-    override suspend fun definition(uri: String, line: Int, character: Int) = Result.failure(UnsupportedOperationException("LSP unavailable"))
-    override suspend fun references(uri: String, line: Int, character: Int, includeDeclaration: Boolean) = Result.failure(UnsupportedOperationException("LSP unavailable"))
-    override suspend fun hover(uri: String, line: Int, character: Int) = Result.failure(UnsupportedOperationException("LSP unavailable"))
-    override suspend fun rename(uri: String, line: Int, character: Int, newName: String) = Result.failure(UnsupportedOperationException("LSP unavailable"))
+    override suspend fun definition(uri: String, line: Int, character: Int): Result<List<LspLocation>> = Result.failure(UnsupportedOperationException("LSP unavailable"))
+    override suspend fun references(uri: String, line: Int, character: Int, includeDeclaration: Boolean): Result<List<LspLocation>> = Result.failure(UnsupportedOperationException("LSP unavailable"))
+    override suspend fun hover(uri: String, line: Int, character: Int): Result<LspHover?> = Result.failure(UnsupportedOperationException("LSP unavailable"))
+    override suspend fun rename(uri: String, line: Int, character: Int, newName: String): Result<LspWorkspaceEdit?> = Result.failure(UnsupportedOperationException("LSP unavailable"))
 }
 
 /**

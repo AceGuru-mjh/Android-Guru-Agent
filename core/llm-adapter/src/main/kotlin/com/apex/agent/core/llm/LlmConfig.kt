@@ -99,9 +99,15 @@ data class LlmConfig(
     // ── Structured Output ──────────────────────────────────────
     val structuredOutputMode: StructuredOutputMode = StructuredOutputMode.TEXT,
     val structuredOutputStrict: Boolean = false,
+    /** JSON Schema 字符串（JSON_SCHEMA 模式下作为 `response_format.json_schema.schema` 发送）。 */
+    val jsonSchema: String? = null,
 
     // ── Capabilities ───────────────────────────────────────────
     val capabilities: ModelCapabilities = ModelCapabilities(),
+
+    // ── Provider 标识（T72 §二十二：用于按 provider 分支请求体构造）──────────
+    /** 该 Profile 挂载的 Provider id。运行时按此判定是否发送 top_k/min_p/ repetition_penalty 等 provider 专有字段。 */
+    val providerId: String = "",
 ) {
     val isValid: Boolean
         get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank() &&
@@ -198,7 +204,9 @@ data class LlmConfig(
                 maxToolResultTokens = profile.maxToolResultTokens,
                 structuredOutputMode = profile.structuredOutputMode,
                 structuredOutputStrict = profile.structuredOutputStrict,
+                jsonSchema = profile.jsonSchema,
                 capabilities = profile.capabilities,
+                providerId = profile.providerId,
             )
         }
     }

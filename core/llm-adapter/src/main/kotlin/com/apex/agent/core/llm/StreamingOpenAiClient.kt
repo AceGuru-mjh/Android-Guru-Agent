@@ -39,10 +39,10 @@ class StreamingOpenAiClient(
         
         val request = buildRequest(body)
         val response = httpClient.newCall(request).await()
-        val responseBody = response.body?.string() ?: throw LlmException("Empty response")
+        val responseBody = response.body?.string() ?: throw LlmException.EmptyResponse()
         
         if (!response.isSuccessful) {
-            throw LlmException("API error ${response.code}: $responseBody")
+            throw LlmException.Http(response.code, responseBody)
         }
         
         return parseNonStreamResponse(responseBody)
@@ -63,12 +63,12 @@ class StreamingOpenAiClient(
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: "Unknown error"
             response.close()
-            throw LlmException("API error ${response.code}: $errorBody")
+            throw LlmException.Http(response.code, errorBody)
         }
 
         val responseBody = response.body ?: run {
             response.close()
-            throw LlmException("Empty response body")
+            throw LlmException.EmptyBody()
         }
         val reader = BufferedReader(InputStreamReader(responseBody.byteStream(), Charsets.UTF_8))
 
@@ -147,38 +147,62 @@ class StreamingOpenAiClient(
 
             // ── Sampling 参数（完整开放）─────────────────────────
             if (config.topP != 1.0f) put("top_p", config.topP)
-            if (config.topK != 0) put("top_k", config.topK)
-            if (config.minP != 0.0f) put("min_p", config.minP)
+            // T72 §二十二：top_k / min_p / repetition_penalty 为非标准参数，
+            // OpenAI/Anthropic 端点会 400 拒绝。仅在已知接受这些参数的 provider
+            // 上发送（本地推理 / 自定义兼容端点）。
+            val acceptsLocalSampling = config.providerId in LOCAL_SAMPLING_PROVIDERS
+            if (config.topK != 0 && acceptsLocalSampling) put("top_k", config.topK)
+            if (config.minP != 0.0f && acceptsLocalSampling) put("min_p", config.minP)
             if (config.presencePenalty != 0.0f) put("presence_penalty", config.presencePenalty)
             if (config.frequencyPenalty != 0.0f) put("frequency_penalty", config.frequencyPenalty)
-            if (config.repetitionPenalty != 1.0f) put("repetition_penalty", config.repetitionPenalty)
+            if (config.repetitionPenalty != 1.0f && acceptsLocalSampling) put("repetition_penalty", config.repetitionPenalty)
             config.seed?.let { put("seed", it) }
             if (config.stopSequences.isNotEmpty()) {
                 putJsonArray("stop") { config.stopSequences.forEach { s -> add(s) } }
             }
 
             // ── Reasoning（原生思考强度 + 思维预算）──────────────
-            config.reasoningEffort.apiValue?.let { effort ->
-                put("reasoning_effort", effort)
+            // T72 §二十二修复：仅当模型声明 reasoning 能力时才发送 reasoning_effort。
+            // 旧实现默认 MEDIUM → 对所有端点（含非推理模型）发 "reasoning_effort":"medium"，
+            // 部分服务端会 400。
+            if (config.capabilities.reasoning) {
+                config.reasoningEffort.apiValue?.let { effort ->
+                    put("reasoning_effort", effort)
+                }
             }
             // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准
             val maxCompletion = config.thinkingBudget ?: run {
-                if (config.reasoningEffort == ReasoningEffort.MAX) maxOf(maxTokens, 8192) else null
+                if (config.reasoningEffort == ReasoningEffort.MAX && config.capabilities.reasoning) maxOf(maxTokens, 8192) else null
             }
             maxCompletion?.let { put("max_completion_tokens", it) }
 
             // ── Structured Output ───────────────────────────────
+            // T72 §二十二修复：仅当模型声明 structuredOutput 能力时才发送
+            // response_format；schema 使用 config.jsonSchema（非空时 parse，
+            // 为空回退 {"type":"object"}，兼容旧行为）。
             when (config.structuredOutputMode) {
                 StructuredOutputMode.TEXT -> Unit
-                StructuredOutputMode.JSON -> putJsonObject("response_format") {
-                    put("type", "json_object")
+                StructuredOutputMode.JSON -> {
+                    if (config.capabilities.jsonMode || config.capabilities.structuredOutput) {
+                        putJsonObject("response_format") {
+                            put("type", "json_object")
+                        }
+                    }
                 }
-                StructuredOutputMode.JSON_SCHEMA -> putJsonObject("response_format") {
-                    put("type", "json_schema")
-                    put("strict", config.structuredOutputStrict)
-                    putJsonObject("json_schema") {
-                        put("name", "structured_output")
-                        putJsonObject("schema") { put("type", "object") }
+                StructuredOutputMode.JSON_SCHEMA -> {
+                    if (config.capabilities.structuredOutput) {
+                        putJsonObject("response_format") {
+                            put("type", "json_schema")
+                            put("strict", config.structuredOutputStrict)
+                            putJsonObject("json_schema") {
+                                put("name", "structured_output")
+                                val schemaEl = config.jsonSchema
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() }
+                                if (schemaEl != null) put("schema", schemaEl)
+                                else putJsonObject("schema") { put("type", "object") }
+                            }
+                        }
                     }
                 }
             }
@@ -268,6 +292,10 @@ class StreamingOpenAiClient(
                 )
                 if (config.parallelToolCalls) {
                     put("parallel_tool_calls", true)
+                } else {
+                    // T72 §二十二修复：旧实现 false 时直接省略键，导致用户无法
+                    // 关闭并行工具调用（服务端默认 true）。现在显式发送 false。
+                    put("parallel_tool_calls", false)
                 }
             }
         }
@@ -350,12 +378,49 @@ class StreamingOpenAiClient(
             }
             override fun onFailure(call: Call, e: java.io.IOException) {
                 if (!cont.isCancelled) {
-                    cont.resumeWithException(e)
+                    // T72：把原始 IOException 包成 [LlmException.Network]，供
+                    // 上层 [com.apex.agent.core.llm.runtime.ErrorClassifier] 精确分类。
+                    cont.resumeWithException(LlmException.Network(e))
                 }
             }
         })
         cont.invokeOnCancellation { cancel() }
     }
+
+    private companion object {
+        /**
+         * 已知接受 top_k / min_p / repetition_penalty 等非标准采样参数的 Provider。
+         * OpenAI / Anthropic / Google / DeepSeek / OpenRouter 的官方端点不接受这些参数
+         * （会返回 400），故仅对本地推理与自定义兼容端点发送。
+         */
+        val LOCAL_SAMPLING_PROVIDERS: Set<String> = setOf(
+            "ollama", "lmstudio", "vllm", "custom_openai"
+        )
+    }
 }
 
-class LlmException(message: String) : Exception(message)
+/**
+ * T72 §十四 — 适配层异常类型化。
+ *
+ * 旧实现仅有一个 `class LlmException(message: String)`，上层只能靠字符串匹配
+ * 区分"超时/限流/鉴权失败"——脆弱且不可靠。现在拆成 sealed 层级，运行时
+ * [com.apex.agent.core.llm.runtime.ErrorClassifier] 据子类型精确映射到
+ * [com.apex.agent.core.llm.runtime.ModelRuntimeException]。
+ *
+ * 向后兼容：仍是 [Exception] 子类，旧的 `catch (e: Exception)` / `catch (e: LlmException)`
+ * 仍能捕获（sealed 基类即 [LlmException]）。
+ */
+sealed class LlmException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    /** HTTP 非 2xx 响应。携带状态码 [code] 与响应体 [body]。 */
+    class Http(val code: Int, val body: String) : LlmException("API error $code: $body")
+
+    /** 响应体为空（非流式）。 */
+    class EmptyResponse : LlmException("Empty response")
+
+    /** 流式响应体为空。 */
+    class EmptyBody : LlmException("Empty response body")
+
+    /** 网络层错误（连接失败 / DNS / SocketTimeout 等），包装原始 [IOException]。 */
+    class Network(cause: java.io.IOException) : LlmException("Network error: ${cause.message}", cause)
+}
+

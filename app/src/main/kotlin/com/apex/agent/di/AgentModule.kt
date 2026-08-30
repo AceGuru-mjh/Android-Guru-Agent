@@ -10,6 +10,7 @@ import com.apex.agent.core.engine.orchestrator.DefaultTaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestratorConfig
 import com.apex.agent.core.llm.LlmClient
+import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
@@ -88,7 +89,11 @@ object AgentModule {
      */
     @Provides
     @Singleton
-    fun provideContextCompressor(llmClient: LlmClient, repo: SettingsRepository): ContextCompressor {
+    fun provideContextCompressor(
+        llmClient: LlmClient,
+        modelRuntime: ModelRuntime,
+        repo: SettingsRepository
+    ): ContextCompressor {
         val agent = repo.agentSettings.value
         val maxChars = agent.maxToolOutputLength.coerceIn(200, 100_000)
         return HybridCompressor(
@@ -99,7 +104,9 @@ object AgentModule {
                 tailChars = (maxChars * 0.3f).toInt().coerceAtLeast(50)
             ),
             maxContextTokens = agent.maxContextTokens,
-            threshold = agent.compressionThreshold
+            threshold = agent.compressionThreshold,
+            // T72 §十：第 3 层 LLM 摘要走 SUMMARY 角色（路由 + 降级）
+            modelRuntime = modelRuntime
         )
     }
 
@@ -114,7 +121,9 @@ object AgentModule {
         contextCompressor: ContextCompressor,
         privilegeInfoProvider: PrivilegeInfoProvider,
         skillRegistry: SkillRegistry,
-        memoryObserver: ExecutionMemoryObserver
+        memoryObserver: ExecutionMemoryObserver,
+        // T72：注入多模型运行时，按角色路由 PRIMARY/VISION/REASONING/SUMMARY
+        modelRuntime: ModelRuntime
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -125,7 +134,8 @@ object AgentModule {
             contextCompressor = contextCompressor,
             skillRegistry = skillRegistry,
             privilegeInfoProvider = privilegeInfoProvider,
-            memoryObserver = memoryObserver
+            memoryObserver = memoryObserver,
+            modelRuntime = modelRuntime
         )
     }
 
@@ -154,7 +164,9 @@ object AgentModule {
         config: AgentConfig,
         memory: ConversationMemory,
         memoryObserver: ExecutionMemoryObserver,
-        privilegeInfoProvider: PrivilegeInfoProvider
+        privilegeInfoProvider: PrivilegeInfoProvider,
+        // T72：注入多模型运行时，BUILD 循环按角色路由
+        modelRuntime: ModelRuntime
     ): TaskOrchestrator {
         return DefaultTaskOrchestrator(
             llmClient = llmClient,
@@ -167,7 +179,8 @@ object AgentModule {
             delegate = agentEngine,
             memory = memory,
             memoryObserver = memoryObserver,
-            privilegeInfoProvider = privilegeInfoProvider
+            privilegeInfoProvider = privilegeInfoProvider,
+            modelRuntime = modelRuntime
         )
     }
 }

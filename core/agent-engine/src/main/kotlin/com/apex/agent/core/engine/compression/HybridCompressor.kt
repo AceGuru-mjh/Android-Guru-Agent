@@ -2,6 +2,7 @@ package com.apex.agent.core.engine.compression
 
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.LlmMessage
+import com.apex.agent.core.llm.runtime.ModelRuntime
 
 /**
  * 混合压缩器（推荐）
@@ -12,16 +13,21 @@ import com.apex.agent.core.llm.LlmMessage
  * 3. 如果仍超限，执行LLM摘要（消耗一次调用）
  *
  * 设计原则：能用便宜方案解决的，不用贵方案。
+ *
+ * T72 §十：把 [modelRuntime] 透传给内部的 [LlmSummaryCompressor]，使第 3 层
+ * 摘要走 SUMMARY 角色（路由 + 降级）。为空时 [LlmSummaryCompressor] 自行回退到
+ * [com.apex.agent.core.llm.runtime.SingleClientModelRuntime]，保留旧行为。
  */
 class HybridCompressor(
     private val llmClient: LlmClient,
     private val toolTruncator: ToolOutputTruncator = ToolOutputTruncator(),
     private val maxContextTokens: Int = 128000,
-    private val threshold: Float = 0.8f
+    private val threshold: Float = 0.8f,
+    modelRuntime: ModelRuntime? = null
 ) : ContextCompressor {
 
     private val slidingWindow = SlidingWindowCompressor()
-    private val llmSummarizer = LlmSummaryCompressor(llmClient)
+    private val llmSummarizer = LlmSummaryCompressor(llmClient, modelRuntime)
 
     override fun needsCompression(
         history: List<LlmMessage>,

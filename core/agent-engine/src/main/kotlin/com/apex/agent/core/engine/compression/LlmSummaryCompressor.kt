@@ -2,6 +2,9 @@ package com.apex.agent.core.engine.compression
 
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.LlmMessage
+import com.apex.agent.core.llm.runtime.LlmRequestContext
+import com.apex.agent.core.llm.runtime.ModelRuntime
+import com.apex.agent.core.llm.runtime.SingleClientModelRuntime
 
 /**
  * LLM摘要压缩器
@@ -13,10 +16,19 @@ import com.apex.agent.core.llm.LlmMessage
  * - 对话历史很长（>50条消息）
  * - 包含复杂的推理链
  * - 工具输出包含关键信息需要保留
+ *
+ * T72 §十：摘要压缩现在通过 [ModelRuntime] 路由到 SUMMARY 角色。路由器在
+ * SUMMARY Profile 不可用时自动降级到 PRIMARY（§六），避免因 Summary Profile
+ * 配置错误导致整个 Agent task 崩溃——除非 PRIMARY 也不可用。
+ * [modelRuntime] 为空时回退到 [SingleClientModelRuntime]（用注入的 [llmClient]），
+ * 保留旧行为，使现有测试无需改动。
  */
 class LlmSummaryCompressor(
-    private val llmClient: LlmClient
+    private val llmClient: LlmClient,
+    modelRuntime: ModelRuntime? = null
 ) : ContextCompressor {
+
+    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     override fun needsCompression(
         history: List<LlmMessage>,
@@ -65,18 +77,20 @@ class LlmSummaryCompressor(
         // 将需要压缩的消息转为文本
         val compressText = formatMessagesForSummary(toCompress)
 
-        // 调用LLM生成摘要
+        // 调用LLM生成摘要（T72：通过 SUMMARY 角色路由）
         val summaryPrompt = buildSummaryPrompt(compressText)
 
         val summary = try {
-            val summaryResponse = llmClient.chat(
+            val summaryResponse = runtime.chat(
+                context = LlmRequestContext.summary("context_compression"),
                 messages = listOf(LlmMessage.User(summaryPrompt)),
                 temperature = 0.2f,  // 低温度，更确定性
                 maxTokens = 800      // 摘要不需要太长
             )
             summaryResponse.content ?: generateFallbackSummary(toCompress)
         } catch (e: Exception) {
-            // LLM调用失败时降级
+            // LLM调用失败时降级（含 ModelRuntimeException：SUMMARY 不可用且 PRIMARY 也不可用时
+            // 路由器已抛 ModelFallbackExhausted，这里一并降级为启发式摘要，不阻断主流程）
             generateFallbackSummary(toCompress)
         }
 

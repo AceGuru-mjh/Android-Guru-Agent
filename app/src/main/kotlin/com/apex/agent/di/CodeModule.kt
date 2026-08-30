@@ -140,7 +140,7 @@ object CodeModule {
         WorkspaceFsProvider { wsManager.activeFileSystem() }
 
     /**
-     * CodeWorkspaceIdProvider：git_*/code_definition 等工具用它取当前 active workspaceId。
+     * CodeWorkspaceIdProvider: git tools and code_definition etc. use it to get current active workspaceId.
      */
     @Provides
     @Singleton

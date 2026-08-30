@@ -41,15 +41,17 @@ class SkillMenuProvider(
     }
 
     companion object {
-        private val BUILTIN_TEMPLATES = listOf(
+        // 公开给市场页（MarketScreen）复用同一份清单，避免与斜杠菜单两处漂移
+        val BUILTIN_TEMPLATES = listOf(
             BuiltinTemplate("web_scraper", "网页数据爬取", "从网页提取结构化数据"),
             BuiltinTemplate("file_organizer", "文件自动整理", "按类型/日期自动分类整理文件"),
             BuiltinTemplate("code_runner", "代码运行器", "编写并运行代码，自动修复错误"),
-            BuiltinTemplate("data_analyzer", "数据分析", "分析 CSV/JSON 数据，生成统计报告")
+            BuiltinTemplate("data_analyzer", "数据分析", "分析 CSV/JSON 数据，生成统计报告"),
+            BuiltinTemplate("coding_principles", "编码原则 (Karpathy)", "AI 编程协作九原则，约束 Agent 编码行为")
         )
     }
 
-    private data class BuiltinTemplate(
+    data class BuiltinTemplate(
         val id: String,
         val name: String,
         val description: String

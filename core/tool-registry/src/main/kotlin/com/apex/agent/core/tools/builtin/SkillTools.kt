@@ -106,7 +106,8 @@ class SkillSearchTool(
             "web" to "• web_scraper (内置模板)\n  网页数据提取\n  安装: skill_install({\"source\":\"template\",\"template\":\"web_scraper\"})",
             "file" to "• file_organizer (内置模板)\n  文件自动分类整理\n  安装: skill_install({\"source\":\"template\",\"template\":\"file_organizer\"})",
             "code" to "• code_runner (内置模板)\n  代码执行与调试\n  安装: skill_install({\"source\":\"template\",\"template\":\"code_runner\"})",
-            "data" to "• data_analyzer (内置模板)\n  数据分析与可视化\n  安装: skill_install({\"source\":\"template\",\"template\":\"data_analyzer\"})"
+            "data" to "• data_analyzer (内置模板)\n  数据分析与可视化\n  安装: skill_install({\"source\":\"template\",\"template\":\"data_analyzer\"})",
+            "principle" to "• coding_principles (内置模板)\n  编码协作九原则（Karpathy）\n  安装: skill_install({\"source\":\"template\",\"template\":\"coding_principles\"})"
         )
         return templates.filter { (key, _) -> query.contains(key, ignoreCase = true) }.values.toList()
     }
@@ -117,7 +118,7 @@ class SkillSearchTool(
  *
  * 三种安装来源：
  * - "url"       — 从 URL 下载 skill JSON
- * - "template"  — 使用内置模板（web_scraper / file_organizer / code_runner / data_analyzer）
+ * - "template"  — 使用内置模板（web_scraper / file_organizer / code_runner / data_analyzer / coding_principles）
  * - "content"   — 直接传入 skill JSON 内容
  */
 class SkillInstallTool(
@@ -133,7 +134,7 @@ class SkillInstallTool(
 
         Sources:
         - URL: Download skill JSON from a web URL
-        - Template: Use a built-in template (web_scraper, file_organizer, code_runner, data_analyzer)
+        - Template: Use a built-in template (web_scraper, file_organizer, code_runner, data_analyzer, coding_principles)
         - Content: Directly provide the skill JSON content
 
         Examples:
@@ -221,7 +222,8 @@ class SkillInstallTool(
             "file_organizer" -> FILE_ORGANIZER_TEMPLATE
             "code_runner" -> CODE_RUNNER_TEMPLATE
             "data_analyzer" -> DATA_ANALYZER_TEMPLATE
-            else -> "Error: Unknown template '$name'. Available: web_scraper, file_organizer, code_runner, data_analyzer"
+            "coding_principles" -> CODING_PRINCIPLES_TEMPLATE
+            else -> "Error: Unknown template '$name'. Available: web_scraper, file_organizer, code_runner, data_analyzer, coding_principles"
         }
     }
 
@@ -319,6 +321,21 @@ class SkillInstallTool(
       {"tool": "shell_execute", "args": {}}
     ]}
   }],
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        // Prompt 型内置技能：不新增工具，安装后把九条编码协作原则注入 System Prompt
+        val CODING_PRINCIPLES_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "coding_principles",
+  "name": "编码原则 (Karpathy)",
+  "version": "1.0.0",
+  "description": "Andrej Karpathy 式 AI 编程协作九原则：写之前先读、想清楚再动手、保持简单、外科手术式修改、先验证再交付等",
+  "author": "apex-builtin",
+  "promptInjection": "你遵循以下编码协作原则（源自 Andrej Karpathy），适用于一切读代码、写代码、改代码的任务：\n1. 写之前先读代码库：动笔前，务必阅读要修改的文件和项目中类似功能的实现方式，确保新代码与项目风格一致。\n2. 想清楚再动手：明确假设，说出权衡（例如「我假设你希望使用基于 JWT 的认证」）；存在歧义时先向用户确认。\n3. 保持简单：只编写解决问题所需的最少代码，不添加任何未被要求的功能。\n4. 外科手术式修改：只修改被要求的部分，避免附带修改或「顺便」重构。\n5. 先验证再交付：交付代码前先测试或验证，确保改动没有引入新问题。\n6. 目标驱动执行：以明确的验收标准为导向，自行寻找达标的路径，而非等待逐步指令。\n7. 不猜先调查：遇到不确定的事情，先调查清楚，而不是猜测。\n8. 谨慎加依赖：引入新依赖前要三思，尽量使用项目已有的库。\n9. 把沟通写清楚：与协作者（包括人类和其他 Agent）沟通时，要清晰、明确、结论先行。",
+  "tools": [],
   "configuration": {"autoSetup": []}
 }
 """.trimIndent()

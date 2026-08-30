@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +48,7 @@ import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
 import com.apex.agent.ui.screen.log.LogViewerScreen
+import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
 import com.apex.agent.ui.screen.skill.SkillScreen
@@ -65,6 +67,7 @@ sealed class DrawerDestination(
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
     data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
     data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
+    data object Market : DrawerDestination("market", "市场", Icons.Default.Storefront)
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
@@ -157,6 +160,7 @@ fun ApexRoot() {
                         )
                         DrawerDestination.Terminal -> TerminalScreen()
                         DrawerDestination.Skill -> SkillScreen()
+                        DrawerDestination.Market -> MarketScreen()
                         DrawerDestination.Memory -> MemoryScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
                         DrawerDestination.Log -> LogViewerScreen()

@@ -37,8 +37,12 @@ data class PackageSpec(
 // ─── Section 4/5/6: PackageOperation ───
 enum class PackageOperationType { UPDATE, INSTALL, REMOVE, UPGRADE, REPAIR }
 
+/**
+ * T76: 包操作状态机。新增 [TIMED_OUT]（区别于 [FAILED] —— Agent 据此知道该重试
+ * 而非修复环境；超时是瞬时态，apt 本身可能仍在后台）。
+ */
 enum class PackageOperationState {
-    QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED, RECOVERING
+    QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED, RECOVERING, TIMED_OUT
 }
 
 data class PackageOperation(
@@ -53,12 +57,29 @@ data class PackageOperation(
     val error: PackageOperationError?
 )
 
+/**
+ * T76: 包操作结果。扩展有界输出字段（[stdout]/[stderr]/[stdoutTruncated]/
+ * [stderrTruncated]/[maxOutputBytes]/[exitCode]/[operationId]/[state]）——
+ * 让 Agent 拿到的不只是"成功/失败"，而是真实 apt 输出的首尾片段与截断标记。
+ *
+ * 既有字段（installed/removed/upgraded/alreadySatisfied/durationMs）保留默认值，
+ * 旧测试构造不破坏。
+ */
 data class PackageOperationResult(
     val installed: List<String> = emptyList(),
     val removed: List<String> = emptyList(),
     val upgraded: List<String> = emptyList(),
     val alreadySatisfied: List<String> = emptyList(),
-    val durationMs: Long
+    val durationMs: Long,
+    val exitCode: Int? = null,
+    val operationId: String = "",
+    val state: PackageOperationState = PackageOperationState.SUCCEEDED,
+    val stdout: String = "",
+    val stderr: String = "",
+    val stdoutTruncated: Boolean = false,
+    val stderrTruncated: Boolean = false,
+    val maxOutputBytes: Long = 0L,
+    val failedPackages: List<String> = emptyList()
 )
 
 data class PackageOperationError(
@@ -67,11 +88,30 @@ data class PackageOperationError(
     val recoverable: Boolean
 )
 
+/**
+ * T76: 包操作错误码。保留 PR #65 的 13 个原码（向后兼容），追加 T76 §22 的
+ * 具名环境层错误（ROOTFS_NOT_READY / PROOT_UNAVAILABLE / NETWORK_DNS_FAILED /
+ * NETWORK_TLS_FAILED / APT_UNAVAILABLE / APT_LOCKED / APT_FAILED /
+ * PACKAGE_INSTALL_FAILED / BOOTSTRAP_FAILED / WORKSPACE_UNAVAILABLE /
+ * ENVIRONMENT_INVALID / HOME_UNAVAILABLE）。
+ *
+ * 新码与原码的映射关系（APT 内部上射）：
+ *  - LOCK_HELD → APT_LOCKED（更精确的 Agent 语义）
+ *  - MANAGER_UNAVAILABLE → APT_UNAVAILABLE
+ *  - NETWORK_UNAVAILABLE → NETWORK_DNS_FAILED / NETWORK_TLS_FAILED（拆分）
+ */
 enum class PackageErrorCode {
+    // ── PR #65 原码（向后兼容）──
     PACKAGE_NOT_FOUND, NETWORK_UNAVAILABLE, LOCK_HELD, DPKG_BROKEN,
     DPKG_INTERRUPTED, PERMISSION_DENIED, DISK_FULL,
     DEPENDENCY_CONFLICT, CANCELLED, TIMEOUT,
-    MANAGER_UNAVAILABLE, REPOSITORY_ERROR, UNKNOWN
+    MANAGER_UNAVAILABLE, REPOSITORY_ERROR, UNKNOWN,
+    // ── T76 §22 环境层具名错误 ──
+    ROOTFS_NOT_READY, PROOT_UNAVAILABLE,
+    NETWORK_DNS_FAILED, NETWORK_TLS_FAILED,
+    APT_UNAVAILABLE, APT_LOCKED, APT_FAILED,
+    PACKAGE_INSTALL_FAILED, BOOTSTRAP_FAILED,
+    WORKSPACE_UNAVAILABLE, ENVIRONMENT_INVALID, HOME_UNAVAILABLE
 }
 
 // ─── Section 7/8: Package Manager Status ───

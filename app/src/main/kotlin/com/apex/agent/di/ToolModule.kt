@@ -23,6 +23,10 @@ import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalBackendsTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxBootstrapTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxNetworkTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxPackagesTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxStatusTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalObserveTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalResizeTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalRunTool
@@ -35,6 +39,10 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
+import com.apex.agent.platform.terminal.ubuntu.UbuntuBootstrapManager
+import com.apex.agent.platform.terminal.health.LinuxEnvironmentHealth
+import com.apex.agent.platform.terminal.network.LinuxNetworkProbe
+import com.apex.agent.platform.terminal.pkg.LinuxPackageManager
 import com.apex.agent.core.engine.CommandPermissionGate
 import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
@@ -117,7 +125,12 @@ object ToolModule {
         memoryRecentEpisodesTool: MemoryRecentEpisodesTool,
         memorySearchNodesTool: MemorySearchNodesTool,
         memoryRecallMacroTool: MemoryRecallMacroTool,
-        browserAgentTools: BrowserAgentTools
+        browserAgentTools: BrowserAgentTools,
+        // T76: Linux environment productionization 依赖
+        linuxEnvironmentHealth: LinuxEnvironmentHealth,
+        ubuntuBootstrapManager: UbuntuBootstrapManager,
+        linuxNetworkProbe: LinuxNetworkProbe,
+        linuxPackageManager: LinuxPackageManager
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -238,6 +251,15 @@ object ToolModule {
         )))
         // T75: workspace 管理（list/create/inspect/delete —— 隔离文件区生命周期）。
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWorkspacesTool(workspaceManager))))
+        // T76: Ubuntu Linux Environment Productionization —— 4 个 Agent 工具
+        //   terminal.linux.status    统一健康快照（6 维度 + bootstrap）
+        //   terminal.linux.bootstrap  rootfs→sources→network→apt-update→base-packages→READY
+        //   terminal.linux.network    DNS/HTTP/HTTPS/APT_REPOSITORY 分维诊断
+        //   terminal.linux.packages   结构化 apt API（update/install/remove/upgrade/search/...）
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxStatusTool(linuxEnvironmentHealth))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxBootstrapTool(ubuntuBootstrapManager))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxNetworkTool(linuxNetworkProbe))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxPackagesTool(linuxPackageManager))))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))

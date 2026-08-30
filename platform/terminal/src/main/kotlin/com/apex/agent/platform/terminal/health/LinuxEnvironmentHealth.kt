@@ -136,7 +136,7 @@ class LinuxEnvironmentHealth(
                 is com.apex.agent.platform.terminal.runtime.BackendAvailability.Ready ->
                     DimensionCheck("proot", HealthStatus.READY, "OK", "proot backend ready", false)
                 is com.apex.agent.platform.terminal.runtime.BackendAvailability.NeedsRootfs ->
-                    DimensionCheck("proot", HealthStatus.DEGRADED, LinuxErrorCode.ROOTFS_NOT_READY.name, "proot ok but rootfs needed: ${avail.reason ?: ""}", true)
+                    DimensionCheck("proot", HealthStatus.DEGRADED, LinuxErrorCode.ROOTFS_NOT_READY.name, "proot ok but rootfs needed: ${avail.state}", true)
                 is com.apex.agent.platform.terminal.runtime.BackendAvailability.Failed ->
                     DimensionCheck("proot", HealthStatus.FAILED, LinuxErrorCode.PROOT_UNAVAILABLE.name, avail.reason, false)
             }

@@ -32,7 +32,7 @@ import com.apex.agent.platform.terminal.ubuntu.BootstrapStateStore
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.GuestUserHome
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
-import com.apex.agent.platform.terminal.proot.PRootExecutor
+import com.apex.agent.platform.terminal.proot.ProotExecutor
 import com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager
 import com.apex.agent.platform.terminal.health.LinuxEnvironmentHealth
 import com.apex.agent.platform.terminal.network.LinuxNetworkProbe
@@ -232,8 +232,8 @@ object TerminalModule {
     /** T76: ProotExecutor —— apt / bootstrap / network probe 的非交互执行底座（P71）。 */
     @Provides
     @Singleton
-    fun provideProotExecutor(hostEnv: PRootHostEnvironment): PRootExecutor =
-        PRootExecutor(hostEnv = {
+    fun provideProotExecutor(hostEnv: PRootHostEnvironment): ProotExecutor =
+        ProotExecutor(hostEnv = {
             hostEnv.prepare().getOrThrow()
             hostEnv.hostEnv()
         })
@@ -256,7 +256,7 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideUbuntuAptPackageManager(
-        executor: PRootExecutor,
+        executor: ProotExecutor,
         binaryProvider: NativeLibraryPRootBinaryProvider,
         rootfsProvider: ProvisionedRootfsProvider,
         userHome: GuestUserHome,

@@ -69,7 +69,7 @@ class UbuntuBootstrapManager(
         data class StageStarted(override val stage: String, val message: String) : BootstrapProgress
         data class StageCompleted(override val stage: String, val durationMs: Long) : BootstrapProgress
         data class StageFailed(override val stage: String, val reason: String) : BootstrapProgress
-        data class OverallCompleted(val state: BootstrapState, val durationMs: Long) : BootstrapProgress
+        data class OverallCompleted(override val stage: String = "OVERALL", val state: BootstrapState, val durationMs: Long) : BootstrapProgress
     }
 
     private val mutex = Mutex()
@@ -141,13 +141,13 @@ class UbuntuBootstrapManager(
             _progress.tryEmit(BootstrapProgress.StageCompleted(stage.name, ts - started))
         }
 
-        fun stageStart(stage: BootstrapState, msg: String) {
+        suspend fun stageStart(stage: BootstrapState, msg: String) {
             currentState = stage
             persistState(stage, evidence, started)
             _progress.tryEmit(BootstrapProgress.StageStarted(stage.name, msg))
         }
 
-        fun stageFail(stage: BootstrapState, reason: String): BootstrapResult.Failed {
+        suspend fun stageFail(stage: BootstrapState, reason: String): BootstrapResult.Failed {
             currentState = BootstrapState.FAILED
             persistFailure(stage, reason, evidence, started)
             _progress.tryEmit(BootstrapProgress.StageFailed(stage.name, reason))

@@ -3,14 +3,14 @@ package com.apex.agent.platform.terminal.pkg
 import com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager
 import com.apex.agent.platform.terminal.linux.RootfsDescriptor
 import com.apex.agent.platform.terminal.linux.RootfsProvider
-import com.apex.agent.platform.terminal.proot.PRootBinaryProvider
 import com.apex.agent.platform.terminal.proot.PRootBind
+import com.apex.agent.platform.terminal.proot.PRootBinaryProvider
 import com.apex.agent.platform.terminal.proot.PRootCommand
 import com.apex.agent.platform.terminal.proot.PRootCommandBuilder
 import com.apex.agent.platform.terminal.proot.PRootCommandBuilderImpl
-import com.apex.agent.platform.terminal.proot.PRootExecutor
 import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.platform.terminal.proot.PRootLaunchRequest
+import com.apex.agent.platform.terminal.proot.ProotExecutor
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.GuestUserHome
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
@@ -389,7 +389,7 @@ class UbuntuAptPackageManager(
                     val err = mapExecToError(exec, aptArgv)
                     emit(PackageOperationEvent.Failed(opId, err))
                 }
-                opOf(opId, type, packages, startedAt, finalState, finalResult, exec, if (finalState == PackageOperationState.SUCCEEDED) null else mapExecToError(exec, aptArgv))
+                opOf(opId, type, packages, startedAt, finalState, finalResult, if (finalState == PackageOperationState.SUCCEEDED) null else mapExecToError(exec, aptArgv))
             }
         } catch (ce: CancellationException) {
             emit(PackageOperationEvent.StateChanged(opId, PackageOperationState.RUNNING, PackageOperationState.CANCELLED))

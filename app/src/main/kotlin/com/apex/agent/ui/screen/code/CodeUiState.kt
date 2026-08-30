@@ -32,11 +32,11 @@ enum class CodeBottomTab { FILES, CHANGES, PROBLEMS, TERMINAL }
 sealed interface CodeUiMessage {
     val id: String
 
-    data class User(val text: String, override val id: String = "u-${System.nanoTime()}") : CodeUiMessage
-    data class Assistant(val text: String, override val id: String = "a-${System.nanoTime()}") : CodeUiMessage
-    data class Tool(val name: String, val args: String, val output: String, val success: Boolean, override val id: String = "t-${System.nanoTime()}") : CodeUiMessage
-    data class Thinking(val text: String, override val id: String = "k-${System.nanoTime()}") : CodeUiMessage
-    data class System(val text: String, override val id: String = "s-${System.nanoTime()}") : CodeUiMessage
+    data class User(val text: String, override val id: String = "u-${java.lang.System.nanoTime()}") : CodeUiMessage
+    data class Assistant(val text: String, override val id: String = "a-${java.lang.System.nanoTime()}") : CodeUiMessage
+    data class Tool(val name: String, val args: String, val output: String, val success: Boolean, override val id: String = "t-${java.lang.System.nanoTime()}") : CodeUiMessage
+    data class Thinking(val text: String, override val id: String = "k-${java.lang.System.nanoTime()}") : CodeUiMessage
+    data class System(val text: String, override val id: String = "s-${java.lang.System.nanoTime()}") : CodeUiMessage
 }
 
 /** Code Bottom 面板渲染用的工作区列表项。 */

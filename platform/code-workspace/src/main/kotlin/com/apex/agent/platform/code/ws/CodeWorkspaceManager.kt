@@ -5,6 +5,7 @@ import com.apex.agent.core.codetools.fs.CodeWorkspaceFileSystem
 import com.apex.agent.platform.terminal.environment.ProjectAnalysis
 import com.apex.agent.platform.terminal.environment.ProjectEnvironmentAnalyzer
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -27,7 +28,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class CodeWorkspaceManager @Inject constructor(
-    private val context: Context,
+    @ApplicationContext private val context: Context,
     private val linuxWorkspaceManager: LinuxWorkspaceManager,
     private val environmentAnalyzer: ProjectEnvironmentAnalyzer
 ) {

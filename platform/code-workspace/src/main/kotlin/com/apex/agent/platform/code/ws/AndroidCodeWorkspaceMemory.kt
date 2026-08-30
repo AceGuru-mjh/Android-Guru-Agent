@@ -4,6 +4,7 @@ import android.content.Context
 import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.ToolCall
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
@@ -23,7 +24,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class AndroidCodeWorkspaceMemory @Inject constructor(
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) : CodeConversationMemory {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

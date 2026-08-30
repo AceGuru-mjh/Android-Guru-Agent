@@ -217,7 +217,7 @@ class UbuntuBootstrapManager(
         // ── READY ──
         currentState = BootstrapState.READY
         persistState(BootstrapState.READY, evidence, started, finishedAt = System.currentTimeMillis())
-        _progress.tryEmit(BootstrapProgress.OverallCompleted(BootstrapState.READY, System.currentTimeMillis() - started))
+        _progress.tryEmit(BootstrapProgress.OverallCompleted(state = BootstrapState.READY, durationMs = System.currentTimeMillis() - started))
         return BootstrapResult.Ready(System.currentTimeMillis() - started, completedStages)
     }
 

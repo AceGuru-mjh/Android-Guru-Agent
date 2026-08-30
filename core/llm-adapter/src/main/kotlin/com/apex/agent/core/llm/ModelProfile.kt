@@ -141,6 +141,14 @@ data class ModelProfile(
     // ── Structured Output ─────────────────────────────────────
     val structuredOutputMode: StructuredOutputMode = StructuredOutputMode.TEXT,
     val structuredOutputStrict: Boolean = false,
+    /**
+     * JSON Schema 字符串（仅 [structuredOutputMode] == JSON_SCHEMA 时生效）。
+     *
+     * 旧实现把 `response_format.json_schema.schema` 硬编码为 `{"type":"object"}`，
+     * 实际无法约束输出结构——字段存在但无效（T72 §二十二 审计项）。
+     * 非空时把它 parse 后作为 schema 发送；为空则回退到 `{"type":"object"}`。
+     */
+    val jsonSchema: String? = null,
 
     // ── Prompt / Headers ──────────────────────────────────────
     val systemPromptPrefix: String = "",

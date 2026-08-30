@@ -5,6 +5,10 @@ import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.*
+import com.apex.agent.core.llm.runtime.LlmRequestContext
+import com.apex.agent.core.llm.runtime.ModelRuntime
+import com.apex.agent.core.llm.runtime.ModelRuntimeException
+import com.apex.agent.core.llm.runtime.SingleClientModelRuntime
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
@@ -56,8 +60,25 @@ class ApexAgentEngine(
     private val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
-    private val memoryObserver: ExecutionMemoryObserver? = null
+    private val memoryObserver: ExecutionMemoryObserver? = null,
+    /**
+     * T72 — 多模型运行时。非空时所有 LLM 调用按 [LlmRequestContext.role] 路由到
+     * 对应 Profile / Client，并做能力校验、降级、诊断。
+     *
+     * 为空则回退到 [SingleClientModelRuntime]（行为与 T72 之前完全等价：单一
+     * [llmClient] 处理所有请求）。这样：
+     *  1. 现有基于 [FakeLlmClient] 的单元测试无需改动即可继续通过；
+     *  2. 生产环境由 DI 注入 [com.apex.agent.core.llm.runtime.DefaultModelRuntime]，
+     *     获得完整多模型能力。
+     */
+    modelRuntime: ModelRuntime? = null
 ) : AgentEngine, ConfirmationSink {
+
+    /**
+     * 实际执行 LLM 调用的运行时。null [modelRuntime] 时回退到单 client，
+     * 保留旧行为；非空时使用多模型路由。
+     */
+    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
     private val toolTruncator = ToolOutputTruncator(
@@ -286,6 +307,17 @@ class ApexAgentEngine(
         } catch (e: TimeoutCancellationException) {
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
             emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
+        } catch (e: ModelRuntimeException) {
+            // T72 §十四：模型运行时错误（能力不匹配 / 降级耗尽 / 限流 / 超时…），
+            // 单独分类记录，便于诊断。可降级类（限流/超时/不可用/鉴权）标记 recoverable，
+            // 配置/能力类标记不可恢复（需用户改设置）。
+            val fatal = !e.isFallbackEligible && e !is ModelRuntimeException.ModelFallbackExhausted
+            AppLogger.instance.error(
+                LogCategory.LLM, "ApexAgentEngine",
+                "模型运行时错误 [${e::class.simpleName}]: ${e.message}"
+            )
+            taskHadFailure = true
+            emit(AgentEvent.Error(e.message ?: "模型运行时错误", recoverable = !fatal))
         } catch (e: Exception) {
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
             taskHadFailure = true
@@ -357,7 +389,8 @@ class ApexAgentEngine(
         val planPrompt = buildPlanPrompt(input)
         val planResponseBuilder = StringBuilder()
 
-        llmClient.chatStream(
+        runtime.chatStream(
+            context = LlmRequestContext.reasoning("plan_generation"),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(planPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -400,7 +433,8 @@ class ApexAgentEngine(
         // Phase 5: reflection
         val reflectPrompt = buildReflectionPrompt(plan)
         val reflectionBuilder = StringBuilder()
-        llmClient.chatStream(
+        runtime.chatStream(
+            context = LlmRequestContext.primary("plan_reflection"),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -446,7 +480,8 @@ class ApexAgentEngine(
         val specPrompt = buildSpecPrompt(input)
         val specResponseBuilder = StringBuilder()
 
-        llmClient.chatStream(
+        runtime.chatStream(
+            context = LlmRequestContext.reasoning("spec_generation"),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -490,7 +525,8 @@ class ApexAgentEngine(
         // Phase 5: reflection
         val reflectPrompt = buildSpecReflectionPrompt(spec)
         val reflectionBuilder = StringBuilder()
-        llmClient.chatStream(
+        runtime.chatStream(
+            context = LlmRequestContext.primary("spec_reflection"),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -571,7 +607,17 @@ class ApexAgentEngine(
             // 参数拼不全。现在以 "id || idx_N" 为复合键，保证同一工具的片段都能落到同一累加器。
             val toolCallsAccumulator = mutableMapOf<String, StreamingToolCallAccumulator>()
 
-            llmClient.chatStream(
+            // T72 §九 / §十一：主 ReAct 流——含图片时路由到 VISION 角色（要求 vision+imageInput），
+            // 路由器会校验能力并在不满足时降级到具备视觉能力的 PRIMARY；全链无视觉模型时
+            // 抛 ModelCapabilityMismatch 而非静默丢图（§七）。
+            val reactContext = if (messagesContainImages(messages)) {
+                LlmRequestContext.vision("react_loop")
+            } else {
+                LlmRequestContext.primary("react_loop")
+            }
+
+            runtime.chatStream(
+                context = reactContext,
                 messages = messages,
                 tools = tools,
                 temperature = config.temperature
@@ -660,7 +706,8 @@ class ApexAgentEngine(
                         repeat(config.reflectionRounds) { round ->
                             // 评审
                             val reviewBuilder = StringBuilder()
-                            llmClient.chatStream(
+                            runtime.chatStream(
+                                context = LlmRequestContext.reasoning("reflection_review"),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
                                     LlmMessage.User(buildReviewPrompt(draft)),
                                 temperature = config.temperature
@@ -672,7 +719,8 @@ class ApexAgentEngine(
 
                             // 修正
                             val reviseBuilder = StringBuilder()
-                            llmClient.chatStream(
+                            runtime.chatStream(
+                                context = LlmRequestContext.primary("reflection_revise"),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
                                     LlmMessage.User(buildRevisePrompt(draft, review, round + 1)),
                                 temperature = config.temperature
@@ -855,6 +903,20 @@ class ApexAgentEngine(
         messages.addAll(conversationHistory)
         return messages
     }
+
+    /**
+     * T72 §十一 — 判定当前消息列表是否含图片（用户附件 / 历史 Vision 上下文）。
+     *
+     * 主 ReAct 流据此把请求路由到 VISION 角色（要求 vision+imageInput）。
+     * 路由器会校验所选 Profile 的 effective capabilities：
+     *  - 具备视觉 → 正常发送 multimodal content（图片在 [StreamingOpenAiClient.buildRequestBody]
+     *    里以 `image_url` part 发送，链路完整，见 AUDIT-ENGINE Q11）。
+     *  - 不具备 → 降级到具备视觉能力的 PRIMARY；全链无视觉模型 → 抛
+     *    [ModelRuntimeException.ModelCapabilityMismatch]（§七：不允许降级到 text-only
+     *    然后丢图）。
+     */
+    private fun messagesContainImages(messages: List<LlmMessage>): Boolean =
+        messages.any { it is LlmMessage.User && it.images.isNotEmpty() }
 
     private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
         config = config,

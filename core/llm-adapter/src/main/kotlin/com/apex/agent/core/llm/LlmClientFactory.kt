@@ -17,6 +17,10 @@ object LlmClientFactory {
             .connectTimeout(config.connectTimeoutMs, TimeUnit.MILLISECONDS)
             .readTimeout(config.readTimeoutMs, TimeUnit.MILLISECONDS)
             .writeTimeout(config.writeTimeoutMs, TimeUnit.MILLISECONDS)
+            // T72 §二十二修复：requestTimeoutMs 旧实现从未接线（dead 字段）。
+            // callTimeout 限制整个请求（含 RetryInterceptor 重试）的总时长，
+            // 防止重试 + 退避累积导致单请求无限拖长。
+            .callTimeout(config.requestTimeoutMs, TimeUnit.MILLISECONDS)
             .addInterceptor(RetryInterceptor(config))
             .build()
 

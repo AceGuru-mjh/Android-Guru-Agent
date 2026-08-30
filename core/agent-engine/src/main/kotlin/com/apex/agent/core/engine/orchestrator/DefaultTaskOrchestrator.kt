@@ -14,6 +14,10 @@ import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.LlmStreamChunk
+import com.apex.agent.core.llm.runtime.LlmRequestContext
+import com.apex.agent.core.llm.runtime.ModelRuntime
+import com.apex.agent.core.llm.runtime.ModelRuntimeException
+import com.apex.agent.core.llm.runtime.SingleClientModelRuntime
 import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
@@ -148,8 +152,16 @@ class DefaultTaskOrchestrator(
     private val delegate: AgentEngine? = null,
     private val memory: ConversationMemory? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null,
-    private val privilegeInfoProvider: PrivilegeInfoProvider? = null
+    private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
+    /**
+     * T72 — 多模型运行时。为空则回退到 [SingleClientModelRuntime]（旧行为），
+     * 非空则 BUILD 循环按角色路由（含图片时走 VISION）。
+     */
+    modelRuntime: ModelRuntime? = null
 ) : TaskOrchestrator {
+
+    /** 实际执行 LLM 调用的运行时（多模型或单 client 回退）。 */
+    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     // ─── Observable state ──────────────────────────────────────────────────
 
@@ -534,8 +546,16 @@ class DefaultTaskOrchestrator(
             // ── Call LLM streaming ──
             val contentBuilder = StringBuilder()
             val toolCallAccumulators = LinkedHashMap<String, StreamingToolCallAccumulator>()
+            // T72 §九 / §十一：含图片时路由到 VISION 角色（要求 vision+imageInput），
+            // 路由器做能力校验与降级；全链无视觉模型时抛 ModelCapabilityMismatch。
+            val reactContext = if (conversationHistory.any { it is LlmMessage.User && it.images.isNotEmpty() }) {
+                LlmRequestContext.vision("orchestrator_react_loop")
+            } else {
+                LlmRequestContext.primary("orchestrator_react_loop")
+            }
             try {
-                llmClient.chatStream(
+                runtime.chatStream(
+                    context = reactContext,
                     messages = conversationHistory.toList(),
                     tools = toolRegistry.getToolDefinitions(),
                     temperature = agentConfig.temperature

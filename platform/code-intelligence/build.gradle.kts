@@ -33,6 +33,10 @@ android {
 dependencies {
     implementation(project(":core:code-tools"))
     implementation(project(":core:code-engine"))
+    // Git/Build/Intelligence tools implement AgentTool (from :core:tool-registry).
+    // Gradle `implementation` is NOT transitive, so the implemented interface must
+    // be on this module's own compile classpath.
+    implementation(project(":core:tool-registry"))
     implementation(project(":platform:terminal"))
     implementation(project(":platform:code-workspace"))
     implementation(project(":core:logging"))

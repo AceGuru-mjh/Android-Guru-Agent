@@ -32,6 +32,12 @@ android {
 dependencies {
     implementation(project(":core:code-tools"))
     implementation(project(":core:code-engine"))
+    // AndroidCodeWorkspaceMemory implements CodeConversationMemory which extends
+    // ConversationMemory (from :core:agent-engine) and serializes LlmMessage/ToolCall
+    // (from :core:llm-adapter). Gradle `implementation` is NOT transitive, so the
+    // supertype and the serialized types must be on this module's own compile classpath.
+    implementation(project(":core:agent-engine"))
+    implementation(project(":core:llm-adapter"))
     implementation(project(":platform:terminal"))
     implementation(project(":core:logging"))
 

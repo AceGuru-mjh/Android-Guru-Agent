@@ -25,9 +25,20 @@ import com.apex.agent.platform.terminal.ubuntu.RootfsMetadataStore
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisionerImpl
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
+import com.apex.agent.platform.terminal.ubuntu.UbuntuBootstrapManager
+import com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList
+import com.apex.agent.platform.terminal.ubuntu.BasePackageProfile
+import com.apex.agent.platform.terminal.ubuntu.BootstrapStateStore
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.GuestUserHome
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
+import com.apex.agent.platform.terminal.proot.PRootExecutor
+import com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager
+import com.apex.agent.platform.terminal.health.LinuxEnvironmentHealth
+import com.apex.agent.platform.terminal.network.LinuxNetworkProbe
+import com.apex.agent.platform.terminal.pkg.LinuxPackageManager
+import com.apex.agent.platform.terminal.pkg.PackageOperationLock
+import com.apex.agent.platform.terminal.pkg.UbuntuAptPackageManager
 import com.apex.agent.core.tools.ToolRegistry
 import dagger.Module
 import dagger.Provides
@@ -202,4 +213,148 @@ object TerminalModule {
     @Singleton
     fun provideLegacyTerminalManager(runtime: TerminalRuntime): LegacyTerminalManager =
         LegacyTerminalManager(runtime)
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // T76: Ubuntu Linux Environment Productionization —
+    // Package Manager + Environment + Network + Bootstrap + Health 全链路接线。
+    // 复用 P71 proot / T72 rootfs / T75 workspace+home 既有单例，新增 T76 组件。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * T76: rootfs base 目录（`<filesDir>/rootfs/ubuntu`）—— apt lock / bootstrap lock /
+     * bootstrap state file 的稳定落点。与 [provideRootfsProvisioner] 的 layout.baseDir 同路径。
+     */
+    @Provides
+    @Singleton
+    fun provideRootfsBaseDir(@ApplicationContext context: Context): File =
+        File(context.filesDir, "rootfs/ubuntu")
+
+    /** T76: ProotExecutor —— apt / bootstrap / network probe 的非交互执行底座（P71）。 */
+    @Provides
+    @Singleton
+    fun provideProotExecutor(hostEnv: PRootHostEnvironment): PRootExecutor =
+        PRootExecutor(hostEnv = {
+            hostEnv.prepare().getOrThrow()
+            hostEnv.hostEnv()
+        })
+
+    /** T76: LinuxEnvironmentManager —— 三层 env 模型（host/proot/guest）+ apt env 变体。 */
+    @Provides
+    @Singleton
+    fun provideLinuxEnvironmentManager(): LinuxEnvironmentManager = LinuxEnvironmentManager()
+
+    /** T76: PackageOperationLock —— apt/dpkg 写串行化（进程内 Mutex + 跨实例 OS 文件锁）。 */
+    @Provides
+    @Singleton
+    fun providePackageOperationLock(rootfsBaseDir: File): PackageOperationLock =
+        PackageOperationLock(rootfsHostDirProvider = { rootfsBaseDir })
+
+    /**
+     * T76: UbuntuAptPackageManager —— 生产 apt 包管理器。
+     * 经 ProotExecutor → PRoot → Ubuntu rootfs，与交互式 terminal session 共享 dpkg database。
+     */
+    @Provides
+    @Singleton
+    fun provideUbuntuAptPackageManager(
+        executor: PRootExecutor,
+        binaryProvider: NativeLibraryPRootBinaryProvider,
+        rootfsProvider: ProvisionedRootfsProvider,
+        userHome: GuestUserHome,
+        hostEnv: PRootHostEnvironment,
+        workspaces: LinuxWorkspaceManager,
+        environment: LinuxEnvironmentManager,
+        lock: PackageOperationLock
+    ): UbuntuAptPackageManager = UbuntuAptPackageManager(
+        executor = executor,
+        binaryProvider = binaryProvider,
+        rootfsProvider = rootfsProvider,
+        userHome = userHome,
+        hostEnv = hostEnv,
+        workspaces = workspaces,
+        environment = environment,
+        lock = lock
+    )
+
+    /** 把 [UbuntuAptPackageManager] 暴露为 [LinuxPackageManager] 接口（工具层依赖抽象）。 */
+    @Provides
+    @Singleton
+    fun provideLinuxPackageManager(apt: UbuntuAptPackageManager): LinuxPackageManager = apt
+
+    /** T76: LinuxNetworkProbe —— DNS/HTTP/HTTPS/APT_REPOSITORY 分维诊断。 */
+    @Provides
+    @Singleton
+    fun provideLinuxNetworkProbe(
+        rootfsProvider: ProvisionedRootfsProvider,
+        aptManager: LinuxPackageManager,
+        target: RootfsTarget
+    ): LinuxNetworkProbe = LinuxNetworkProbe(
+        rootfsProvider = rootfsProvider,
+        aptManager = aptManager,
+        probeHostProvider = { LinuxNetworkProbe.defaultProbeHostFor(target.architecture) }
+    )
+
+    /** T76: UbuntuSourcesList —— 架构感知、幂等的 apt 源配置器。 */
+    @Provides
+    @Singleton
+    fun provideUbuntuSourcesList(): UbuntuSourcesList = UbuntuSourcesList()
+
+    /** T76: BasePackageProfile —— bootstrap 默认安装的 CLI 基础包清单。 */
+    @Provides
+    @Singleton
+    fun provideBasePackageProfile(): BasePackageProfile = BasePackageProfile.DEFAULT
+
+    /** T76: BootstrapStateStore —— bootstrap 状态机持久化（崩溃恢复用）。 */
+    @Provides
+    @Singleton
+    fun provideBootstrapStateStore(rootfsBaseDir: File): BootstrapStateStore =
+        BootstrapStateStore(File(rootfsBaseDir, "bootstrap.json"))
+
+    /**
+     * T76: UbuntuBootstrapManager —— rootfs→sources→network→apt-update→base-packages→READY
+     * 状态机。幂等 + 并发安全 + 崩溃恢复。
+     */
+    @Provides
+    @Singleton
+    fun provideUbuntuBootstrapManager(
+        provisioner: RootfsProvisioner,
+        aptManager: LinuxPackageManager,
+        networkProbe: LinuxNetworkProbe,
+        sourcesList: UbuntuSourcesList,
+        baseProfile: BasePackageProfile,
+        stateStore: BootstrapStateStore,
+        rootfsBaseDir: File
+    ): UbuntuBootstrapManager = UbuntuBootstrapManager(
+        provisioner = provisioner,
+        aptManager = aptManager,
+        networkProbe = networkProbe,
+        sourcesList = sourcesList,
+        baseProfile = baseProfile,
+        stateStore = stateStore,
+        rootfsHostDirProvider = { rootfsBaseDir }
+    )
+
+    /**
+     * T76: LinuxEnvironmentHealth —— 统一健康门面（6 维度 + bootstrap）。
+     */
+    @Provides
+    @Singleton
+    fun provideLinuxEnvironmentHealth(
+        provisioner: RootfsProvisioner,
+        prootBackend: LinuxPRootBackend,
+        networkProbe: LinuxNetworkProbe,
+        aptManager: LinuxPackageManager,
+        bootstrapManager: UbuntuBootstrapManager,
+        workspaceManager: LinuxWorkspaceManager,
+        guestUserHome: GuestUserHome,
+        target: RootfsTarget
+    ): LinuxEnvironmentHealth = LinuxEnvironmentHealth(
+        rootfsProvisioner = provisioner,
+        prootBackend = prootBackend,
+        networkProbe = networkProbe,
+        aptManager = aptManager,
+        bootstrapManager = bootstrapManager,
+        workspaceManager = workspaceManager,
+        guestUserHome = guestUserHome,
+        rootfsHealthInspector = RootfsHealthInspector(expectedArch = target.architecture)
+    )
 }

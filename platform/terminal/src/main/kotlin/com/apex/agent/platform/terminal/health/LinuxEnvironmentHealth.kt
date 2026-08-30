@@ -2,6 +2,7 @@ package com.apex.agent.platform.terminal.health
 
 import com.apex.agent.platform.terminal.errors.LinuxErrorCode
 import com.apex.agent.platform.terminal.network.LinuxNetworkProbe
+import com.apex.agent.platform.terminal.pkg.LinuxPackageManager
 import com.apex.agent.platform.terminal.pkg.UbuntuAptPackageManager
 import com.apex.agent.platform.terminal.proot.LinuxPRootBackend
 import com.apex.agent.platform.terminal.ubuntu.BootstrapState
@@ -35,7 +36,7 @@ class LinuxEnvironmentHealth(
     private val rootfsProvisioner: com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner,
     private val prootBackend: LinuxPRootBackend,
     private val networkProbe: LinuxNetworkProbe,
-    private val aptManager: UbuntuAptPackageManager,
+    private val aptManager: LinuxPackageManager,
     private val bootstrapManager: UbuntuBootstrapManager,
     private val workspaceManager: LinuxWorkspaceManager,
     private val guestUserHome: GuestUserHome,

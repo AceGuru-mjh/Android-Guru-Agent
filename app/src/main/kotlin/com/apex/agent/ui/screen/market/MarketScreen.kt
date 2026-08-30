@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,7 +44,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.tools.ToolRegistry
-import com.apex.agent.core.tools.builtin.SkillTools
+import com.apex.agent.core.tools.builtin.SkillInstallTool
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
@@ -157,11 +158,11 @@ class MarketViewModel @Inject constructor(
     /** 安装内置技能模板（与 skill_install 的 template 来源一致）。 */
     fun installBuiltinSkill(templateId: String) {
         val json = when (templateId) {
-            "coding_principles" -> SkillTools.CODING_PRINCIPLES_TEMPLATE
-            "web_scraper" -> SkillTools.WEB_SCRAPER_TEMPLATE
-            "file_organizer" -> SkillTools.FILE_ORGANIZER_TEMPLATE
-            "code_runner" -> SkillTools.CODE_RUNNER_TEMPLATE
-            "data_analyzer" -> SkillTools.DATA_ANALYZER_TEMPLATE
+            "coding_principles" -> SkillInstallTool.CODING_PRINCIPLES_TEMPLATE
+            "web_scraper" -> SkillInstallTool.WEB_SCRAPER_TEMPLATE
+            "file_organizer" -> SkillInstallTool.FILE_ORGANIZER_TEMPLATE
+            "code_runner" -> SkillInstallTool.CODE_RUNNER_TEMPLATE
+            "data_analyzer" -> SkillInstallTool.DATA_ANALYZER_TEMPLATE
             else -> null
         }
         if (json == null) {
@@ -431,7 +432,7 @@ private fun <T> MarketList(
     items: List<T>,
     emptyHint: String,
     header: (LazyListScope.() -> Unit)? = null,
-    itemContent: @Composable LazyListScope.(T) -> Unit
+    itemContent: @Composable LazyItemScope.(T) -> Unit
 ) {
     if (items.isEmpty()) {
         Box(

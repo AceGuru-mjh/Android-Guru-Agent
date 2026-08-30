@@ -24,11 +24,13 @@ class PackageSpecTest {
 }
 
 class PackageOperationTest {
-    @Test fun `operation has 6 states`() {
-        assertEquals(6, PackageOperationState.values().size)
+    @Test fun `operation has 7 states`() {
+        // T76: +TIMED_OUT (区别于 FAILED —— 超时是可重试瞬时态)
+        assertEquals(7, PackageOperationState.values().size)
         assertTrue(PackageOperationState.values().any { it.name == "QUEUED" })
         assertTrue(PackageOperationState.values().any { it.name == "SUCCEEDED" })
         assertTrue(PackageOperationState.values().any { it.name == "RECOVERING" })
+        assertTrue(PackageOperationState.values().any { it.name == "TIMED_OUT" })
     }
 
     @Test fun `operation has 5 types`() {
@@ -45,14 +47,23 @@ class PackageOperationTest {
 }
 
 class PackageErrorCodeTest {
-    @Test fun `has 12 error codes`() {
-        assertEquals(13, PackageErrorCode.values().size)
+    @Test fun `has 25 error codes`() {
+        // T76: 13 原码 + 12 环境层具名错误（ROOTFS_NOT_READY/PROOT_UNAVAILABLE/
+        // NETWORK_DNS_FAILED/NETWORK_TLS_FAILED/APT_UNAVAILABLE/APT_LOCKED/APT_FAILED/
+        // PACKAGE_INSTALL_FAILED/BOOTSTRAP_FAILED/WORKSPACE_UNAVAILABLE/
+        // ENVIRONMENT_INVALID/HOME_UNAVAILABLE）
+        assertEquals(25, PackageErrorCode.values().size)
         assertTrue(PackageErrorCode.values().any { it.name == "PACKAGE_NOT_FOUND" })
         assertTrue(PackageErrorCode.values().any { it.name == "NETWORK_UNAVAILABLE" })
         assertTrue(PackageErrorCode.values().any { it.name == "LOCK_HELD" })
         assertTrue(PackageErrorCode.values().any { it.name == "DPKG_BROKEN" })
         assertTrue(PackageErrorCode.values().any { it.name == "DPKG_INTERRUPTED" })
         assertTrue(PackageErrorCode.values().any { it.name == "DISK_FULL" })
+        // T76 新增
+        assertTrue(PackageErrorCode.values().any { it.name == "APT_LOCKED" })
+        assertTrue(PackageErrorCode.values().any { it.name == "APT_FAILED" })
+        assertTrue(PackageErrorCode.values().any { it.name == "NETWORK_DNS_FAILED" })
+        assertTrue(PackageErrorCode.values().any { it.name == "BOOTSTRAP_FAILED" })
     }
 }
 

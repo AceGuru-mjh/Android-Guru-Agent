@@ -60,7 +60,7 @@ class LinuxEnvironmentManagerTest {
         assertEquals("yes", env["CUSTOM"])
     }
 
-    @Test fun `LC_ALL is set to C.UTF-8`() {
+    @Test fun `LC_ALL is set to C UTF-8`() {
         assertEquals("C.UTF-8", mgr.interactiveGuestEnv()["LC_ALL"])
     }
 

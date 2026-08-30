@@ -47,7 +47,7 @@ class UbuntuSourcesListTest {
         val file = File(rootfs, "etc/apt/sources.list.d/ubuntu.sources")
         assertTrue(file.isFile)
         val content = file.readText()
-        assertTrue(content.contains("Codename: noble") || content.contains("noble "))
+        assertTrue(content.contains("Suites: noble") || content.contains("noble "))
         assertTrue(content.contains("ports.ubuntu.com"))
     }
 

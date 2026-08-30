@@ -65,7 +65,8 @@ class UbuntuSourcesList(
         val expectedCodename = codename
 
         // 已含正确 mirror + codename → 幂等跳过
-        if (existing.contains(expectedHost) && existing.contains("Codename: $expectedCodename")) {
+        // deb822 用 Suites: <codename> <codename>-updates <codename>-security
+        if (existing.contains(expectedHost) && existing.contains("Suites: $expectedCodename ")) {
             return SourcesResult(
                 written = false,
                 architecture = arch,
@@ -116,8 +117,8 @@ class UbuntuSourcesList(
             files = files,
             mirrorHosts = hosts.distinct(),
             usesHttps = content.contains("https://"),
-            codename = Regex("Codename: (\\S+)").find(content)?.groupValues?.getOrNull(1)
-                ?: Regex("$codename ").find(content)?.value?.trim()
+            codename = Regex("Suites: (\\S+)").find(content)?.groupValues?.getOrNull(1)
+                ?: Regex("Codename: (\\S+)").find(content)?.groupValues?.getOrNull(1)
         )
     }
 

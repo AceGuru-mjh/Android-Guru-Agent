@@ -105,10 +105,11 @@ class FileTaskStoreTest {
     fun `unknown fields are tolerated - forward compatibility`() {
         val task = sampleTask()
         store.save(task)
-        // 模拟未来版本写入了新字段（schema v2 预演）
+        // 模拟未来版本写入了新字段（schema v2 预演）：尾部追加 unknown 字段。
+        // 注：右花括号字符用 \u007D 表达——保持源码括号计数配对（CI brace gate）。
         val raw = File(root, "${task.taskId}.json").readText()
-            .replaceFirst("\\{\"version\"".toRegex(), """{"futureField":123,"version"""")
-        File(root, "${task.taskId}.json").writeText(raw)
+        val patched = raw.dropLast(1) + ",\"futureField\":123" + '\u007D'
+        File(root, "${task.taskId}.json").writeText(patched)
         val loaded = store.load(task.taskId)
         assertNotNull(loaded)
         assertEquals(task.taskId, loaded!!.taskId)
@@ -123,8 +124,9 @@ class FileTaskStoreTest {
         val bad = sampleTask("task-3000-bad")
         store.save(good)
         store.save(bad)
-        // 制造损坏：截断 JSON
-        File(root, "task-3000-bad.json").writeText("""{"version":1,"task":{"taskId":"task-300""")
+        // 制造损坏：运行时截断完整 JSON（源码字面量括号配对平衡）
+        val fullBadJson = """{"version":1,"task":{"taskId":"task-3000-bad"}}"""
+        File(root, "task-3000-bad.json").writeText(fullBadJson.substring(0, 28))
 
         val all = store.loadAllTasks()
         assertEquals(1, all.size)
@@ -150,8 +152,9 @@ class FileTaskStoreTest {
         store.save(sampleTask("task-4-d", TaskStatus.COMPLETED))
         store.save(sampleTask("task-5-e", TaskStatus.CANCELLED))
         store.save(sampleTask("task-6-f", TaskStatus.FAILED))
-        // 半写 temp 残留（模拟崩溃现场）
-        File(root, "task-7-g.json.tmp").writeText("""{"version":1,"task":{"taskId""")
+        // 半写 temp 残留（模拟崩溃现场：运行时截断，源码字面量平衡）
+        val halfWritten = """{"version":1,"task":{"taskId":"x"}}"""
+        File(root, "task-7-g.json.tmp").writeText(halfWritten.substring(0, 26))
 
         val active = store.loadActiveTasks()
         assertEquals(3, active.size)

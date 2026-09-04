@@ -97,9 +97,28 @@ class SkillRegistry(
     private val installedSkills = mutableMapOf<String, InstalledSkill>()
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
+    // 禁用状态持久化：sidecar 文件（每行一个 skill id），不污染 manifest schema
+    private val disabledIds = mutableSetOf<String>()
+
     init {
         skillsDir.mkdirs()
+        loadDisabledIds()
         loadInstalledSkills()
+    }
+
+    private val disabledFile: File get() = File(skillsDir, ".disabled")
+
+    private fun loadDisabledIds() {
+        disabledIds.clear()
+        if (disabledFile.exists()) {
+            disabledFile.readLines().forEach { if (it.isNotBlank()) disabledIds.add(it.trim()) }
+        }
+    }
+
+    private fun persistDisabledIds() {
+        try {
+            disabledFile.writeText(disabledIds.joinToString("\n"))
+        } catch (_: Exception) { /* 写失败不阻断内存态，下次 setEnabled 再试 */ }
     }
 
     data class InstalledSkill(
@@ -186,6 +205,8 @@ class SkillRegistry(
      */
     fun uninstall(skillId: String): Boolean {
         installedSkills.remove(skillId) ?: return false
+        disabledIds.remove(skillId)
+        persistDisabledIds()
         return File(skillsDir, "$skillId.json").delete()
     }
 
@@ -219,6 +240,8 @@ class SkillRegistry(
         installedSkills[skillId]?.let {
             installedSkills[skillId] = it.copy(enabled = enabled)
         }
+        if (enabled) disabledIds.remove(skillId) else disabledIds.add(skillId)
+        persistDisabledIds()
     }
 
     /**
@@ -246,7 +269,7 @@ class SkillRegistry(
         skillsDir.listFiles()?.filter { it.extension == "json" }?.forEach { file ->
             try {
                 val manifest = json.decodeFromString<SkillManifest>(file.readText())
-                installedSkills[manifest.id] = InstalledSkill(manifest)
+                installedSkills[manifest.id] = InstalledSkill(manifest, enabled = manifest.id !in disabledIds)
             } catch (_: Exception) { /* skip malformed */ }
         }
     }

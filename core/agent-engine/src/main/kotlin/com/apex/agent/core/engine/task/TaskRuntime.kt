@@ -191,7 +191,14 @@ class TaskRuntime(
                 runCatching { tap.send(AgentEvent.Error(e.message ?: "runtime failure", recoverable = false)) }
                 finalizeWith(task.taskId, TaskStatus.FAILED, e.message)
             } finally {
-                finalizeStream(task.taskId)
+                // 异常安全：finalize 内部任何异常都不得吞掉 done/close
+                // （否则 pause/cancel 永久挂起、UI collect 永不完成）。
+                runCatching { finalizeStream(task.taskId) }.onFailure { e ->
+                    AppLogger.instance.error(
+                        LogCategory.ENGINE, TAG,
+                        "finalizeStream failed (task left at last checkpoint): ${e.message}", e
+                    )
+                }
                 tap.close() // 订阅端 receiveAsFlow 完成（UI collect 正常返回）
                 done.complete(Unit)
             }
@@ -207,22 +214,33 @@ class TaskRuntime(
         when (event) {
             is AgentEvent.PlanConfirmed,
             is AgentEvent.SpecConfirmed -> {
-                val steps = extractSteps(event)
-                persist(
-                    steps?.let { task.copy(steps = it) } ?: task,
-                    CheckpointBoundary.PLAN_CONFIRMED
-                )
+                // 计划/规格确认：进入执行阶段（PLANNING→RUNNING）+ 步骤持久化。
+                // 非 PLANNING 态（重放/恢复场景已 RUNNING）幂等跳过迁移。
+                val withSteps = extractSteps(event)
+                    ?.let { task.copy(steps = it) } ?: task
+                val target = if (withSteps.status == TaskStatus.PLANNING) {
+                    TaskStatusMachine.transition(withSteps, TaskStatus.RUNNING, clock())
+                } else withSteps
+                persist(target, CheckpointBoundary.PLAN_CONFIRMED)
+                emitRuntimeSync(TaskRuntimeEvent.StatusChanged(target.taskId, target.status))
             }
 
             is AgentEvent.StepStart -> {
                 currentStepIndex = event.stepIndex
                 tagsSetter(task.taskId, task.steps.getOrNull(event.stepIndex)?.stepId)
+                // 步骤切换推导前序步骤完成（AgentEvent 体系无 StepComplete——
+                // 下一个 StepStart 到达即隐含前序完成；最后步骤由 Complete 兜底）
                 val steps = task.steps.mapIndexed { i, s ->
-                    if (i == event.stepIndex) s.copy(
-                        status = StepStatus.RUNNING,
-                        startedAt = clock(),
-                        attempts = s.attempts + 1
-                    ) else s
+                    when {
+                        i == event.stepIndex -> s.copy(
+                            status = StepStatus.RUNNING,
+                            startedAt = clock(),
+                            attempts = s.attempts + 1
+                        )
+                        s.status == StepStatus.RUNNING && i < event.stepIndex ->
+                            s.copy(status = StepStatus.DONE, finishedAt = clock())
+                        else -> s
+                    }
                 }
                 persist(task.copy(steps = steps), CheckpointBoundary.STEP_STARTED)
             }
@@ -281,8 +299,13 @@ class TaskRuntime(
 
             is AgentEvent.Complete -> {
                 // 引擎 finally 无条件发 Complete（含失败场景）——终态由 finalizeStream
-                // 统一裁决（pause/cancel/failure 标志优先），此处只记录摘要。
-                persistSummary(task, event.summary, event.totalToolCalls)
+                // 统一裁决（pause/cancel/failure 标志优先），此处记录摘要 +
+                // 最后步骤的完成化兜底（RUNNING 步骤在成功收尾时视为 DONE）。
+                val steps = task.steps.map {
+                    if (it.status == StepStatus.RUNNING) it.copy(status = StepStatus.DONE, finishedAt = clock())
+                    else it
+                }
+                persistSummary(task.copy(steps = steps), event.summary, event.totalToolCalls)
             }
 
             is AgentEvent.Aborted -> {

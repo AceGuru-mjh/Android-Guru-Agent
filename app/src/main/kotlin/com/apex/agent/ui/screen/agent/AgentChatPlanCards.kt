@@ -15,10 +15,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,20 +44,45 @@ import com.apex.agent.core.engine.ExecutionSpec
 import com.apex.agent.core.engine.RiskLevel
 
 /**
- * Skill 执行横幅：`/skill:xxx` 启动 Skill 时的专用卡片。
+ * 流水线路由横幅：`/skill:xxx` `/connector:xxx` `/plugin:xxx` 触发时的专用卡片。
  *
- * 与工具卡片 SKILL 徽章同色系（primary + AutoAwesome 图标），标题注明
- * "正在执行 Skill"，右侧脉冲圆点表示 Agent 循环仍在运行。其后该 Skill
- * 产生的工具调用会以 SKILL 来源徽章展示，形成完整的执行链路视觉。
+ * 与工具卡片同色系（Skill=primary+AutoAwesome / 连接器=紫+Link / 插件=琥珀+Extension），
+ * 运行中右侧脉冲圆点表示 Agent 循环仍在运行；完成后变为对勾并显示总耗时，
+ * 其后同来源的工具调用会以对应来源徽章展示，形成完整的执行链路视觉。
  */
 @Composable
-internal fun SkillBannerCard(skill: String) {
-    val color = MaterialTheme.colorScheme.primary
-    val pulse by rememberInfiniteTransition(label = "skill-banner-pulse").animateFloat(
+internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
+    val finished = banner.finishedAt != null
+    val style: Triple<String, ImageVector, Color> = when (banner.kind) {
+        ToolKind.CONNECTOR -> Triple(
+            "正在调用连接器",
+            Icons.Default.Link,
+            Color(0xFF8B5CF6)
+        )
+        ToolKind.PLUGIN -> Triple(
+            "正在调用插件",
+            Icons.Default.Extension,
+            Color(0xFFF59E0B)
+        )
+        else -> Triple(
+            "正在执行 Skill",
+            Icons.Default.AutoAwesome,
+            MaterialTheme.colorScheme.primary
+        )
+    }
+    val (runningLabel, icon, color) = style
+    val title = when {
+        finished && banner.kind == ToolKind.CONNECTOR -> "连接器执行完成"
+        finished && banner.kind == ToolKind.PLUGIN -> "插件执行完成"
+        finished -> "Skill 执行完成"
+        else -> runningLabel
+    }
+
+    val pulse by rememberInfiniteTransition(label = "pipeline-banner-pulse").animateFloat(
         initialValue = 0.25f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
-        label = "skill-banner-alpha"
+        label = "pipeline-banner-alpha"
     )
     Surface(
         color = color.copy(alpha = 0.10f),
@@ -70,7 +101,7 @@ internal fun SkillBannerCard(skill: String) {
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = Icons.Default.AutoAwesome,
+                        imageVector = icon,
                         contentDescription = null,
                         tint = color,
                         modifier = Modifier.size(16.dp)
@@ -79,13 +110,13 @@ internal fun SkillBannerCard(skill: String) {
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "正在执行 Skill",
+                    text = title,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = color
                 )
                 Text(
-                    text = skill,
+                    text = banner.name,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -93,11 +124,28 @@ internal fun SkillBannerCard(skill: String) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(color.copy(alpha = pulse), CircleShape)
-            )
+            if (finished) {
+                // 完成态：对勾 + 总耗时
+                val durationMs = (banner.finishedAt ?: 0L) - banner.startedAt
+                Text(
+                    text = formatDuration(durationMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "已完成",
+                    tint = color,
+                    modifier = Modifier.size(16.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(color.copy(alpha = pulse), CircleShape)
+                )
+            }
         }
     }
 }
@@ -109,7 +157,16 @@ internal fun PlanCard(plan: ExecutionPlan) {
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("📋 Execution Plan", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Flag,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("📋 Execution Plan", style = MaterialTheme.typography.titleSmall)
+            }
             Spacer(modifier = Modifier.height(8.dp))
             plan.steps.forEach { step ->
                 Row(

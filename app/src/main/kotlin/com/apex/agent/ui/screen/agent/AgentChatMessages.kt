@@ -73,7 +73,9 @@ internal fun AgentMessageItem(
             onRetry = retryLastUser(vm)
         )
         is AgentUiMessage.System -> SystemMessage(message.text)
-        is AgentUiMessage.SkillStart -> SkillBannerCard(message.skill)
+        is AgentUiMessage.PipelineBanner -> PipelineBannerCard(message)
+        is AgentUiMessage.StepMarker -> StepMarkerCard(message)
+        is AgentUiMessage.RunSummary -> RunSummaryCard(message)
         is AgentUiMessage.Error -> ErrorBlock(
             message = message.message,
             canRetry = message.canRetry,

@@ -382,8 +382,14 @@ internal fun QuestionCard(
 }
 
 /**
- * ask_user 工具触发的用户输入对话框。
+ * ask_user 工具触发的用户输入对话框（弹出选择）。
  * 用户提交后引擎恢复执行；取消则中止等待。
+ *
+ * 按输入类型差异化渲染：
+ * - [InputType.CHOICE]：从 prompt 文本解析 `1. xxx` / `• xxx` 选项渲染单选卡，
+ *   选中后提交选项文本；解析失败回退自由文本输入。
+ * - [InputType.CONFIRMATION]：明确"确认 / 拒绝"双按钮语义。
+ * - [InputType.TEXT]：多行文本输入。
  */
 @Composable
 internal fun UserInputDialog(
@@ -392,21 +398,34 @@ internal fun UserInputDialog(
     onCancel: () -> Unit
 ) {
     var text by remember { mutableStateOf("") }
+    var selectedChoice by remember { mutableStateOf<String?>(null) }
     val isChoice = request.type == InputType.CHOICE
     val isConfirmation = request.type == InputType.CONFIRMATION
+    val choiceOptions = remember(request.prompt) { parseChoiceOptions(request.prompt) }
 
     AlertDialog(
         onDismissRequest = onCancel,
         confirmButton = {
             androidx.compose.material3.Button(
-                onClick = { onSubmit(text) },
-                enabled = !isChoice // 选项类暂以确认框展示，提交默认空串
+                onClick = {
+                    when {
+                        isChoice -> onSubmit(selectedChoice ?: text)
+                        isConfirmation -> onSubmit("yes")
+                        else -> onSubmit(text)
+                    }
+                },
+                enabled = when {
+                    isChoice -> selectedChoice != null || text.isNotBlank()
+                    else -> true
+                }
             ) {
-                Text("提交")
+                Text(if (isConfirmation) "确认" else "提交")
             }
         },
         dismissButton = {
-            TextButton(onClick = onCancel) { Text("取消") }
+            TextButton(onClick = onCancel) {
+                Text(if (isConfirmation) "拒绝" else "取消")
+            }
         },
         title = { Text("需要你的输入") },
         text = {
@@ -416,23 +435,76 @@ internal fun UserInputDialog(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                if (!isConfirmation) {
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("你的回答") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 2,
-                        maxLines = 6
-                    )
-                } else {
-                    Text(
-                        text = "点击「提交」以确认，或「取消」拒绝。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+
+                when {
+                    // CHOICE 且成功解析出选项 → 单选卡
+                    isChoice && choiceOptions.isNotEmpty() -> {
+                        choiceOptions.forEach { option ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedChoice = option }
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                RadioButton(
+                                    selected = selectedChoice == option,
+                                    onClick = { selectedChoice = option }
+                                )
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = {
+                                text = it
+                                if (it.isNotBlank()) selectedChoice = null
+                            },
+                            label = { Text("或输入自定义答案") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 1,
+                            maxLines = 3
+                        )
+                    }
+                    // CONFIRMATION → 语义提示
+                    isConfirmation -> {
+                        Text(
+                            text = "点击「确认」继续执行，或「拒绝」终止。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // TEXT / CHOICE 兜底 → 自由文本
+                    else -> {
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            label = { Text("你的回答") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                            maxLines = 6
+                        )
+                    }
                 }
             }
         }
     )
+}
+
+/**
+ * 从 CHOICE 提示文本中解析选项（`1. xxx` / `1) xxx` / `• xxx` / `- xxx` 行）。
+ * 解析出少于 2 个选项时返回空列表（由调用方回退自由文本）。
+ */
+internal fun parseChoiceOptions(prompt: String): List<String> {
+    val options = Regex("""^\s*(?:\d+[.、)]|•|·|-|\*)\s*(.+)$""", RegexOption.MULTILINE)
+        .findAll(prompt)
+        .mapNotNull { m ->
+            m.groupValues[1].trim().takeIf { it.isNotBlank() }
+        }
+        .toList()
+    return if (options.size >= 2) options.take(8) else emptyList()
 }

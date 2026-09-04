@@ -26,7 +26,10 @@ internal object SlashCommands {
      */
     sealed interface Result {
 
-        /** 追加到消息列表的反馈条目：Skill 指令用 [AgentUiMessage.SkillStart] 专用横幅，其余指令用 [AgentUiMessage.System] 行。 */
+        /**
+         * 追加到消息列表的反馈条目：Skill/连接器/插件指令用 [AgentUiMessage.PipelineBanner]
+         * 专用横幅，其余指令用 [AgentUiMessage.System] 行。
+         */
         val banner: AgentUiMessage
 
         /** 应用该结果时 UI 应进入的 loading 状态（GitHub 连接请求为 false）。 */
@@ -35,13 +38,15 @@ internal object SlashCommands {
         /**
          * 可直接交给 AgentEngine 执行的普通路由结果。
          *
-         * @property skillName 触发的 Skill 名称（`/skill:xxx`），无则 null；
-         *   调用方应记录为 Skill 上下文，循环内产生的工具调用会被标记 SKILL 来源。
+         * @property contextKind 触发的流水线来源（Skill/连接器/插件），无则 null；
+         *   调用方应记录为路由上下文，循环内产生的工具调用会被标记同来源。
+         * @property contextName 触发的流水线名称（指令 id），无则 null。
          * @property agentPrompt 交给 AgentEngine 执行的提示词。
          */
         data class Execute(
             override val banner: AgentUiMessage,
-            val skillName: String?,
+            val contextKind: ToolKind?,
+            val contextName: String?,
             val agentPrompt: String
         ) : Result {
             override val isLoading: Boolean get() = true
@@ -76,10 +81,12 @@ internal object SlashCommands {
         val route = SlashCommandRouter.route(parsed, context)
 
         // 始终携带反馈消息，让用户看到指令被识别 + 当前状态：
-        // Skill 指令使用专用横幅（SkillStart），其余指令用 System 行。
-        val skillName = route.skillName
-        val banner = if (skillName != null) {
-            AgentUiMessage.SkillStart(skillName)
+        // Skill/连接器/插件指令使用专用横幅（PipelineBanner），其余指令用 System 行。
+        val banner = if (route.routeKind != null && route.sourceName != null) {
+            AgentUiMessage.PipelineBanner(
+                kind = kindOf(route.routeKind),
+                name = route.sourceName
+            )
         } else {
             AgentUiMessage.System(route.systemMessage)
         }
@@ -89,9 +96,17 @@ internal object SlashCommands {
         } else {
             Result.Execute(
                 banner = banner,
-                skillName = skillName,
+                contextKind = route.routeKind?.let { kindOf(it) },
+                contextName = route.sourceName,
                 agentPrompt = route.agentPrompt
             )
         }
+    }
+
+    /** 路由类别字符串 → [ToolKind]（未知类别归为 Skill 展示）。 */
+    private fun kindOf(routeKind: String?): ToolKind = when (routeKind) {
+        "connector" -> ToolKind.CONNECTOR
+        "plugin" -> ToolKind.PLUGIN
+        else -> ToolKind.SKILL
     }
 }

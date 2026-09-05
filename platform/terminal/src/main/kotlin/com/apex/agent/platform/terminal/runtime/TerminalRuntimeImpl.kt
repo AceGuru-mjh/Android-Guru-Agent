@@ -131,7 +131,7 @@ class TerminalRuntimeImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, pumpScope  // P70: pumps + exit watchers on the injectable pump scope
     )
-    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope)
+    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope, timeoutController)
 
     init {
         // P70-4: wire the REAL sessionId(Long) → nativeSessionId(Int) mapping into the
@@ -518,4 +518,10 @@ class TerminalRuntimeImpl(
 
     /** T81 测试钩子：事件日志计数（验证 close 后无事件再追加）。 */
     internal suspend fun eventLogCountPublic(sessionId: Long): Long = eventLog.count(sessionId)
+
+    /** T81 测试钩子：job 状态查询（超时/取消收敛测试用）。 */
+    internal suspend fun jobStatePublic(jobId: Long): String? = jobManager.get(jobId)?.state?.name
+
+    /** T81 测试钩子：job 快照（终态字段验证用）。 */
+    internal suspend fun jobPublic(jobId: Long): com.apex.agent.platform.terminal.job.TerminalJob? = jobManager.get(jobId)
 }

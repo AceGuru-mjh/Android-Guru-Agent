@@ -31,8 +31,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * T76 — TaskRuntime 全链测试（任务书 §18 C/D/F/G/H + 幂等）。
@@ -99,19 +97,26 @@ class TaskRuntimeTest {
         scope = scope
     ).also { runtime = it }
 
-    /** 后台收集事件直到终态事件出现（带超时防挂起）。 */
+    /**
+     * 收集事件直到执行流自然关闭（带超时防挂起）。
+     *
+     * 关键：必须等到 flow 完成而非仅看到 Complete 事件——TaskRuntime 的终态
+     * 落盘 + claim 释放在 mirror collector 的 finally（finalizeStream）中执行，
+     * 而 tap.close()（触发 flow 完成）发生在 finalizeStream 之后。提前在
+     * Complete 事件上 cancel 会让后续 retry/二次 execute 与 finalizeStream 竞态
+     * （claim 未释放 → "rejects concurrent execution"，或终态未落盘 → store 落
+     * RUNNING）。等待 flow 关闭即保证 finalizeStream 已完成。
+     */
     private fun collectUntilTerminal(flow: kotlinx.coroutines.flow.Flow<AgentEvent>): List<AgentEvent> =
         runBlocking {
             val events = CopyOnWriteArrayList<AgentEvent>()
-            val done = CountDownLatch(1)
-            val job = launch(Dispatchers.Unconfined) {
-                flow.collect { event ->
-                    events.add(event)
-                    if (event is AgentEvent.Complete || event is AgentEvent.Aborted) done.countDown()
-                }
+            withTimeout(15_000L) {
+                flow.collect { event -> events.add(event) }
             }
-            assertTrue("execution should reach terminal event", done.await(10, TimeUnit.SECONDS))
-            job.cancel()
+            assertTrue(
+                "execution should reach terminal event, last was ${events.lastOrNull()}",
+                events.any { it is AgentEvent.Complete || it is AgentEvent.Aborted }
+            )
             events.toList()
         }
 

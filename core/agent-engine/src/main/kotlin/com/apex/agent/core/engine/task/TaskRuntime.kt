@@ -544,15 +544,19 @@ class TaskRuntime(
 
     private fun persist(task: AgentTask, boundary: CheckpointBoundary) {
         val stamped = task.copy(updatedAt = clock())
-        _activeTask.value = stamped
         // TaskStore 为同步阻塞语义（D-1 契约）；调用方运行于 IO dispatcher。
         // 失败不中断执行流（checkpoint 是尽力而为的持久层）。
+        //
+        // 先落盘再更新内存态：保证 _activeTask 对外可见的状态必已持久化，
+        // 消除 waitTerminal(内存态可见 COMPLETED) 与 store.load(持久态仍 RUNNING)
+        // 之间的竞态——内存态绝不能领先于持久态。
         runCatching { store.save(stamped) }.onFailure { e ->
             AppLogger.instance.error(
                 LogCategory.ENGINE, TAG,
                 "checkpoint save failed at $boundary: ${e.message}", e
             )
         }
+        _activeTask.value = stamped
     }
 
     private fun transitionAndPersist(

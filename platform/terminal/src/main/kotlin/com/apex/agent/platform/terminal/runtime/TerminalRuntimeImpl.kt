@@ -162,8 +162,10 @@ class TerminalRuntimeImpl(
         // OutputProduced event, making the pattern field dead (every wait(OutputMatch)
         // completed instantly). The RingBuffer is per-session, owned by SessionManager.
         waitEngine.recentOutputProvider = { sid ->
+            // T81 (D-6)：UTF-8 边界安全解码（窗口起点可能落在多字节序列中间）
             sessionManager.assembly(sid)?.ringBuffer
-                ?.latest(4096)?.bytes?.toString(Charsets.UTF_8) ?: ""
+                ?.latest(4096)?.bytes
+                ?.let { com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(it) } ?: ""
         }
     }
 

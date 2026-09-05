@@ -144,7 +144,7 @@ class SessionManagerImpl(
             // RingBuffer) so ErrorClassifier.classify can apply its regex patterns.
             // Previously classify() was always called with recentOutput=null → every
             // pattern in ErrorClassifier was dead code in production.
-            recentOutputProvider = { ringBuffer.latest(4096).bytes.toString(Charsets.UTF_8) }
+            recentOutputProvider = { com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(ringBuffer.latest(4096).bytes) }  // T81 (D-6)
         )
         val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
             eventLog, ringBuffer, vt, reducer

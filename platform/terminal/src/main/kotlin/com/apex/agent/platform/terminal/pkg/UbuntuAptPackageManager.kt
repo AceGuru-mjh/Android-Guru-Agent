@@ -18,6 +18,8 @@ import com.apex.agent.platform.terminal.workspace.WorkspacePath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -373,6 +375,23 @@ class UbuntuAptPackageManager(
         try {
             return lock.withLock(rootfs) {
                 currentCoroutineContext().ensureActive()
+                // T81 (U-4)：写操作磁盘 preflight（估算：每包 250MB + 100MB 基线；
+                // REMOVE/REPAIR 走基线）
+                val requiredBytes = when (type) {
+                    PackageOperationType.INSTALL, PackageOperationType.UPGRADE ->
+                        100L * 1024 * 1024 + packages.size * 250L * 1024 * 1024
+                    else -> 100L * 1024 * 1024
+                }
+                runCatching { diskPreflight(java.io.File(rootfs.location!!.value), requiredBytes, type.name) }
+                    .onFailure { fe ->
+                        val err = PackageOperationError(
+                            PackageErrorCode.DISK_FULL,
+                            fe.message ?: "insufficient disk space",
+                            recoverable = false
+                        )
+                        emit(PackageOperationEvent.Failed(opId, err))
+                        throw fe
+                    }
                 emit(PackageOperationEvent.Progress(opId, "EXECUTE", aptArgv.joinToString(" ")))
                 val exec = runAptBounded(rootfs, aptArgv, timeoutMs)
                 currentCoroutineContext().ensureActive()
@@ -404,6 +423,31 @@ class UbuntuAptPackageManager(
         }
     }
 
+    /**
+     * T81 (U-2)：读操作最近一次环境错误（proot 崩溃/rootfs 缺失/超时…）。
+     * 原实现 catch(Exception)→null 全吞：isInstalled()=false 与真实「未安装」
+     * 不可区分（静默失败掩盖环境损坏）。返回值保持保守语义（false/空），
+     * 但环境错误通过此 StateFlow 可观察 —— 工具层据此区分并引导 repair。
+     */
+    private val _lastReadError = kotlinx.coroutines.flow.MutableStateFlow<PackageOperationError?>(null)
+    val lastReadError: kotlinx.coroutines.flow.StateFlow<PackageOperationError?> = _lastReadError.asStateFlow()
+
+    /**
+     * T81 (U-4)：写操作磁盘 preflight —— rootfs 所在卷剩余空间不足时提前结构化失败
+     * （DISK_FULL），不再等 apt 中途失败留下半装状态。估算：每包 250MB 保守预算
+     * + 100MB 基线（dpkg 数据库/日志）。可通过 [diskPreflight] 注入替换（测试）。
+     */
+    internal var diskPreflight: suspend (rootfsDir: java.io.File, requiredBytes: Long, stage: String) -> Unit =
+        { dir, required, stage ->
+            val usable = dir.usableSpace
+            if (usable in 1 until required) {
+                throw RuntimeException(
+                    "PackageError:DISK_FULL — ${'$'}stage 前磁盘不足（需 ${'$'}{required / (1024 * 1024)}MB，" +
+                        "可用 ${'$'}{usable / (1024 * 1024)}MB）"
+                )
+            }
+        }
+
     /** 经 ProotExecutor 执行一个 apt 子命令（写操作路径，有界输出）。 */
     private suspend fun runAptBounded(
         rootfs: RootfsDescriptor,
@@ -417,7 +461,11 @@ class UbuntuAptPackageManager(
         return executor.executeBounded(command, timeoutMs = timeoutMs, maxOutputBytes = maxOutputBytes)
     }
 
-    /** 读操作路径（无锁，短超时）。返回 null = rootfs 不可用。 */
+    /**
+     * 读操作路径（无锁，短超时）。返回 null = 环境不可用。
+     * T81 (U-2)：环境错误不再静默吞掉 —— 记录到 [lastReadError]（含结构化
+     * 错误码），返回值仍为 null（调用方保守语义不变）。
+     */
     private suspend fun runAptRead(
         rootfs: RootfsDescriptor,
         aptArgv: List<String>,
@@ -427,6 +475,7 @@ class UbuntuAptPackageManager(
             val command = buildProotCommand(rootfs, aptArgv, environment.aptGuestEnv())
             executor.executeBounded(command, timeoutMs = timeoutMs, maxOutputBytes = maxOutputBytes)
         } catch (e: Exception) {
+            _lastReadError.value = mapExceptionToError(e, aptArgv)
             null
         }
     }
@@ -513,6 +562,10 @@ class UbuntuAptPackageManager(
     private fun mapExceptionToError(e: Throwable, aptArgv: List<String>): PackageOperationError {
         val msg = e.message ?: ""
         return when {
+            // T81 (U-6)：跨实例 OS 锁竞争（PackageOperationLock 抛 PackageLockError:OsLockHeld）
+            // 原映射无此标记 → 错标 UNKNOWN/不可恢复；应为 APT_LOCKED/可重试。
+            msg.contains("PackageLockError:OsLockHeld") || msg.contains("OsLockHeld") ->
+                PackageOperationError(PackageErrorCode.APT_LOCKED, msg, recoverable = true)
             msg.contains("PROOT_UNAVAILABLE") -> PackageOperationError(PackageErrorCode.PROOT_UNAVAILABLE, msg, false)
             msg.contains("ROOTFS_NOT_READY") -> PackageOperationError(PackageErrorCode.ROOTFS_NOT_READY, msg, false)
             msg.contains("WORKSPACE_UNAVAILABLE") -> PackageOperationError(PackageErrorCode.WORKSPACE_UNAVAILABLE, msg, true)

@@ -93,7 +93,12 @@ class TerminalRuntimeImpl(
      * close 成功后 unbind —— LinuxWorkspaceManager 的活跃计数由此驱动
      * （delete 拒绝有活跃会话的 workspace）。生产 DI 注入；测试可传 fake。
      */
-    private val workspaceBinder: com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder? = null
+    private val workspaceBinder: com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder? = null,
+    /**
+     * T81 (U-10)：rootfs 活跃会话绑定（LINUX 会话创建/关闭维护引用计数 ——
+     * provisioner.remove() 的活跃保护由此驱动，原 markInUse 生产零调用）。
+     */
+    private val rootfsBinder: com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinder? = null
 ) : TerminalRuntime {
 
     private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
@@ -458,6 +463,8 @@ class TerminalRuntimeImpl(
             // timeoutController.cancelAll()（全局），关 session A 会误杀
             // session B/C 的 job 超时定时器。
             timeoutController.cancelSession(sessionId)
+            // T81 (U-10)：解除 rootfs 引用（LINUX 会话；remove 门禁解除）
+            rootfsBinder?.unbind(sessionId)
             // T81：close 后同步删除持久化记录（§39 语义：CLOSED → 不再保留；
             // 原路径依赖 collector 收到 SessionClosed 时 autoSave，与 assembly
             // 移除存在竞态，CLOSED 终态可能从未落盘）。

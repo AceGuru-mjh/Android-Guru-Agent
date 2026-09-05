@@ -200,12 +200,15 @@ object TerminalModule {
         policy: TerminalPolicy,
         store: SessionMetadataStore,
         backends: ExecutionBackendRegistry,
-        workspaceBinder: LinuxWorkspaceManager
+        workspaceBinder: LinuxWorkspaceManager,
+        provisioner: RootfsProvisioner
     ): TerminalRuntime = TerminalRuntimeImpl(
         native, policy,
         backendRegistry = backends,
         persistenceStore = store,
-        workspaceBinder = workspaceBinder
+        workspaceBinder = workspaceBinder,
+        // T81 (U-10)：rootfs 活跃会话绑定（provisioner.remove 门禁）。
+        rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner)
     )
 
     /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */

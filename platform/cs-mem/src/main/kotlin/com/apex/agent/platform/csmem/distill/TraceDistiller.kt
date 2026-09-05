@@ -211,7 +211,12 @@ object TraceDistiller {
         // 提取首个平衡括号对内的内容
         val open = desc.indexOf('(')
         val close = desc.lastIndexOf(')')
-        if (open < 0 || close <= open) return desc
+        if (open < 0 || close <= open) {
+            // 无括号形态：视为已是纯参数，仅去除包裹引号——与回放侧
+            // BypassExecutionEngine.extractInputText 的无括号分支对称，
+            // 否则蒸馏产物带着引号入库、回放侧行为两歧。
+            return desc.removeSurrounding("\"").removeSurrounding("'")
+        }
         val inner = desc.substring(open + 1, close).trim()
         // 去除包裹引号（单/双均可）
         return inner.removeSurrounding("\"").removeSurrounding("'")

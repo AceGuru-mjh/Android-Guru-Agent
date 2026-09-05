@@ -98,6 +98,7 @@ class AgentChatViewModel @Inject constructor(
     /** 恢复暂停任务：返回的执行流接入与 sendMessage 相同的事件管线。 */
     fun resumeTask() {
         taskController.resume()?.let { flow ->
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
@@ -110,6 +111,7 @@ class AgentChatViewModel @Inject constructor(
     /** 重试失败任务。 */
     fun retryTask() {
         taskController.retry()?.let { flow ->
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
@@ -118,6 +120,7 @@ class AgentChatViewModel @Inject constructor(
     fun resumeCrashedTask(taskId: String) {
         taskController.resumeFromCrash(taskId)?.let { flow ->
             _recoveryCandidates.value = emptyList()
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }

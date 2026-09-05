@@ -30,6 +30,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -56,6 +57,9 @@ class BrowserOverlay @Inject constructor(
     private val windowManager =
         appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // 混沌审查修复：单例持有唯一主线程作用域（替代每次回调 new CoroutineScope 的孤儿作用域）
+    private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     @Volatile private var rootView: FrameLayout? = null
     @Volatile private var webViewHost: FrameLayout? = null
@@ -132,7 +136,10 @@ class BrowserOverlay @Inject constructor(
             setContent {
                 OverlayContent(
                     state = uiState,
-                    onCompleteHandoff = { mainHandler.post { CoroutineScope(Dispatchers.Main).launch { engine.completeHandoff() } } },
+                    // 混沌审查修复：旧实现 `mainHandler.post { CoroutineScope(Dispatchers.Main).launch {...} }`
+                    // 双重异步 + 每次回调 new 孤儿作用域 —— 连点“交还”会挂起 N 个无主协程排队抢
+                    // stateMutex，永不取消。改用单例持有的 overlayScope，Main.immediate 已保证主线程。
+                    onCompleteHandoff = { overlayScope.launch { engine.completeHandoff() } },
                     onCollapseToggle = { mainHandler.post { toggleCollapse() } },
                     onClose = { mainHandler.post { doHide() } },
                 )

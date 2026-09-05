@@ -479,18 +479,23 @@ private fun exportAndShare(context: android.content.Context, content: String) {
     // v2：GlobalScope → 受管协程（GlobalScope 生命周期失控；导出失败无提示）。
     // 此处为顶层函数拿不到作用域，用 kotlinx.coroutines 自带的 SupervisorJob
     // + IO 单发任务，并在失败时汇入日志中枢，不再无声吞错。
+    //
+    // 混沌审查修复：调用点传入的是 Compose LocalContext（Activity）—— 异步落盘期间
+    // 用户退出页面/旋转屏幕，Activity 已 destroy 时 startActivity 会静默失败，
+    // 且 Activity 实例被后台 Job 延长持有（内存泄漏）。改用 applicationContext 跨异步边界。
+    val appContext = context.applicationContext
     val scope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
     )
     scope.launch {
         try {
-            val dir = java.io.File(context.cacheDir, "logs")
+            val dir = java.io.File(appContext.cacheDir, "logs")
             dir.mkdirs()
             val file = java.io.File(dir, "apex-logs-${System.currentTimeMillis()}.txt")
             file.writeText(content)
             val uri = androidx.core.content.FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
+                appContext,
+                "${appContext.packageName}.fileprovider",
                 file
             )
             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -499,7 +504,7 @@ private fun exportAndShare(context: android.content.Context, content: String) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             withContext(Dispatchers.Main) {
-                context.startActivity(Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                appContext.startActivity(Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         } catch (e: Exception) {
             AppLogger.instance.warn(

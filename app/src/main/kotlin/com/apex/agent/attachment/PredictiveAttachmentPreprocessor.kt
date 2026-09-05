@@ -6,6 +6,8 @@ import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +53,12 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
     /** 清理调度器 */
     private var cleanupJob: kotlinx.coroutines.Job? = null
 
+    // 混沌审查修复：旧实现 preprocess() 每次调用都 `CoroutineScope(Dispatchers.IO)` 新建孤儿
+    // 作用域，拷贝中 Job 无人持有 → cancel(uri) 的 ensureActive() 永远不会触发，
+    // 移除附件/退出页面后拷贝仍在后台跑完（IO 浪费 + 重复并发拷贝风险）。
+    // @Singleton 进程级作用域：拷贝 Job 被登记进缓存，随 cancel/cancelAll 可取消。
+    private val copyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * 启动后台清理循环（每 5 分钟清理 30 分钟前的预拷贝文件）。
      * 应在 ViewModel 创建时调用一次。
@@ -93,11 +101,26 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
 
         val progressFlow = MutableStateFlow(0f)
         val targetDir = File(context.filesDir, DIR_PRE).apply { mkdirs() }
-        val targetFile = File(targetDir, "${System.currentTimeMillis()}_$fileName")
+        // 混沌审查加固：文件名含时间戳+uri哈希，避免同毫秒重选同名文件时两路协程交错写同一路径；
+        // fileName 取最后一段路径，防御 content URI 名称携带 '/' 导致 File 解析到子目录。
+        val safeName = fileName.substringAfterLast('/').ifBlank { "attachment" }
+        val targetFile = File(targetDir, "${System.currentTimeMillis()}_${uri.hashCode()}_$safeName")
 
-        // 启动后台拷贝协程
-        val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-        scope.launch {
+        // 混沌审查修复：先以 putIfAbsent 登记进行中条目（含 Job 占位），命中即复用 ——
+        // 拷贝进行中重复调用不再穿透缓存启动第二路并发拷贝；
+        // 旧实现只有“完成时”才写缓存，进行中窗口内的重复调用全部穿透。
+        val entry = PreprocessResult(
+            sandboxPath = targetFile.absolutePath,
+            timestamp = System.currentTimeMillis(),
+            progress = progressFlow
+        )
+        val raced = preprocessedCache.putIfAbsent(uri, entry)
+        if (raced != null) return raced.progress
+
+        // 启动后台拷贝协程：Job 存入缓存条目，cancel(uri) 才能真正取消拷贝
+        // stored：登记进缓存的最终条目（含 Job），失败/取消清理时按同一引用移除。
+        var stored = entry
+        val copyJob = copyScope.launch {
             try {
                 val totalSize = queryFileSize(uri)
                 context.contentResolver.openInputStream(uri)?.use { input ->
@@ -117,18 +140,17 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
                     }
                 } ?: throw IllegalStateException("Cannot open input stream for $uri")
 
-                preprocessedCache[uri] = PreprocessResult(
-                    sandboxPath = targetFile.absolutePath,
-                    timestamp = System.currentTimeMillis(),
-                    progress = progressFlow
-                )
                 progressFlow.value = 1.0f
             } catch (e: Exception) {
                 android.util.Log.w(TAG, "Preprocess failed for $uri: ${e.message}")
                 progressFlow.value = -1f
                 runCatching { targetFile.delete() }
+                // 失败/取消的条目不留在缓存里占位（按引用移除，不误伤后继重新登记的条目）
+                preprocessedCache.remove(uri, stored)
             }
         }
+        stored = entry.copy(job = copyJob)
+        preprocessedCache.replace(uri, entry, stored)
 
         return progressFlow.asStateFlow()
     }
@@ -157,11 +179,12 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
 
     /**
      * 取消某个 Uri 的预拷贝（用户移除附件时调用）。
+     * 混沌审查修复：同时取消在途拷贝 Job —— 旧实现只删缓存条目，拷贝协程继续满速跑完。
      */
     fun cancel(uri: Uri) {
-        preprocessedCache[uri]?.let { result ->
+        preprocessedCache.remove(uri)?.let { result ->
+            result.job?.cancel()
             runCatching { File(result.sandboxPath).delete() }
-            preprocessedCache.remove(uri)
         }
     }
 
@@ -169,9 +192,7 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
      * 清空所有预拷贝缓存（用户清空附件列表时调用）。
      */
     fun cancelAll() {
-        preprocessedCache.values.forEach { result ->
-            runCatching { File(result.sandboxPath).delete() }
-        }
+        preprocessedCache.keys.forEach { uri -> cancel(uri) }
         preprocessedCache.clear()
     }
 
@@ -202,13 +223,15 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
      * 预拷贝结果。
      *
      * @property sandboxPath 沙箱中的文件绝对路径
-     * @property timestamp 预拷贝完成的时间戳
+     * @property timestamp 预拷贝登记的时间戳
      * @property progress 拷贝进度 Flow（0.0 ~ 1.0，-1.0 表示失败）
+     * @property job 在途拷贝协程（完成/失败后保留引用，供 cancel() 兑现取消语义）
      */
     data class PreprocessResult(
         val sandboxPath: String,
         val timestamp: Long,
-        val progress: StateFlow<Float>
+        val progress: StateFlow<Float>,
+        val job: Job? = null
     )
 
     companion object {

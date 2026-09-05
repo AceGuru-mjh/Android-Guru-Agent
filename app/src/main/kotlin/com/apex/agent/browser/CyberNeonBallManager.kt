@@ -22,11 +22,14 @@ import androidx.dynamicanimation.animation.SpringForce
 import com.lzf.easyfloat.EasyFloat
 import com.lzf.easyfloat.enums.ShowPattern
 import com.lzf.easyfloat.enums.SidePattern
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +55,11 @@ class CyberNeonBallManager @Inject constructor(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tag = "cyber_neon_ball"
+
+    // 混沌审查修复：旧实现 onBallClick 每次点击都 `CoroutineScope(Dispatchers.Main).launch`
+    // 新建孤儿作用域 —— 连点 N 次挂起 N 个无主协程排队抢 stateMutex，永不取消、无法追踪。
+    // 单例持有唯一作用域，进程级生命周期与 @Singleton 一致。
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     @Volatile private var ballView: View? = null
     @Volatile private var currentState = CyberState.RUNNING
@@ -91,7 +99,7 @@ class CyberNeonBallManager @Inject constructor(
 
     /** 点击球 toggle 显式握手 */
     private fun onBallClick() {
-        CoroutineScope(Dispatchers.Main).launch {
+        mainScope.launch {
             when (engine.currentState) {
                 BrowserEngine.BrowserSessionState.WAITING_HUMAN -> engine.completeHandoff()
                 else -> engine.enterHandoffMode()
@@ -208,12 +216,18 @@ class CyberNeonBallManager @Inject constructor(
     }
 
     private fun triggerVibration() {
+        // 混沌审查修复：VIBRATE 属普通权限，正常打包清单已声明；但清单合并被裁剪/
+        // OEM 定制 ROM 等边缘场景下 vibrate() 会抛 SecurityException（主线程 → 崩溃）。
+        // 运行时自防御：无权限直接跳过，而不是让必现崩溃带走整个前台服务。
+        if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.VIBRATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
         val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
+            runCatching { vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE)) }
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(150)
+            runCatching { vibrator.vibrate(150) }
         }
     }
 }

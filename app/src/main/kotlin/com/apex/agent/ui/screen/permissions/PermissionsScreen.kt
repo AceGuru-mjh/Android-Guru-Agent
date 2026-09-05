@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +74,15 @@ fun PermissionsScreen() {
     var overlayGranted by remember { mutableStateOf(false) }
     var notifGranted by remember { mutableStateOf(false) }
     var storageGranted by remember { mutableStateOf(false) }
+
+    // 混沌审查修复（CR #C2）：POST_NOTIFICATIONS 仅在清单声明、从未运行时请求 ——
+    // Android 13+ 全新安装默认拒绝，前台服务通知静默不可见，用户误以为服务已死。
+    // 授权成功后刷新状态；拒绝/永久拒绝时仍回退到系统设置页。
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notifGranted = granted || NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
 
     // 在后台检测权限
     LaunchedEffect(Unit) {
@@ -152,7 +163,14 @@ fun PermissionsScreen() {
                 description = "发送前台服务通知、读取通知",
                 status = if (notifGranted) Status.Granted else Status.Denied,
                 actionLabel = if (notifGranted) "已授权" else "授权",
-                onClick = { context.openNotificationSettings() }
+                onClick = {
+                    // Android 13+：优先走标准运行时权限请求，而非直接跳系统设置页
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifGranted) {
+                        notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        context.openNotificationSettings()
+                    }
+                }
             )
             PermissionCard(
                 icon = Icons.Default.Folder,

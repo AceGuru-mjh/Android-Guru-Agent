@@ -27,6 +27,7 @@ import com.apex.agent.core.tools.builtin.browser.PageSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -76,6 +77,11 @@ class BrowserEngine @Inject constructor(
         private set
 
     private val stateMutex = Mutex()
+
+    // 混沌审查修复：旧实现 onPermissionRequest 等回调里直接
+    // `CoroutineScope(Dispatchers.Main).launch` 新建孤儿作用域，每次网页权限请求
+    // 都产生一个无主协程抢 stateMutex，连点即堆积、永不取消。单例持有唯一作用域。
+    private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // ───────── UI 回调（浮窗等可视层订阅状态变更） ─────────
     /** 可视层（浮窗）订阅状态变更，用于自动展开/收起与刷新控制条 */
@@ -261,7 +267,8 @@ class BrowserEngine @Inject constructor(
                     lastDialog = "permission: 网页请求敏感权限(摄像头/麦克风/地理)，已默认拒绝并进入人工接管；" +
                         "如需授权请用 browser_show 在真实页面操作"
                     // 进入人工接管，由用户在真实页面上通过浏览器原生对话框授权
-                    CoroutineScope(Dispatchers.Main).launch { enterHandoffMode() }
+                    // 混沌审查修复：孤儿 CoroutineScope → 引擎单例持有的 engineScope
+                    engineScope.launch { enterHandoffMode() }
                     request.deny() // 隐私最小化：不自动授予敏感权限
                 } else {
                     request.deny()

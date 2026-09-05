@@ -123,7 +123,10 @@ class RingTerminalBuffer(
 
     override val retainedBytes: Int
         get() = synchronized(lock) {
-            minOf(writePos.get().toInt(), capacityBytes)
+            // 混沌审查修复：writePos 是 Long 累计游标，长寿命会话跑高吞吐输出（yes/日志刷屏）
+            // 越过 2GiB 后旧实现 writePos.get().toInt() 回绕为负 → retainedBytes 变负数，
+            // 未来任何 retained/capacity 水位计算都得到负进度。先在 Long 域取 min 再收窄到 Int。
+            minOf(writePos.get(), capacityBytes.toLong()).toInt()
         }
 
     companion object {

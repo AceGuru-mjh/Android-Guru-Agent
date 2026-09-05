@@ -345,10 +345,22 @@ class StreamingOpenAiClient(
     }
     
     private fun parseNonStreamResponse(body: String): LlmResponse {
-        val json = Json.parseToJsonElement(body).jsonObject
+        // 混沌审查加固（CR #D3）：非流式解析原本零容错——
+        //   ① baseUrl 指向网关/反代时返回 200 + HTML/空体，Json.parseToJsonElement
+        //      抛 SerializationException（未分类），绕过 LlmException 体系，
+        //      ErrorClassifier 无法归类 → 重试/降级策略失效；
+        //   ② vLLM / Gemini-OpenAI 代理等端点把 usage 返回成 128.0（浮点），
+        //      jsonPrimitive.int 抛 NumberFormatException —— choices 已解析成功
+        //      却因统计字段炸掉整个响应。流式路径 parseStreamChunk 有 catch{null}
+        //      兑底，此处对齐容错语义。
+        val json = try {
+            Json.parseToJsonElement(body).jsonObject
+        } catch (_: Exception) {
+            throw LlmException.Http(-1, "unparseable response body: ${body.take(200)}")
+        }
         val choices = json["choices"]?.jsonArray
         val message = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
-        
+
         val content = message?.get("content")?.jsonPrimitive?.contentOrNull
         val toolCalls = message?.get("tool_calls")?.jsonArray?.map { tc ->
             val tcObj = tc.jsonObject
@@ -358,15 +370,15 @@ class StreamingOpenAiClient(
                 arguments = tcObj["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.content ?: "{}"
             )
         } ?: emptyList()
-        
+
         val usage = json["usage"]?.jsonObject?.let { u ->
             Usage(
-                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.int ?: 0,
-                completionTokens = u["completion_tokens"]?.jsonPrimitive?.int ?: 0,
-                totalTokens = u["total_tokens"]?.jsonPrimitive?.int ?: 0
+                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                completionTokens = u["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                totalTokens = u["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0
             )
         }
-        
+
         return LlmResponse(content = content, toolCalls = toolCalls, usage = usage)
     }
     

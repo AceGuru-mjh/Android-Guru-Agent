@@ -165,6 +165,7 @@ object AgentModule {
         memory: ConversationMemory,
         memoryObserver: ExecutionMemoryObserver,
         privilegeInfoProvider: PrivilegeInfoProvider,
+        contextCompressor: ContextCompressor,
         // T72：注入多模型运行时，BUILD 循环按角色路由
         modelRuntime: ModelRuntime
     ): TaskOrchestrator {
@@ -180,7 +181,11 @@ object AgentModule {
             memory = memory,
             memoryObserver = memoryObserver,
             privilegeInfoProvider = privilegeInfoProvider,
-            modelRuntime = modelRuntime
+            modelRuntime = modelRuntime,
+            // P7：编排器与 AgentEngine 共享同一上下文压缩链路（HybridCompressor），
+            // 使经编排器执行的长任务同样具备三级压缩（截断/滑窗/LLM摘要），
+            // 修复"编排器路径工具输出无界增长"的上下文窗口风险。
+            contextCompressor = contextCompressor
         )
     }
 }

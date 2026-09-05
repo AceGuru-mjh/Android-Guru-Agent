@@ -86,6 +86,16 @@ interface MemoryGraphStore {
     suspend fun recordMacroSuccess(skillId: String)
     suspend fun recordMacroFailure(skillId: String)
 
+    /**
+     * 晶化宏技能（ROM 级固化）：置 is_crystallized = 1。
+     *
+     * 晶化后的宏：不参与能量衰减（decayNonCrystallizedEnergy 跳过）、
+     * 不参与低能剪枝（pruneLowEnergy 跳过）、不可被 delete(skillId) 删除。
+     * 由 DreamRenderer 依据 [com.apex.agent.platform.csmem.entropy.EntropyManager.shouldCrystallize]
+     * （能量≥8、成功≥10次、成功率≥90%）在梦境周期中晋升。
+     */
+    suspend fun crystallizeMacro(skillId: String)
+
     // ---- 拓扑同胚迁移（跨版本记忆保鲜） ----
 
     /** 记录一组指纹别名映射（幂等 upsert，旧指纹唯一） */
@@ -93,6 +103,20 @@ interface MemoryGraphStore {
 
     /** 解析旧指纹到新指纹；无映射返回 null */
     suspend fun resolveMigration(oldFingerprint: String): String?
+
+    /**
+     * 跨版本宏回退匹配：给定当前（新版本）UI 指纹，反查映射到它的旧指纹
+     * 别名（按 matchScore 降序），再检索以旧指纹为初始态的 FSM 宏。
+     *
+     * 背景：App 版本升级后 UI 指纹变化，旧宏的 initialFingerprint 无法再
+     * 精确匹配当前屏幕，宏技能集体失效。DreamRenderer 已把旧→新别名桥写入
+     * migration_map，但召回侧从未消费（有炉无米）。此方法补齐闭环——
+     * 闭环缺口 #9 §4（cs-mem-gaps-spec）。
+     */
+    suspend fun findMacrosViaMigration(
+        currentFingerprint: String,
+        appPackage: String
+    ): FSMMacro?
 
     /** 取全部迁移映射（供可视化/审计） */
     suspend fun getMigrationMaps(): List<MigrationMap>

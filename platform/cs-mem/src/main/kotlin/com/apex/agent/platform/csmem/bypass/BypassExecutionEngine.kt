@@ -45,6 +45,12 @@ class BypassExecutionEngine @Inject constructor(
     /**
      * 尝试旁路执行——如果当前 UI 匹配已知宏技能，直接执行并跳过 LLM。
      *
+     * 匹配顺序：
+     * 1. 精确匹配：当前指纹直接命中宏的 initialFingerprint；
+     * 2. 跨版本回退：App 升级后当前指纹已变化，通过 migration_map 的
+     *    旧→新别名桥反查旧指纹，再检索旧版本时期蒸馏的宏（闭环
+     *    cs-mem-gaps-spec 缺口 #9 §4——此前映射只写不读，跨版本宏集体失效）。
+     *
      * @param currentFingerprints 当前屏幕语义节点的指纹列表
      * @param appPackage 当前前台 App 包名
      * @return BypassResult - 执行结果
@@ -57,7 +63,7 @@ class BypassExecutionEngine @Inject constructor(
             return BypassResult.NotMatched("No UI fingerprints available")
         }
 
-        // 1. 用每个指纹尝试匹配 FSM
+        // 1. 用每个指纹尝试精确匹配 FSM
         var bestMatch: FSMMacro? = null
         for (fp in currentFingerprints) {
             val macro = store.findBestMacro(fp, appPackage)
@@ -68,11 +74,32 @@ class BypassExecutionEngine @Inject constructor(
             }
         }
 
+        // 2. 精确匹配失败 → 跨版本别名回退（仅对前几个指纹尝试，避免逐指纹
+        //    反查开销过大；迁移表无记录时立即短路返回 null）
+        if (bestMatch == null) {
+            val probeLimit = 8
+            for (fp in currentFingerprints.take(probeLimit)) {
+                val migrated = store.findMacrosViaMigration(fp, appPackage) ?: continue
+                // store 侧按 newFingerprint == fp 反查——宏的旧初始态经别名桥解析后
+                // 恰为当前指纹 fp。不能用宏的原始旧指纹做 matchRate 复验：旧指纹
+                // 必然已不在当前屏幕（迁移的前提就是指纹变了），任何阈值下都会
+                // 被误杀，闭环形同虚设。改用正向别名桥（旧→新）精确校验：
+                // resolved == fp 即命中；旧指纹仍在屏上时（新旧节点共存）也直接放行。
+                val resolvedNew = runCatching {
+                    store.resolveMigration(migrated.initialFingerprint)
+                }.getOrNull()
+                if (resolvedNew == fp || currentFingerprints.contains(migrated.initialFingerprint)) {
+                    bestMatch = migrated
+                    break
+                }
+            }
+        }
+
         if (bestMatch == null) {
             return BypassResult.NotMatched("No FSM macro matches current UI state")
         }
 
-        // 2. 执行 FSM 转移表
+        // 3. 执行 FSM 转移表
         return executeMacro(bestMatch, appPackage)
     }
 
@@ -152,7 +179,10 @@ class BypassExecutionEngine @Inject constructor(
                     } ?: return false
                 }
                 "input_text" -> {
-                    UiAction.InputText(transition.actionParams.removeSurrounding("\""))
+                    // 双保险：TraceDistiller 已在蒸馏期提取纯参数，但旧库中的
+                    // 宏可能仍存完整描述（input_text("hello")）。这里兼容两种
+                    // 形态，避免把整串字面量输入进输入框。
+                    UiAction.InputText(extractInputText(transition.actionParams))
                 }
                 "back" -> UiAction.Back
                 "home" -> UiAction.Home
@@ -164,6 +194,25 @@ class BypassExecutionEngine @Inject constructor(
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * 提取 input_text 的纯文本参数，兼容三种历史形态：
+     * - "hello"（新蒸馏，纯参数）
+     * - input_text("hello") / input_text(hello)（旧库存的完整描述）
+     */
+    internal fun extractInputText(params: String): String {
+        val trimmed = params.trim()
+        // 非括号包裹形态：直接去引号返回
+        if (!trimmed.startsWith("input_text") && !trimmed.startsWith("input")) {
+            return trimmed.removeSurrounding("\"")
+        }
+        // 兼容旧形态：提取首个平衡括号对内内容
+        val open = trimmed.indexOf('(')
+        val close = trimmed.lastIndexOf(')')
+        if (open < 0 || close <= open) return trimmed
+        return trimmed.substring(open + 1, close).trim()
+            .removeSurrounding("\"")
     }
 
     /**

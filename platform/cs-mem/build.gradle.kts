@@ -21,6 +21,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        // cs-mem 单测为纯 JVM：SemanticNode/UiTreePruner 类签名引用 android.graphics.Rect，
+        // 但被测路径（stableEdgeId / 指纹 / 蒸馏 / 旁路回放解析）不触碰其方法。
+        // 打开 returnDefaultValues 使类加载与方法桩安全通过，无需 Robolectric。
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -47,4 +54,8 @@ dependencies {
     implementation(libs.work.runtime)
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
+
+    // Unit tests（stableEdgeId / 蒸馏参数提取 / 旁路回放解析 —— 纯 JVM 无 Android 依赖）
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
 }

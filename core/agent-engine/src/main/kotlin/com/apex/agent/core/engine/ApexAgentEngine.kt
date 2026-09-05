@@ -634,8 +634,10 @@ class ApexAgentEngine(
                 }
                 for (tc in chunk.toolCalls) {
                     // 并行工具调用：首个片段带 id+index，后续片段只带 index 而 id 为空。
-                    // 以 "id || _idx_N" 为复合键，保证同一工具的片段落到同一累加器。
-                    val key = tc.id.ifBlank { if (tc.index >= 0) "_idx_${tc.index}" else "" }
+                    // 键以 index 优先（index 在全部分片中稳定；id 只在首片出现）——
+                    // 若以 id 优先，首片键 "call_x" 与续片键 "_idx_0" 不一致，同一
+                    // 调用被撕裂成两个累加器、参数 JSON 被裁断。index<0 时回退 id。
+                    val key = if (tc.index >= 0) "_idx_${tc.index}" else tc.id
                     if (key.isBlank()) continue  // 既无 id 又无 index 的畸形片段，跳过
                     val acc = toolCallsAccumulator.getOrPut(key) {
                         StreamingToolCallAccumulator(tc.id.ifBlank { key }, tc.name)

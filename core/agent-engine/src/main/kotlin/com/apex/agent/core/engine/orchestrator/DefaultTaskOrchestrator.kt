@@ -11,6 +11,9 @@ import com.apex.agent.core.engine.PrivilegeInfoProvider
 import com.apex.agent.core.engine.StreamingToolCallAccumulator
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.UserInput
+import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.engine.compression.TokenEstimator
+import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.LlmStreamChunk
@@ -157,11 +160,28 @@ class DefaultTaskOrchestrator(
      * T72 — 多模型运行时。为空则回退到 [SingleClientModelRuntime]（旧行为），
      * 非空则 BUILD 循环按角色路由（含图片时走 VISION）。
      */
-    modelRuntime: ModelRuntime? = null
+    modelRuntime: ModelRuntime? = null,
+    /**
+     * P7 — 上下文压缩器（与 [com.apex.agent.core.engine.ApexAgentEngine] 对称）。
+     * 为 null 则关闭压缩（旧行为，测试兼容）；非空则 BUILD 循环每轮迭代前检查
+     * token 水位，超阈值触发 [ContextCompressor.compress] 并发射
+     * [AgentEvent.ContextCompressed]。
+     *
+     * 此前仅 AgentEngine 有压缩链路，通过编排器执行的长任务上下文会无界增长
+     * （工具输出直接入历史），最终撞上模型窗口上限。这里补齐同一能力。
+     */
+    private val contextCompressor: ContextCompressor? = null
 ) : TaskOrchestrator {
 
     /** 实际执行 LLM 调用的运行时（多模型或单 client 回退）。 */
     private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
+
+    /**
+     * P7 Layer-1 — 工具输出截断器（与 AgentEngine 同源参数：maxChars 取
+     * [AgentConfig.maxToolOutputLength]）。工具结果写入 history 前做智能截断，
+     * 防止单条超大输出（如 shell dump）直接耗尽上下文窗口。
+     */
+    private val toolTruncator = ToolOutputTruncator(maxChars = agentConfig.maxToolOutputLength)
 
     // ─── Observable state ──────────────────────────────────────────────────
 
@@ -247,7 +267,8 @@ class DefaultTaskOrchestrator(
             runtime = runtime,
             userGate = userGate,
             memoryObserver = memoryObserver,
-            isStillRunning = { isRunning }
+            isStillRunning = { isRunning },
+            toolTruncator = toolTruncator
         )
         if (memory != null) {
             try {
@@ -532,6 +553,11 @@ class DefaultTaskOrchestrator(
             iteration++
             totalIterations = iteration
             send(AgentEvent.IterationStart(iteration))
+
+            // P7 — 每轮迭代前检查上下文水位：超阈值则压缩（与 AgentEngine 同一
+            // 触发时机）。压缩失败仅记日志，绝不中断任务循环。
+            maybeCompressContext { ev -> send(ev) }
+
             stateMachine.transitionTo(
                 TaskState.Planning(
                     iteration,
@@ -545,7 +571,15 @@ class DefaultTaskOrchestrator(
 
             // ── Call LLM streaming ──
             val contentBuilder = StringBuilder()
+            val reasoningBuilder = StringBuilder()
             val toolCallAccumulators = LinkedHashMap<String, StreamingToolCallAccumulator>()
+            // 「函数调用」白名单：仅向模型暴露用户圈选的工具子集（null = 全部），
+            // 与 AgentEngine 保持同一过滤语义，避免模型幻觉调用未启用工具。
+            val tools = toolRegistry.getToolDefinitions().let { defs ->
+                agentConfig.enabledToolIds?.let { whitelist ->
+                    defs.filter { it.name in whitelist }
+                } ?: defs
+            }
             // T72 §九 / §十一：含图片时路由到 VISION 角色（要求 vision+imageInput），
             // 路由器做能力校验与降级；全链无视觉模型时抛 ModelCapabilityMismatch。
             val reactContext = if (conversationHistory.any { it is LlmMessage.User && it.images.isNotEmpty() }) {
@@ -557,20 +591,37 @@ class DefaultTaskOrchestrator(
                 runtime.chatStream(
                     context = reactContext,
                     messages = conversationHistory.toList(),
-                    tools = toolRegistry.getToolDefinitions(),
+                    tools = tools,
                     temperature = agentConfig.temperature
                 ).collect { chunk: LlmStreamChunk ->
+                    // 正文内容：逐段流式转发为 ResponseChunk（与 AgentEngine 一致，
+                    // 此前编排器把正文误当 ThinkingChunk 整段缓存，UI 无法逐字渲染）。
                     chunk.content?.let { text ->
                         if (text.isNotEmpty()) {
                             contentBuilder.append(text)
+                            send(AgentEvent.ResponseChunk(text))
+                        }
+                    }
+                    // 原生思考内容（DeepSeek-R1 / Qwen3-thinking / o-series）：
+                    // 透传为 ThinkingChunk，让 UI 显示思维链（与 AgentEngine 一致）。
+                    chunk.reasoningContent?.let { text ->
+                        if (text.isNotEmpty()) {
+                            reasoningBuilder.append(text)
                             send(AgentEvent.ThinkingChunk(text))
                         }
                     }
                     chunk.toolCalls.forEach { tc ->
-                        val acc = toolCallAccumulators.getOrPut(tc.id) {
-                            StreamingToolCallAccumulator(tc.id, tc.name)
+                        // 复合键：OpenAI 并行工具调用的首片段带 id+index，后续片段
+                        // 只带 index 而 id 为空。键必须以 index 优先（index 在所有
+                        // 分片中稳定出现；id 只在首片出现）——若以 id 优先，首片
+                        // 键为 "call_x"、续片键为 "_idx_0"，同一调用被撕裂成两个
+                        // 累加器，参数 JSON 被裁断。index<0（非流式/单片）回退 id。
+                        val key = if (tc.index >= 0) "_idx_${tc.index}" else tc.id
+                        if (key.isBlank()) return@forEach
+                        val acc = toolCallAccumulators.getOrPut(key) {
+                            StreamingToolCallAccumulator(tc.id.ifBlank { key }, tc.name)
                         }
-                        acc.appendArguments(tc.arguments)
+                        acc.append(tc.name, tc.arguments)
                     }
                 }
             } catch (e: CancellationException) {
@@ -582,10 +633,11 @@ class DefaultTaskOrchestrator(
                 return@channelFlow
             }
 
-            val fullThought = contentBuilder.toString()
-            if (agentConfig.thinkingLevel != ThinkingLevel.NONE) {
-                send(AgentEvent.ThinkingComplete(fullThought))
+            if (reasoningBuilder.isNotEmpty() && agentConfig.thinkingLevel != ThinkingLevel.NONE) {
+                send(AgentEvent.ThinkingComplete(reasoningBuilder.toString()))
             }
+
+            val fullThought = contentBuilder.toString()
 
             val toolCalls = toolCallAccumulators.values.map { it.build() }
 
@@ -653,7 +705,7 @@ class DefaultTaskOrchestrator(
                     TaskState.Responding(iteration, stateMachine.currentProgress)
                 )
                 conversationHistory.add(LlmMessage.Assistant(fullThought, emptyList()))
-                send(AgentEvent.ResponseChunk(fullThought))
+                // 正文已在流式阶段逐段发送；这里只发送终止信号，避免 UI 收到重复全文。
                 send(AgentEvent.ResponseComplete(fullThought))
                 stateMachine.updateProgress { p ->
                     p.copy(
@@ -715,6 +767,55 @@ class DefaultTaskOrchestrator(
             "A68.2 recovery ${runtime.recoveryPlanner.recoveryCount}/${cfg.maxRecoveries} injected"
         )
         return null
+    }
+
+    // ─── P7 context compression ─────────────────────────────────────────────
+
+    /**
+     * P7 — 每轮 BUILD 迭代前检查 token 水位，超阈值触发压缩。
+     *
+     * 与 [com.apex.agent.core.engine.ApexAgentEngine.maybeCompressContext] 同一
+     * 语义：阈值 = maxContextTokens × compressionThreshold；压缩失败仅记日志并
+     * 跳过本轮（绝不中断任务循环）；压缩成功后同步持久化记忆并发射
+     * [AgentEvent.ContextCompressed] 供 UI 展示上下文水位变化。
+     */
+    private suspend fun maybeCompressContext(emit: suspend (AgentEvent) -> Unit) {
+        val compressor = contextCompressor ?: return
+
+        val currentTokens = TokenEstimator.estimateHistory(conversationHistory)
+        val thresholdTokens = (agentConfig.maxContextTokens * agentConfig.compressionThreshold).toInt()
+        if (currentTokens <= thresholdTokens) return
+
+        val report = try {
+            compressor.compress(
+                history = conversationHistory,
+                preserveRecent = agentConfig.preserveRecentTurns
+            )
+        } catch (e: Exception) {
+            OrchestratorLog.log(
+                LogLevel.WARN,
+                "Context compression failed, skipping this round " +
+                    "(tokens=$currentTokens, threshold=$thresholdTokens): ${e.message}"
+            )
+            return
+        }
+
+        try {
+            memory?.save(conversationHistory)
+        } catch (e: Throwable) {
+            OrchestratorLog.log(LogLevel.WARN, "Failed to persist compressed memory: ${e.message}")
+        }
+
+        emit(
+            AgentEvent.ContextCompressed(
+                beforeTokens = report.beforeTokens,
+                afterTokens = report.afterTokens,
+                strategy = report.strategy.name,
+                summary = report.summary.take(200),
+                messagesRemoved = report.messagesRemoved,
+                messagesTruncated = report.messagesTruncated
+            )
+        )
     }
 
     // ─── State reduction from events (delegated modes) ─────────────────────

@@ -181,12 +181,40 @@ object TraceDistiller {
             transitions.add(FSMTransition(
                 fromState = fromState,
                 actionType = bestAction.actionType,
-                actionParams = bestAction.actionDescription,
+                // 修复：旧实现直接存完整原始描述（如 input_text("hello")），
+                // BypassExecutionEngine 回放 input_text 时会把整串字面量
+                // 输入进输入框。这里在蒸馏期就提取纯参数（括号内内容），
+                // 回放侧再做双保险解析。
+                actionParams = extractActionParams(bestAction),
                 toState = toState
             ))
         }
 
         return transitions
+    }
+
+    /**
+     * 从动作描述中提取回放可用的纯参数。
+     *
+     * - input_text("hello") / input_text(hello) → hello（去包裹引号）
+     * - ui_tap(540,1200) / tap(x=540,y=1200) → 保留原始形式（回放侧用
+     *   正则提取坐标数字，保留原始可读性）
+     * - 其他（back/home 等）→ 原样返回
+     *
+     * internal 可见性：供同模块单元测试（TraceDistillerParamExtractionTest）
+     * 直接验证新旧两种参数形态的提取语义。
+     */
+    internal fun extractActionParams(step: TraceStep): String {
+        if (step.actionType != "input_text") return step.actionDescription
+
+        val desc = step.actionDescription.trim()
+        // 提取首个平衡括号对内的内容
+        val open = desc.indexOf('(')
+        val close = desc.lastIndexOf(')')
+        if (open < 0 || close <= open) return desc
+        val inner = desc.substring(open + 1, close).trim()
+        // 去除包裹引号（单/双均可）
+        return inner.removeSurrounding("\"").removeSurrounding("'")
     }
 
     /**

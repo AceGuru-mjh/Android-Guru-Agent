@@ -8,9 +8,14 @@ import com.apex.agent.attachment.AttachmentCleanupManager
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.dream.DreamRenderer
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
@@ -33,6 +38,16 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var dreamRenderer: DreamRenderer
 
+    // T82: Ubuntu 产品级生命周期 —— App 启动时恢复现场（reconcile + 状态派生），
+    // **绝不自动下载**：首次安装仍是显式动作（Agent 调 terminal.ubuntu.ensure /
+    // 用户进依赖下载中心）。warmUp 只做崩溃后一致性收敛（stale staging 清理、
+    // 孤儿 temp 清理、bootstrap 中断态标记）—— "App 重启后知道 Ubuntu 在不在"。
+    @Inject
+    lateinit var ubuntuLifecycle: UbuntuLifecycleCoordinator
+
+    /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -47,6 +62,32 @@ class ApexApp : Application(), Configuration.Provider {
 
         // 启动 CS-Mem 记忆写入管道与后台梦境整理（见报告 P0：初始化缺口）。
         initCsMem()
+
+        // T82: Ubuntu 生命周期现场恢复（不下载、不 bootstrap —— 只做 reconcile）。
+        initUbuntuLifecycleRecovery()
+    }
+
+    /**
+     * T82: App 重启后的 Ubuntu 状态收敛。
+     *
+     * warmUp 语义（UbuntuLifecycleCoordinator）：
+     * - rootfs 安装中断 → 清 stale staging / 孤儿 temp（provisioner.reconcile）；
+     * - bootstrap 中断态 → 状态机如实标记（下次 ensureReady 续跑未完成阶段）；
+     * - 已 READY → 秒级确认，零副作用。
+     *
+     * 刻意 NOT 触发下载：用户没同意消耗 ~30MB 流量前，App 不替用户做决定。
+     */
+    private fun initUbuntuLifecycleRecovery() {
+        appScope.launch {
+            runCatching { ubuntuLifecycle.warmUp() }
+                .onSuccess { report ->
+                    Log.i("ApexAgent", "Ubuntu lifecycle warmUp: action=${report.action} " +
+                        "staleStaging=${report.staleStaging} phase=${report.phaseAfter.name}")
+                }
+                .onFailure {
+                    Log.w("ApexAgent", "Ubuntu lifecycle warmUp failed: ${it.message}")
+                }
+        }
     }
 
     /**

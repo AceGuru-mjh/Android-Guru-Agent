@@ -47,6 +47,16 @@ class InputWaitingDetector {
      * Each pattern is a regex matched against the trimmed last visible line.
      */
     private val highConfidencePatterns = listOf(
+        // ── T81 (D-3)：真实 shell PS1 形态 ──
+        // 根因：原正则只认裸 "^\s*\$\s*$"/"^\s*#\s*$" —— 真实 bash 默认 PS1
+        //（user@host:~$）、venv/conda 前缀（(venv) $）、zsh（machine %）全部不命中
+        // → 前台 job 完成后 JobManager 的合成退出永不触发，job 永久 RUNNING、
+        // wait() 挂死（FakeNativePty 输出裸 "$ " 掩盖了此缺陷）。
+        // 与 intelligence/PromptDetector 的 SHELL_PROMPTS 对齐 + 扩充。
+        Regex("^[\\w.-]+@[\\w.-]+:[^\\s]*[#$]\\s*$"),          // user@host:/path$（bash 默认；root 为 #）
+        Regex("^\\(.*\\)\\s*[\\w.-]*@?[\\w.-]*:?[^\\s]*[#$]\\s*$"), // (venv) $ / (base) user@host:~$
+        Regex("^\\d+\\s*[#$]\\s*$"),                           // 带上条退出码的 PS1（`1 $`）
+        Regex("^\\s*%\\s*$"),                                 // zsh 默认 prompt
         Regex(".*\\[Y/n]\\s*$", RegexOption.IGNORE_CASE),
         Regex(".*\\[y/N]\\s*$", RegexOption.IGNORE_CASE),
         Regex(".*\\[yes/no]\\s*$", RegexOption.IGNORE_CASE),

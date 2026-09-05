@@ -168,8 +168,15 @@ class UbuntuBootstrapManager(
         // ── 2. CONFIGURING：sources.list + env ──
         if (force || !evidence.containsKey(BootstrapState.CONFIGURING.name)) {
             stageStart(BootstrapState.CONFIGURING, "configuring sources.list + env")
-            val rootfs = provisioner.current()!!
-            val rootfsDir = File(rootfs.location!!.value)
+            // T81 (U-3)：NPE 修复 —— 原实现 `provisioner.current()!!` + `location!!`：
+            // CHECKING 阶段可被上一进程的 stageEvidence 短路跳过，此后 rootfs 被
+            // invalidate/remove → `!!` 抛 NPE → 泛型 catch 吞成
+            // "bootstrap crashed: null"（错误信息无语义）。
+            val rootfs = provisioner.current()
+                ?: return stageFail(BootstrapState.CONFIGURING, "rootfs disappeared between stages — re-install (terminal.ubuntu.install)")
+            val rootfsLocation = rootfs.location
+                ?: return stageFail(BootstrapState.CONFIGURING, "rootfs has no location — re-install (terminal.ubuntu.install)")
+            val rootfsDir = File(rootfsLocation.value)
             val arch = rootfs.architecture
             val sourcesResult = sourcesList.ensure(rootfsDir, arch)
             if (!sourcesResult.written && sourcesResult.actions.any { it.contains("skipped") }) {

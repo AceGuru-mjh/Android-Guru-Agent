@@ -34,16 +34,32 @@ import java.util.concurrent.atomic.AtomicLong
  *   - Subscribes to EventBus for ProcessExited/WaitingInput events to advance Job state.
  *   - startCursor = session's current RingBuffer cursor at command-write time.
  *   - endCursor = cursor when ProcessExited observed.
+ *
+ * T81 (D-2)：超时统一走 [TimeoutController] 三级序列（SIGTERM → 宽限 → SIGKILL）。
+ * 原实现私自 launch 裸 SIGKILL 发给进程组 —— native kill(-PGID) 连同 shell
+ * 一起杀（一次 job 超时 = 整个 session 报废），且 timer 协程不可取消、与
+ * cancel 路径叠加发信号。现在：
+ *   - job 进入终态（含合成退出/取消/正常退出）自动撤销定时器；
+ *   - 超时到期不再直接判死 —— SIGTERM 后命令若在宽限期内退出，shell 回到
+ *     prompt 的合成退出路径会先把 job 推到终态并撤销定时器（SIGKILL 兑底
+ *     不再发送）；仍存活才 SIGKILL + ProcessExited(TIMEOUT)。
  */
 class JobManagerImpl(
     private val sessionManager: SessionManagerImpl,
     private val inputManager: InputManager,
     private val eventLog: TerminalEventLog,
     private val eventBus: TerminalEventBus,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /** T81 (D-2)：超时统一控制器（三级序列 + 按 session/job 撤销）。 */
+    private val timeoutController: com.apex.agent.platform.terminal.process.TimeoutController? = null
 ) : JobManager {
 
     private val jobs = ConcurrentHashMap<Long, TerminalJob>()
+
+    /** T81 (D-2)：job 终态集合（J11 —— 不可逆，进入即撤销超时定时器）。 */
+    private val TERMINAL_JOB_STATES = setOf(
+        JobState.EXITED, JobState.INTERRUPTED, JobState.TIMED_OUT, JobState.FAILED, JobState.UNKNOWN
+    )
     private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<JobState>>()
     private val idCounter = AtomicLong(0)
     private val mutex = Mutex()
@@ -150,20 +166,28 @@ class JobManagerImpl(
         val eid = eventLog.append(ev)
         eventBus.emit(ev.copy(id = eid))
 
-        // Optional timeout watcher
-        if (timeoutMs > 0) {
+        // Optional timeout watcher —— T81 (D-2)：统一走 TimeoutController 三级序列
+        //（SIGTERM → 宽限 → SIGKILL），取代原裸 SIGKILL 杀全组（连 shell 一起杀）。
+        if (timeoutMs > 0 && timeoutController != null) {
+            timeoutController.startTimeout(sessionId, jobId, timeoutMs) {
+                // SIGKILL 兑底已发出（或命令已在宽限期内退出且定时器被撤销）。
+                // 终态推进：仍处非终态才标记 TIMED_OUT（与并发合成退出竞争时以先到者为准）。
+                scope.launch {
+                    val cur = jobs[jobId] ?: return@launch
+                    if (!cur.isTerminal) {
+                        emitProcessExited(jobId, sessionId, ExitCause.TIMEOUT, 137)
+                    }
+                }
+            }
+        } else if (timeoutMs > 0) {
+            // 兼容路径（无 TimeoutController 注入，仅测试构造）：保留旧行为但不再杀全组后立即谎报 —
+            // 发 SIGKILL 后交由 exit watcher/合成退出推进终态。
             scope.launch {
                 kotlinx.coroutines.delay(timeoutMs)
                 val cur = jobs[jobId] ?: return@launch
-                if (cur.state == JobState.RUNNING || cur.state == JobState.WAITING_INPUT) {
+                if (!cur.isTerminal) {
                     inputManager.sendSignal(sessionId, owner, UnixSignal.SIGKILL, jobId)
-                    val exEv = TerminalEvent.ProcessExited(
-                        id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
-                        cursor = -1, jobId = jobId, pid = a.session.pid,
-                        exitCode = 137, signal = UnixSignal.SIGKILL, cause = ExitCause.TIMEOUT
-                    )
-                    val xid = eventLog.append(exEv)
-                    eventBus.emit(exEv.copy(id = xid))
+                    emitProcessExited(jobId, sessionId, ExitCause.TIMEOUT, 137)
                 }
             }
         }
@@ -207,6 +231,11 @@ class JobManagerImpl(
         // updates jobs[jid] manually — this makes transition the single source of truth).
         val job = jobs[jobId] ?: return
         jobs[jobId] = job.copy(state = to)
+        // T81 (D-2)：终态撤销超时定时器 —— job 已完成/取消/失败，定时器若继续跑
+        // 会在宽限期后发 SIGKILL 到进程组（杀 shell）+ 重复发终态事件。
+        if (TERMINAL_JOB_STATES.contains(to)) {
+            timeoutController?.cancelTimeout(jobId)
+        }
         val ev = TerminalEvent.StateChanged(
             id = 0, sessionId = job.sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             kind = com.apex.agent.platform.terminal.events.StateKind.JOB,

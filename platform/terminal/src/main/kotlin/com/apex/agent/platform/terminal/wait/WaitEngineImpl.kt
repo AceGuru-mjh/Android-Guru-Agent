@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
@@ -74,9 +75,14 @@ class WaitEngineImpl(
             WaitCondition.Error -> event is TerminalEvent.Error
             is WaitCondition.OutputMatch -> event is TerminalEvent.OutputProduced &&
                 matchOutput(condition, event)
-            WaitCondition.ScreenChanged -> event is TerminalEvent.OutputProduced  // coarse
-            WaitCondition.PromptDetected -> event is TerminalEvent.OutputProduced  // TODO v2: prompt regex
-            is WaitCondition.IdleFor -> false  // IdleFor handled separately by timer; not event-matched
+            WaitCondition.ScreenChanged -> event is TerminalEvent.OutputProduced &&
+                event.byteCount > 0   // T81：零字节输出不算屏幕变化
+            // T81：真实 prompt 检测 —— 匹配 pump 的 InputWaitingDetector HIGH 事件
+            //（原实现匹配任意 OutputProduced：任何输出都触发 wait(PromptDetected)，
+            // 纯假阳性）。
+            WaitCondition.PromptDetected -> event is TerminalEvent.WaitingInput &&
+                event.confidence == com.apex.agent.platform.terminal.events.Confidence.HIGH_CONFIDENCE
+            is WaitCondition.IdleFor -> false  // IdleFor 由定时器路径处理（见 await），非事件匹配
         }
         return if (matched) MatchResult(true, event) else MatchResult(false)
     }
@@ -90,11 +96,15 @@ class WaitEngineImpl(
         // instantly on the first OutputProduced event (silent false positive).
         val recent = recentOutputProvider(e.sessionId)
         if (recent.isEmpty()) return false
+        // T81：bounded matching —— 模式长度上限 256，防止巨型模式在 4KB 窗口上
+        // 高 CPU（regex 灾难性回溯风险由长度 + 编译失败容错双重限制）。
+        if (c.pattern.length > 256) return false
         return if (c.isRegex) {
-            // Compile each call (waits are infrequent; cache only if profiling demands).
-            runCatching { Regex(c.pattern).containsMatchIn(recent) }.getOrDefault(false)
+            val opts = if (c.ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+            runCatching { Regex(c.pattern, opts).containsMatchIn(recent) }.getOrDefault(false)
         } else {
-            recent.contains(c.pattern)
+            if (c.ignoreCase) recent.contains(c.pattern, ignoreCase = true)
+            else recent.contains(c.pattern)
         }
     }
 
@@ -105,6 +115,13 @@ class WaitEngineImpl(
         // The bus guarantees no event is lost across the replay→live transition (see
         // TerminalEventBusImpl.subscribe), so this will not miss the synthesized
         // ProcessExited emitted when the shell returns to its idle prompt.
+        //
+        // T81：IdleFor 的真实实现 —— [WaitCondition.IdleFor] 语义为「condition.ms 内
+        // 无新输出」。定时器静默期满 → Matched(event=null)；期间任何 OutputProduced
+        // → IdleFor 不成立，继续等待新的静默窗口（在 timeoutMs 总预算内重置计时）。
+        if (condition is WaitCondition.IdleFor) {
+            return awaitIdle(sessionId, condition, timeoutMs)
+        }
         val result = withTimeoutOrNull(timeoutMs) {
             val ev = bus.subscribe(sessionId, afterCursor = 0L).first { e ->
                 val m = matchEvent(condition, e)
@@ -125,16 +142,38 @@ class WaitEngineImpl(
         }
     }
 
-    override fun register(sessionId: Long, condition: WaitCondition): Flow<WaitResult> = flow {
-        // Streaming variant: emit each match as a separate WaitResult.Matched.
-        bus.subscribe(sessionId, afterCursor = 0L).collect { ev ->
-            val m = matchEvent(condition, ev)
-            if (m.matched && m.event != null) emit(WaitResult.Matched(m.event))
-            if (ev is TerminalEvent.SessionClosed) {
-                emit(WaitResult.SessionGone(ev.cause))
-                return@collect
+    /** T81：IdleFor 定时器路径（静默期满 → Matched；输出打破静默 → 重置）。 */
+    private suspend fun awaitIdle(sessionId: Long, condition: WaitCondition.IdleFor, timeoutMs: Long): WaitResult {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val silence = withTimeoutOrNull(condition.ms) {
+                // 任何新输出/会话关闭都打破静默
+                bus.subscribe(sessionId, afterCursor = 0L).first { e ->
+                    (e is TerminalEvent.OutputProduced && e.byteCount > 0) || e is TerminalEvent.SessionClosed
+                }
+            }
+            when {
+                silence == null -> return WaitResult.Matched(null)   // 静默期满 —— IdleFor 成立
+                silence is TerminalEvent.SessionClosed -> return WaitResult.SessionGone(silence.cause)
+                else -> { /* 输出打破静默 —— 循环继续，重置计时 */ }
             }
         }
+        return WaitResult.Timeout(waitedMs = timeoutMs)
+    }
+
+    override fun register(sessionId: Long, condition: WaitCondition): Flow<WaitResult> = flow {
+        // T81：SessionGone 后终止流 —— 原实现 `return@collect` 只结束当前元素的
+        // lambda，不终止 collect（流在会话关闭后继续运行/继续匹配，与「取消即
+        // 注销」契约不符）。用 takeWhile 在 SessionGone emit 后完成流。
+        bus.subscribe(sessionId, afterCursor = 0L)
+            .takeWhile { ev -> ev !is TerminalEvent.SessionClosed }
+            .collect { ev ->
+                val m = matchEvent(condition, ev)
+                if (m.matched && m.event != null) emit(WaitResult.Matched(m.event))
+            }
+        // SessionClosed 终止 takeWhile 后：补发 SessionGone 让订阅者拿到关闭语义
+        //（无法在这里拿到 cause —— 由 await 路径提供；流式路径只表示终结）。
+        emit(WaitResult.SessionGone(com.apex.agent.platform.terminal.events.CloseCause.USER))
     }
 
     /** Called by PtyOutputPump / EventBus dispatcher on every event (internal hook). */

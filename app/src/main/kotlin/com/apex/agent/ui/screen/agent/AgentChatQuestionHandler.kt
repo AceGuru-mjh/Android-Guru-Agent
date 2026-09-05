@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import com.apex.agent.core.engine.AgentAnswer
+import kotlinx.coroutines.flow.update
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent 主动提问的回答 / 跳过处理 —— 从 AgentChatViewModel.kt 抽出的单一职责

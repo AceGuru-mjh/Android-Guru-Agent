@@ -118,7 +118,7 @@ PtySession::PtySession(int id, const std::vector<std::string>& argv,
     }
 
     LOGI("Session %d created: pid=%d fd=%d argv0=%s cwd=%s",
-         id_, pid_, masterFd, argv.empty() ? "(empty)" : argv[0].c_str(),
+         id_, pid_.load(), masterFd, argv.empty() ? "(empty)" : argv[0].c_str(),
          workDir.c_str());
 }
 
@@ -150,13 +150,32 @@ void PtySession::reapChild() {
     pid_t ret = waitpid(pid_, &status, WNOHANG);
     if (ret == pid_) {
         alive_ = false;
-        if (WIFEXITED(status)) {
-            exitCode_ = WEXITSTATUS(status);
-        } else if (WIFSIGNALED(status)) {
-            exitCode_ = 128 + WTERMSIG(status);
-        }
-        LOGI("Session %d: child %d exited with code %d", id_, pid_, exitCode_);
+        applyExitStatus(status);
+        LOGI("Session %d: child %d exited with code %d", id_, pid_.load(), exitCode_.load());
     }
+}
+
+// T81 (N-2)：waitpid 状态解析单一出口 —— reapChild 与 close() 共用，
+// 修复「经 close() 终止的 session exitCode 恒 -1」（原先 close 内 waitpid
+// 后直接丢弃 status）。
+void PtySession::applyExitStatus(int status) {
+    if (WIFEXITED(status)) {
+        exitCode_.store(WEXITSTATUS(status), std::memory_order_relaxed);
+    } else if (WIFSIGNALED(status)) {
+        exitCode_.store(128 + WTERMSIG(status), std::memory_order_relaxed);
+    }
+}
+
+// T81 (N-4/N-5)：有界轮询等待退出（2ms 步进）。进程未及 timeout 退出返回 false。
+bool PtySession::waitExitBounded(int timeoutMs) {
+    const int steps = timeoutMs / 2 + 1;
+    for (int i = 0; i < steps; ++i) {
+        reapChild();
+        if (!alive_.load(std::memory_order_acquire)) return true;
+        usleep(2000);
+    }
+    reapChild();
+    return !alive_.load(std::memory_order_acquire);
 }
 
 bool PtySession::write(const char* data, size_t len) {
@@ -232,6 +251,10 @@ ReadResult PtySession::readEx(int maxBytes) {
             // read()==0：所有 slave 已关闭且无缓冲数据 —— EOF。
             // P70-1：EOF 只代表 PTY 输出流结束，绝不修改 alive_（进程存活由
             // waitpid/reapChild 判定，两个概念独立）。
+            // T81 (N-2 补强)：EOF 意味着输出方全部关闭 —— 此时子进程大概率已死，
+            // 顺手 reap 一次（WNOHANG，非阻塞），让上层「EOF 后立即查 exitCode」
+            // 可得（原实现必须等下一次 isAlive 轮询）。
+            reapChild();
             if (result.data.empty()) {
                 result.status = ReadStatus::EOF_;
             }
@@ -253,6 +276,8 @@ ReadResult PtySession::readEx(int maxBytes) {
             if (errno == EIO) {
                 // Linux PTY 语义：slave 全部关闭后 read(master) 返回 EIO，
                 // 等价于输出流 EOF（shell 及其子进程都已退出/关闭）。
+                // T81 (N-2 补强)：同 EOF 分支 —— 顺手 reap，exitCode 立即可得。
+                reapChild();
                 if (result.data.empty()) {
                     result.status = ReadStatus::EOF_;
                 }
@@ -338,22 +363,27 @@ void PtySession::close() {
     // 注意顺序：先向整个进程组发信号，最后才关闭 master fd ——
     // killProcessGroup() 需要 master fd 做 tcgetpgrp()。
     if (pid_ > 0 && alive_) {
-        // 先尝试优雅终止整个进程组（shell + child + grandchild）
+        // 先尝试优雅终止整个进程组（shell + child + grandchild）。
+        // T81 (N-5)：等待改为有界轮询（进程早退即返回，不再固定睡满 50/100ms）。
         killProcessGroup(SIGHUP);
-        usleep(50000); // 50ms
-
-        if (isAlive()) {
+        if (!waitExitBounded(50)) {
             killProcessGroup(SIGTERM);
-            usleep(100000); // 100ms
+            if (!waitExitBounded(100)) {
+                killProcessGroup(SIGKILL);
+                waitExitBounded(150);
+            }
         }
 
-        if (isAlive()) {
-            killProcessGroup(SIGKILL);
+        // T81 (N-4)：回收 shell 子进程 —— 只用 WNOHANG 有界重试（reapChild）。
+        // 原实现 waitpid(pid_, &status, 0) 是无限期阻塞：SIGKILL 后子进程若处于
+        // uninterruptible sleep（D-state，罕见但存在，如 FUSE/nfs 持有者），
+        // JNI 调用线程会被永久挂死。200ms 后放弃回收（子进程由 init 收养）。
+        // T81 (N-2)：回收到的 exit status 经 applyExitStatus 写入 exitCode_，
+        // 经 close() 终止的会话不再丢失退出码。
+        for (int i = 0; i < 100 && alive_.load(std::memory_order_acquire); ++i) {
+            usleep(2000);
+            reapChild();
         }
-
-        // 回收 shell 子进程
-        int status;
-        waitpid(pid_, &status, 0);
         pid_ = -1;
     }
 

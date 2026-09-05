@@ -69,8 +69,10 @@ class PtyOutputPumpImpl(
     override val isRunning: Boolean get() = running.get()
 
     override suspend fun start() {
-        if (running.get()) return
-        running.set(true)
+        // T81：check-then-act 竞态修复 —— 原实现 `if (running.get()) return;
+        // running.set(true)` 非原子，并发调用 start 可孵化两个读协程同时
+        // nativeRead 同一个 fd（违反单 reader 契约）。compareAndSet 保证唯一胜者。
+        if (!running.compareAndSet(false, true)) return
         pumpJob = scope.launch {
             val buf = ByteArray(READ_CHUNK)
             while (isActive && running.get()) {
@@ -86,7 +88,15 @@ class PtyOutputPumpImpl(
                             break
                         }
                         // 进程还活着却读到流结束/错误 —— 真异常，报告并停止 pump。
+                        // T81：同步迁移 session → BROKEN（经 reducer），原实现停在 READY
+                        // 且无 reader（半开僵尸：后续 write 成功但永远读不到输出）。
                         emitError("ReadFailed", "nativeRead returned $n", recoverable = false)
+                        semanticReducer.onEvent(
+                            TerminalEvent.Error(
+                                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
+                                cursor = -1, code = "PtyUnavailable", message = "pump stream broken", recoverable = false
+                            )
+                        )
                         running.set(false)
                         break
                     }

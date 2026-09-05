@@ -50,7 +50,11 @@ class TerminalEventBusImpl(
         sessions.computeIfAbsent(sessionId) {
             SessionBus(
                 MutableSharedFlow(
-                    replay = 0,
+                    // T81 (D-4)：replay=REPLAY_WINDOW —— 填补「collectJob 异步启动前
+                    // tryEmit 的事件两头都收不到」的订阅启动窗口（原 replay=0 时该窗口
+                    // 内的事件永久丢失）。重放与历史回放由 subscribe 的 seen-set 去重，
+                    // 不产生重复投递。
+                    replay = REPLAY_WINDOW,
                     extraBufferCapacity = BUFFER_CAPACITY,
                     onBufferOverflow = BufferOverflow.DROP_OLDEST
                 )
@@ -92,8 +96,12 @@ class TerminalEventBusImpl(
                 if (e.id !in seen) emit(e)
             }
             // Phase 2b: live tail.
+            // T81 (D-4)：tail 阶段同样走 seen 去重 —— collectJob 与主 flow 并发，
+            // replay/早 emit 事件可能在 Phase 2a 的 tryReceive break 之后才送达
+            // channel；无去重时同一事件被投递两次（合跑时序变化即触发，生产
+            // 在订阅者调度竞争下同样可复现）。
             for (e in live) {
-                emit(e)
+                if (e.id !in seen) emit(e)
             }
         } finally {
             collectJob.cancel()
@@ -122,5 +130,8 @@ class TerminalEventBusImpl(
         // Large enough that DROP_OLDEST almost never triggers in normal use;
         // EventLog is the durable fallback for re-sync.
         private const val BUFFER_CAPACITY = 1024
+
+        /** T81 (D-4)：订阅启动窗口的填补重放深度（与 subscribe 的 seen 去重配合）。 */
+        private const val REPLAY_WINDOW = 64
     }
 }

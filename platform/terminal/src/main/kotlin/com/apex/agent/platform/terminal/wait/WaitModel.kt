@@ -35,8 +35,12 @@ sealed interface WaitCondition {
 
     // ---- v2 (enhanced) ----
 
-    /** Output matched a regex or substring. */
-    data class OutputMatch(val pattern: String, val isRegex: Boolean = true) : WaitCondition
+    /** Output matched a regex or substring. T81: [ignoreCase] — 大小写不敏感（regex 内嵌 (?i) 的结构化替代）。 */
+    data class OutputMatch(
+        val pattern: String,
+        val isRegex: Boolean = true,
+        val ignoreCase: Boolean = false
+    ) : WaitCondition
 
     /** Screen content changed. */
     object ScreenChanged : WaitCondition
@@ -56,7 +60,7 @@ sealed interface WaitCondition {
  */
 sealed class WaitResult {
     /** Condition matched. [event] is the triggering TerminalEvent (e.g. ProcessExited with exitCode). */
-    data class Matched(val event: TerminalEvent) : WaitResult()
+    data class Matched(val event: TerminalEvent? = null) : WaitResult()   // T81: event 可空（IdleFor 匹配无真实事件）
 
     /** Condition not met within timeoutMs. NOT fatal; caller may retry or proceed. */
     data class Timeout(val waitedMs: Long) : WaitResult()

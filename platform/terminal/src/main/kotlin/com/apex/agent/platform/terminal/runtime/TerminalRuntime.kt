@@ -253,6 +253,18 @@ interface TerminalRuntime {
 
     /** Read-only SemanticState for a recovered session (from persisted metadata). */
     suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState?
+
+    // ───────── shutdown (T81 §15) ─────────
+    // 停止新会话/新 job → cancel 全部 job（三级序列）→ 停 pump → close 全部
+    // session（HUP→TERM→KILL 收敛 + bus/log drop）→ 停协程域 → nativeCloseAll
+    // 兕底 → 持久化 flush。幂等：重复调用直接返回上次结果。
+    suspend fun shutdown(): Result<ShutdownResult>
+
+    data class ShutdownResult(
+        val sessionsClosed: Int,
+        val jobsCancelled: Int,
+        val clean: Boolean          // 全部 session 正常关闭（无 BROKEN/LOST）
+    )
 }
 
 /** Convenience: wrap a TerminalError into a kotlin.Result failure. */

@@ -63,7 +63,7 @@ public:
 
     int id() const { return id_; }
     int masterFd() const { return masterFd_.load(std::memory_order_acquire); }
-    pid_t pid() const { return pid_; }
+    pid_t pid() const { return pid_.load(std::memory_order_relaxed); }
 
     bool isAlive();
     bool write(const char* data, size_t len);
@@ -83,10 +83,22 @@ public:
     bool sendSignal(int sig);
     void resize(int rows, int cols);
     void close();
-    int exitCode() const { return exitCode_; }
+    int exitCode() const { return exitCode_.load(std::memory_order_relaxed); }
 
 private:
     void reapChild();
+
+    /** T81 (N-2)：waitpid status → exitCode_ 单一解析出口（reapChild/close 共用）。 */
+    void applyExitStatus(int status);
+
+    /**
+     * T81 (N-4/N-5)：有界等待子进程退出 —— 轮询 reapChild（WNOHANG），
+     * [timeoutMs] 内退出返回 true。替代 close() 中原先后果更差的两件套：
+     *   a) 固定 usleep(50ms/100ms) —— 进程早退时白白阻塞；
+     *   b) 阻塞 waitpid(..., 0) —— SIGKILL 后进程处于 D-state 时会把
+     *      JNI 调用线程永久挂死。
+     */
+    bool waitExitBounded(int timeoutMs);
 
     /**
      * 向整个进程组发送信号（Spec PR #51 §1）。
@@ -104,9 +116,14 @@ private:
     // 与 readEx/write 并发读写 —— 用 atomic 消除数据竞争（fd 关闭后 read/write
     // 返回 EBADF → ERROR_，由上层按状态语义处理，而非 UB）。
     std::atomic<int> masterFd_{-1};
-    pid_t pid_ = -1;
+    // T81 (N-3 补强)：pid_ 由构造线程写、close() 写 -1、reapChild/readEx 的
+    // EOF 分支（持 ioMutex_）并发读 —— atomic 消除数据竞争（operator= 即
+    // store / 隐式转换即 load，调用点语法不变）。
+    std::atomic<pid_t> pid_{-1};
     std::atomic<bool> alive_{false};
-    int exitCode_ = -1;
+    // T81 (N-3)：exitCode_ 由 reapChild（任意调用 isAlive 的线程）写、
+    // exitCode()（JNI 线程）读 —— relaxed atomic 消除数据竞争 UB。
+    std::atomic<int> exitCode_{-1};
     std::mutex ioMutex_;
 };
 

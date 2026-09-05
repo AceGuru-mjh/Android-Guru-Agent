@@ -60,6 +60,7 @@ import com.apex.agent.ui.component.FileOpener
 import com.apex.agent.ui.component.GithubIconButton
 import com.apex.agent.ui.component.GithubTokenDialog
 import com.apex.agent.ui.component.ImageLightbox
+import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
@@ -390,6 +391,13 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击回填）═══
+                    SlashAutoCompleteHost(
+                        inputText = inputText,
+                        slashMenuProvider = slashMenuProvider,
+                        onCommandSelected = { viewModel.updateInputText(it) }
+                    )
+
                     // ═══ 迷你小圆环：工具菜单（搜索/时间/函数/结构化输出/规则）═══
                     ToolkitRingButton(
                         webSearchEnabled = webSearchEnabled,

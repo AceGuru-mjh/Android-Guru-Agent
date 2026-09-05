@@ -130,7 +130,8 @@ object ToolModule {
         linuxEnvironmentHealth: LinuxEnvironmentHealth,
         ubuntuBootstrapManager: UbuntuBootstrapManager,
         linuxNetworkProbe: LinuxNetworkProbe,
-        linuxPackageManager: LinuxPackageManager
+        linuxPackageManager: LinuxPackageManager,
+        skillRegistry: SkillRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -277,8 +278,22 @@ object ToolModule {
             registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
         }
 
+        // ═══ 12. Skill 工具接线（此前缺口：skill_* 管理工具与已启用技能的
+        // composite/script 工具从未注册进 ToolRegistry，安装后形同虚设）═══
+        registry.register(SafeAgentTool(SkillSearchTool(httpClient)))
+        registry.register(SafeAgentTool(SkillInstallTool(skillRegistry, httpClient)))
+        registry.register(SafeAgentTool(SkillCreateTool(skillRegistry)))
+        registry.register(SafeAgentTool(SkillListTool(skillRegistry)))
+        registry.register(SafeAgentTool(SkillUninstallTool(skillRegistry)))
+        // composite/script 工具：随注册表构建时快照注册；新装技能后重启 App 生效
+        // （SkillToolAdapter 经独立 executor 调用本注册表内的底层工具）
+        val skillStepExecutor: ToolExecutor = DefaultToolExecutor(registry)
+        skillRegistry.getActiveTools().forEach { def ->
+            registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
+        }
+
         return registry
-        // 总计：44 基础 + 2 T73（backends/ubuntu-install） + 7 GitHub(条件) = 53
+        // 总计：44 基础 + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 + N 已启用技能 composite + 7 GitHub(条件)
     }
 
     @Provides

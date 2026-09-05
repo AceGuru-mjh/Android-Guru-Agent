@@ -39,10 +39,17 @@ private val SERVER_FIELD_REGEX = Regex("""(?i)"server"\s*:\s*"([^"]+)"""")
  * 规则（按优先级）：
  * - `mcp_call` / `mcp_call_<server>_<tool>` → MCP，并从参数中解析 server；
  * - `web_search` → 联网搜索；`web_fetch` → 网页抓取；
- * - `/skill:` 路由触发的工具 → Skill（toolName 含 `:skill` 或来自 skill 上下文）；
+ * - `plugin*` 前缀 → 插件（plugin-sdk 经 ToolRegistry 注册的工具）；
+ * - `connector*` / `http_request` / `github_*` → 连接器（连接外部服务的 API 调用）；
+ * - 其余含 "skill" → Skill；
+ * - 均未命中但当前处于 Skill/连接器/插件路由上下文 → 归入该上下文来源；
  * - 其余 → 本地工具。
  */
-fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
+fun classifyTool(
+    toolName: String,
+    args: String,
+    contextKind: ToolKind? = null
+): Pair<ToolKind, String?> {
     if (toolName.startsWith("mcp_call")) {
         // RouterMcpTool 通过 arguments 的 "server" 字段传入 server 名。
         val server = SERVER_FIELD_REGEX.find(args)
@@ -51,7 +58,15 @@ fun classifyTool(toolName: String, args: String): Pair<ToolKind, String?> {
     }
     if (toolName == "web_search") return ToolKind.WEB_SEARCH to null
     if (toolName == "web_fetch") return ToolKind.WEB_FETCH to null
+    if (toolName.startsWith("plugin")) return ToolKind.PLUGIN to null
+    if (toolName.startsWith("connector") || toolName == "http_request" ||
+        toolName.startsWith("github_")) {
+        return ToolKind.CONNECTOR to null
+    }
     if (toolName.contains("skill", ignoreCase = true)) return ToolKind.SKILL to null
+    // 路由上下文兜底：Skill/连接器/插件流水线内产生的未匹配工具归入该来源，
+    // 让 `/connector:ssh` 会话里的 shell_execute 也能带上连接器链路徽章。
+    if (contextKind != null) return contextKind to null
     return ToolKind.LOCAL to null
 }
 
@@ -356,11 +371,31 @@ class AgentChatViewModel @Inject constructor(
     }
 
     /**
-     * 当前 Slash 指令触发的 Skill 名称（若来自 `/skill:xxx`）。
-     * 在该 Skill 的 agent 循环中产生的工具调用会被标记为 SKILL 来源，
-     * 便于 UI 区分"这是一个 Skill 调用"。循环结束后清空。
+     * 当前斜杠指令触发的流水线上下文（`/skill:xxx` `/connector:xxx` `/plugin:xxx`）。
+     *
+     * 在该流水线的 agent 循环中产生的工具调用会携带对应来源分类与名称，
+     * 便于 UI 区分"这是一个 Skill / 连接器 / 插件调用"。循环结束后清空。
      */
-    private var skillContext: String? = null
+    private var routeContextKind: ToolKind? = null
+    private var routeContextName: String? = null
+
+    /** 正在展示中的流水线横幅 id（[AgentUiMessage.PipelineBanner]），收尾时原地置为完成态。 */
+    private var activeBannerId: String? = null
+
+    /** 引擎一轮执行收尾时调用：把未完成的流水线横幅置为完成态（停止脉冲、显示耗时）。 */
+    private fun finishActiveBanner() {
+        val id = activeBannerId ?: return
+        activeBannerId = null
+        _uiState.update { state ->
+            state.copy(messages = state.messages.map { m ->
+                if (m is AgentUiMessage.PipelineBanner && m.id == id && m.finishedAt == null) {
+                    m.copy(finishedAt = java.lang.System.currentTimeMillis())
+                } else {
+                    m
+                }
+            })
+        }
+    }
 
     /**
      * 发送消息（含附件）。
@@ -376,6 +411,9 @@ class AgentChatViewModel @Inject constructor(
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
+        // 被取消任务的横幅收尾：若上一轮是 /skill: /connector: /plugin: 流水线且尚未结束，
+        // 此处把横幅置为完成态，避免旧横幅永远脉冲在"运行中"。
+        finishActiveBanner()
 
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
         val currentAttachments = attachmentManager.drainAttachments()
@@ -414,6 +452,8 @@ class AgentChatViewModel @Inject constructor(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         currentJob?.cancel()
+        // 同 sendMessage：被取消的上一轮流水线横幅收尾，避免残留"运行中"脉冲。
+        finishActiveBanner()
         updateInputText("")
         currentJob = viewModelScope.launch {
             runEngine(trimmed, attachments)
@@ -637,8 +677,8 @@ class AgentChatViewModel @Inject constructor(
                     )
                 )
 
-                val (kind, server) = classifyTool(event.toolName, event.arguments)
-                val skill = if (kind == ToolKind.SKILL) skillContext else null
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind)
+                val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 _uiState.update { state ->
                     state.copy(
@@ -662,7 +702,7 @@ class AgentChatViewModel @Inject constructor(
                 // 仅处理当前活跃工具的 chunk；上一轮工具迟到的 chunk 丢弃（安全）。
                 if (event.callId != activeToolCallId) return
 
-                toolOutputBuffer.append(event.chunk)
+                toolOutputBuffer.append(stripAnsi(event.chunk))
 
                 // 16ms 内的多个 chunk 合并为一次 UI 更新（≈1 帧节流）。
                 if (toolFlushJob == null) {
@@ -718,18 +758,20 @@ class AgentChatViewModel @Inject constructor(
                 activeToolCallId = null
                 toolOutputBuffer.clear()
 
-                val (kind, server) = classifyTool(event.toolName, event.arguments)
-                val skill = if (kind == ToolKind.SKILL) skillContext else null
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind)
+                val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 // 最终过程流：丢弃"活输出"步骤（其快照与完整输出重复），仅保留
-                // START / PROGRESS 等结构性步骤 + 收尾步。
+                // START / PROGRESS 等结构性步骤 + 收尾步；输出统一去 ANSI 转义序列。
+                val cleanOutput = stripAnsi(event.output)
+                val cleanFullOutput = stripAnsi(event.fullOutput.ifBlank { event.output })
                 val finalSteps = ((currentToolCallSteps ?: emptyList())
                     .filter { it.id != liveOutputStepId } + ToolStep(
                     phase = if (event.success) StepPhase.COMPLETE else StepPhase.ERROR,
                     text = if (event.success)
-                        "完成（${event.durationMs}ms）：${event.output}"
+                        "完成（${event.durationMs}ms）：${cleanOutput}"
                     else
-                        "失败（${event.durationMs}ms）：${event.output}",
+                        "失败（${event.durationMs}ms）：${cleanOutput}",
                     seq = nextStepSeq()
                 )).takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
                 liveOutputStepId = null
@@ -740,8 +782,8 @@ class AgentChatViewModel @Inject constructor(
                         messages = state.messages + AgentUiMessage.ToolCall(
                             toolName = event.toolName,
                             args = event.arguments,
-                            output = event.output,
-                            fullOutput = event.fullOutput.ifBlank { event.output },
+                            output = cleanOutput,
+                            fullOutput = cleanFullOutput,
                             success = event.success,
                             durationMs = event.durationMs,
                             kind = kind,
@@ -790,6 +832,19 @@ class AgentChatViewModel @Inject constructor(
                 }
             }
 
+            // ═══ Plan 模式：步骤开始（流水线分隔卡，长任务进度可视化）═══
+            is AgentEvent.StepStart -> {
+                flushStreamBuffers()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = state.messages + AgentUiMessage.StepMarker(
+                            stepIndex = event.stepIndex,
+                            description = event.description
+                        )
+                    )
+                }
+            }
+
             // ═══ 压缩 ═══
             is AgentEvent.ContextCompressed -> {
                 _uiState.update { state ->
@@ -808,6 +863,7 @@ class AgentChatViewModel @Inject constructor(
             is AgentEvent.Error -> {
                 // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂。
                 flushStreamBuffers()
+                finishActiveBanner()
                 _uiState.update { state ->
                     val partial = state.currentResponse
                     state.copy(
@@ -828,10 +884,18 @@ class AgentChatViewModel @Inject constructor(
                 }
             }
             is AgentEvent.Complete -> {
+                // 本轮任务收尾：展示运行总结卡（旧实现直接丢弃了 Complete 事件的信息）。
+                finishActiveBanner()
                 _uiState.update {
                     val engine = agentEngine as? ApexAgentEngine
                     it.copy(
                         isLoading = false,
+                        messages = it.messages + AgentUiMessage.RunSummary(
+                            summary = event.summary,
+                            totalIterations = event.totalIterations,
+                            totalToolCalls = event.totalToolCalls,
+                            totalDurationMs = event.totalDurationMs
+                        ),
                         historyDepth = engine?.historyCount() ?: it.historyDepth,
                         contextUsedTokens = engine?.currentTokenCount() ?: it.contextUsedTokens,
                         contextMaxTokens = engine?.maxContextTokens() ?: it.contextMaxTokens
@@ -839,6 +903,7 @@ class AgentChatViewModel @Inject constructor(
                 }
             }
             is AgentEvent.Aborted -> {
+                finishActiveBanner()
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + AgentUiMessage.System("⏹ 已中止"),
@@ -962,6 +1027,7 @@ class AgentChatViewModel @Inject constructor(
         viewModelScope.launch { taskController.cancel() }
 
         // 取消后：部分产物落盘 + 状态复位。
+        finishActiveBanner()
         _uiState.update { state ->
             val extra = buildList<AgentUiMessage> {
                 if (partialResponse.isNotBlank()) {
@@ -987,6 +1053,8 @@ class AgentChatViewModel @Inject constructor(
         activeToolCallId = null
         liveOutputStepId = null
         currentToolCallSteps = null
+        routeContextKind = null
+        routeContextName = null
     }
 
     fun newChat() {
@@ -999,6 +1067,9 @@ class AgentChatViewModel @Inject constructor(
         activeToolCallId = null
         liveOutputStepId = null
         currentToolCallSteps = null
+        activeBannerId = null
+        routeContextKind = null
+        routeContextName = null
         viewModelScope.launch {
             (agentEngine as? ApexAgentEngine)?.clearHistory()
             _uiState.update {
@@ -1144,7 +1215,7 @@ class AgentChatViewModel @Inject constructor(
         resetStreamBuffers()
 
         // 始终追加反馈消息，让用户看到指令被识别 + 当前状态：
-        // Skill 指令使用专用横幅（SkillStart），其余指令用 System 行。
+        // Skill/连接器/插件指令使用专用横幅（PipelineBanner），其余指令用 System 行。
         _uiState.update { s ->
             s.copy(
                 messages = s.messages + result.banner,
@@ -1162,15 +1233,20 @@ class AgentChatViewModel @Inject constructor(
             return
         }
 
-        // 记录 Skill 上下文，循环内产生的工具调用会被标为 SKILL 来源。
+        // 记录流水线路由上下文，循环内产生的工具调用会携带对应来源徽章。
         val execute = result as SlashCommands.Result.Execute
-        skillContext = execute.skillName
+        routeContextKind = execute.contextKind
+        routeContextName = execute.contextName
+        activeBannerId = execute.banner.id
 
         currentJob = viewModelScope.launch {
             taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt))
                 .collect { event -> handleEvent(event) }
         }.apply {
-            invokeOnCompletion { skillContext = null }
+            invokeOnCompletion {
+                routeContextKind = null
+                routeContextName = null
+            }
         }
     }
 

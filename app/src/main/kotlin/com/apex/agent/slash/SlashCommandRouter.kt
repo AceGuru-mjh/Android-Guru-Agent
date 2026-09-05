@@ -47,7 +47,14 @@ data class SlashCommandRoute(
     val agentPrompt: String,
     val requestGithubConnect: Boolean = false,
     /** 当路由来自 Skill 指令时携带 skill 名称，供 UI 标记后续工具调用来源。 */
-    val skillName: String? = null
+    val skillName: String? = null,
+    /**
+     * 路由来源类别："skill" / "connector" / "plugin"，null 表示普通指令。
+     * 与 [sourceName] 一起供 UI 渲染流水线横幅与后续工具调用的来源徽章。
+     */
+    val routeKind: String? = null,
+    /** 路由来源名称（指令 id）：Skill / 连接器 / 插件指令均有值。 */
+    val sourceName: String? = null
 )
 
 /**
@@ -94,7 +101,9 @@ object SlashCommandRouter {
                 verb = "请根据此指令执行对应操作，通过 skill 相关工具执行",
                 toolHint = "skill"
             ),
-            skillName = command.id
+            skillName = command.id,
+            routeKind = "skill",
+            sourceName = command.id
         )
 
         is SlashCommand.Mcp -> routeMcp(command, context)
@@ -104,14 +113,18 @@ object SlashCommandRouter {
             agentPrompt = command.buildAgentPrompt(
                 verb = "请根据此指令执行对应操作，通过 connector 工具执行",
                 toolHint = "connector"
-            )
+            ),
+            routeKind = "connector",
+            sourceName = command.id
         )
         is SlashCommand.Plugin -> SlashCommandRoute(
             systemMessage = "📦 调用插件: ${command.id}",
             agentPrompt = command.buildAgentPrompt(
                 verb = "请根据此指令执行对应操作，通过 plugin 工具执行",
                 toolHint = "plugin"
-            )
+            ),
+            routeKind = "plugin",
+            sourceName = command.id
         )
         is SlashCommand.Unknown -> SlashCommandRoute(
             systemMessage = "⚡ 指令: ${command.raw.trim()}",

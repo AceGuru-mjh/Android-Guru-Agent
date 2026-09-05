@@ -30,10 +30,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -97,10 +100,18 @@ internal fun toolKindStyle(kind: ToolKind): ToolKindStyle = when (kind) {
         "Skill", Icons.Default.AutoAwesome,
         MaterialTheme.colorScheme.primary
     )
+    ToolKind.CONNECTOR -> ToolKindStyle(
+        "连接器", Icons.Default.Link,
+        Color(0xFF8B5CF6)
+    )
+    ToolKind.PLUGIN -> ToolKindStyle(
+        "插件", Icons.Default.Extension,
+        Color(0xFFF59E0B)
+    )
 }
 
 /**
- * 工具调用来源徽章（图标 + 文字 + 浅色底），用于区分 本地/MCP/搜索/抓取/Skill。
+ * 工具调用来源徽章（图标 + 文字 + 浅色底），用于区分 本地/MCP/搜索/抓取/Skill/连接器/插件。
  */
 @Composable
 internal fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String? = null) {
@@ -134,6 +145,27 @@ internal fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String
                 color = color
             )
         }
+    }
+}
+
+/**
+ * 工具卡的智能摘要行：从参数/输出中提取一行人类可读的关键信息
+ * （文件路径 / 命令 / URL / server / skill），折叠时也能看懂这次调用在做什么。
+ */
+internal fun smartToolSummary(toolName: String, args: String, kind: ToolKind, server: String?): String? {
+    val name = toolName.lowercase()
+    val path = Regex(""""(?:path|source|dest|target|file|url)"\s*:\s*"([^"]+)"""")
+        .find(args)?.groupValues?.getOrNull(1)
+    return when {
+        name in FILE_OP_TOOLS -> path
+        name == "shell_execute" ->
+            Regex(""""command"\s*:\s*"([^"]+)"""").find(args)?.groupValues?.getOrNull(1)
+                ?.take(80)
+        name == "web_fetch" -> path
+        name == "web_search" ->
+            Regex(""""query"\s*:\s*"([^"]+)"""").find(args)?.groupValues?.getOrNull(1)
+        kind == ToolKind.MCP -> server ?: path
+        else -> null
     }
 }
 
@@ -214,12 +246,29 @@ internal fun ToolCallCard(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     ToolKindBadge(toolCall.kind, toolCall.server, toolCall.skill)
+
+                    // 智能摘要：折叠时也能一眼看懂这次调用在做什么（文件路径 / 命令 / URL）
+                    val summary = remember(toolCall.id) {
+                        smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
+                    }
+                    if (!summary.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 if (toolCall.durationMs > 0) {
                     Text(
-                        text = "${toolCall.durationMs}ms",
+                        text = formatDuration(toolCall.durationMs),
                         style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -273,18 +322,27 @@ internal fun ToolCallCard(
 
             val outputText = if (expanded) toolCall.fullOutput ?: toolCall.output else toolCall.output
 
-            outputText?.let { output ->
+            if (outputText != null) {
                 Spacer(modifier = Modifier.height(6.dp))
-                if (toolCall.kind == ToolKind.WEB_SEARCH) {
-                    // 联网搜索：优先解析为结构化结果卡片；解析失败回退纯文本。
-                    val results = remember(output) { parseWebSearchResults(output) }
-                    if (results.isNotEmpty()) {
-                        WebSearchResultsCard(results, query = extractSearchQuery(output))
-                    } else {
-                        PlainOutputBlock(output, expanded, if (expanded) "完整输出" else "输出摘要")
-                    }
+                val results = if (toolCall.kind == ToolKind.WEB_SEARCH) {
+                    remember(outputText) { parseWebSearchResults(outputText) }
                 } else {
-                    PlainOutputBlock(output, expanded, if (expanded) "完整输出" else "输出摘要")
+                    emptyList()
+                }
+                if (results.isNotEmpty()) {
+                    WebSearchResultsCard(results, query = extractSearchQuery(outputText))
+                } else {
+                    // 智能输出渲染：按工具类型自动选择 代码高亮 / 文件卡 / JSON树 / Shell / 文本 卡片。
+                    // output 直接传 outputText（本分支已保证非空）：展开时它等于 fullOutput ?: output，
+                    // 折叠时等于 output——与卡片将要展示的内容完全一致。
+                    SmartToolOutput(
+                        toolName = toolCall.toolName,
+                        args = toolCall.args,
+                        output = outputText,
+                        fullOutput = toolCall.fullOutput,
+                        expanded = expanded,
+                        isError = isError
+                    )
                 }
             }
 
@@ -330,35 +388,6 @@ internal fun RetryChip(onRetry: () -> Unit) {
                 color = MaterialTheme.colorScheme.onError
             )
         }
-    }
-}
-
-/**
- * 纯文本输出块（参数/输出通用），可折叠高度 + 横向滚动（等宽字体）。
- */
-@Composable
-internal fun PlainOutputBlock(text: String, expanded: Boolean, label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier
-                .padding(8.dp)
-                .heightIn(max = if (expanded) 420.dp else 120.dp)
-                .verticalScroll(rememberScrollState()),
-            maxLines = if (expanded) Int.MAX_VALUE else 8,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -598,6 +627,24 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
 
+    // 实时耗时计时：立即显示真实已用时长（而非从 0 起跳），此后每秒刷新；
+    // ≥60s 后切换为 2m05s 形式，长任务可读性更好。
+    var elapsedSec by remember(toolCall.id) {
+        mutableStateOf(
+            (System.currentTimeMillis() - toolCall.startedAt).coerceAtLeast(0L) / 1000
+        )
+    }
+    LaunchedEffect(toolCall.id) {
+        while (true) {
+            delay(1000)
+            elapsedSec = (System.currentTimeMillis() - toolCall.startedAt).coerceAtLeast(0L) / 1000
+        }
+    }
+
+    val summary = remember(toolCall.id) {
+        smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
+    }
+
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -634,6 +681,26 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
                     )
                     Spacer(modifier = Modifier.height(3.dp))
                     ToolKindBadge(toolCall.kind, toolCall.server, toolCall.skill)
+                    if (!summary.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = summary,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                // 实时耗时
+                if (elapsedSec > 0) {
+                    Text(
+                        text = if (elapsedSec < 60) "${elapsedSec}s" else formatDuration(elapsedSec * 1000),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 // 脉冲进度环（运行态）
                 val transition = rememberInfiniteTransition(label = "toolRunning")

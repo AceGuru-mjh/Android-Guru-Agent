@@ -44,9 +44,9 @@ data class UserInputRequest(
  *
  * 引擎事件本身没有"类型"字段，ViewModel 在 [classifyTool] 中根据
  * toolName 前缀与已知 id 推断。这样用户能一眼区分本地工具 / MCP /
- * 联网搜索 / 网页抓取 / Skill 调用。
+ * 联网搜索 / 网页抓取 / Skill / 连接器 / 插件调用。
  */
-enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL }
+enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL, CONNECTOR, PLUGIN }
 
 @Immutable
 sealed interface AgentUiMessage {
@@ -94,13 +94,18 @@ sealed interface AgentUiMessage {
         override val id: String = java.util.UUID.randomUUID().toString()
     ) : AgentUiMessage
     /**
-     * Skill 开始执行横幅（区别于普通 System 行）：`/skill:xxx` 路由触发时展示，
-     * 让用户一眼看出"当前正在执行哪个 Skill"，并为其后 SKILL 来源的工具调用提供上下文。
+     * 流水线路由横幅：`/skill:xxx` `/connector:xxx` `/plugin:xxx` 斜杠指令触发时展示，
+     * 让用户一眼看出"当前正在执行哪条流水线"（Skill / 连接器 / 插件），
+     * 并为其后同来源的工具调用提供上下文。
+     *
+     * [finishedAt] 非 null 表示本次执行已收尾（横幅停止脉冲、显示耗时）。
      */
     @Immutable
-    data class SkillStart(
-        val skill: String,
-        val timestamp: Long = java.lang.System.currentTimeMillis(),
+    data class PipelineBanner(
+        val kind: ToolKind,
+        val name: String,
+        val startedAt: Long = java.lang.System.currentTimeMillis(),
+        val finishedAt: Long? = null,
         override val id: String = java.util.UUID.randomUUID().toString()
     ) : AgentUiMessage
     /**
@@ -135,6 +140,30 @@ sealed interface AgentUiMessage {
         val thought: String,
         override val id: String = java.util.UUID.randomUUID().toString()
     ) : AgentUiMessage
+    /**
+     * Plan 模式步骤开始标记：`StepStart` 事件的流水线可视化（步骤分隔卡），
+     * 让长任务的执行进度在消息流中一目了然。
+     */
+    @Immutable
+    data class StepMarker(
+        val stepIndex: Int,
+        val description: String,
+        val timestamp: Long = java.lang.System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : AgentUiMessage
+    /**
+     * 运行总结卡：引擎发射 `Complete` 事件时展示（旧实现直接丢弃了该事件的全部信息）。
+     * 汇总本轮任务的总结文本 / 迭代次数 / 工具调用次数 / 总耗时。
+     */
+    @Immutable
+    data class RunSummary(
+        val summary: String,
+        val totalIterations: Int,
+        val totalToolCalls: Int,
+        val totalDurationMs: Long,
+        val timestamp: Long = java.lang.System.currentTimeMillis(),
+        override val id: String = java.util.UUID.randomUUID().toString()
+    ) : AgentUiMessage
 }
 
 @Immutable
@@ -142,6 +171,8 @@ data class AgentToolCallUi(
     val callId: String = "",
     val toolName: String,
     val args: String,
+    /** 工具开始执行的时间戳（运行卡实时耗时计时用）。 */
+    val startedAt: Long = java.lang.System.currentTimeMillis(),
     /** 实时输出（由 ToolOutputChunk 逐段累积，节流后刷新；尾部窗口 4000 字符）。 */
     val output: String = "",
     /** 逐步执行过程（带时间戳的步骤序列），实时追加。 */

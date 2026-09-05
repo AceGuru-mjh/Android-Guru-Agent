@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 
 /**
@@ -113,11 +114,13 @@ class TerminalRuntimeImpl(
         onCancelled = { sessionId, jobId ->
         // Job was cancelled by the agent → emit ProcessExited so wait(ProcessExited(jobId))
         // resolves with a non-RUNNING state (Control Plane contract).
+        // T81 (D-2)：如实上报 —— 取消序列实际发送 SIGTERM（信号 15），合成事件
+        // 不再谎报 SIGINT/130（原实现语义错位：信号类型与 exit code 不匹配）。
         scope.launch {
             val ev = TerminalEvent.ProcessExited(
                 id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
                 cursor = -1, jobId = jobId, pid = 0,
-                exitCode = 130, signal = UnixSignal.SIGINT, cause = ExitCause.USER_INTERRUPT
+                exitCode = 143, signal = UnixSignal.SIGTERM, cause = ExitCause.USER_INTERRUPT
             )
             val eid = eventLog.append(ev)
             eventBus.emit(ev.copy(id = eid))
@@ -426,8 +429,15 @@ class TerminalRuntimeImpl(
             processController.unregister(sessionId)
             // T75: 会话关闭 → 释放 workspace 活跃绑定（delete 门禁解除）
             workspaceBinder?.unbind(sessionId)
+            // T81 (D-4)：只收敛本 session 的超时定时器 —— 原实现调
+            // timeoutController.cancelAll()（全局），关 session A 会误杀
+            // session B/C 的 job 超时定时器。
+            timeoutController.cancelSession(sessionId)
+            // T81：close 后同步删除持久化记录（§39 语义：CLOSED → 不再保留；
+            // 原路径依赖 collector 收到 SessionClosed 时 autoSave，与 assembly
+            // 移除存在竞态，CLOSED 终态可能从未落盘）。
+            persistenceStore?.delete(sessionId)
         }
-        timeoutController.cancelAll()
         return r.map {
             val cause = when {
                 wasLost -> "LOST"
@@ -443,13 +453,20 @@ class TerminalRuntimeImpl(
     /** Subscribe JobManager to a session's event stream (so it can advance Job states). */
     private fun startSessionListener(sessionId: Long) {
         scope.launch {
-            eventBus.subscribe(sessionId, afterCursor = 0L).collect { ev ->
-                jobManager.onEvent(ev)
-                // Auto-save on significant events (Spec §39)
-                if (persistenceStore != null && (ev is TerminalEvent.ProcessExited || ev is TerminalEvent.SessionClosed)) {
-                    autoSaveSession(sessionId)
+            // T81 (D-4)：SessionClosed 后终止 collect —— 原实现永久 collect 一个
+            // 永不 complete 的 SharedFlow（bus 的 drop 只移除 map 条目，不影响
+            // 已订阅的 collector），每个 session 泄漏一个协程。
+            // 持久化终态在 close() 主路径同步处理（此处 assembly 可能已移除，
+            // autoSave 是 no-op）；ProcessExited 的自动保存仍在事件到达时执行。
+            eventBus.subscribe(sessionId, afterCursor = 0L)
+                .takeWhile { ev -> ev !is TerminalEvent.SessionClosed }
+                .collect { ev ->
+                    jobManager.onEvent(ev)
+                    // Auto-save on significant events (Spec §39)
+                    if (persistenceStore != null && ev is TerminalEvent.ProcessExited) {
+                        autoSaveSession(sessionId)
+                    }
                 }
-            }
         }
     }
 
@@ -492,4 +509,13 @@ class TerminalRuntimeImpl(
     /** Get a recovered session's last-known SemanticState (read-only, from persisted metadata). */
     override suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =
         recoveryService?.recoveredSnapshot(sessionId)
+
+    /** T81 测试钩子：事件总线只读视图（事件收敛回归测试用）。 */
+    internal fun eventBusPublic(): TerminalEventBus = eventBus
+
+    /** T81 测试钩子：SessionManager 只读视图（close 收敛回归测试用）。 */
+    internal fun sessionManagerPublic(): SessionManagerImpl = sessionManager
+
+    /** T81 测试钩子：事件日志计数（验证 close 后无事件再追加）。 */
+    internal suspend fun eventLogCountPublic(sessionId: Long): Long = eventLog.count(sessionId)
 }

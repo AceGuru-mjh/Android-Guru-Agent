@@ -195,18 +195,33 @@ class SessionManagerImpl(
         return assemblies.keys.mapNotNull { get(it) }.filter { it.state != SessionState.CLOSED }
     }
 
-    override suspend fun close(id: Long, force: Boolean): Result<Unit> {
-        val a = assemblies[id] ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
-        if (stateFlows[id]?.value == SessionState.CLOSED) return Result.success(Unit)
+    override suspend fun close(id: Long, force: Boolean): Result<Unit> = mutex.withLock {
+        // T81 (D-4)：幂等 + 持锁。原实现不持 mutex —— 两个并发 close 都能通过
+        // 前置检查，重复 SIGHUP/nativeCloseSession/双发 SessionClosed；且
+        // assemblies 移除后第二次 close 返回 SessionNotFound 失败（非幂等）。
+        val a = assemblies[id]
+        if (a == null) {
+            // 已关闭（assembly 已移除）—— 幂等成功（与 Runtime 层 ALREADY_CLOSED 语义对齐）
+            return@withLock Result.success(Unit)
+        }
+        if (stateFlows[id]?.value == SessionState.CLOSED) return@withLock Result.success(Unit)
+        // T81：BROKEN 原因必须在 transition(CLOSED) 之前捕获 —— 原实现在迁移后
+        // 检查（此刻恒为 CLOSED），CloseCause.BROKEN 永远不可能产出（死代码）。
+        val wasBroken = stateFlows[id]?.value == SessionState.BROKEN
+        val wasLost = stateFlows[id]?.value == SessionState.LOST
         if (force) native.nativeSendSignal(a.nativeSessionId, 9)  // SIGKILL
         // stop pump
         a.pump.stop()
         // SIGHUP the shell
         native.nativeSendSignal(a.nativeSessionId, 1)
-        // close native
+        // close native（内部：HUP→TERM→KILL 有界序列 + exit code 保留）
         native.nativeCloseSession(a.nativeSessionId)
-        transition(id, SessionState.CLOSED)
-        val cause = if (stateFlows[id]?.value == SessionState.BROKEN) CloseCause.BROKEN else CloseCause.USER
+        transitionLocked(id, SessionState.CLOSED)
+        val cause = when {
+            wasBroken -> CloseCause.BROKEN
+            wasLost -> CloseCause.BROKEN
+            else -> CloseCause.USER
+        }
         val ev = TerminalEvent.SessionClosed(
             id = 0, sessionId = id, timestamp = System.currentTimeMillis(), cursor = -1, cause = cause
         )
@@ -217,7 +232,10 @@ class SessionManagerImpl(
         waitEngine.drop(id)
         assemblies.remove(id)
         stateFlows.remove(id)
-        return Result.success(Unit)
+        // T81 (D-4)：释放 bus（正在 collect 的订阅者持有 SharedFlow 引用不受影响；
+        // EventLog 不 drop —— 有界（500）且持久化/恢复路径还要读 tail）。
+        if (eventBus is TerminalEventBusImpl) eventBus.drop(id)
+        return@withLock Result.success(Unit)
     }
 
     // PR #54 §5: stop jobs but keep Session alive
@@ -273,6 +291,11 @@ class SessionManagerImpl(
         }
     }
 
+    /** T81：close 持锁路径专用 —— 不再二次拿 mutex（可重入但避免不必要嵌套）。 */
+    private suspend fun transitionLocked(sessionId: Long, to: SessionState) {
+        transition(sessionId, to)
+    }
+
     /** Get the assembled deps for a session (used by Runtime/JobManager). */
     fun assembly(id: Long): SessionAssembly? = assemblies[id]
 
@@ -283,17 +306,31 @@ class SessionManagerImpl(
     private fun startExitWatcher(sessionId: Long, nativeId: Int) {
         scope.launch {
             while (true) {
+                // T81：session 已被 close（assembly 移除）→ 立即退出，不再发伪
+                // ProcessExited(exitCode=-1)（native 会话已关，nativeGetExitCode 必返 -1）。
+                if (assemblies[sessionId] == null) break
                 val alive = native.nativeIsAlive(nativeId)
                 if (!alive) {
-                    val exit = native.nativeGetExitCode(nativeId)
-                    val ev = TerminalEvent.ProcessExited(
-                        id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
-                        cursor = -1, jobId = null, pid = native.nativeGetPid(nativeId),
-                        exitCode = exit, signal = null, cause = ExitCause.NORMAL
-                    )
-                    val eid = eventLog.append(ev)
-                    eventBus.emit(ev.copy(id = eid))
-                    transition(sessionId, SessionState.EXITED)
+                    // T81：与 close() 的 mutex 互斥 —— 原实现在「close 已 nativeCloseSession
+                    // 但尚未移除 assembly」的窗口内醒来的 watcher 会发出 exitCode=-1 的
+                    // 伪 ProcessExited + EXITED 迁移（事件日志被污染，时序敏感下可复现）。
+                    // 持锁二次校验：close 全程持锁，此时要么 assembly 已移除（跳过），
+                    // 要么 close 尚未开始（native 会话仍真实存在，退出码真实）。
+                    mutex.withLock {
+                        if (assemblies[sessionId] != null &&
+                            stateFlows[sessionId]?.value != SessionState.CLOSED
+                        ) {
+                            val exit = native.nativeGetExitCode(nativeId)
+                            val ev = TerminalEvent.ProcessExited(
+                                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
+                                cursor = -1, jobId = null, pid = native.nativeGetPid(nativeId),
+                                exitCode = exit, signal = null, cause = ExitCause.NORMAL
+                            )
+                            val eid = eventLog.append(ev)
+                            eventBus.emit(ev.copy(id = eid))
+                            transition(sessionId, SessionState.EXITED)
+                        }
+                    }
                     break
                 }
                 kotlinx.coroutines.delay(EXIT_POLL_MS)

@@ -80,6 +80,26 @@ class ApexAgentEngine(
      */
     private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
+    /**
+     * T76 — 当前执行的诊断标签（taskId/stepId → LlmRequestContext 四元 ID）。
+     *
+     * 由 TaskRuntime 在执行边界设置（N-12：观测性贯通——字段在 T72 已预留，
+     * 此前恒传 null）。引擎内部所有 LlmRequestContext 构造点经 [tagged]
+     * 包裹后携带任务/步骤关联，诊断日志可按任务聚合。
+     */
+    @Volatile
+    private var executionTags: Pair<String?, String?>? = null
+
+    /** T76 — 压缩后重注入的任务状态 system 消息（N-9，TaskRuntime 调用）。 */
+    fun injectSystemContext(content: String) {
+        conversationHistory.add(LlmMessage.System(content))
+    }
+
+    /** T76 — TaskRuntime 设置当前任务/步骤诊断标签（null = 清理）。 */
+    fun setLlmExecutionTags(taskId: String?, stepId: String?) {
+        executionTags = taskId?.let { it to stepId }
+    }
+
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
     private val toolTruncator = ToolOutputTruncator(
         maxChars = config.maxToolOutputLength
@@ -390,7 +410,7 @@ class ApexAgentEngine(
         val planResponseBuilder = StringBuilder()
 
         runtime.chatStream(
-            context = LlmRequestContext.reasoning("plan_generation"),
+            context = tagged(LlmRequestContext.reasoning("plan_generation")),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(planPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -434,7 +454,7 @@ class ApexAgentEngine(
         val reflectPrompt = buildReflectionPrompt(plan)
         val reflectionBuilder = StringBuilder()
         runtime.chatStream(
-            context = LlmRequestContext.primary("plan_reflection"),
+            context = tagged(LlmRequestContext.primary("plan_reflection")),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -481,7 +501,7 @@ class ApexAgentEngine(
         val specResponseBuilder = StringBuilder()
 
         runtime.chatStream(
-            context = LlmRequestContext.reasoning("spec_generation"),
+            context = tagged(LlmRequestContext.reasoning("spec_generation")),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -526,7 +546,7 @@ class ApexAgentEngine(
         val reflectPrompt = buildSpecReflectionPrompt(spec)
         val reflectionBuilder = StringBuilder()
         runtime.chatStream(
-            context = LlmRequestContext.primary("spec_reflection"),
+            context = tagged(LlmRequestContext.primary("spec_reflection")),
             messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
             temperature = config.temperature
         ).collect { chunk ->
@@ -611,9 +631,9 @@ class ApexAgentEngine(
             // 路由器会校验能力并在不满足时降级到具备视觉能力的 PRIMARY；全链无视觉模型时
             // 抛 ModelCapabilityMismatch 而非静默丢图（§七）。
             val reactContext = if (messagesContainImages(messages)) {
-                LlmRequestContext.vision("react_loop")
+                tagged(LlmRequestContext.vision("react_loop"))
             } else {
-                LlmRequestContext.primary("react_loop")
+                tagged(LlmRequestContext.primary("react_loop"))
             }
 
             runtime.chatStream(
@@ -707,7 +727,7 @@ class ApexAgentEngine(
                             // 评审
                             val reviewBuilder = StringBuilder()
                             runtime.chatStream(
-                                context = LlmRequestContext.reasoning("reflection_review"),
+                                context = tagged(LlmRequestContext.reasoning("reflection_review")),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
                                     LlmMessage.User(buildReviewPrompt(draft)),
                                 temperature = config.temperature
@@ -720,7 +740,7 @@ class ApexAgentEngine(
                             // 修正
                             val reviseBuilder = StringBuilder()
                             runtime.chatStream(
-                                context = LlmRequestContext.primary("reflection_revise"),
+                                context = tagged(LlmRequestContext.primary("reflection_revise")),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
                                     LlmMessage.User(buildRevisePrompt(draft, review, round + 1)),
                                 temperature = config.temperature
@@ -917,6 +937,17 @@ class ApexAgentEngine(
      */
     private fun messagesContainImages(messages: List<LlmMessage>): Boolean =
         messages.any { it is LlmMessage.User && it.images.isNotEmpty() }
+
+    /**
+     * T76 — 把当前 executionTags（taskId/stepId）填入 LlmRequestContext。
+     *
+     * TaskRuntime 未接线时（executionTags == null）返回原 context，
+     * 行为与 T76 之前完全一致（既有测试不受影响）。
+     */
+    private fun tagged(ctx: LlmRequestContext): LlmRequestContext {
+        val tags = executionTags ?: return ctx
+        return ctx.copy(taskId = tags.first, stepId = tags.second)
+    }
 
     private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
         config = config,

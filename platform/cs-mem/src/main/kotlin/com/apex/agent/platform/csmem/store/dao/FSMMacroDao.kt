@@ -60,6 +60,10 @@ interface FSMMacroDao {
     @Query("UPDATE fsm_macros SET energy = energy * :decayFactor WHERE is_crystallized = 0")
     suspend fun decayNonCrystallizedEnergy(decayFactor: Float)
 
+    /** 晶化宏技能：置 is_crystallized = 1，此后免疫衰减/剪枝/删除。 */
+    @Query("UPDATE fsm_macros SET is_crystallized = 1, energy = MAX(energy, 10.0) WHERE skill_id = :skillId AND is_crystallized = 0")
+    suspend fun crystallize(skillId: String)
+
     @Query("DELETE FROM fsm_macros WHERE energy < :threshold AND is_crystallized = 0")
     suspend fun pruneLowEnergy(threshold: Float): Int
 

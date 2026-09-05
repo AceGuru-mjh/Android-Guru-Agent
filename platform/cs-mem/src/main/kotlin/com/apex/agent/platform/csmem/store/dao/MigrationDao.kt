@@ -15,6 +15,17 @@ interface MigrationDao {
     @Query("SELECT * FROM migration_map WHERE old_fingerprint = :oldFingerprint LIMIT 1")
     suspend fun getByOldFingerprint(oldFingerprint: String): MigrationMapEntity?
 
+    /**
+     * 反向查询：给定当前（新版本）指纹，取映射到它的全部旧指纹别名。
+     *
+     * 供旁路引擎做"跨版本宏回退匹配"——App 升级后当前 UI 指纹已变化，
+     * 精确匹配旧 initial_fingerprint 必然失败；通过该查询把当前指纹解析回
+     * 旧指纹，再检索旧版本时期蒸馏的 FSM 宏，使跨版本宏技能仍可复用。
+     * 按匹配分数降序，优先取置信度最高的别名桥。
+     */
+    @Query("SELECT * FROM migration_map WHERE new_fingerprint = :newFingerprint ORDER BY match_score DESC")
+    suspend fun getByNewFingerprint(newFingerprint: String): List<MigrationMapEntity>
+
     @Query("SELECT * FROM migration_map")
     suspend fun getAll(): List<MigrationMapEntity>
 

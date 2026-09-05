@@ -27,8 +27,8 @@ interface EdgeDao {
     @Query("SELECT * FROM edges WHERE edge_label = :label LIMIT 1")
     suspend fun getByLabel(label: String): EdgeEntity?
 
-    @Query("DELETE FROM edges WHERE edge_label IN (:labels)")
-    suspend fun deleteByLabels(labels: List<String>)
+    @Query("DELETE FROM edges WHERE episode_id = :episodeId AND edge_label IN (:labels)")
+    suspend fun deleteByLabelsInEpisode(episodeId: String, labels: List<String>)
 
     @Query("UPDATE edges SET energy = energy * :decayFactor")
     suspend fun decayAllEnergy(decayFactor: Float)

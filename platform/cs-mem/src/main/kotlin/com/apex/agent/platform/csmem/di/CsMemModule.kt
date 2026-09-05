@@ -33,7 +33,10 @@ object CsMemModule {
             MemoryGraphDatabase::class.java,
             "cs_mem_graph.db"
         )
-        .addMigrations(MemoryGraphDatabase.MIGRATION_1_2) // v1→v2 保留旧数据
+        .addMigrations(
+            MemoryGraphDatabase.MIGRATION_1_2, // v1→v2 保留旧数据
+            MemoryGraphDatabase.MIGRATION_2_3  // v2→v3 边去重 + (episode, label) 唯一索引
+        )
         // 仅在版本降级时允许 destructive 重建；升级必须显式提供 Migration，
         // 否则任何未来 schema 升级缺失 Migration 都会静默清空长期记忆 DB。
         // 注：@Database(exportSchema = false)，未来应配置 ksp room.schemaLocation

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="230" viewBox="0 0 880 230" role="img" aria-label="Android Guru Agent banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1117"/>
+      <stop offset="0.55" stop-color="#161B27"/>
+      <stop offset="1" stop-color="#0B1E2D"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3DDC84"/>
+      <stop offset="0.5" stop-color="#00C2D1"/>
+      <stop offset="1" stop-color="#7F52FF"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#E6EDF3"/>
+      <stop offset="1" stop-color="#9FE8C4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.15" cy="0.9" r="0.9">
+      <stop offset="0" stop-color="#3DDC84" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#00C2D1" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="880" height="230" rx="18" fill="url(#bg)"/>
+  <rect width="880" height="230" rx="18" fill="url(#glow)"/>
+  <rect x="1.5" y="1.5" width="877" height="227" rx="17" fill="none" stroke="#30363D" stroke-width="1.5"/>
+
+  <!-- robot head -->
+  <g transform="translate(64,52)">
+    <rect x="8" y="30" width="104" height="82" rx="20" fill="#101826" stroke="url(#accent)" stroke-width="2.5"/>
+    <line x1="60" y1="30" x2="60" y2="14" stroke="#00C2D1" stroke-width="2.5"/>
+    <circle cx="60" cy="11" r="6" fill="#3DDC84"/>
+    <!-- eyes -->
+    <circle cx="40" cy="66" r="9" fill="#3DDC84"/>
+    <circle cx="80" cy="66" r="9" fill="#3DDC84"/>
+    <circle cx="42.5" cy="63.5" r="3" fill="#0D1117"/>
+    <circle cx="82.5" cy="63.5" r="3" fill="#0D1117"/>
+    <!-- mouth -->
+    <rect x="38" y="88" width="44" height="8" rx="4" fill="none" stroke="#00C2D1" stroke-width="2.5"/>
+    <!-- antenna pulses -->
+    <circle cx="60" cy="11" r="11" fill="none" stroke="#3DDC84" stroke-opacity="0.35" stroke-width="1.5"/>
+  </g>
+
+  <!-- circuit decoration -->
+  <g stroke="#00C2D1" stroke-opacity="0.35" stroke-width="1.5" fill="none">
+    <path d="M700 40 h90 v40 h60"/>
+    <path d="M700 190 h60 v-30 h90"/>
+    <circle cx="850" cy="80" r="3.5" fill="#00C2D1" fill-opacity="0.6" stroke="none"/>
+    <circle cx="850" cy="160" r="3.5" fill="#3DDC84" fill-opacity="0.6" stroke="none"/>
+    <path d="M560 18 h240"/>
+    <circle cx="800" cy="18" r="3" fill="#7F52FF" fill-opacity="0.7" stroke="none"/>
+  </g>
+
+  <!-- title -->
+  <text x="205" y="92" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="44" font-weight="700" fill="url(#title)">Android Guru Agent</text>
+
+  <!-- subtitle -->
+  <text x="207" y="126" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="17" fill="#8B949E">Autonomous AI Agent · On-device LLM · Linux Terminal · Cognitive Memory</text>
+
+  <!-- keyword chips -->
+  <g font-family="'Segoe UI','PingFang SC','Noto Sans SC',Helvetica,Arial,sans-serif" font-size="13" font-weight="600">
+    <rect x="205" y="148" width="86" height="26" rx="13" fill="#3DDC84" fill-opacity="0.12" stroke="#3DDC84" stroke-opacity="0.55"/>
+    <text x="248" y="166" text-anchor="middle" fill="#3DDC84">Kotlin</text>
+
+    <rect x="299" y="148" width="112" height="26" rx="13" fill="#4285F4" fill-opacity="0.12" stroke="#4285F4" stroke-opacity="0.55"/>
+    <text x="355" y="166" text-anchor="middle" fill="#7EA6F4">Compose UI</text>
+
+    <rect x="419" y="148" width="88" height="26" rx="13" fill="#E95420" fill-opacity="0.12" stroke="#E95420" stroke-opacity="0.55"/>
+    <text x="463" y="166" text-anchor="middle" fill="#F2931D">Ubuntu</text>
+
+    <rect x="515" y="148" width="102" height="26" rx="13" fill="#00C2D1" fill-opacity="0.12" stroke="#00C2D1" stroke-opacity="0.55"/>
+    <text x="566" y="166" text-anchor="middle" fill="#00C2D1">83 Tools</text>
+
+    <rect x="625" y="148" width="120" height="26" rx="13" fill="#7F52FF" fill-opacity="0.12" stroke="#7F52FF" stroke-opacity="0.55"/>
+    <text x="685" y="166" text-anchor="middle" fill="#A78BFA">FSM Memory</text>
+  </g>
+
+  <!-- bottom accent line -->
+  <rect x="205" y="196" width="430" height="4" rx="2" fill="url(#accent)"/>
+  <text x="205" y="222" font-family="Consolas,'Sarasa Mono SC',monospace" font-size="12" fill="#6E7681">apex-agent · runs entirely on your phone · no server required</text>
+</svg>

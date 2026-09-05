@@ -3,6 +3,7 @@ package com.apex.agent.core.engine.orchestrator
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.ExecutionMemoryObserver
 import com.apex.agent.core.engine.InputType
+import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.ToolCall
 import com.apex.agent.core.logging.LogLevel
@@ -40,7 +41,13 @@ internal class BatchExecutionEngine(
     private val userGate: UserInteractionGate,
     private val memoryObserver: ExecutionMemoryObserver?,
     /** Reads the orchestrator's cooperative-abort flag (flipped by `abort()`). */
-    private val isStillRunning: () -> Boolean
+    private val isStillRunning: () -> Boolean,
+    /**
+     * P7 Layer-1 — 工具输出截断器：工具结果写入 history 前智能截断（超长输出
+     * 保留 head+tail / JSON 结构 / 列表首尾）。事件流仍携带完整输出，仅对话
+     * 历史收窄，与 AgentEngine 的 executeToolCallStreaming 行为对称。
+     */
+    private val toolTruncator: ToolOutputTruncator? = null
 ) {
 
     /** Total completed tool calls this task (including ask_user interactions). */
@@ -55,6 +62,16 @@ internal class BatchExecutionEngine(
         data class TaskFailed(val message: String) : Outcome
         /** Aborted mid-batch — caller returns, the outer task finally classifies. */
         data object Aborted : Outcome
+    }
+
+    /**
+     * P7 Layer-1 — 入历史前截断；无截断器（旧调用方/测试）时原样返回。
+     * 失败输出（Error 前缀）同样截断：超长堆栈对 LLM 无增益，只耗 token。
+     */
+    private fun truncateForHistory(output: String, toolName: String): String {
+        val truncator = toolTruncator ?: return output
+        return runCatching { truncator.smartTruncate(output, toolName).text }
+            .getOrElse { output }
     }
 
     // ─── Serial path (A68.1 semantics + A68.2 retry) ────────────────────────
@@ -181,7 +198,12 @@ internal class BatchExecutionEngine(
             )
         )
 
-        history.add(LlmMessage.ToolResult(tc.id, outcome.output))
+        history.add(
+            LlmMessage.ToolResult(
+                tc.id,
+                truncateForHistory(outcome.output, tc.name)
+            )
+        )
         totalToolCalls++
         stateMachine.updateProgress { p ->
             p.copy(
@@ -301,7 +323,12 @@ internal class BatchExecutionEngine(
         // ToolResults in ORIGINAL emission order — the LLM sees one result
         // per call, exactly as in serial execution.
         outcomes.forEach { outcome ->
-            history.add(LlmMessage.ToolResult(outcome.callId, outcome.output))
+            history.add(
+                LlmMessage.ToolResult(
+                    outcome.callId,
+                    truncateForHistory(outcome.output, outcome.toolName)
+                )
+            )
         }
         totalToolCalls += outcomes.size
         stateMachine.updateProgress { p ->

@@ -352,6 +352,18 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
+      - name: Run platform:cs-mem unit tests
+        run: |
+          # v3 memory hardening coverage: stable content-hash edge IDs
+          # (differential ingest semantics), TraceDistiller input_text param
+          # extraction (replay purity), BypassExecutionEngine cross-version
+          # macro recall via migration alias bridge + state-deviation guard.
+          # Pure JVM (returnDefaultValues) — no device required.
+          ./gradlew :platform:cs-mem:testDebugUnitTest \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
   build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest

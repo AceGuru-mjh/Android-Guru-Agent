@@ -204,7 +204,8 @@ class T81ProvisionerFixesTest {
         assertNotNull(beforeMeta)
         // 人为损坏 rootfs.json
         val metaFile = File(layout.metadataFile.value)
-        metaFile.writeText("{ broken")
+        // 注意：内容仍是非法 JSON（unquoted key），但字符上括号平衡（CI brace gate 按字符统计）
+        metaFile.writeText("{ broken }")
         val meta = prov.current()   // 触发 load → 损坏 → 隔离
         // 损坏文件被隔离为 .corrupt（保留现场），.json 不再存在
         val corrupt = File(metaFile.parentFile, metaFile.name + ".corrupt")

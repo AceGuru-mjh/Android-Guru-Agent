@@ -7,8 +7,10 @@ import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.policy.TerminalPolicyImpl
 import com.apex.agent.platform.terminal.compat.LegacyTerminalManager
 import com.apex.agent.platform.terminal.linux.CpuArchitecture
+import com.apex.agent.platform.terminal.linux.RootfsProvider
 import com.apex.agent.platform.terminal.proot.LinuxPRootBackend
 import com.apex.agent.platform.terminal.proot.NativeLibraryPRootBinaryProvider
+import com.apex.agent.platform.terminal.proot.PRootBinaryProvider
 import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.platform.terminal.runtime.ExecutionBackendRegistry
 import com.apex.agent.platform.terminal.runtime.LocalShellBackend
@@ -120,19 +122,24 @@ object TerminalModule {
         )
     }
 
-    /** RootfsProvider 门面（LinuxPRootBackend 的只读视图；见 ProvisionedRootfsProvider §21）。 */
+    /** RootfsProvider 门面（LinuxPRootBackend 的只读视图；见 ProvisionedRootfsProvider §21）。
+     *  T81 CI fix: 返回接口类型 —— Dagger 需要接口绑定（LinuxExecutionContextFactory 等
+     *  注入点依赖 RootfsProvider 抽象，此前只有具体类绑定 → MissingBinding）。 */
     @Provides
     @Singleton
     fun provideRootfsProvider(
         provisioner: RootfsProvisioner
-    ): ProvisionedRootfsProvider = ProvisionedRootfsProvider(provisioner)
+    ): RootfsProvider = ProvisionedRootfsProvider(provisioner)
 
-    /** libproot.so 定位 + ELF 架构校验（字节级）+ --version 探测（诊断性，不阻断）。 */
+    /** libproot.so 定位 + ELF 架构校验（字节级）+ --version 探测（诊断性，不阻断）。
+     *  T81 CI fix: 返回接口类型（PRootBinaryProvider）—— 与 RootfsProvider 同理，
+     *  LinuxExecutionContextFactory / UbuntuAptPackageManager / LinuxPRootBackend 均
+     *  依赖接口注入，具体类绑定无法满足。 */
     @Provides
     @Singleton
     fun providePRootBinaryProvider(
         hostEnv: PRootHostEnvironment
-    ): NativeLibraryPRootBinaryProvider = NativeLibraryPRootBinaryProvider(
+    ): PRootBinaryProvider = NativeLibraryPRootBinaryProvider(
         hostEnv = hostEnv,
         supportedAbis = { Build.SUPPORTED_ABIS.toList() }
     )
@@ -167,8 +174,8 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideLinuxPRootBackend(
-        binaryProvider: NativeLibraryPRootBinaryProvider,
-        rootfsProvider: ProvisionedRootfsProvider,
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
         workspaces: LinuxWorkspaceManager,
         userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment
@@ -250,8 +257,8 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideLinuxExecutionContextFactory(
-        binaryProvider: com.apex.agent.platform.terminal.proot.PRootBinaryProvider,
-        rootfsProvider: com.apex.agent.platform.terminal.linux.RootfsProvider,
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
         workspaces: LinuxWorkspaceManager,
         userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment,
@@ -297,8 +304,8 @@ object TerminalModule {
     @Singleton
     fun provideUbuntuAptPackageManager(
         executor: ProotExecutor,
-        binaryProvider: NativeLibraryPRootBinaryProvider,
-        rootfsProvider: ProvisionedRootfsProvider,
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
         userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment,
         workspaces: LinuxWorkspaceManager,
@@ -326,7 +333,7 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideLinuxNetworkProbe(
-        rootfsProvider: ProvisionedRootfsProvider,
+        rootfsProvider: RootfsProvider,
         aptManager: LinuxPackageManager,
         target: RootfsTarget
     ): LinuxNetworkProbe = LinuxNetworkProbe(

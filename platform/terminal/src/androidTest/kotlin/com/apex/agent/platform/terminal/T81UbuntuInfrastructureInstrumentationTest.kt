@@ -218,7 +218,7 @@ class T81UbuntuInfrastructureInstrumentationTest {
         runBlocking {
             val rt = newRuntime()
             val s = rt.create(backendId = "linux-ubuntu").getOrThrow()
-            rt.run(s.sessionId, "echo $HOME", InputOwner.AGENT)
+            rt.run(s.sessionId, "echo \$HOME", InputOwner.AGENT)
             // $HOME 在 bash 里展开 —— run 转义注意：用 env 查询更稳
             rt.run(s.sessionId, "printenv HOME", InputOwner.AGENT)
             val out = awaitOutput(rt, s.sessionId, "/root")
@@ -313,7 +313,7 @@ class T81UbuntuInfrastructureInstrumentationTest {
                 hostEnv = hostEnv,
                 workspaces = workspaces,
                 environment = environment,
-                lock = PackageOperationLock(File(layout.baseDir.value)),
+                lock = PackageOperationLock(rootfsHostDirProvider = { File(layout.baseDir.value) }),
                 contextFactory = contextFactory
             )
             val op = apt.install(listOf(PackageSpec("sl")))
@@ -404,9 +404,12 @@ class T81UbuntuInfrastructureInstrumentationTest {
                 backendRegistry = ExecutionBackendRegistry.of(
                     LocalShellBackend(),
                     LinuxPRootBackend(
-                        NativeLibraryPRootBinaryProvider(hostEnv),
-                        ProvisionedRootfsProvider(provisioner),
-                        workspaces, userHome, hostEnv, environment
+                        binaryProvider = NativeLibraryPRootBinaryProvider(hostEnv),
+                        rootfsProvider = ProvisionedRootfsProvider(provisioner),
+                        workspaces = workspaces,
+                        userHome = userHome,
+                        hostEnv = hostEnv,
+                        environment = environment
                     )
                 ),
                 persistenceStore = store
@@ -424,9 +427,12 @@ class T81UbuntuInfrastructureInstrumentationTest {
                 backendRegistry = ExecutionBackendRegistry.of(
                     LocalShellBackend(),
                     LinuxPRootBackend(
-                        NativeLibraryPRootBinaryProvider(hostEnv),
-                        ProvisionedRootfsProvider(provisioner),
-                        workspaces, userHome, hostEnv, environment
+                        binaryProvider = NativeLibraryPRootBinaryProvider(hostEnv),
+                        rootfsProvider = ProvisionedRootfsProvider(provisioner),
+                        workspaces = workspaces,
+                        userHome = userHome,
+                        hostEnv = hostEnv,
+                        environment = environment
                     )
                 ),
                 persistenceStore = store
@@ -440,7 +446,15 @@ class T81UbuntuInfrastructureInstrumentationTest {
             val state = snap!!.session.state.name
             assertTrue("recovered session faked alive: $state", state == "EXITED" || state == "BROKEN")
             snap.foregroundJob?.let {
-                assertTrue("recovered job faked RUNNING: ${it.state}", it.state.name == "INTERRUPTED" || it.state.isTerminal)
+                // §16 核心断言：恢复的 job 不得仍为活跃态（CREATED/RUNNING/WAITING_INPUT）
+                val terminalJobStates = setOf(
+                    com.apex.agent.platform.terminal.job.JobState.EXITED,
+                    com.apex.agent.platform.terminal.job.JobState.INTERRUPTED,
+                    com.apex.agent.platform.terminal.job.JobState.TIMED_OUT,
+                    com.apex.agent.platform.terminal.job.JobState.FAILED,
+                    com.apex.agent.platform.terminal.job.JobState.UNKNOWN
+                )
+                assertTrue("recovered job faked RUNNING: ${it.state}", it.state in terminalJobStates)
             }
             // 清理：真 shell 进程还在跑（rootfs 里）—— closeAll 兜底
             JniNativePty().nativeCloseAll()

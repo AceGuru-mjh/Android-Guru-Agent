@@ -67,7 +67,8 @@ class T81PersistenceAtomicityTest {
         store.save(session(1L), emptyList(), emptyList())
         store.save(session(2L), emptyList(), emptyList())
         // 人为损坏 session-3
-        java.io.File(dir, "session-3.json").writeText("{ this is not json")
+        // 括号平衡的非法 JSON（CI brace gate 按字符统计）
+        java.io.File(dir, "session-3.json").writeText("{ this is not json }")
         val loaded = store.loadAll()
         assertEquals(listOf(1L, 2L), loaded.map { it.id }.sorted())
         // 损坏文件被隔离为 .corrupt（保留现场），不再以 .json 存在

@@ -29,46 +29,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
-
-/** [classifyTool] 用的 server 字段提取正则（原实现在每次调用时重复编译，现提升到顶层）。 */
-private val SERVER_FIELD_REGEX = Regex("""(?i)"server"\s*:\s*"([^"]+)"""")
-
-/**
- * 根据工具名推断调用来源分类，用于 UI 差异化呈现。
- *
- * 规则（按优先级）：
- * - `mcp_call` / `mcp_call_<server>_<tool>` → MCP，并从参数中解析 server；
- * - `web_search` → 联网搜索；`web_fetch` → 网页抓取；
- * - `plugin*` 前缀 → 插件（plugin-sdk 经 ToolRegistry 注册的工具）；
- * - `connector*` / `http_request` / `github_*` → 连接器（连接外部服务的 API 调用）；
- * - 其余含 "skill" → Skill；
- * - 均未命中但当前处于 Skill/连接器/插件路由上下文 → 归入该上下文来源；
- * - 其余 → 本地工具。
- */
-fun classifyTool(
-    toolName: String,
-    args: String,
-    contextKind: ToolKind? = null
-): Pair<ToolKind, String?> {
-    if (toolName.startsWith("mcp_call")) {
-        // RouterMcpTool 通过 arguments 的 "server" 字段传入 server 名。
-        val server = SERVER_FIELD_REGEX.find(args)
-            ?.groupValues?.getOrNull(1)
-        return ToolKind.MCP to server
-    }
-    if (toolName == "web_search") return ToolKind.WEB_SEARCH to null
-    if (toolName == "web_fetch") return ToolKind.WEB_FETCH to null
-    if (toolName.startsWith("plugin")) return ToolKind.PLUGIN to null
-    if (toolName.startsWith("connector") || toolName == "http_request" ||
-        toolName.startsWith("github_")) {
-        return ToolKind.CONNECTOR to null
-    }
-    if (toolName.contains("skill", ignoreCase = true)) return ToolKind.SKILL to null
-    // 路由上下文兜底：Skill/连接器/插件流水线内产生的未匹配工具归入该来源，
-    // 让 `/connector:ssh` 会话里的 shell_execute 也能带上连接器链路徽章。
-    if (contextKind != null) return contextKind to null
-    return ToolKind.LOCAL to null
-}
+// 工具来源分类 classifyTool() 已抽出到 ToolKindClassifier.kt（God-file 预算拆分）。
 
 @HiltViewModel
 class AgentChatViewModel @Inject constructor(
@@ -78,7 +39,7 @@ class AgentChatViewModel @Inject constructor(
     val githubTokenManager: GithubTokenManager,
     private val savedStateHandle: SavedStateHandle,
     private val preprocessor: PredictiveAttachmentPreprocessor,
-    private val userQuestionBridge: UserQuestionBridge,
+    internal val userQuestionBridge: UserQuestionBridge,
     private val settingsRepository: SettingsRepository,
     private val chatToolkit: ChatToolkitStore,
     private val toolRegistry: ToolRegistry,
@@ -87,7 +48,8 @@ class AgentChatViewModel @Inject constructor(
     private val taskController: AgentTaskStatusController
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
+    // internal：供抽出的 AgentChatQuestionHandler.kt 扩展访问（God-file 预算拆分）。
+    internal val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
 
     /**
@@ -957,54 +919,8 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.cancelUserInput()
     }
 
-    fun answerQuestion(selectedIds: List<String>, customText: String?) {
-        val question = pendingQuestion.value ?: return
-
-        val answer = AgentAnswer(
-            questionId = question.id,
-            selectedOptionId = selectedIds.firstOrNull(),
-            selectedOptionIds = selectedIds,
-            customText = customText?.takeIf { it.isNotBlank() }
-        )
-
-        val displayAnswer = when {
-            !customText.isNullOrBlank() -> customText.trim()
-            selectedIds.isNotEmpty() -> question.options
-                .filter { it.id in selectedIds }
-                .joinToString("、") { it.label }
-                .ifBlank { "未知选项" }
-            else -> "跳过"
-        }
-
-        _uiState.update { state ->
-            state.copy(
-                messages = state.messages + AgentUiMessage.System(
-                    "✅ 已回答：$displayAnswer"
-                )
-            )
-        }
-
-        userQuestionBridge.submit(answer)
-    }
-
-    fun cancelQuestion() {
-        val question = pendingQuestion.value ?: return
-
-        _uiState.update { state ->
-            state.copy(
-                messages = state.messages + AgentUiMessage.System(
-                    "⏹ 已跳过 Agent 提问"
-                )
-            )
-        }
-
-        userQuestionBridge.submit(
-            AgentAnswer(
-                questionId = question.id,
-                skipped = true
-            )
-        )
-    }
+    // answerQuestion() / cancelQuestion() 已抽出到 AgentChatQuestionHandler.kt
+    // （internal 扩展，调用点 viewModel.answerQuestion/cancelQuestion 解析不变）。
 
     /**
      * 中止当前任务。

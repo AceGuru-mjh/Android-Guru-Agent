@@ -289,10 +289,11 @@ class MarketViewModel @Inject constructor(
 
     fun addConnector(id: String, name: String, type: String, endpoint: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            val trimmedId = id.trim()
             connectorRegistry.add(
-                ConnectorDef(id = id.trim(), name = name.trim(), type = type, endpoint = endpoint.trim())
+                ConnectorDef(id = trimmedId, name = name.trim(), type = type, endpoint = endpoint.trim())
             ).fold(
-                onSuccess = { message(it + "（/ 菜单与 /connector:${id.trim()} 可用）") },
+                onSuccess = { message("已添加连接器：$trimmedId（/ 菜单与 /connector:$trimmedId 可用）") },
                 onFailure = { message("添加失败：${it.message}") }
             )
             refresh()

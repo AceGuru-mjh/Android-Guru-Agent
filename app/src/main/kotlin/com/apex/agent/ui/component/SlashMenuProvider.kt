@@ -251,3 +251,30 @@ data class SlashMenuCategory(
 data class SlashMenuData(
     val categories: List<SlashMenuCategory>
 )
+
+// ═══ Compose 侧获取入口 ═══
+
+/**
+ * [SlashMenuProvider] 的 Hilt EntryPoint：本类是 @Singleton 普通类而非 ViewModel，
+ * Composable 中不能（也不应）经 hiltViewModel() 获取——旧写法
+ * `slashMenuProvider: SlashMenuProvider = hiltViewModel()` 会让 ViewModelProvider
+ * 反射创建本类（构造器带 5 个依赖）必然抛 RuntimeException，属闪退缺陷。
+ * 经此 EntryPoint 直接从 SingletonComponent 取真实单例。
+ */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface SlashMenuEntryPoint {
+    fun slashMenuProvider(): SlashMenuProvider
+}
+
+/** Compose 中获取斜杠菜单单例（随 Application 上下文记忆化）。 */
+@androidx.compose.runtime.Composable
+fun rememberSlashMenuProvider(): SlashMenuProvider {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.remember(context) {
+        dagger.hilt.android.EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            SlashMenuEntryPoint::class.java
+        ).slashMenuProvider()
+    }
+}

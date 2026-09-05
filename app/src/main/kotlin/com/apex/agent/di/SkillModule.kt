@@ -9,7 +9,7 @@ import com.apex.agent.plugin.host.PluginManager
 import com.apex.agent.ui.component.SlashMenuProvider
 import dagger.Module
 import dagger.Provides
-import dagger.hilt.InstallsIn
+import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.io.File

@@ -132,7 +132,7 @@ class SkillViewModel @Inject constructor(
         description: String,
         type: String,
         prompt: String = ""
-    ): Boolean {
+    ) {
         val id = name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifBlank { "skill_${System.currentTimeMillis() }" }
         val manifest = SkillManifest(
             id = id,
@@ -152,9 +152,9 @@ class SkillViewModel @Inject constructor(
             promptInjection = if (type == "prompt") prompt.ifBlank { description } else null
         )
         val json = kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(SkillManifest.serializer(), manifest)
-        installFromJson(json).also {
-            _lastMessage.value = "已创建：${manifest.name}"
-        }
+        // 安装结果经 installFromJson 内部 lastMessage 提示，此处补一条“已创建”摘要
+        installFromJson(json)
+        _lastMessage.value = "已创建：${manifest.name}"
     }
 
     fun uninstall(skillId: String) {

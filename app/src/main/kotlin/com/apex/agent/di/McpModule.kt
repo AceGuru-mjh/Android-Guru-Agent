@@ -1,9 +1,10 @@
 package com.apex.agent.di
 
+import android.content.Context
 import com.apex.agent.core.tools.mcp.McpManager
 import dagger.Module
 import dagger.Provides
-import dagger.hilt.InstallsIn
+import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.io.File

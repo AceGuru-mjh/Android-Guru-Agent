@@ -51,6 +51,11 @@ dependencies {
     implementation(project(":platform:persistence"))
     implementation(project(":platform:terminal"))
     implementation(project(":platform:cs-mem"))
+    // Code Mode（Spec §3）—— 独立的 Drawer 产品入口，继承 Agent 能力 + 代码专属工具
+    implementation(project(":core:code-engine"))
+    implementation(project(":core:code-tools"))
+    implementation(project(":platform:code-workspace"))
+    implementation(project(":platform:code-intelligence"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose

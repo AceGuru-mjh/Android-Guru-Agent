@@ -51,6 +51,30 @@ import com.apex.agent.tools.AskUserTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
+import com.apex.agent.core.codetools.tools.CodeReadTool
+import com.apex.agent.core.codetools.tools.CodeWriteTool
+import com.apex.agent.core.codetools.tools.CodeEditTool
+import com.apex.agent.core.codetools.tools.CodeCreateTool
+import com.apex.agent.core.codetools.tools.CodeDeleteTool
+import com.apex.agent.core.codetools.tools.CodeMoveTool
+import com.apex.agent.core.codetools.tools.CodeCopyTool
+import com.apex.agent.core.codetools.tools.CodeGlobTool
+import com.apex.agent.core.codetools.tools.CodeSearchTool
+import com.apex.agent.core.codetools.tools.WorkspaceFsProvider
+import com.apex.agent.platform.code.intel.git.CodeWorkspaceIdProvider
+import com.apex.agent.platform.code.intel.git.GitStatusTool
+import com.apex.agent.platform.code.intel.git.GitDiffTool
+import com.apex.agent.platform.code.intel.git.GitLogTool
+import com.apex.agent.platform.code.intel.git.GitBranchTool
+import com.apex.agent.platform.code.intel.git.GitCheckoutTool
+import com.apex.agent.platform.code.intel.git.GitCommitTool
+import com.apex.agent.platform.code.intel.CodeBuildTool
+import com.apex.agent.platform.code.intel.CodeTestTool
+import com.apex.agent.platform.code.intel.CodeDefinitionTool
+import com.apex.agent.platform.code.intel.CodeReferencesTool
+import com.apex.agent.platform.code.intel.CodeHoverTool
+import com.apex.agent.platform.code.intel.CodeDiagnosticsTool
+import com.apex.agent.platform.code.intel.CodeRenameTool
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -131,7 +155,23 @@ object ToolModule {
         ubuntuBootstrapManager: UbuntuBootstrapManager,
         linuxNetworkProbe: LinuxNetworkProbe,
         linuxPackageManager: LinuxPackageManager,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        // T80: Code Mode 工具集
+        workspaceFsProvider: WorkspaceFsProvider,
+        codeWorkspaceIdProvider: CodeWorkspaceIdProvider,
+        gitStatusTool: GitStatusTool,
+        gitDiffTool: GitDiffTool,
+        gitLogTool: GitLogTool,
+        gitBranchTool: GitBranchTool,
+        gitCheckoutTool: GitCheckoutTool,
+        gitCommitTool: GitCommitTool,
+        codeBuildTool: CodeBuildTool,
+        codeTestTool: CodeTestTool,
+        codeDefinitionTool: CodeDefinitionTool,
+        codeReferencesTool: CodeReferencesTool,
+        codeHoverTool: CodeHoverTool,
+        codeDiagnosticsTool: CodeDiagnosticsTool,
+        codeRenameTool: CodeRenameTool
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -180,6 +220,38 @@ object ToolModule {
         registry.register(SafeAgentTool(FileSearchTool(workspaceDir)))
         registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
         registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
+        // 🐛 BUG FIX: FileEditTool was defined but never registered, yet EnginePrompts
+        // already told the model to "Use edit_file with search-replace". Registering it now
+        // fixes the latent gap for BOTH Agent mode and Code mode.
+        registry.register(SafeAgentTool(FileEditTool(workspaceDir)))
+
+        // ═══ 2.5. Code Mode 工具（Spec §14/§28-§30/§31/§34/§35） ═══
+        // code_* 文件工具：host 侧 CodeWorkspaceFileSystem（非 shell），按 active workspace 动态解析。
+        registry.register(SafeAgentTool(CodeReadTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeWriteTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeEditTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeCreateTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeDeleteTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeMoveTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeCopyTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeGlobTool(workspaceFsProvider)))
+        registry.register(SafeAgentTool(CodeSearchTool(workspaceFsProvider)))
+        // Code Intelligence（LSP 语义工具，v1 优雅降级为文本搜索，Spec §79）
+        registry.register(SafeAgentTool(codeDefinitionTool))
+        registry.register(SafeAgentTool(codeReferencesTool))
+        registry.register(SafeAgentTool(codeHoverTool))
+        registry.register(SafeAgentTool(codeDiagnosticsTool))
+        registry.register(SafeAgentTool(codeRenameTool))
+        // Build / Test runner（proot guest 内执行，Spec §34/§35）
+        registry.register(SafeAgentTool(codeBuildTool))
+        registry.register(SafeAgentTool(codeTestTool))
+        // Git（proot guest 内 git 二进制，Spec §31）
+        registry.register(SafeAgentTool(gitStatusTool))
+        registry.register(SafeAgentTool(gitDiffTool))
+        registry.register(SafeAgentTool(gitLogTool))
+        registry.register(SafeAgentTool(gitBranchTool))
+        registry.register(SafeAgentTool(gitCheckoutTool))
+        registry.register(SafeAgentTool(gitCommitTool))
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))

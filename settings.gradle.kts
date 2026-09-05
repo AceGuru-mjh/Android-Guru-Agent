@@ -33,12 +33,18 @@ include(":core:agent-engine")
 include(":core:llm-adapter")
 include(":core:tool-registry")
 include(":core:logging")
+// Code Mode 核心层（纯Kotlin JVM）—— Coding Agent 引擎 + 代码工具 + LSP 协议类型
+include(":core:code-engine")
+include(":core:code-tools")
 
 // Android平台层
 include(":platform:privilege")
 include(":platform:persistence")
 include(":platform:terminal")
 include(":platform:cs-mem")
+// Code Mode Android平台层 —— Workspace 管理 + Code Intelligence (LSP/Git/Diagnostics)
+include(":platform:code-workspace")
+include(":platform:code-intelligence")
 
 // Terminal Runtime 2.0 — vendored VT100/ANSI emulator (ATR Phase 2)
 include(":terminal-emulator")

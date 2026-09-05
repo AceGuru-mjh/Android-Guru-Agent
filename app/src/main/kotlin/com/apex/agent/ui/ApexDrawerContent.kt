@@ -122,6 +122,7 @@ fun ApexDrawerContent(
         // ═══ 导航项（自定义：霓虹左指示条） ═══
         val destinations = listOf(
             DrawerDestination.Agent,
+            DrawerDestination.Code,
             DrawerDestination.Terminal,
             DrawerDestination.Skill,
             DrawerDestination.Market,

@@ -325,6 +325,12 @@ data class McpRequest(
     val params: JsonObject? = null
 )
 
+/**
+ * MCP 服务器配置。
+ * @Serializable（v2）：McpManager 用 kotlinx.serialization 正规序列化整表配置，
+ * 替代旧实现的手工字符串拼接（无转义，含 `"` / `\` 的字段会写坏 JSON 导致全部配置丢失）。
+ */
+@Serializable
 data class McpServerConfig(
     val name: String,
     val url: String,
@@ -333,6 +339,7 @@ data class McpServerConfig(
     val enabled: Boolean = true
 )
 
+@Serializable
 enum class McpTransport { HTTP, SSE, STDIO }
 
 data class McpCapabilities(

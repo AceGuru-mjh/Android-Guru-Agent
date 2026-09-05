@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.android.EntryPointAccessors
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachButton
@@ -63,6 +64,7 @@ import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.component.rememberSlashMenuProvider
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
 import kotlinx.coroutines.launch
 
@@ -70,7 +72,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel(),
+    // v2 闪退修复：旧默认值 hiltViewModel() 要求参数类型是 ViewModel——
+    // SlashMenuProvider 是 @Singleton 普通类，进入聊天页时 ViewModelProvider
+    // 反射创建必然抛 RuntimeException（K2 仅告警不拦截）。改为经 EntryPoint
+    // 从 Hilt SingletonComponent 取真实单例，既不闪退也消除未来版本的编译错误。
+    slashMenuProvider: SlashMenuProvider = rememberSlashMenuProvider(),
     onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

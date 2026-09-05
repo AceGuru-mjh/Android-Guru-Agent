@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             // 全局外观由设置中心驱动：主题模式 / 动态取色 / 字体缩放 / 时间戳开关
-            val settings by remember { settingsRepository.agentSettings }.collectAsState()
+            val settings by remember { settingsRepository.agentSettings }.collectAsStateWithLifecycle()
             val darkTheme = when (settings.themeMode) {
                 "dark" -> true
                 "light" -> false

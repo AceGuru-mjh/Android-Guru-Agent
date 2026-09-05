@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,8 +35,8 @@ fun TerminalRenderer(
     viewModel: TerminalViewModel,
     modifier: Modifier = Modifier
 ) {
-    val semantic by viewModel.semanticState.collectAsState()
-    val settings by viewModel.settings.collectAsState()
+    val semantic by viewModel.semanticState.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     val screen = semantic?.screen
     val cursorRow = screen?.cursorRow ?: 0
@@ -58,7 +58,7 @@ fun TerminalRenderer(
         }
 
         // Real terminal screen output (observe SCREEN → renderedText). Spec §41.
-        val screenText by viewModel.screenText.collectAsState()
+        val screenText by viewModel.screenText.collectAsStateWithLifecycle()
         val s = semantic!!
         val displayText = screenText.ifEmpty {
             "Session #${s.session.id} ready. State=${s.session.state}, cursor=${s.session.cursor}"

@@ -48,9 +48,12 @@ class AgentChatViewModel @Inject constructor(
     private val taskController: AgentTaskStatusController
 ) : ViewModel() {
 
-    // internal：供抽出的 AgentChatQuestionHandler.kt 扩展访问（God-file 预算拆分）。
-    internal val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
+    // v2：memory.count() 在主线程 = 全量 JSON 反序列化（旧实现在构造器调用，
+    // 几千条历史时进聊天页卡顿），改为 IO 线程异步回填（见下方 init）；
+    // 同时保留 internal 可见性（供抽出的 AgentChatQuestionHandler.kt 扩展访问）。
+    internal val _uiState = MutableStateFlow(AgentChatUiState())
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
+    init { viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } } }
 
     /**
      * 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人

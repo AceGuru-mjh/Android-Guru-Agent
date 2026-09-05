@@ -1,6 +1,8 @@
 package com.apex.agent.core.engine
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.ToolCategory
+import com.apex.agent.core.tools.ToolRisk
 
 /**
  * Prompt construction for every [ApexAgentEngine] mode.
@@ -109,17 +111,30 @@ internal object EnginePrompts {
                 appendLine(thinking)
             }
             // 「函数调用」白名单：system prompt 工具清单与实际下发的 ToolDefinition 保持一致
+            // Tool System v2：按类别分组 + 高风险 ⚠ 标记 —— 40+ 工具的字母序长列表
+            // 对模型只是噪音；分组清单让模型更快定位"这类任务该用哪类工具"。
             appendLine()
             appendLine("## Available Tools (${visibleTools.size})")
-            // 动态读取当前注册的工具，不硬编码
-            visibleTools.forEach { tool ->
-                val firstLine = tool.description
-                    .lineSequence()
-                    .firstOrNull()
-                    ?.trim()
-                    ?.take(160)
-                    ?: ""
-                appendLine("- ${tool.id}: ${tool.name} — $firstLine")
+            val byCategory = visibleTools.groupBy { it.metadata.category }
+                .toSortedMap(compareBy { it.order })
+            byCategory.forEach { (category, tools) ->
+                appendLine("### ${category.label} (${tools.size})")
+                tools.sortedBy { it.id }.forEach { tool ->
+                    val firstLine = tool.description
+                        .lineSequence()
+                        .firstOrNull()
+                        ?.trim()
+                        ?.take(160)
+                        ?: ""
+                    val riskMark = if (tool.metadata.risk == ToolRisk.HIGH) " ⚠️HIGH-RISK" else ""
+                    appendLine("- ${tool.id}: $firstLine$riskMark")
+                }
+            }
+            if (visibleTools.any { it.metadata.risk == ToolRisk.HIGH }) {
+                appendLine()
+                appendLine("Tools marked ⚠️HIGH-RISK are destructive or irreversible. The user will be")
+                appendLine("asked to confirm before their first execution this session; after a denial,")
+                appendLine("do NOT retry the same tool — propose an alternative approach instead.")
             }
 
             // Skill prompt 注入

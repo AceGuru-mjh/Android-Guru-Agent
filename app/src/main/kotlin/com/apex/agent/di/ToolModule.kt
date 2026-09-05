@@ -48,6 +48,8 @@ import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
+import com.apex.agent.tools.RiskAwareToolGate
+import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -109,6 +111,20 @@ object ToolModule {
 
     @Provides
     @Singleton
+    fun provideRiskAwareToolGate(
+        gateway: UserQuestionGateway
+    ): RiskAwareToolGate = RiskAwareToolGate(gateway)
+
+    /**
+     * 工具使用统计（v2）：DefaultToolExecutor 每次调用后记录
+     * 成败/耗时；设置页与诊断报告从这读取。单例，随进程存活。
+     */
+    @Provides
+    @Singleton
+    fun provideToolUsageTracker(): ToolUsageTracker = ToolUsageTracker()
+
+    @Provides
+    @Singleton
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
@@ -131,7 +147,11 @@ object ToolModule {
         ubuntuBootstrapManager: UbuntuBootstrapManager,
         linuxNetworkProbe: LinuxNetworkProbe,
         linuxPackageManager: LinuxPackageManager,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
+        mcpManager: McpManager,
+        riskAwareToolGate: RiskAwareToolGate,
+        toolUsageTracker: ToolUsageTracker
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -230,9 +250,32 @@ object ToolModule {
         registry.register(SafeAgentTool(GetLocationTool(shellExec)))
         registry.register(SafeAgentTool(NotificationReadTool(shellExec)))
 
-        // ═══ 9. 实用工具 (2) ═══
+        // ═══ 9. 实用工具 (2 v1 + 15 v2) ═══
         registry.register(SafeAgentTool(CalculateTool()))
         registry.register(SafeAgentTool(TextTransformTool()))
+        // ── Tool System v2：结构化数据/文本/时间工具（纯 JVM、离线、确定性）──
+        // json_path（JSONPath 查询）、regex_extract / regex_replace（正则抽取/替换）、
+        // text_diff（Myers diff）、datetime（6 操作）、uuid_generate（v4/v7）、
+        // file_hash（流式 md5/sha1/sha256/sha512 + 沙箱）
+        registry.register(SafeAgentTool(JsonPathTool()))
+        registry.register(SafeAgentTool(RegexExtractTool()))
+        registry.register(SafeAgentTool(RegexReplaceTool()))
+        registry.register(SafeAgentTool(TextDiffTool()))
+        registry.register(SafeAgentTool(DateTimeTool()))
+        registry.register(SafeAgentTool(UuidGenerateTool()))
+        registry.register(SafeAgentTool(FileHashTool(workspaceDir)))
+        // csv_query（RFC4180 查询/过滤/排序）、base_convert（2-36 任意进制 + 前缀探测）、
+        // string_distance（levenshtein/damerau/jaro-winkler）、random_generate（SecureRandom）
+        registry.register(SafeAgentTool(CsvQueryTool()))
+        registry.register(SafeAgentTool(BaseConvertTool()))
+        registry.register(SafeAgentTool(StringDistanceTool()))
+        registry.register(SafeAgentTool(RandomGenerateTool()))
+        // cron_next（Vixie cron 解析/下 N 次/人话解释）、duration_convert（人类时长↔秒）、
+        // unit_convert（长度/质量/数据/温度/速度）、xml_extract（XML 路径抽取 + XXE 防护）
+        registry.register(SafeAgentTool(CronTool()))
+        registry.register(SafeAgentTool(DurationConvertTool()))
+        registry.register(SafeAgentTool(UnitConvertTool()))
+        registry.register(SafeAgentTool(XmlExtractTool()))
 
         // ═══ 10. Terminal PTY — ATR 2.0 (9 new Agent-Native + 4 legacy compat + T73 ×2) ═══
         // 9 new Agent-Native tools (Spec §34) — non-blocking, incremental, event-driven.
@@ -278,26 +321,51 @@ object ToolModule {
             registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
         }
 
-        // ═══ 12. Skill 工具接线（此前缺口：skill_* 管理工具与已启用技能的
+        // ═══ 12. MCP 服务器工具（此前缺口：McpManager 三工具已建成但从未
+        // 接进 ToolRegistry，MCP 连接建立后 mcp_call/mcp_list 形同虚设）═══
+        // 注册点放在 MCP 参数注入之后（mcpManager 由 McpModule 提供）。
+        registry.register(SafeAgentTool(McpCallTool(mcpManager)))
+        registry.register(SafeAgentTool(McpListTool(mcpManager)))
+        registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
+
+        // ═══ 13. Skill 工具接线（此前缺口：skill_* 管理工具与已启用技能的
         // composite/script 工具从未注册进 ToolRegistry，安装后形同虚设）═══
         registry.register(SafeAgentTool(SkillSearchTool(httpClient)))
         registry.register(SafeAgentTool(SkillInstallTool(skillRegistry, httpClient)))
         registry.register(SafeAgentTool(SkillCreateTool(skillRegistry)))
         registry.register(SafeAgentTool(SkillListTool(skillRegistry)))
         registry.register(SafeAgentTool(SkillUninstallTool(skillRegistry)))
+
+        // ═══ 主执行器（v2：风险门 + schema 校验 + 使用统计）═══
+        // 所有工具调用统一过门：HIGH 风险首次弹窗（RiskAwareToolGate 复用
+        // ask_user_choice 对话框）；参数违规在工具执行前拦截；成败/耗时入账。
+        val mainExecutor: ToolExecutor = DefaultToolExecutor(
+            registry = registry,
+            gate = riskAwareToolGate,
+            usageTracker = toolUsageTracker
+        )
+
         // composite/script 工具：随注册表构建时快照注册；新装技能后重启 App 生效
-        // （SkillToolAdapter 经独立 executor 调用本注册表内的底层工具）
-        val skillStepExecutor: ToolExecutor = DefaultToolExecutor(registry)
+        // （SkillToolAdapter 的复合步骤同样过主执行器：风险门/校验/统计全覆盖）
+        val skillStepExecutor: ToolExecutor = mainExecutor
         skillRegistry.getActiveTools().forEach { def ->
             registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
         }
 
         return registry
-        // 总计：44 基础 + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 + N 已启用技能 composite + 7 GitHub(条件)
+        // 总计：44 基础 + 15 v2 工具 + 3 MCP + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 +
+        // N 已启用技能 composite + 7 GitHub(条件)
     }
 
     @Provides
     @Singleton
-    fun provideToolExecutor(registry: ToolRegistry): ToolExecutor =
-        DefaultToolExecutor(registry)
+    fun provideToolExecutor(
+        registry: ToolRegistry,
+        riskAwareToolGate: RiskAwareToolGate,
+        toolUsageTracker: ToolUsageTracker
+    ): ToolExecutor = DefaultToolExecutor(
+        registry = registry,
+        gate = riskAwareToolGate,
+        usageTracker = toolUsageTracker
+    )
 }

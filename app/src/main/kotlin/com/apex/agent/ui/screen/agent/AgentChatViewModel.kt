@@ -29,7 +29,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
-
 /** [classifyTool] 用的 server 字段提取正则（原实现在每次调用时重复编译，现提升到顶层）。 */
 private val SERVER_FIELD_REGEX = Regex("""(?i)"server"\s*:\s*"([^"]+)"""")
 
@@ -85,8 +84,10 @@ class AgentChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(AgentChatUiState(historyDepth = memory.count()))
+    // v2：memory.count() 在主线程 = 全量 JSON 反序列化（旧实现在构造器调用，几千条历史时进聊天页卡顿），改为 IO 线程异步回填
+    private val _uiState = MutableStateFlow(AgentChatUiState())
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
+    init { viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } } }
 
     /**
      * 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人

@@ -100,32 +100,34 @@ class WebFetchTool(
     }
 
     private fun extractReadableText(html: String, maxChars: Int): String {
+        // v2：正则全部提升为顶层预编译常量（旧实现每次调用现编 ~15 个正则，
+        // web_fetch 高频调用时 CPU 浪费显著）
         val text = html
             // 移除噪音
-            .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<nav[^>]*>[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<header[^>]*>[\\s\\S]*?</header>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<footer[^>]*>[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<aside[^>]*>[\\s\\S]*?</aside>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<!--[\\s\\S]*?-->"), "")
+            .replace(RX_SCRIPT, "")
+            .replace(RX_STYLE, "")
+            .replace(RX_NAV, "")
+            .replace(RX_HEADER, "")
+            .replace(RX_FOOTER, "")
+            .replace(RX_ASIDE, "")
+            .replace(RX_COMMENT, "")
             // 保留结构
-            .replace(Regex("<h1[^>]*>", RegexOption.IGNORE_CASE), "\n\n# ")
-            .replace(Regex("<h2[^>]*>", RegexOption.IGNORE_CASE), "\n\n## ")
-            .replace(Regex("<h3[^>]*>", RegexOption.IGNORE_CASE), "\n\n### ")
-            .replace(Regex("<(br|/p|/div|/li|/tr)[^>]*>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n• ")
-            .replace(Regex("<code[^>]*>", RegexOption.IGNORE_CASE), "`")
-            .replace(Regex("</code>", RegexOption.IGNORE_CASE), "`")
+            .replace(RX_H1, "\n\n# ")
+            .replace(RX_H2, "\n\n## ")
+            .replace(RX_H3, "\n\n### ")
+            .replace(RX_BREAKS, "\n")
+            .replace(RX_LI, "\n• ")
+            .replace(RX_CODE_OPEN, "`")
+            .replace(RX_CODE_CLOSE, "`")
             // 移除剩余标签
-            .replace(Regex("<[^>]+>"), "")
+            .replace(RX_ANY_TAG, "")
             // 解码实体
             .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
             .replace("&#x27;", "'").replace("&mdash;", "—")
             // 清理
-            .replace(Regex("\n{3,}"), "\n\n")
-            .replace(Regex("[ \t]+"), " ")
+            .replace(RX_BLANK_LINES, "\n\n")
+            .replace(RX_SPACES, " ")
             .trim()
 
         return if (text.length > maxChars) {
@@ -443,3 +445,22 @@ class HttpRequestTool(
         }
     }
 }
+
+// ═══ v2：WebTools HTML 清洗正则（预编译一次，替代旧实现每次调用现编 ~15 个）═══
+private val RX_SCRIPT = Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE)
+private val RX_STYLE = Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE)
+private val RX_NAV = Regex("<nav[^>]*>[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE)
+private val RX_HEADER = Regex("<header[^>]*>[\\s\\S]*?</header>", RegexOption.IGNORE_CASE)
+private val RX_FOOTER = Regex("<footer[^>]*>[\\s\\S]*?</footer>", RegexOption.IGNORE_CASE)
+private val RX_ASIDE = Regex("<aside[^>]*>[\\s\\S]*?</aside>", RegexOption.IGNORE_CASE)
+private val RX_COMMENT = Regex("<!--[\\s\\S]*?-->")
+private val RX_H1 = Regex("<h1[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_H2 = Regex("<h2[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_H3 = Regex("<h3[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_BREAKS = Regex("<(br|/p|/div|/li|/tr)[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_LI = Regex("<li[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_CODE_OPEN = Regex("<code[^>]*>", RegexOption.IGNORE_CASE)
+private val RX_CODE_CLOSE = Regex("</code>", RegexOption.IGNORE_CASE)
+private val RX_ANY_TAG = Regex("<[^>]+>")
+private val RX_BLANK_LINES = Regex("\\n{3,}")
+private val RX_SPACES = Regex("[ \\t]+")

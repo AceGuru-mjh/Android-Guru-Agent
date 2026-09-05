@@ -86,7 +86,8 @@ fun LogViewerScreen() {
     val listState = rememberLazyListState()
 
     // 实时刷新：订阅全量快照流，在 collect 时套用当前过滤条件。
-    // 日志写入/淘汰/清空都会触发，列表随之中枢实时更新，无需轮询。
+    // v2：AppLogger 已限速发布快照（250ms 合并洪峰），此处不再被每条日志触发全量 diff。
+    // 过滤仅在条件变化时重算，快照未变时不重复过滤。
     LaunchedEffect(selectedCategory, minLevel, keyword, sessionId) {
         AppLogger.instance.recordsFlow.collectLatest { all ->
             stats = AppLogger.instance.stats.value
@@ -101,11 +102,14 @@ fun LogViewerScreen() {
         }
     }
 
-    // 自动滚动：新日志追加且开关开启时，保持停留在最新一条。
-    LaunchedEffect(records, autoScroll) {
-        if (autoScroll && records.isNotEmpty()) {
+    // v2：记住上一次数量，仅在「新增」时滚动（旧实现 records 任何变化都强制滚动，
+    // 用户手动回滚浏览历史时会被拉回底部，且过滤条件变化也会触发滚动）
+    var lastRecordCount by remember { mutableStateOf(0) }
+    LaunchedEffect(records.size, autoScroll) {
+        if (autoScroll && records.isNotEmpty() && records.size > lastRecordCount) {
             listState.scrollToItem(records.lastIndex)
         }
+        lastRecordCount = records.size
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -189,7 +193,8 @@ fun LogViewerScreen() {
                 .padding(horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(records) { record ->
+            // v2：补 key——FIFO 淘汰头部后无 key 会导致展开状态错位到相邻日志
+            items(records, key = { it.id }) { record ->
                 LogRow(record = record, onCopy = {
                     clipboard.setText(AnnotatedString(record.toFlatString()))
                 })
@@ -459,14 +464,25 @@ private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
     }
 }
 
+// v2：SimpleDateFormat 提升为复用实例（旧实现每行日志 new 一个，
+// 长列表滚动时无谓分配 + SimpleDateFormat 构造成本不低）
+private val logTimeFormat = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+
 private fun formatTime(ts: Long): String {
-    val s = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-    return s.format(java.util.Date(ts))
+    synchronized(logTimeFormat) {
+        return logTimeFormat.format(java.util.Date(ts))
+    }
 }
 
 /** 导出并分享：写入应用私有缓存目录，再发起系统分享。 */
 private fun exportAndShare(context: android.content.Context, content: String) {
-    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+    // v2：GlobalScope → 受管协程（GlobalScope 生命周期失控；导出失败无提示）。
+    // 此处为顶层函数拿不到作用域，用 kotlinx.coroutines 自带的 SupervisorJob
+    // + IO 单发任务，并在失败时汇入日志中枢，不再无声吞错。
+    val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
+    scope.launch {
         try {
             val dir = java.io.File(context.cacheDir, "logs")
             dir.mkdirs()
@@ -486,7 +502,11 @@ private fun exportAndShare(context: android.content.Context, content: String) {
                 context.startActivity(Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         } catch (e: Exception) {
-            // 分享失败不影响日志中枢本身；如需可追溯可在此汇入 SYSTEM 日志。
+            AppLogger.instance.warn(
+                category = com.apex.agent.core.logging.LogCategory.SYSTEM,
+                source = "LogViewer",
+                message = "日志导出失败: ${e.message}"
+            )
         }
     }
 }

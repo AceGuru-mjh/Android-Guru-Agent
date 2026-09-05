@@ -130,36 +130,13 @@ class TerminalViewModel @Inject constructor(
 
     enum class DepGroup { GENERAL, ANDROID }
 
-    val depItems: List<DepItem> = listOf(
-        DepItem("jdk17", "JDK 17", DepGroup.GENERAL,
-            "winget install Microsoft.OpenJDK.17 --accept-source-agreements --accept-package-agreements",
-            "scoop install adopt17-hotspot",
-            "java -version"),
-        DepItem("git", "Git", DepGroup.GENERAL,
-            "winget install Git.Git --accept-source-agreements --accept-package-agreements",
-            "scoop install git",
-            "git --version"),
-        DepItem("gradle", "Gradle 8.10", DepGroup.GENERAL,
-            "winget install Gradle.Gradle --version 8.10 --accept-source-agreements",
-            "scoop install gradle@8.10",
-            "gradle --version"),
-        DepItem("android-sdk", "Android SDK", DepGroup.ANDROID,
-            "winget install Google.AndroidSDK --accept-source-agreements --accept-package-agreements",
-            "scoop install android-sdk",
-            "sdkmanager --version"),
-        DepItem("ndk", "NDK 27.0.12077973", DepGroup.ANDROID,
-            "sdkmanager \"ndk;27.0.12077973\"",
-            "sdkmanager \"ndk;27.0.12077973\"",
-            "ndk-build --version"),
-        DepItem("platform-tools", "Platform Tools (adb)", DepGroup.ANDROID,
-            "sdkmanager \"platform-tools\"",
-            "scoop install adb",
-            "adb --version"),
-        DepItem("build-tools", "Build-Tools 35.0.0", DepGroup.ANDROID,
-            "sdkmanager \"build-tools;35.0.0\"",
-            "sdkmanager \"build-tools;35.0.0\"",
-            "ls \$ANDROID_HOME/build-tools/35.0.0 >/dev/null 2>&1 && echo BT_OK")
-    )
+    // v2 修复：旧清单是 Windows 的 winget/scoop 命令，在 Android PTY 里必然失败。
+    // 现在委托给 environment/DepCatalog 单一数据源（apt/Ubuntu proot 命令），
+    // 同时消除 TerminalViewModel 与 DepCatalog 两份清单漂移。
+    val depItems: List<DepItem> =
+        com.apex.agent.environment.DepCatalog.ALL.map {
+            DepItem(it.id, it.name, DepGroup.valueOf(it.group.name), it.installOfficial, it.installMirror, it.checkCommand)
+        }
 
     // 镜像源开关
     private val _useMirror = MutableStateFlow(prefs.getBoolean("dep_use_mirror", true))

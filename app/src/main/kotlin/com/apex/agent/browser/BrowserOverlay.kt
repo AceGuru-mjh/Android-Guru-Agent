@@ -23,6 +23,8 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,7 +60,9 @@ class BrowserOverlay @Inject constructor(
     @Volatile private var rootView: FrameLayout? = null
     @Volatile private var webViewHost: FrameLayout? = null
     @Volatile private var composeView: ComposeView? = null
-    private val lifecycleOwner = OverlayLifecycleOwner()
+    // 每次展示周期新建：LifecycleRegistry 一旦 ON_DESTROY 无法重置，
+    // 复用同一实例会在二次显示时抛 IllegalStateException
+    @Volatile private var lifecycleOwner: OverlayLifecycleOwner? = null
 
     // 控制条/浮窗状态（Compose 观察）
     private var uiState by mutableStateOf(OverlayUiState())
@@ -116,7 +120,15 @@ class BrowserOverlay @Inject constructor(
         }
 
         // Compose 控制条
+        // v2 修复：必须把 LifecycleOwner + SavedStateRegistryOwner 挂到 View 树上，
+        // 否则 ComposeView.onAttachedToWindow 找不到 owner 直接抛
+        // IllegalStateException，被下方 catch 吞掉 → 浮窗静默永远无法显示
+        //（人工接管 UI 即 WAITING_HUMAN 面板完全不可用）。
+        val owner = OverlayLifecycleOwner()
+        owner.performRestore()
         val compose = ComposeView(appContext).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
             setContent {
                 OverlayContent(
                     state = uiState,
@@ -135,17 +147,20 @@ class BrowserOverlay @Inject constructor(
         rootView = root
         webViewHost = host
         composeView = compose
+        lifecycleOwner = owner
 
         try {
             windowManager.addView(root, params)
-            lifecycleOwner.onCreate()
-            lifecycleOwner.onStart()
-            lifecycleOwner.onResume()
+            owner.onCreate()
+            owner.onStart()
+            owner.onResume()
             rebindWebView()
         } catch (e: Exception) {
             // 无悬浮窗权限或系统拒绝：静默降级，引擎照常后台工作
             rootView = null
             webViewHost = null
+            composeView = null
+            lifecycleOwner = null
         }
     }
 
@@ -153,10 +168,14 @@ class BrowserOverlay @Inject constructor(
         val root = rootView ?: return
         // 从浮窗 detach WebView，交还引擎后台驱动
         detachWebView()
+        lifecycleOwner?.let { owner ->
+            runCatching {
+                owner.onPause()
+                owner.onStop()
+                owner.onDestroy()
+            }
+        }
         try {
-            lifecycleOwner.onPause()
-            lifecycleOwner.onStop()
-            lifecycleOwner.onDestroy()
             windowManager.removeView(root)
         } catch (_: Exception) {
             // ignore
@@ -164,6 +183,7 @@ class BrowserOverlay @Inject constructor(
         rootView = null
         webViewHost = null
         composeView = null
+        lifecycleOwner = null
     }
 
     /** 把引擎 active WebView 挂到浮窗容器（接管期间人类真实交互） */

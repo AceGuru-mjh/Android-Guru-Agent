@@ -70,19 +70,51 @@ class ApexApp : Application(), Configuration.Provider {
     /**
      * 安装进程级未捕获异常处理器：任何线程抛出的未处理异常都会以 FATAL 级别
      * 汇入日志中枢，并保留原始堆栈到 [LogRecord.throwable]，便于事后追溯崩溃。
+     *
+     * v2 修复：
+     * - 旧实现在崩溃路径上调用 AppLogger（旧版内部是 `runBlocking { mutex.withLock }`）——
+     *   若崩溃恰好发生在持锁的日志协程内，crash handler 会永久等待同一把锁，
+     *   进程"僵而不死"（无限 ANR 循环）。AppLogger v2 已改为非阻塞监视器锁，
+     *   此处再叠一层 runCatching 双保险：崩溃路径上的任何二次异常都绝不外抛。
+     * - 追加同步落盘：把崩溃摘要 + 堆栈直接写入 filesDir/crash/ 目录，
+     *   即使日志中枢不可用也有崩溃现场可查（crash 文件按秒命名，保留最近 10 个）。
      */
     private fun installGlobalCrashHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            AppLogger.instance.fatal(
-                category = LogCategory.SYSTEM,
-                source = "UncaughtException@${thread.name}",
-                message = "未捕获异常: ${throwable.message ?: throwable::class.simpleName}",
-                throwable = throwable,
-                tags = arrayOf("crash", "uncaught")
-            )
+            runCatching {
+                writeCrashFile(thread, throwable)
+            }
+            runCatching {
+                AppLogger.instance.fatal(
+                    category = LogCategory.SYSTEM,
+                    source = "UncaughtException@${thread.name}",
+                    message = "未捕获异常: ${throwable.message ?: throwable::class.simpleName}",
+                    throwable = throwable,
+                    tags = arrayOf("crash", "uncaught")
+                )
+            }
             defaultHandler?.uncaughtException(thread, throwable)
         }
+    }
+
+    /** 崩溃现场同步落盘（崩溃路径专用，不依赖任何协程/锁）。 */
+    private fun writeCrashFile(thread: Thread, throwable: Throwable) {
+        val crashDir = java.io.File(filesDir, "crash").apply { mkdirs() }
+        val file = java.io.File(crashDir, "crash-${System.currentTimeMillis()}.txt")
+        val stack = android.util.Log.getStackTraceString(throwable)
+        file.writeText(
+            buildString {
+                appendLine("time: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
+                appendLine("thread: ${thread.name}")
+                appendLine("exception: ${throwable::class.java.name}")
+                appendLine("message: ${throwable.message}")
+                appendLine("stack:")
+                appendLine(stack)
+            }
+        )
+        // 只保留最近 10 个崩溃文件，防止磁盘膨胀
+        crashDir.listFiles()?.sortedByDescending { it.name }?.drop(10)?.forEach { it.delete() }
     }
 
     /**

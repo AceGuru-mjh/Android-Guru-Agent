@@ -45,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,9 +64,13 @@ import com.apex.agent.core.tools.skill.SkillManifest
 import com.apex.agent.core.tools.skill.SkillToolDef
 import com.apex.agent.core.tools.skill.SkillRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewModelScope
 import javax.inject.Inject
 
 @HiltViewModel
@@ -80,15 +85,21 @@ class SkillViewModel @Inject constructor(
     private val _lastMessage = MutableStateFlow<String?>(null)
     val lastMessage: StateFlow<String?> = _lastMessage.asStateFlow()
 
+    // v2：旧实现在 Main 线程直接调注册表（扫盘/写文件），点一下开关就掉帧；
+    // 现在所有注册表操作全部 IO 线程化
     init { refresh() }
 
     fun refresh() {
-        _skills.value = skillRegistry.getInstalled()
+        viewModelScope.launch {
+            _skills.value = withContext(Dispatchers.IO) { skillRegistry.getInstalled() }
+        }
     }
 
     fun toggleEnabled(skillId: String, enabled: Boolean) {
-        skillRegistry.setEnabled(skillId, enabled)
-        refresh()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { skillRegistry.setEnabled(skillId, enabled) }
+            refresh()
+        }
     }
 
     fun clearMessage() { _lastMessage.value = null }
@@ -96,19 +107,20 @@ class SkillViewModel @Inject constructor(
     /** 供 UI 主动报告提示（如导入文件读取失败）。 */
     fun notify(msg: String) { _lastMessage.value = msg }
 
-    /** 从 manifest JSON 字符串安装 Skill（导入场景）。 */
-    fun installFromJson(json: String): Boolean {
-        return skillRegistry.install(json).fold(
-            onSuccess = { m ->
-                refresh()
-                _lastMessage.value = "已安装：${m.name}"
-                true
-            },
-            onFailure = { e ->
-                _lastMessage.value = "安装失败：${e.message}"
-                false
-            }
-        )
+    /** 从 manifest JSON 字符串安装 Skill（导入场景）。结果经 lastMessage 提示。 */
+    fun installFromJson(json: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { skillRegistry.install(json) }
+            result.fold(
+                onSuccess = { m ->
+                    refresh()
+                    _lastMessage.value = "已安装：${m.name}"
+                },
+                onFailure = { e ->
+                    _lastMessage.value = "安装失败：${e.message}"
+                }
+            )
+        }
     }
 
     /**
@@ -140,18 +152,19 @@ class SkillViewModel @Inject constructor(
             promptInjection = if (type == "prompt") prompt.ifBlank { description } else null
         )
         val json = kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(SkillManifest.serializer(), manifest)
-        return installFromJson(json).also {
-            if (it) _lastMessage.value = "已创建：${manifest.name}"
+        installFromJson(json).also {
+            _lastMessage.value = "已创建：${manifest.name}"
         }
     }
 
-    fun uninstall(skillId: String): Boolean {
-        val ok = skillRegistry.uninstall(skillId)
-        if (ok) {
-            refresh()
-            _lastMessage.value = "已卸载：$skillId"
+    fun uninstall(skillId: String) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { skillRegistry.uninstall(skillId) }
+            if (ok) {
+                refresh()
+                _lastMessage.value = "已卸载：$skillId"
+            }
         }
-        return ok
     }
 }
 
@@ -169,15 +182,19 @@ fun SkillScreen(
     var showToast by remember { mutableStateOf(false) }
 
     // 导入 manifest 文件（apex-skill-v1 JSON）
+    // v2：文件读取（contentResolver IO）从主线程下沉到 IO 线程
+    val importScope = rememberCoroutineScope()
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        val json = readUriText(context, uri)
-        if (json != null) {
-            viewModel.installFromJson(json)
-        } else {
-            viewModel.notify("无法读取文件，请选择有效的 JSON 文件")
+        importScope.launch {
+            val json = withContext(Dispatchers.IO) { readUriText(context, uri) }
+            if (json != null) {
+                viewModel.installFromJson(json)
+            } else {
+                viewModel.notify("无法读取文件，请选择有效的 JSON 文件")
+            }
         }
     }
 

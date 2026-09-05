@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -55,20 +56,30 @@ class GithubTokenManager @Inject constructor(
         _connectionState.value = GithubConnectionState(false)
     }
 
+    // v2：共享单例 client（旧实现每次 validateToken 都 new 一个带独立连接池的
+    // OkHttpClient，且非 2xx 分支不关 response —— 连接泄漏）
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
     suspend fun validateToken(token: String): String? = withContext(Dispatchers.IO) {
         try {
-            val client = OkHttpClient()
             val request = Request.Builder()
                 .url("https://api.github.com/user")
                 .header("Authorization", "Bearer $token")
                 .header("Accept", "application/vnd.github.v3+json")
                 .header("User-Agent", "ApexAgent/1.0")
                 .build()
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string() ?: return@withContext null
-                Regex("\"login\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
-            } else null
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext null
+                    val loginRegex = Regex("\"login\"\\s*:\\s*\"([^\"]+)\"")
+                    loginRegex.find(body)?.groupValues?.get(1)
+                } else null
+            }
         } catch (e: Exception) { null }
     }
 

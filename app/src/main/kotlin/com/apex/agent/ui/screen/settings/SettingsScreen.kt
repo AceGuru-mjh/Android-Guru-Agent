@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,10 +40,10 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onBack: () -> Unit = {}
 ) {
-    val profiles by viewModel.profiles.collectAsState()
-    val providers by viewModel.providers.collectAsState()
-    val roles by viewModel.roles.collectAsState()
-    val agent by viewModel.agentSettings.collectAsState()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val roles by viewModel.roles.collectAsStateWithLifecycle()
+    val agent by viewModel.agentSettings.collectAsStateWithLifecycle()
 
     var selectedId by remember { mutableStateOf(viewModel.defaultProfile.id) }
     val selected = profiles.firstOrNull { it.id == selectedId } ?: profiles.firstOrNull()

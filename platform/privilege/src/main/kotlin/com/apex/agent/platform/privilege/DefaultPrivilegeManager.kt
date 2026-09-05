@@ -39,8 +39,26 @@ class DefaultPrivilegeManager @Inject constructor(
     private fun checkRoot() {
         _rootAvailable.value = try {
             val suPaths = listOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su")
-            suPaths.any { File(it).exists() } ||
-                Runtime.getRuntime().exec("which su").waitFor() == 0
+            suPaths.any { File(it).exists() } || whichSuExists()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * v2 修复：旧实现 `exec("which su").waitFor()` 无超时——本 @Singleton 在 DI 首次
+     * 注入（通常主线程）时执行，个别设备上 su 命令挂起会让主线程永久阻塞（ANR）。
+     * 现在 2 秒超时 + destroyForcibly 兜底，与 PrivilegeDetector 的做法对齐。
+     */
+    private fun whichSuExists(): Boolean {
+        return try {
+            val process = Runtime.getRuntime().exec("which su")
+            val completed = process.waitFor(2, TimeUnit.SECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                return false
+            }
+            process.exitValue() == 0
         } catch (e: Exception) {
             false
         }

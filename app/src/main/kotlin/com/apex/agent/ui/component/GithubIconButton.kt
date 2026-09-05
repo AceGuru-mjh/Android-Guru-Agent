@@ -26,7 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,7 +54,7 @@ fun GithubIconButton(
     tokenManager: GithubTokenManager,
     modifier: Modifier = Modifier
 ) {
-    val connectionState by tokenManager.connectionState.collectAsState()
+    val connectionState by tokenManager.connectionState.collectAsStateWithLifecycle()
     var showMenu by remember { mutableStateOf(false) }
     var showTokenDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current

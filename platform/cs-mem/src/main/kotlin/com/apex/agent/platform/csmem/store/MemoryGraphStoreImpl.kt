@@ -185,9 +185,11 @@ class MemoryGraphStoreImpl @Inject constructor(
             // 新增边
             ingestEdges(delta.newEdges, delta.episodeId)
 
-            // 删除边
+            // 删除边（修复：限定在本 Episode 作用域内。旧 deleteByLabels 按标签
+            // 全局删除，帧内计数器边 ID 又每帧重置，B Episode 的差分可能误删
+            // A Episode 的同名边。内容哈希边 ID + Episode 作用域双保险。）
             if (delta.removedEdgeIds.isNotEmpty()) {
-                db.edgeDao().deleteByLabels(delta.removedEdgeIds)
+                db.edgeDao().deleteByLabelsInEpisode(delta.episodeId, delta.removedEdgeIds)
             }
 
             // 位移节点：持久化新坐标，避免空间记忆漂移（修复仅更新 lastSeen 的缺口）
@@ -258,6 +260,10 @@ class MemoryGraphStoreImpl @Inject constructor(
         db.fsmMacroDao().recordFailure(skillId, System.currentTimeMillis())
     }
 
+    override suspend fun crystallizeMacro(skillId: String) {
+        db.fsmMacroDao().crystallize(skillId)
+    }
+
     // ==================== Entropy & Forgetting ====================
 
     override suspend fun decayAllEnergy(decayFactor: Float) {
@@ -295,6 +301,26 @@ class MemoryGraphStoreImpl @Inject constructor(
 
     override suspend fun resolveMigration(oldFingerprint: String): String? {
         return db.migrationDao().getByOldFingerprint(oldFingerprint)?.newFingerprint
+    }
+
+    override suspend fun findMacrosViaMigration(
+        currentFingerprint: String,
+        appPackage: String
+    ): FSMMacro? {
+        // 当前指纹 → 映射到它的旧指纹别名（按置信度降序）
+        val aliases = runCatching {
+            db.migrationDao().getByNewFingerprint(currentFingerprint)
+        }.getOrDefault(emptyList())
+        if (aliases.isEmpty()) return null
+
+        // 用旧别名逐一回查旧版本时期蒸馏的 FSM 宏
+        for (alias in aliases) {
+            val macro = runCatching {
+                db.fsmMacroDao().findBestMatch(alias.oldFingerprint, appPackage)
+            }.getOrNull() ?: continue
+            return macro.toDomain()
+        }
+        return null
     }
 
     override suspend fun getMigrationMaps(): List<MigrationMap> {

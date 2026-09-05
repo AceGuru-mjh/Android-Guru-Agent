@@ -74,29 +74,35 @@ jobs:
 
       - name: Compile core:logging
         run: |
+          # T76：kotlinx-serialization 编译器插件（kotlin-compiler 发行版自带）
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
           CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
-          kotlinc -cp "$CLASSPATH" -d /tmp/build/logging \
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/logging \
             $(find core/logging/src/main/kotlin -name "*.kt") \
             -jvm-target 17
 
       - name: Compile core:llm-adapter
         run: |
           CLASSPATH=$(find /tmp/apex-libs -name "*.jar" | tr '\n' ':')
-          kotlinc -cp "$CLASSPATH" -d /tmp/build/llm-adapter \
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/llm-adapter \
             $(find core/llm-adapter/src/main/kotlin -name "*.kt") \
             -jvm-target 17
 
       - name: Compile core:tool-registry
         run: |
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
           CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter"
-          kotlinc -cp "$CLASSPATH" -d /tmp/build/tool-registry \
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/tool-registry \
             $(find core/tool-registry/src/main/kotlin -name "*.kt") \
             -jvm-target 17
 
       - name: Compile core:agent-engine
         run: |
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
           CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/llm-adapter:/tmp/build/tool-registry:/tmp/build/logging"
-          kotlinc -cp "$CLASSPATH" -d /tmp/build/agent-engine \
+          # T76：task/ 包（@Serializable + .serializer()）依赖 serialization 插件
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/agent-engine \
             $(find core/agent-engine/src/main/kotlin -name "*.kt") \
             -jvm-target 17
 
@@ -342,6 +348,18 @@ jobs:
           # "a,"). This module must stay green from now on — do NOT delete or
           # skip this step to make CI pass; fix the code or the test instead.
           ./gradlew :core:tool-registry:test \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
+      - name: Run platform:cs-mem unit tests
+        run: |
+          # v3 memory hardening coverage: stable content-hash edge IDs
+          # (differential ingest semantics), TraceDistiller input_text param
+          # extraction (replay purity), BypassExecutionEngine cross-version
+          # macro recall via migration alias bridge + state-deviation guard.
+          # Pure JVM (returnDefaultValues) — no device required.
+          ./gradlew :platform:cs-mem:testDebugUnitTest \
             --no-daemon \
             -Pkotlin.incremental=false \
             --stacktrace

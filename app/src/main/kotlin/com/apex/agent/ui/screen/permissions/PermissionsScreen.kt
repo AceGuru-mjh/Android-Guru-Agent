@@ -41,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +62,10 @@ fun PermissionsScreen() {
     val context = LocalContext.current
     var hasRoot by remember { mutableStateOf(false) }
     var hasShizuku by remember { mutableStateOf(false) }
+    // v2：Root 检测 = fork `su --version` + waitFor(3s) + 多个 File.exists 磁盘 IO，
+    // 旧实现直接在 onClick（主线程）同步执行 → 轻则掉帧重则 ANR。
+    // 现在检测统一挂到 IO 线程，回主线程只更新状态。
+    val scope = rememberCoroutineScope()
 
     // 系统级权限的实时状态
     var accessibilityGranted by remember { mutableStateOf(false) }
@@ -67,8 +75,10 @@ fun PermissionsScreen() {
 
     // 在后台检测权限
     LaunchedEffect(Unit) {
-        hasRoot = PrivilegeDetector.detectRoot()
-        hasShizuku = PrivilegeDetector.detectShizuku()
+        withContext(Dispatchers.IO) {
+            hasRoot = PrivilegeDetector.detectRoot()
+            hasShizuku = PrivilegeDetector.detectShizuku()
+        }
         accessibilityGranted = context.isAccessibilityServiceEnabled()
         overlayGranted = Settings.canDrawOverlays(context)
         notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -97,15 +107,19 @@ fun PermissionsScreen() {
                 status = if (hasRoot) Status.Granted else Status.Denied,
                 actionLabel = "检测",
                 onClick = {
-                    hasRoot = PrivilegeDetector.detectRoot()
-                    storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        android.os.Environment.isExternalStorageManager()
-                    } else {
-                        context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                    // v2：Root 检测下沉 IO 线程（fork su 最多 3s，主线程执行会 ANR）
+                    scope.launch {
+                        val root = withContext(Dispatchers.IO) { PrivilegeDetector.detectRoot() }
+                        hasRoot = root
+                        storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            android.os.Environment.isExternalStorageManager()
+                        } else {
+                            context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                        }
+                        overlayGranted = Settings.canDrawOverlays(context)
+                        notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
+                        accessibilityGranted = context.isAccessibilityServiceEnabled()
                     }
-                    overlayGranted = Settings.canDrawOverlays(context)
-                    notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
-                    accessibilityGranted = context.isAccessibilityServiceEnabled()
                 }
             )
 

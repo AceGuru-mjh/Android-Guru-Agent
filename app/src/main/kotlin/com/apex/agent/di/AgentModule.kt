@@ -9,6 +9,11 @@ import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.engine.orchestrator.DefaultTaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestratorConfig
+import com.apex.agent.core.engine.task.AgentTask
+import com.apex.agent.core.engine.task.FileTaskStore
+import com.apex.agent.core.engine.task.TaskConfigSnapshot
+import com.apex.agent.core.engine.task.TaskRuntime
+import com.apex.agent.core.engine.task.TaskStore
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.tools.ToolExecutor
@@ -154,6 +159,71 @@ object AgentModule {
      * [ApexAgentEngine] via the @Singleton-scoped delegate, so there's no
      * duplicate engine instance.
      */
+    // ═══════════════════════════════════════════════════════════════
+    // T76 — Agent Task Runtime（长任务执行体系，D-2 方案 B 叠加层）
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * T76 — 文件式任务存储（D-1：原子写 + 损坏隔离 + schema v1）。
+     *
+     * 布局 `filesDir/taskstore/<taskId>.json`；FileTaskStore 零 Android
+     * 依赖（纯 java.io），此处仅注入目录。
+     */
+    @Provides
+    @Singleton
+    fun provideTaskStore(@ApplicationContext context: Context): TaskStore {
+        return FileTaskStore(java.io.File(context.filesDir, "taskstore"))
+    }
+
+    /**
+     * T76 — TaskRuntime 装配（D-2 修正版：AgentEngine 绑定保持 ApexAgentEngine
+     * 不动，TaskRuntime 独立注入——VM 的 15 处 `as? ApexAgentEngine` cast
+     * 全兼容）。
+     *
+     * 引擎挂钩（N-9/N-12 函数式注入）：
+     * - configProvider：任务创建时快照当前生效配置（§20 配置快照语义）；
+     * - contextInjector：压缩后向引擎 history 重注入受保护任务状态消息；
+     * - tagsSetter：taskId/stepId 填入 LlmRequestContext（诊断四元贯通）。
+     *
+     * 消费方式：AgentChatViewModel 经 AgentTaskStatusController 使用（execute
+     * 走 TaskRuntime 包装流获得 checkpoint 能力；plan/spec 确认与配置更新
+     * 等仍直接 cast 引擎——两条路径共享同一 @Singleton 引擎实例）。
+     */
+    @Provides
+    @Singleton
+    fun provideTaskRuntime(
+        agentEngine: AgentEngine,
+        taskStore: TaskStore,
+        memory: ConversationMemory,
+        config: AgentConfig
+    ): TaskRuntime {
+        val apex = agentEngine as? ApexAgentEngine
+        return TaskRuntime(
+            engine = agentEngine,
+            store = taskStore,
+            memory = memory,
+            configProvider = {
+                val cfg = apex?.currentConfig() ?: config
+                TaskConfigSnapshot(
+                    mode = cfg.mode.name,
+                    thinkingLevel = cfg.thinkingLevel.name,
+                    maxIterations = cfg.maxIterations,
+                    maxContextTokens = cfg.maxContextTokens,
+                    compressionThreshold = cfg.compressionThreshold,
+                    preserveRecentTurns = cfg.preserveRecentTurns,
+                    maxToolOutputLength = cfg.maxToolOutputLength,
+                    temperature = cfg.temperature,
+                    reflectionRounds = cfg.reflectionRounds,
+                    // AgentConfig.enabledToolIds is Set<String>? while the snapshot
+                    // expects List<String>; convert explicitly to satisfy the type.
+                    enabledToolIds = cfg.enabledToolIds?.toList() ?: emptyList()
+                )
+            },
+            contextInjector = { content -> apex?.injectSystemContext(content) },
+            tagsSetter = { taskId, stepId -> apex?.setLlmExecutionTags(taskId, stepId) }
+        )
+    }
+
     @Provides
     @Singleton
     fun provideTaskOrchestrator(
@@ -165,6 +235,7 @@ object AgentModule {
         memory: ConversationMemory,
         memoryObserver: ExecutionMemoryObserver,
         privilegeInfoProvider: PrivilegeInfoProvider,
+        contextCompressor: ContextCompressor,
         // T72：注入多模型运行时，BUILD 循环按角色路由
         modelRuntime: ModelRuntime
     ): TaskOrchestrator {
@@ -180,7 +251,11 @@ object AgentModule {
             memory = memory,
             memoryObserver = memoryObserver,
             privilegeInfoProvider = privilegeInfoProvider,
-            modelRuntime = modelRuntime
+            modelRuntime = modelRuntime,
+            // P7：编排器与 AgentEngine 共享同一上下文压缩链路（HybridCompressor），
+            // 使经编排器执行的长任务同样具备三级压缩（截断/滑窗/LLM摘要），
+            // 修复"编排器路径工具输出无界增长"的上下文窗口风险。
+            contextCompressor = contextCompressor
         )
     }
 }

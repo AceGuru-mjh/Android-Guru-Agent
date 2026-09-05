@@ -883,6 +883,153 @@ class ProgressAndEventTests {
             events.last() is AgentEvent.Complete
         )
     }
+
+    // ── 流式语义回归（v3：编排器与 AgentEngine 对齐）─────────────────
+
+    /**
+     * v3 修复回归：旧实现把正文内容整段缓存后误当 ThinkingChunk 发射，
+     * UI 无法逐字渲染回复。修复后正文必须在 LLM 流式阶段逐段转发为
+     * ResponseChunk，而非思维链事件。
+     */
+    @Test
+    fun `content chunks stream as ResponseChunk during LLM call`() = runTest {
+        val llm = FakeLlmClient(
+            listOf(
+                FakeLlmClient.ScriptedResponse.Stream(
+                    chunks = listOf(
+                        LlmStreamChunk(content = "Hello", isFinish = false),
+                        LlmStreamChunk(content = ", ", isFinish = false),
+                        LlmStreamChunk(content = "world!", isFinish = false),
+                        LlmStreamChunk(isFinish = true)
+                    )
+                )
+            )
+        )
+        val orchestrator = buildOrchestrator(llm = llm)
+
+        val events = orchestrator.execute("hi").toList()
+
+        val chunks = events.filterIsInstance<AgentEvent.ResponseChunk>()
+        assertEquals(
+            "正文应按流式分段逐段转发（3 段），实际: ${chunks.map { it.text }}",
+            3,
+            chunks.size
+        )
+        assertEquals("Hello", chunks[0].text)
+        assertEquals(", ", chunks[1].text)
+        assertEquals("world!", chunks[2].text)
+
+        val completes = events.filterIsInstance<AgentEvent.ResponseComplete>()
+        assertEquals("ResponseComplete 应恰好一次", 1, completes.size)
+        assertEquals("Hello, world!", completes[0].fullText)
+    }
+
+    /**
+     * v3 修复回归：原生思考内容（DeepSeek-R1 / Qwen3-thinking / o-series 的
+     * delta.reasoning_content）应透传为 ThinkingChunk 并在 ThinkingComplete
+     * 中给出完整思维链；正文与思维链不得混流。
+     */
+    @Test
+    fun `reasoningContent streams as ThinkingChunk and never mixes with content`() = runTest {
+        val llm = FakeLlmClient(
+            listOf(
+                FakeLlmClient.ScriptedResponse.Stream(
+                    chunks = listOf(
+                        LlmStreamChunk(reasoningContent = "thinking ", isFinish = false),
+                        LlmStreamChunk(reasoningContent = "hard", isFinish = false),
+                        LlmStreamChunk(content = "Answer!", isFinish = false),
+                        LlmStreamChunk(isFinish = true)
+                    )
+                )
+            )
+        )
+        // ThinkingComplete 的发射门控为 thinkingLevel != NONE，故用 STANDARD
+        val orchestrator = buildOrchestrator(
+            llm = llm,
+            agentConfig = AgentConfig(
+                mode = AgentMode.BUILD,
+                thinkingLevel = ThinkingLevel.STANDARD,
+                maxIterations = 5
+            )
+        )
+
+        val events = orchestrator.execute("hi").toList()
+
+        val thinkingChunks = events.filterIsInstance<AgentEvent.ThinkingChunk>()
+        assertEquals(
+            "reasoning_content 应逐段透传为 ThinkingChunk",
+            listOf("thinking ", "hard"),
+            thinkingChunks.map { it.text }
+        )
+
+        val thinkingComplete = events.filterIsInstance<AgentEvent.ThinkingComplete>()
+        assertEquals("ThinkingComplete 应恰好一次", 1, thinkingComplete.size)
+        assertEquals(
+            "完整思维链 = reasoning 拼接（不得混入正文）",
+            "thinking hard",
+            thinkingComplete[0].fullThought
+        )
+
+        val responseChunks = events.filterIsInstance<AgentEvent.ResponseChunk>()
+        assertEquals(
+            "正文只应有一段，不得把 reasoning 混进 ResponseChunk",
+            listOf("Answer!"),
+            responseChunks.map { it.text }
+        )
+    }
+
+    /**
+     * v3 修复回归：OpenAI 并行工具调用流中，首片带 id+index，后续分片只带
+     * index 而 id 为空。累加器键必须以 index 优先——若以 id 优先，首片键
+     * "call_1" 与续片键 "_idx_0" 不一致，同一调用被撕裂成两个累加器，
+     * 参数 JSON 被裁断、工具调用失败。
+     */
+    @Test
+    fun `tool call fragments with only index merge into one accumulator`() = runTest {
+        val llm = FakeLlmClient(
+            listOf(
+                FakeLlmClient.ScriptedResponse.Stream(
+                    chunks = listOf(
+                        // 首片：id + index=0 + 函数名 + 参数前半
+                        LlmStreamChunk(
+                            toolCalls = listOf(
+                                ToolCall(id = "call_1", name = "t", arguments = "{\"a\":", index = 0)
+                            ),
+                            isFinish = false
+                        ),
+                        // 续片：id 为空、仅携带 index=0 与参数后半
+                        LlmStreamChunk(
+                            toolCalls = listOf(
+                                ToolCall(id = "", name = "", arguments = "1}", index = 0)
+                            ),
+                            isFinish = false
+                        ),
+                        LlmStreamChunk(isFinish = true)
+                    )
+                ),
+                FakeLlmClient.ScriptedResponse.Ok(content = "done", toolCalls = emptyList())
+            )
+        )
+        val toolExecutor = FakeToolExecutor().apply {
+            registerSuccess("t", "ok")
+        }
+        val orchestrator = buildOrchestrator(llm = llm, toolExecutor = toolExecutor)
+
+        val events = orchestrator.execute("hi").toList()
+
+        val toolCompletes = events.filterIsInstance<AgentEvent.ToolCallComplete>()
+        assertEquals(
+            "分片参数应合并为一次完整工具调用，实际: ${toolCompletes.map { it.toolName to it.arguments }}",
+            1,
+            toolCompletes.size
+        )
+        assertEquals("t", toolCompletes[0].toolName)
+        assertEquals(
+            "合并后的参数应为完整 JSON",
+            "{\"a\":1}",
+            toolCompletes[0].arguments
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

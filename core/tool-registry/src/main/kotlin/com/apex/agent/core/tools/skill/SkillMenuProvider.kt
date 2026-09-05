@@ -3,6 +3,10 @@ package com.apex.agent.core.tools.skill
 /**
  * 为斜杠菜单提供动态数据
  * 从 SkillRegistry 实时读取已安装的 Skill/MCP/连接器/插件
+ *
+ * v2 修复：旧实现用 label 后缀 `"(未安装)"` 字符串编码状态，消费方
+ * （SlashMenuProvider）用 `label.contains("未安装")` 反推——改文案即全线错乱，
+ * 用户自建技能名字含"未安装"还会被误标。现在改为结构化字段 [SkillMenuItem.installed]。
  */
 class SkillMenuProvider(
     private val skillRegistry: SkillRegistry
@@ -18,7 +22,8 @@ class SkillMenuProvider(
                     id = skill.manifest.id,
                     label = skill.manifest.name,
                     command = "/skill:${skill.manifest.id} ",
-                    description = skill.manifest.description
+                    description = skill.manifest.description,
+                    installed = true
                 )
             }
     }
@@ -33,9 +38,10 @@ class SkillMenuProvider(
             .map { t ->
                 SkillMenuItem(
                     id = t.id,
-                    label = "${t.name} (未安装)",
+                    label = t.name,
                     command = "/skill:${t.id} ",
-                    description = t.description
+                    description = t.description,
+                    installed = false
                 )
             }
     }
@@ -62,5 +68,7 @@ data class SkillMenuItem(
     val id: String,
     val label: String,
     val command: String,
-    val description: String = ""
+    val description: String = "",
+    /** 是否已安装（消费方渲染角标/状态用，替代旧 label 字符串协议）。 */
+    val installed: Boolean = true
 )

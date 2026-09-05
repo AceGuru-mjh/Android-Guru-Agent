@@ -33,27 +33,29 @@ enum class DepGroup { GENERAL, ANDROID }
 /**
  * Canonical dependency list (migrated from old TerminalViewModel.depItems).
  *
- * These are the 7 deps the old UI shipped. Adjust as needed; the Runtime itself knows
- * nothing about these — they're purely the provisioner's concern.
+ * v2 修复：旧清单的「官方源」是 Windows 的 winget/scoop——在 Android PTY 里执行
+ * 必然 `command not found`，功能 100% 不可用。现在统一改为 Ubuntu（proot）环境内
+ * 真实可执行的 apt 命令；镜像源对应清华 apt 源（需先配置 sources.list，见
+ * platform/terminal/ubuntu 的 rootfs 镜像切换工具）。
  */
 object DepCatalog {
     val ALL: List<DepItem> = listOf(
         DepItem(
             id = "jdk17", name = "JDK 17", group = DepGroup.GENERAL,
-            installOfficial = "winget install Microsoft.OpenJDK.17",
-            installMirror = "scoop install adopt17-hotspot",
+            installOfficial = "apt-get update && apt-get install -y openjdk-17-jdk-headless",
+            installMirror = "apt-get update && apt-get install -y openjdk-17-jdk-headless",
             checkCommand = "java -version"
         ),
         DepItem(
             id = "git", name = "Git", group = DepGroup.GENERAL,
-            installOfficial = "winget install Git.Git",
-            installMirror = "scoop install git",
+            installOfficial = "apt-get update && apt-get install -y git",
+            installMirror = "apt-get update && apt-get install -y git",
             checkCommand = "git --version"
         ),
         DepItem(
             id = "gradle", name = "Gradle 8.10", group = DepGroup.GENERAL,
-            installOfficial = "winget install Gradle.Gradle",
-            installMirror = "scoop install gradle",
+            installOfficial = "apt-get update && apt-get install -y gradle",
+            installMirror = "apt-get update && apt-get install -y gradle",
             checkCommand = "gradle --version"
         ),
         DepItem(

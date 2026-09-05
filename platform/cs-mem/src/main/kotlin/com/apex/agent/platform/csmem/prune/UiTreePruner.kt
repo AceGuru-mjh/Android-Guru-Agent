@@ -4,6 +4,7 @@ import android.graphics.Rect
 import com.apex.agent.platform.csmem.model.*
 import com.apex.agent.platform.csmem.fingerprint.NodeFingerprint
 import com.apex.agent.platform.privilege.UiNode
+import java.security.MessageDigest
 
 /**
  * UI 树修剪器 —— 将 Android 物理 UI 树降维为语义交互图。
@@ -127,33 +128,49 @@ object UiTreePruner {
      * 为每个节点生成：
      * 1. 父子边（嵌套关系）
      * 2. 兄弟邻接边（空间相邻：上下左右最近的非容器兄弟节点）
+     *
+     * 边 ID 采用内容哈希（源指纹+目标指纹+关系类型），而非帧内自增计数器。
+     * 修复：旧实现的 `e_0, e_1, ...` 每帧重置，导致
+     * (a) [com.apex.agent.platform.csmem.diff.DifferentialIngestor] 按边 ID 集合
+     * 做差分时语义错乱——帧 N 的 e_3 与帧 N+1 的 e_3 可能连接完全不同的节点，
+     * "新增边"检测随边数波动误报；(b) EdgeDao.deleteByLabels 按标签删除会跨
+     * Episode 误删同名边。内容哈希使同一条边在任意两帧中保持同一 ID，
+     * 差分与删除语义都回归正确，且天然幂等去重。
      */
     fun generateSpatialEdges(nodes: List<SemanticNode>): List<GraphEdge> {
         val edges = mutableListOf<GraphEdge>()
-        val counter = IntCounter()
 
         for (node in nodes) {
-            generateEdgesRecursive(node, edges, counter)
+            generateEdgesRecursive(node, edges)
         }
 
         return edges
     }
 
-    /** 可变计数器（K2 不支持对局部变量的 ::ref 方法引用）。 */
-    private class IntCounter {
-        private var value = 0
-        fun next(): Int = value++
+    /**
+     * 稳定边 ID：对 (sourceFingerprint, targetFingerprint, metadata) 做内容哈希，
+     * 取前 16 位十六进制作为边标签。同一条拓扑关系在任意帧、任意 Episode 中
+     * 得到相同 ID，是差分与按标签删除语义正确的前提。
+     */
+    internal fun stableEdgeId(
+        sourceFingerprint: String,
+        targetFingerprint: String,
+        metadata: String
+    ): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$sourceFingerprint|$targetFingerprint|$metadata".toByteArray())
+        val hex = digest.joinToString("") { "%02x".format(it) }
+        return "e_${hex.take(16)}"
     }
 
     private fun generateEdgesRecursive(
         node: SemanticNode,
-        edges: MutableList<GraphEdge>,
-        counter: IntCounter
+        edges: MutableList<GraphEdge>
     ): Int {
         // 父子边
         for (child in node.children) {
             edges.add(GraphEdge(
-                id = "e_${counter.next()}",
+                id = stableEdgeId(node.fingerprint, child.fingerprint, "parent_child"),
                 sourceFingerprint = node.fingerprint,
                 targetFingerprint = child.fingerprint,
                 type = EdgeType.SPATIAL,
@@ -175,7 +192,7 @@ object UiTreePruner {
             if (horizontalGap in -50..200 && verticalOverlap > 0) {
                 // 水平相邻
                 edges.add(GraphEdge(
-                    id = "e_${counter.next()}",
+                    id = stableEdgeId(current.fingerprint, next.fingerprint, "horizontal_adjacent"),
                     sourceFingerprint = current.fingerprint,
                     targetFingerprint = next.fingerprint,
                     type = EdgeType.SPATIAL,
@@ -184,7 +201,7 @@ object UiTreePruner {
             } else if (verticalOverlap < 0 && horizontalGap > -50) {
                 // 垂直相邻
                 edges.add(GraphEdge(
-                    id = "e_${counter.next()}",
+                    id = stableEdgeId(current.fingerprint, next.fingerprint, "vertical_adjacent"),
                     sourceFingerprint = current.fingerprint,
                     targetFingerprint = next.fingerprint,
                     type = EdgeType.SPATIAL,
@@ -195,7 +212,7 @@ object UiTreePruner {
 
         // 递归子节点
         for (child in node.children) {
-            generateEdgesRecursive(child, edges, counter)
+            generateEdgesRecursive(child, edges)
         }
 
         return 0

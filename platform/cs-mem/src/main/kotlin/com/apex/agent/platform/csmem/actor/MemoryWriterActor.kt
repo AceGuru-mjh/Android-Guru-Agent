@@ -58,6 +58,13 @@ class MemoryWriterActor @Inject constructor(
     /**
      * 启动 Actor 协程。
      * 应在 Application.onCreate 中调用。
+     *
+     * v2 修复：旧实现的 `batch` 同时被主循环（add）与定时器子协程（toList/clear）
+     * 两个协程无锁访问（Dispatchers.IO 多线程）→ ConcurrentModificationException /
+     * 丢事件；且 flushJob 内未捕获异常会经结构化并发取消整个 actor 主循环，记忆
+     * 写入管道静默停摆。
+     * 现在改为**单消费者**模型：定时 flush 通过 `withTimeoutOrNull(channel.receive)`
+     * 融入主循环本身，batch 只有一个所有者，零竞态、零结构化级联取消。
      */
     fun start() {
         if (actorJob?.isActive == true) return
@@ -65,21 +72,18 @@ class MemoryWriterActor @Inject constructor(
         actorJob = scope.launch {
             val batch = mutableListOf<WriteEvent>()
 
-            // 定时器：定期刷新已积累的事件
-            val flushJob = launch {
-                while (isActive) {
-                    delay(flushIntervalMs)
-                    if (batch.isNotEmpty()) {
-                        flushBatch(batch.toList())
-                        batch.clear()
-                    }
-                }
-            }
-
-            // 主循环：消费 Channel 事件
+            // 主循环：单消费者。receive 超时即「定时器到点」——批量刷新积累的事件。
             try {
-                for (event in eventChannel) {
+                while (isActive) {
+                    val event = withTimeoutOrNull(flushIntervalMs) { eventChannel.receive() }
                     when (event) {
+                        null -> {
+                            // 定时器到点：刷新已积累的事件
+                            if (batch.isNotEmpty()) {
+                                flushBatch(batch.toList())
+                                batch.clear()
+                            }
+                        }
                         is WriteEvent.EmergencyFlush -> {
                             flushBatch(batch.toList())
                             batch.clear()
@@ -100,10 +104,9 @@ class MemoryWriterActor @Inject constructor(
                     }
                 }
             } finally {
-                flushJob.cancel()
                 // 确保未刷事件不丢失
                 if (batch.isNotEmpty()) {
-                    flushBatch(batch.toList())
+                    runCatching { flushBatch(batch.toList()) }
                 }
             }
         }

@@ -133,7 +133,8 @@ object ToolModule {
         linuxPackageManager: LinuxPackageManager,
         linuxCapabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
         environmentRepairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
-        skillRegistry: SkillRegistry
+        skillRegistry: SkillRegistry,
+        mcpManager: McpManager
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
         val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
@@ -299,8 +300,14 @@ object ToolModule {
             registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
         }
 
+        // ═══ 13. MCP 工具接线（此前缺口：McpCallTool/McpListTool/McpConnectTool
+        // 已定义但从未注册——Agent 只能通过市场页 UI 连接 MCP，对话内完全无法使用）═══
+        registry.register(SafeAgentTool(McpCallTool(mcpManager)))
+        registry.register(SafeAgentTool(McpListTool(mcpManager)))
+        registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
+
         return registry
-        // 总计：44 基础 + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 + N 已启用技能 composite + 7 GitHub(条件)
+        // 总计：44 基础 + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 + 3 MCP + N 已启用技能 composite + 7 GitHub(条件)
     }
 
     @Provides

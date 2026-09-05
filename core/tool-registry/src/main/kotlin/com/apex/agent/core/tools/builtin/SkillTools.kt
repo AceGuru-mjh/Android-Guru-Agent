@@ -2,6 +2,8 @@ package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.skill.SkillRegistry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -46,6 +48,11 @@ class SkillSearchTool(
     """.trimIndent()
 
     override suspend fun execute(arguments: String): String {
+        // v2：网络搜索统一在 IO 线程执行（旧实现在调用方线程同步 execute）
+        return withContext(Dispatchers.IO) { executeInternal(arguments) }
+    }
+
+    private fun executeInternal(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val query = json["query"]?.jsonPrimitive?.content ?: return "Error: 'query' required"
         val source = json["source"]?.jsonPrimitive?.content ?: "all"
@@ -63,19 +70,22 @@ class SkillSearchTool(
                     .header("User-Agent", "ApexAgent/1.0")
                     .build()
 
-                val response = httpClient.newCall(request).execute()
-                val body = response.body?.string() ?: ""
+                httpClient.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: ""
 
-                if (response.isSuccessful) {
-                    val searchResult = Json.parseToJsonElement(body).jsonObject
-                    val items = searchResult["items"]?.jsonArray ?: return emptyResults(query)
+                    if (response.isSuccessful && body.length <= MAX_SEARCH_RESPONSE_BYTES) {
+                        val searchResult = Json.parseToJsonElement(body).jsonObject
+                        // v2 修复：旧实现在 items 缺失时直接 return emptyResults 提前退出，
+                        // 跳过了后面「内置模板搜索」分支（GitHub 空结果时永远搜不到内置模板）
+                        val items = searchResult["items"]?.jsonArray ?: emptyList()
 
-                    items.forEach { item ->
-                        val obj = item.jsonObject
-                        val name = obj["name"]?.jsonPrimitive?.content ?: ""
-                        val desc = obj["description"]?.jsonPrimitive?.contentOrNull ?: ""
-                        val htmlUrl = obj["html_url"]?.jsonPrimitive?.content ?: ""
-                        results.add("• $name\n  $desc\n  URL: $htmlUrl")
+                        items.forEach { item ->
+                            val obj = item.jsonObject
+                            val name = obj["name"]?.jsonPrimitive?.content ?: ""
+                            val desc = obj["description"]?.jsonPrimitive?.contentOrNull ?: ""
+                            val htmlUrl = obj["html_url"]?.jsonPrimitive?.content ?: ""
+                            results.add("• $name\n  $desc\n  URL: $htmlUrl")
+                        }
                     }
                 }
             } catch (_: Exception) { /* 网络失败时降级到内置模板 */ }
@@ -98,9 +108,6 @@ class SkillSearchTool(
         }
     }
 
-    private fun emptyResults(query: String): String =
-        "No skills found for '$query'. Try a different query or use skill_create."
-
     private fun getBuiltinSkillTemplates(query: String): List<String> {
         val templates = mapOf(
             "web" to "• web_scraper (内置模板)\n  网页数据提取\n  安装: skill_install({\"source\":\"template\",\"template\":\"web_scraper\"})",
@@ -110,6 +117,11 @@ class SkillSearchTool(
             "principle" to "• coding_principles (内置模板)\n  编码协作九原则（Karpathy）\n  安装: skill_install({\"source\":\"template\",\"template\":\"coding_principles\"})"
         )
         return templates.filter { (key, _) -> query.contains(key, ignoreCase = true) }.values.toList()
+    }
+
+    companion object {
+        /** GitHub 搜索响应体上限（防御超大响应 OOM）。 */
+        private const val MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024
     }
 }
 
@@ -200,20 +212,47 @@ class SkillInstallTool(
     }
 
     private suspend fun downloadSkill(url: String): String {
-        return try {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "ApexAgent/1.0")
-                .build()
+        // v2：网络下载统一在 IO 线程执行，且限制响应体大小（旧实现无上限，
+        // 恶意/超大响应会 OOM；且走非 flowOn 路径时会在调用方线程阻塞至超时）
+        return withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "ApexAgent/1.0")
+                    .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return "Error: HTTP ${response.code} downloading skill"
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@use "Error: HTTP ${response.code} downloading skill"
+                    }
+                    response.body?.byteStream()?.let { stream ->
+                        val bytes = stream.readBytes(MAX_DOWNLOAD_BYTES)
+                        if (bytes == null) {
+                            "Error: skill file too large (>${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB)"
+                        } else {
+                            String(bytes, Charsets.UTF_8)
+                        }
+                    } ?: "Error: Empty response"
+                }
+            } catch (e: Exception) {
+                "Error: Download failed - ${e.message}"
             }
-            response.body?.string() ?: "Error: Empty response"
-        } catch (e: Exception) {
-            "Error: Download failed - ${e.message}"
         }
+    }
+
+    /** 读取至多 [max] 字节；超限时返回 null（调用方提示过大）。 */
+    private fun java.io.InputStream.readBytes(max: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(16 * 1024)
+        var total = 0
+        while (total < max) {
+            val n = read(buf, 0, minOf(buf.size, max - total))
+            if (n < 0) break
+            out.write(buf, 0, n)
+            total += n
+        }
+        if (total >= max && read() >= 0) return null  // 还有剩余字节 → 超限
+        return out.toByteArray()
     }
 
     private fun getTemplate(name: String): String {
@@ -228,6 +267,9 @@ class SkillInstallTool(
     }
 
     companion object {
+        /** 单次 skill 下载响应体上限（防御超大响应 OOM）。 */
+        private const val MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024
+
         val WEB_SCRAPER_TEMPLATE = """
 {
   "schema": "apex-skill-v1",
@@ -408,7 +450,17 @@ class SkillCreateTool(
         )
     }
 
-    private fun escape(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
+    /**
+     * v2 修复：补齐换行/回车/制表符转义。旧实现只转义 `\\` 和 `"`，
+     * 多行 description / prompt_injection 拼出的 JSON 非法，
+     * `skill_create` 对多行输入必然安装失败。
+     */
+    private fun escape(s: String): String = s
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
 }
 
 /**

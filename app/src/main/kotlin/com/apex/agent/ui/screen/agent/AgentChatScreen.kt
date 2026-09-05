@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dagger.hilt.android.EntryPointAccessors
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachButton
@@ -63,6 +64,7 @@ import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.component.rememberSlashMenuProvider
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
 import kotlinx.coroutines.launch
 
@@ -70,7 +72,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun AgentChatScreen(
     viewModel: AgentChatViewModel = hiltViewModel(),
-    slashMenuProvider: SlashMenuProvider = androidx.hilt.navigation.compose.hiltViewModel(),
+    // v2 闪退修复：旧默认值 hiltViewModel() 要求参数类型是 ViewModel——
+    // SlashMenuProvider 是 @Singleton 普通类，进入聊天页时 ViewModelProvider
+    // 反射创建必然抛 RuntimeException（K2 仅告警不拦截）。改为经 EntryPoint
+    // 从 Hilt SingletonComponent 取真实单例，既不闪退也消除未来版本的编译错误。
+    slashMenuProvider: SlashMenuProvider = rememberSlashMenuProvider(),
     onOpenSettings: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -100,6 +106,11 @@ fun AgentChatScreen(
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
+
+    // ═══ T76：任务状态卡 + 崩溃恢复横幅状态 ═══
+    val taskState by viewModel.taskState.collectAsStateWithLifecycle()
+    val recoveryCandidates by viewModel.recoveryCandidates.collectAsStateWithLifecycle()
+    val showTaskCard = taskState?.isActive == true
 
     // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
     var showCustomInstructionDialog by remember { mutableStateOf(false) }
@@ -228,6 +239,28 @@ fun AgentChatScreen(
                     )
                 }
             }
+        }
+
+        // ═══ T76：崩溃恢复横幅（重启后发现未完成任务）═══
+        if (recoveryCandidates.isNotEmpty()) {
+            TaskRecoveryBanner(
+                tasks = recoveryCandidates,
+                onResume = { viewModel.resumeCrashedTask(it.taskId) },
+                onDismiss = { viewModel.dismissCrashedTask() }
+            )
+        }
+
+        // ═══ T76：任务状态卡（活跃任务时显示进度 + 控制）═══
+        if (showTaskCard && taskState != null) {
+            TaskStatusCard(
+                task = taskState!!,
+                statusLabel = { status -> statusLabelOf(status) },
+                onPause = { viewModel.pauseTask() },
+                onResume = { viewModel.resumeTask() },
+                onCancel = { viewModel.cancelTask() },
+                onRetry = { viewModel.retryTask() },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
         }
 
         // ═══ 消息列表 ═══
@@ -570,4 +603,22 @@ fun AgentChatScreen(
             }
         )
     }
+}
+
+
+/**
+ * T76 — 任务状态文案（TaskStatusCard 用；与 Controller 状态机一致）。
+ */
+private fun statusLabelOf(status: com.apex.agent.core.engine.task.TaskStatus): String = when (status) {
+    com.apex.agent.core.engine.task.TaskStatus.PENDING -> "准备中"
+    com.apex.agent.core.engine.task.TaskStatus.PLANNING -> "规划中"
+    com.apex.agent.core.engine.task.TaskStatus.RUNNING -> "执行中"
+    com.apex.agent.core.engine.task.TaskStatus.WAITING_USER -> "等待输入"
+    com.apex.agent.core.engine.task.TaskStatus.PAUSED -> "已暂停"
+    com.apex.agent.core.engine.task.TaskStatus.CANCELLING -> "正在取消"
+    com.apex.agent.core.engine.task.TaskStatus.RECOVERING -> "崩溃恢复"
+    com.apex.agent.core.engine.task.TaskStatus.RETRYING -> "重试中"
+    com.apex.agent.core.engine.task.TaskStatus.COMPLETED -> "已完成"
+    com.apex.agent.core.engine.task.TaskStatus.FAILED -> "失败"
+    com.apex.agent.core.engine.task.TaskStatus.CANCELLED -> "已取消"
 }

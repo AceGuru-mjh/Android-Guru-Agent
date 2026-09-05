@@ -61,7 +61,16 @@ class CyberNeonBallManager @Inject constructor(
     }
 
     fun show() = mainHandler.post { doShow() }
-    fun dismiss() = mainHandler.post { EasyFloat.dismiss(tag) }
+
+    /**
+     * v2 修复：旧实现 dismiss 后不清 ballView 引用，而 doShow 以 `ballView != null`
+     * 判断"已显示"直接 return——首次 dismiss 后球**永远无法再唤起**，且 @Singleton
+     * 长期持有已 detach 的 View 树（内存泄漏）。现在 dismiss 时同步置空引用。
+     */
+    fun dismiss() = mainHandler.post {
+        ballView = null
+        runCatching { EasyFloat.dismiss(tag) }
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun doShow() {

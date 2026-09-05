@@ -50,6 +50,13 @@ class LinuxPRootBackend(
     private val commandBuilder: PRootCommandBuilder = PRootCommandBuilderImpl(),
     /** proot 宿主环境（Android 生产必传；JVM 测试可传 null → env 仅含 PATH 兜底）。 */
     private val hostEnv: PRootHostEnvironment? = null,
+    /**
+     * T81 (D-6)：guest env 权威来源（单一事实源）。原 buildGuestEnv 内联 8 键
+     * 基线与 LinuxEnvironmentManager 的 11 键漂移（PWD/OLDPWD/LC_ALL 缺失）——
+     * 注释声称「必须同步」但无机制保证。现在直接派生。
+     */
+    private val environment: com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager =
+        com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager(),
     override val id: String = ID
 ) : ExecutionBackend {
 
@@ -162,21 +169,12 @@ class LinuxPRootBackend(
     /**
      * guest env 基线（§8.1）—— 只经 -E 进入 rootfs，与宿主 env 无关。
      * request.env 的显式键最后覆盖（调用方意图优先）。
+     *
+     * T81 (D-6)：基线直接取自 LinuxEnvironmentManager（唯一权威来源）——
+     * 消除两处内联漂移（原 8 键 vs Manager 11 键：PWD/OLDPWD/LC_ALL）。
      */
-    internal fun buildGuestEnv(requestEnv: Map<String, String>): Map<String, String> {
-        val env = linkedMapOf(
-            "TERM" to "xterm-256color",
-            "LANG" to "C.UTF-8",
-            "HOME" to GuestUserHome.GUEST_PATH,
-            "USER" to "root",        // T75: fake root 视图（proot -0），部分工具需要
-            "LOGNAME" to "root",     // T75: 同上（cron/su 类工具探测）
-            "SHELL" to GUEST_SHELL,
-            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "TMPDIR" to "/tmp"
-        )
-        env.putAll(requestEnv)
-        return env
-    }
+    internal fun buildGuestEnv(requestEnv: Map<String, String>): Map<String, String> =
+        environment.interactiveGuestEnv(requestEnv)
 
     /**
      * request.cwd → guest cwd。"/" 或空 → /workspace。

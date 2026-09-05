@@ -246,6 +246,43 @@ object TerminalModule {
     @Singleton
     fun provideLinuxEnvironmentManager(): LinuxEnvironmentManager = LinuxEnvironmentManager()
 
+    /** T81 (D-6/§34)：Linux 执行上下文工厂 —— 交互会话与 apt 共享的单一解析点。 */
+    @Provides
+    @Singleton
+    fun provideLinuxExecutionContextFactory(
+        binaryProvider: com.apex.agent.platform.terminal.proot.PRootBinaryProvider,
+        rootfsProvider: com.apex.agent.platform.terminal.linux.RootfsProvider,
+        workspaces: LinuxWorkspaceManager,
+        userHome: GuestUserHome,
+        hostEnv: PRootHostEnvironment,
+        environment: LinuxEnvironmentManager
+    ): com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory =
+        com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory(
+            binaryProvider, rootfsProvider, workspaces, userHome, hostEnv, environment
+        )
+
+    /** T81 (D-7/§29)：环境能力真实探测（which + --version，TTL 缓存）。 */
+    @Provides
+    @Singleton
+    fun provideLinuxCapabilityProbe(
+        contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory,
+        executor: ProotExecutor
+    ): com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe =
+        com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe(contextFactory, executor)
+
+    /** T81 (D-7/§30)：单轮自动修复编排（detect → repair once → verify）。 */
+    @Provides
+    @Singleton
+    fun provideEnvironmentRepairService(
+        health: LinuxEnvironmentHealth,
+        linuxPackageManager: com.apex.agent.platform.terminal.pkg.LinuxPackageManager,
+        provisioner: RootfsProvisioner,
+        capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe
+    ): com.apex.agent.platform.terminal.health.EnvironmentRepairService =
+        com.apex.agent.platform.terminal.health.EnvironmentRepairService(
+            health, linuxPackageManager, provisioner, capabilityProbe
+        )
+
     /** T76: PackageOperationLock —— apt/dpkg 写串行化（进程内 Mutex + 跨实例 OS 文件锁）。 */
     @Provides
     @Singleton
@@ -266,7 +303,8 @@ object TerminalModule {
         hostEnv: PRootHostEnvironment,
         workspaces: LinuxWorkspaceManager,
         environment: LinuxEnvironmentManager,
-        lock: PackageOperationLock
+        lock: PackageOperationLock,
+        contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory
     ): UbuntuAptPackageManager = UbuntuAptPackageManager(
         executor = executor,
         binaryProvider = binaryProvider,
@@ -275,7 +313,8 @@ object TerminalModule {
         hostEnv = hostEnv,
         workspaces = workspaces,
         environment = environment,
-        lock = lock
+        lock = lock,
+        contextFactory = contextFactory
     )
 
     /** 把 [UbuntuAptPackageManager] 暴露为 [LinuxPackageManager] 接口（工具层依赖抽象）。 */

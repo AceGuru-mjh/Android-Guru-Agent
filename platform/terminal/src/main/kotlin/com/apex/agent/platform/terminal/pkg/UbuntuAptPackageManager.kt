@@ -80,8 +80,20 @@ class UbuntuAptPackageManager(
     /** apt 操作默认超时（apt update/install 可能较慢）。 */
     private val defaultTimeoutMs: Long = DEFAULT_APT_TIMEOUT_MS,
     /** 输出上限（首 512KB + 尾 512KB）。 */
-    private val maxOutputBytes: Long = ProotExecutor.DEFAULT_MAX_OUTPUT_BYTES
+    private val maxOutputBytes: Long = ProotExecutor.DEFAULT_MAX_OUTPUT_BYTES,
+    /**
+     * T81 (D-6 / §34)：统一执行上下文工厂 —— rootfs/workspace/home/proot/env
+     * 的单一构造点。null → 按上述构造参数内部自建（兼容旧构造；生产 DI 注入
+     * 与 LinuxPRootBackend 共享的实例）。
+     */
+    private val contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory? = null
 ) : LinuxPackageManager {
+
+    /** T81 (D-6)：惰性内部工厂（旧构造兼容路径）。 */
+    private val effectiveContextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory
+        get() = contextFactory ?: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory(
+            binaryProvider, rootfsProvider, workspaces, userHome, hostEnv, environment
+        )
 
     private val _events = MutableSharedFlow<PackageOperationEvent>(
         extraBufferCapacity = 64,

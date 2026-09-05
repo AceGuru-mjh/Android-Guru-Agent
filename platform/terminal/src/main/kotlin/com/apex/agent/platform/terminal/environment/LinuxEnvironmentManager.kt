@@ -97,16 +97,26 @@ class LinuxEnvironmentManager(
     /**
      * 校验一个 env map 是否满足 guest 最小需求（HOME/PATH/SHELL/TERM/LANG 均非空）。
      * 用于 health check 与 bootstrap CONFIGURING 阶段。
+     *
+     * T81 (U-7)：[forApt]=false（交互环境）时实装 DEBIAN_* 违规检测 ——
+     * 原实现 interactiveViolation 恒空（声明了检查但从未实现，死代码）。
+     * apt 专属变量绝不能进入交互终端（否则 apt install 在交互 shell 里
+     * 跳过所有 debconf 提示，破坏用户体验）。
      */
-    fun validateGuestEnv(env: Map<String, String>): EnvValidation {
+    fun validateGuestEnv(env: Map<String, String>, forApt: Boolean = false): EnvValidation {
         val missing = mutableListOf<String>()
         for (key in REQUIRED_GUEST_KEYS) {
             if (env[key].isNullOrBlank()) missing.add(key)
         }
-        // DEBIAN_FRONTEND 只允许在 apt env 中出现 —— 交互 env 含它是配置错误
         val interactiveViolation = mutableListOf<String>()
+        if (!forApt) {
+            for (k in APT_ONLY_KEYS) {
+                if (env.containsKey(k)) interactiveViolation.add(k)
+            }
+        }
         return EnvValidation(
-            valid = missing.isEmpty(),
+            // T81：违规（apt 变量泄入交互 env）视为整体无效
+            valid = missing.isEmpty() && interactiveViolation.isEmpty(),
             missingKeys = missing,
             violations = interactiveViolation
         )
@@ -128,5 +138,8 @@ class LinuxEnvironmentManager(
 
         /** guest 必需的环境变量键。 */
         val REQUIRED_GUEST_KEYS = listOf("TERM", "LANG", "HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR")
+
+        /** T81 (U-7)：仅允许出现在 apt env 的键（泄入交互 env = 违规）。 */
+        val APT_ONLY_KEYS = listOf("DEBIAN_FRONTEND", "DEBIAN_PRIORITY", "APT_LISTBUGS_FRONTEND", "APT_LISTCHANGES_FRONTEND")
     }
 }

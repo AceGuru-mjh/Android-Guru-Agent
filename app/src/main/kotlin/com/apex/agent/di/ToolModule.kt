@@ -131,6 +131,8 @@ object ToolModule {
         ubuntuBootstrapManager: UbuntuBootstrapManager,
         linuxNetworkProbe: LinuxNetworkProbe,
         linuxPackageManager: LinuxPackageManager,
+        linuxCapabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
+        environmentRepairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
         skillRegistry: SkillRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
@@ -261,6 +263,11 @@ object ToolModule {
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxBootstrapTool(ubuntuBootstrapManager))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxNetworkTool(linuxNetworkProbe))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxPackagesTool(linuxPackageManager))))
+        // T81: 环境能力真实探测（§29）+ 单轮自动修复编排（§30）
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalLinuxCapabilitiesTool(linuxCapabilityProbe))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalLinuxRepairTool(environmentRepairService))))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))

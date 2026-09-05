@@ -40,6 +40,13 @@ class TerminalEventLogImpl : TerminalEventLog {
             // reassign id into a new event instance (events are data classes, copy is cheap)
             val withId = reassignId(event, id)
             log.events.add(withId)
+            // P1 fix（边界值）：PtyOutputPump 每读 8KB 追加一条 OutputProduced，
+            // append-only 无淘汰 → 长会话/高吞吐输出（yes、长构建）必然 OOM。
+            // 改为环形淘汰：超过上限时批量裁剪最旧事件。事件 id 单调递增不回绕，
+            // cursor 语义由 RingBuffer 负责，事件日志仅保留近期上下文即可。
+            if (log.events.size > MAX_EVENTS_PER_SESSION) {
+                log.events.subList(0, EVENT_TRIM_CHUNK).clear()
+            }
             id
         }
     }
@@ -116,5 +123,9 @@ class TerminalEventLogImpl : TerminalEventLog {
 
     companion object {
         private const val INITIAL_CAPACITY = 256
+
+        /** P1 fix：单会话事件上限（防 OOM），触发后按块裁剪最旧事件以均摊 O(1)。 */
+        private const val MAX_EVENTS_PER_SESSION = 10_000
+        private const val EVENT_TRIM_CHUNK = 1_000
     }
 }

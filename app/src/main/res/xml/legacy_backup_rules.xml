@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11 及以下（fullBackupContent）的备份排除规则，与
+  data_extraction_rules.xml（Android 12+）语义一致：
+  排除 GitHub token 相关 prefs，避免 EncryptedSharedPreferences 密文
+  被迁移到无对应 KeyStore MasterKey 的设备后触发明文 fallback。
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="github_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="github_prefs_fallback.xml" />
+</full-backup-content>

@@ -48,6 +48,13 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
     /** 预拷贝缓存：uri → 结果（路径 + 时间戳 + 进度） */
     private val preprocessedCache = ConcurrentHashMap<Uri, PreprocessResult>()
 
+    // P1 fix（生命周期竞态）：旧实现每次 preprocess 都 new 一个裸 CoroutineScope 且不保存 Job，
+    // cancel(uri) 只能删缓存里已完成的条目 —— 拷贝进行中时缓存为空，取消完全失效；
+    // 且 getSandboxPath 移除缓存后，在途拷贝完成后又会把已删除的路径写回缓存（复活竞态）。
+    // 现用单例作用域 + 在途 Job 登记，cancel 真正可取消，写缓存前检查是否已被取消。
+    private val copyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val copyJobs = ConcurrentHashMap<Uri, kotlinx.coroutines.Job>()
+
     /** 清理调度器 */
     private var cleanupJob: kotlinx.coroutines.Job? = null
 
@@ -95,9 +102,9 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
         val targetDir = File(context.filesDir, DIR_PRE).apply { mkdirs() }
         val targetFile = File(targetDir, "${System.currentTimeMillis()}_$fileName")
 
-        // 启动后台拷贝协程
-        val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO)
-        scope.launch {
+        // 启动后台拷贝协程（登记到 copyJobs，使 cancel(uri) 可真正取消在途拷贝）
+        copyJobs[uri]?.cancel()
+        copyJobs[uri] = copyScope.launch {
             try {
                 val totalSize = queryFileSize(uri)
                 context.contentResolver.openInputStream(uri)?.use { input ->
@@ -117,6 +124,9 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
                     }
                 } ?: throw IllegalStateException("Cannot open input stream for $uri")
 
+                // 复活竞态防护：拷贝期间用户可能已 cancel(uri)（清缓存+删文件），
+                // 此处重新登记前必须确认未被取消，否则已删除路径会写回缓存
+                if (!isActive) return@launch
                 preprocessedCache[uri] = PreprocessResult(
                     sandboxPath = targetFile.absolutePath,
                     timestamp = System.currentTimeMillis(),
@@ -127,6 +137,8 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
                 android.util.Log.w(TAG, "Preprocess failed for $uri: ${e.message}")
                 progressFlow.value = -1f
                 runCatching { targetFile.delete() }
+            } finally {
+                copyJobs.remove(uri)
             }
         }
 
@@ -157,11 +169,12 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
 
     /**
      * 取消某个 Uri 的预拷贝（用户移除附件时调用）。
+     * P1 fix：先取消在途拷贝协程，再清理缓存与磁盘文件。
      */
     fun cancel(uri: Uri) {
-        preprocessedCache[uri]?.let { result ->
+        copyJobs.remove(uri)?.cancel()
+        preprocessedCache.remove(uri)?.let { result ->
             runCatching { File(result.sandboxPath).delete() }
-            preprocessedCache.remove(uri)
         }
     }
 
@@ -169,6 +182,8 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
      * 清空所有预拷贝缓存（用户清空附件列表时调用）。
      */
     fun cancelAll() {
+        copyJobs.values.forEach { it.cancel() }
+        copyJobs.clear()
         preprocessedCache.values.forEach { result ->
             runCatching { File(result.sandboxPath).delete() }
         }

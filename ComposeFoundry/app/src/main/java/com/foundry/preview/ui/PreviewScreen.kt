@@ -12,7 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,9 +23,9 @@ import com.foundry.preview.state.FoundryViewModel
 
 @Composable
 fun PreviewScreen(viewModel: FoundryViewModel) {
-    val document by viewModel.document.collectAsState()
-    val diagnostics by viewModel.diagnostics.collectAsState()
-    val devicePreset by viewModel.devicePreset.collectAsState()
+    val document by viewModel.document.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
+    val devicePreset by viewModel.devicePreset.collectAsStateWithLifecycle()
     val (width, height) = viewModel.getDeviceDimensions()
 
     Column(

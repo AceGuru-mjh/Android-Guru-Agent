@@ -20,7 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,8 +34,8 @@ import com.foundry.preview.state.FoundryViewModel
 
 @Composable
 fun EditorScreen(viewModel: FoundryViewModel) {
-    val code by viewModel.code.collectAsState()
-    val diagnostics by viewModel.diagnostics.collectAsState()
+    val code by viewModel.code.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier

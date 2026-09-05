@@ -292,9 +292,13 @@ class TerminalRuntimeImpl(
         }
         return res.map { wr ->
             // bytesWritten reflects the actual bytes written to the PTY (LINE appends '\n', RAW does not).
+            // P1 fix（边界值/TOCTOU）：上方 null 校验与本行解引用之间存在挂起点，并发 close()
+            // 时 assembly 已被移除 → 第二次 assembly() 返回 null，!! 抛 NPE（对比 :437 已用
+            // 安全写法）。会话刚关闭时回退为本次实际写入字节数作为 cursor。
             WriteResult(
                 written = true, bytesWritten = wr.bytesWritten,
-                cursor = sessionManager.assembly(sessionId)!!.ringBuffer.totalCursor,
+                cursor = sessionManager.assembly(sessionId)?.ringBuffer?.totalCursor
+                    ?: wr.bytesWritten.toLong(),
                 inputOwner = owner
             )
         }

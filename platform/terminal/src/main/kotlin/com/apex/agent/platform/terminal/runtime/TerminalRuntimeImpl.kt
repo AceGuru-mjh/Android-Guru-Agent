@@ -182,7 +182,7 @@ class TerminalRuntimeImpl(
     ): Result<CreateResult> {
         // T81 §15：shutdown 后拒绝新会话
         if (shutdownGate.get()) {
-            return Result.failure(RuntimeException("TerminalError:UnsupportedOperation — runtime 已 shutdown"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.UnsupportedOperation, "runtime 已 shutdown"))
         }
         // T73: 后端路由。local 默认 —— 与历史行为一致（golden）；
         // linux-ubuntu —— 失败时给出可行动错误（引导 Agent 先装 rootfs）。
@@ -222,7 +222,7 @@ class TerminalRuntimeImpl(
             workspaceId = workspaceId
         )
         val spec = backend.prepare(request).getOrElse { e ->
-            return Result.failure(RuntimeException("TerminalError:BackendPrepareFailed — ${e.message}", e))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.PtyUnavailable, "backend prepare failed: ${e.message}", e))
         }
         val r = sessionManager.createFromSpec(spec, rows, cols, privilege)
         return r.map { s ->
@@ -274,7 +274,7 @@ class TerminalRuntimeImpl(
     ): Result<RunResult> {
         // T81 §15：shutdown 后拒绝新 job
         if (shutdownGate.get()) {
-            return Result.failure(RuntimeException("TerminalError:UnsupportedOperation — runtime 已 shutdown"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.UnsupportedOperation, "runtime 已 shutdown"))
         }
         val r = jobManager.startJob(sessionId, command, owner, background, timeoutMs)
         return r.map { j ->
@@ -291,7 +291,7 @@ class TerminalRuntimeImpl(
         maxBytes: Int, maxEvents: Int
     ): Result<ObserveResult> {
         val a = sessionManager.assembly(sessionId)
-            ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // Delegate to per-session ObservationEngine (Spec §30). Runtime is orchestration only.
         val engine = a.observationEngine
         return Result.success(
@@ -304,7 +304,7 @@ class TerminalRuntimeImpl(
         sessionId: Long, condition: WaitCondition, timeoutMs: Long
     ): Result<WaitResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         val r = waitEngine.await(sessionId, condition, timeoutMs)
         return Result.success(r)
@@ -316,7 +316,7 @@ class TerminalRuntimeImpl(
         text: String?, key: TerminalKey?
     ): Result<WriteResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         val res: Result<com.apex.agent.platform.terminal.io.WriteResult> = when (kind) {
             WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
@@ -338,7 +338,7 @@ class TerminalRuntimeImpl(
         sessionId: Long, signal: UnixSignal, owner: InputOwner, jobId: Long?
     ): Result<SignalResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         // Route through ProcessController: records the session's process group and delegates
         // to InputManager (policy + control-state + SignalSent event). The native layer
@@ -350,7 +350,7 @@ class TerminalRuntimeImpl(
     // ───────── cancel (Spec PR #51 §5) ─────────
     override suspend fun cancel(sessionId: Long, jobId: Long): Result<CancelResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         cancellationController.cancel(sessionId, jobId)
         // Wait briefly for the cancellation to take effect
@@ -363,11 +363,11 @@ class TerminalRuntimeImpl(
     // ───────── resize ─────────
     override suspend fun resize(sessionId: Long, rows: Int, cols: Int): Result<ResizeResult> {
         val a = sessionManager.assembly(sessionId)
-            ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // 0. Validate dimensions (Spec §34.7). Zero or negative rows/cols are rejected
         //    BEFORE touching the native layer or VT.
         if (rows <= 0 || cols <= 0) {
-            return Result.failure(RuntimeException("TerminalError:InvalidDimensions"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.InvalidInput, "rows/cols must be > 0"))
         }
         // 1. Resize the native PTY FIRST (sends SIGWINCH to child). Spec §34.7 / §18.
         //    If native resize fails, VirtualTerminal MUST NOT be updated (correctness: avoid
@@ -425,7 +425,7 @@ class TerminalRuntimeImpl(
     // ───────── stop (Spec PR #54 §5) ─────────
     /** Stop running jobs but keep Session alive. ≠ close(). Idempotent. */
     override suspend fun stop(sessionId: Long): Result<TerminalRuntime.StopResult> {
-        val a = sessionManager.assembly(sessionId) ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        val a = sessionManager.assembly(sessionId) ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // Transition to STOPPING (graceful shutdown)
         sessionManager.transition(sessionId, SessionState.STOPPING)
         // Cancel all active jobs in this session

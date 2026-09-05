@@ -475,22 +475,28 @@ private fun formatTime(ts: Long): String {
 }
 
 /** 导出并分享：写入应用私有缓存目录，再发起系统分享。 */
+// P1 fix（内存泄漏）：旧实现每次点击都 new 一个永不 cancel 的 CoroutineScope，
+// 且在协程内捕获 Activity context —— 连点 N 次积累 N 个孤儿协程，每个都
+// 把 Activity + 8MB 日志字符串钉在内存里直到写盘完成。现改为：
+// 其一、文件级单例导出作用域，点击多次仅复用，新任务取消旧任务；
+// 其二、提前解包 applicationContext，协程内不再持有 Activity。
+private val exportScope = kotlinx.coroutines.CoroutineScope(
+    kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+)
+private var exportJob: kotlinx.coroutines.Job? = null
+
 private fun exportAndShare(context: android.content.Context, content: String) {
-    // v2：GlobalScope → 受管协程（GlobalScope 生命周期失控；导出失败无提示）。
-    // 此处为顶层函数拿不到作用域，用 kotlinx.coroutines 自带的 SupervisorJob
-    // + IO 单发任务，并在失败时汇入日志中枢，不再无声吞错。
-    val scope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
-    )
-    scope.launch {
+    val appContext = context.applicationContext
+    exportJob?.cancel()
+    exportJob = exportScope.launch {
         try {
-            val dir = java.io.File(context.cacheDir, "logs")
+            val dir = java.io.File(appContext.cacheDir, "logs")
             dir.mkdirs()
             val file = java.io.File(dir, "apex-logs-${System.currentTimeMillis()}.txt")
             file.writeText(content)
             val uri = androidx.core.content.FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
+                appContext,
+                "${appContext.packageName}.fileprovider",
                 file
             )
             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -499,7 +505,9 @@ private fun exportAndShare(context: android.content.Context, content: String) {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             withContext(Dispatchers.Main) {
-                context.startActivity(Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                appContext.startActivity(
+                    Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
             }
         } catch (e: Exception) {
             AppLogger.instance.warn(

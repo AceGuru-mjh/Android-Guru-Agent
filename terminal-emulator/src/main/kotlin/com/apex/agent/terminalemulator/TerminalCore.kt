@@ -20,6 +20,11 @@ class TerminalCore(
     initialCols: Int,
     private val maxScrollback: Int = 1000
 ) {
+    companion object {
+        /** P1 fix：待消费 mutation 上限（超过即折叠为 FULL），见 [BoundedMutationList]。 */
+        private const val MAX_PENDING_MUTATIONS = 4096
+    }
+
     private val utf8 = Utf8Decoder()
     private val parser = VtParser()
     private val modes = TerminalModes()
@@ -43,7 +48,11 @@ class TerminalCore(
     var rows: Int = initialRows; private set
     var cols: Int = initialCols; private set
 
-    private val mutations = mutableListOf<ScreenMutation>()
+    // P1 fix（边界值）：生产路径（PtyOutputPumpImpl.feed）从不调用 drainMutations()，
+    // 旧实现无界 mutableListOf 会随每个可打印字符累积 ScreenMutation（cat 50MB 文件
+    // ≈ 5000 万个对象）直至 OOM。改为有界累加器：超过上限时折叠为单条 FULL（全屏重绘），
+    // 语义等价于“脏区丢失时保守全刷”，内存占用恒定。
+    private val mutations = BoundedMutationList(MAX_PENDING_MUTATIONS)
 
     /** Feed raw PTY bytes. Emits mutations via [onMutation] (batched). */
     fun feed(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
@@ -304,15 +313,23 @@ class TerminalCore(
                 p == 49 -> currentStyle = currentStyle.copy(background = TerminalColor.Default)
                 p == 38 || p == 48 -> {
                     // 38;5;n (256) or 38;2;r;g;b (TrueColor)
+                    // P1 fix（边界值）：SGR 参数无合法性保证（程序化构造/畸形序列可为任意 Int），
+                    // 旧实现直接传入 Indexed/RGB —— 负索引在 TerminalColor.toRgb 触发
+                    // BASIC_16[负] ArrayIndexOutOfBounds；巨值在灰度分支 (index-232)*10+8 溢出。
+                    // 此处统一 clamp 到合法色域。
                     val isFg = p == 38
                     if (i + 1 < params.size) {
                         when (params[i + 1]) {
                             5 -> { if (i + 2 < params.size) {
-                                val c = TerminalColor.Indexed(params[i + 2])
+                                val c = TerminalColor.Indexed(params[i + 2].coerceIn(0, 255))
                                 currentStyle = if (isFg) currentStyle.copy(foreground = c) else currentStyle.copy(background = c)
                             }; i += 2 }
                             2 -> { if (i + 4 < params.size) {
-                                val c = TerminalColor.RGB(params[i + 2], params[i + 3], params[i + 4])
+                                val c = TerminalColor.RGB(
+                                    params[i + 2].coerceIn(0, 255),
+                                    params[i + 3].coerceIn(0, 255),
+                                    params[i + 4].coerceIn(0, 255)
+                                )
                                 currentStyle = if (isFg) currentStyle.copy(foreground = c) else currentStyle.copy(background = c)
                             }; i += 4 }
                         }
@@ -437,6 +454,30 @@ class TerminalCore(
         mutations.clear()
         return out
     }
+}
+
+/**
+ * P1 fix：有界 mutation 累加器。超限时清空并折叠为 [ScreenMutation.FULL]，
+ * 保证消费方至少收到一次全屏重绘信号，同时内存占用有界。
+ */
+private class BoundedMutationList(private val capacity: Int) : AbstractMutableList<ScreenMutation>() {
+    private val delegate = ArrayList<ScreenMutation>(256)
+
+    override val size: Int get() = delegate.size
+    override fun get(index: Int): ScreenMutation = delegate[index]
+    override fun set(index: Int, element: ScreenMutation): ScreenMutation = delegate.set(index, element)
+    override fun removeAt(index: Int): ScreenMutation = delegate.removeAt(index)
+
+    override fun add(index: Int, element: ScreenMutation) {
+        if (delegate.size >= capacity) {
+            // 折叠：脏区信息丢失时保守降级为全屏重绘，而非无限增长
+            delegate.clear()
+            delegate.add(ScreenMutation.FULL)
+        }
+        delegate.add(index.coerceAtMost(delegate.size), element)
+    }
+
+    override fun clear() = delegate.clear()
 }
 
 /** Pure-JVM screen snapshot (no Android dependency). */

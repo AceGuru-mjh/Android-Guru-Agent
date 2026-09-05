@@ -27,6 +27,11 @@ class MemoryGraphStoreImpl @Inject constructor(
     private val db: MemoryGraphDatabase
 ) : MemoryGraphStore {
 
+    companion object {
+        /** P1 fix：IN 查询分片大小（SQLite 变量数上限 999，留安全余量）。 */
+        private const val SQLITE_MAX_VARIABLES_SAFE = 500
+    }
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     // ==================== Episode ====================
@@ -86,8 +91,14 @@ class MemoryGraphStoreImpl @Inject constructor(
         if (deduped.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        val existingFps = db.nodeDao()
-            .getByFingerprints(deduped.map { it.fingerprint })
+        // P1 fix（边界值/数据一致性）：整棵 UI 树展平去重后可能超过 999 个指纹，
+        // 一次性传入 Room 的 IN (:fingerprints) 会触发 SQLiteException:
+        // "too many SQL variables"（SQLITE_MAX_VARIABLE_NUMBER=999，Android 8-10 常见），
+        // 异常被 MemoryWriterActor 吞掉 → 该帧全部节点与边静默丢失，记忆图失真。
+        // 改为分片查询规避变量数上限。
+        val existingFps = deduped.map { it.fingerprint }
+            .chunked(SQLITE_MAX_VARIABLES_SAFE)
+            .flatMap { chunk -> db.nodeDao().getByFingerprints(chunk) }
             .map { it.fingerprint }
             .toSet()
 

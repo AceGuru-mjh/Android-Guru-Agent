@@ -234,6 +234,8 @@ internal object ErrorClassifier {
                 ModelRuntimeException.ModelResponseInvalid("空响应", profileId)
             is LlmException.EmptyBody ->
                 ModelRuntimeException.ModelResponseInvalid("空响应体", profileId)
+            is LlmException.Parse ->
+                ModelRuntimeException.ModelResponseInvalid("响应解析失败: ${e.message}", profileId)
             is LlmException.Network -> classifyIoException(e.cause ?: e, profileId)
             else -> classifyIoException(e, profileId)
         }

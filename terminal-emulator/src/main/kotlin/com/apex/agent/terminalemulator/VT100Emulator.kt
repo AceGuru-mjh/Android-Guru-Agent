@@ -77,6 +77,13 @@ class VT100Emulator(
     private val oscBuf = StringBuilder()
     private var csiPrivate: Boolean = false
 
+    companion object {
+        // P1 fix（边界值）：CSI/OSC 缓冲区上限 —— 畸形序列（ESC [ 后永不出现 final byte）
+        // 会让 csiBuf 无限增长直至 OOM（VtParser 同类问题已修）
+        private const val MAX_CSI_BUF_LENGTH = 4096
+        private const val MAX_OSC_BUF_LENGTH = 100_000
+    }
+
     /** Feed raw bytes (UTF-8). Called by VirtualTerminal.feed(). */
     fun feed(bytes: ByteArray) {
         val text = String(bytes, Charsets.UTF_8)
@@ -119,23 +126,32 @@ class VT100Emulator(
 
     private fun processCsi(ch: Char) {
         if (ch == '?' && csiBuf.isEmpty()) { csiPrivate = true; return }
-        if (ch in '0'..'9' || ch == ';') { csiBuf.append(ch); return }
+        if (ch in '0'..'9' || ch == ';') {
+            // P1 fix：超长 CSI 参数转入忽略态，防畸形序列 OOM
+            if (csiBuf.length >= MAX_CSI_BUF_LENGTH) { csiBuf.clear(); state = State.GROUND; return }
+            csiBuf.append(ch); return
+        }
         // Final byte
         val params = csiBuf.toString().split(';').filter { it.isNotEmpty() }.map { it.toIntOrNull() ?: 0 }
         when (ch) {
             'H', 'f' -> cursorTo(params.getOrElse(0) { 1 } - 1, params.getOrElse(1) { 1 } - 1)  // CUP
             'A' -> cursorRow = (cursorRow - (params.getOrElse(0) { 1 })).coerceAtLeast(0)      // CUU
-            'B' -> cursorRow = (cursorRow + (params.getOrElse(0) { 1 })).coerceAtMost(rows - 1) // CUD
-            'C' -> cursorCol = (cursorCol + (params.getOrElse(0) { 1 })).coerceAtMost(cols - 1) // CUF
+            // P1 fix（边界值）：CUD/CUF/CNL 用 coerceAtMost 时，畸大参数（如 \e[2147483647B）
+            // 会使 cursorRow + n 整型回绕为负，coerceAtMost 不修正负数 → 下次 putChar 越界崩溃。
+            // 改用 coerceIn 同时修复下界与上界，并对参数本身先 clamp 防溢出。
+            'B' -> cursorRow = (cursorRow + params.getOrElse(0) { 1 }.coerceIn(0, rows)).coerceIn(0, rows - 1)  // CUD
+            'C' -> cursorCol = (cursorCol + params.getOrElse(0) { 1 }.coerceIn(0, cols)).coerceIn(0, cols - 1)  // CUF
             'D' -> cursorCol = (cursorCol - (params.getOrElse(0) { 1 })).coerceAtLeast(0)       // CUB
-            'E' -> { cursorRow = (cursorRow + params.getOrElse(0) { 1 }).coerceAtMost(rows - 1); cursorCol = 0 }  // CNL
+            'E' -> { cursorRow = (cursorRow + params.getOrElse(0) { 1 }.coerceIn(0, rows)).coerceIn(0, rows - 1); cursorCol = 0 }  // CNL
             'F' -> { cursorRow = (cursorRow - params.getOrElse(0) { 1 }).coerceAtLeast(0); cursorCol = 0 }        // CPL
             'G' -> cursorCol = (params.getOrElse(0) { 1 } - 1).coerceIn(0, cols - 1)             // CHA
             'd' -> cursorRow = (params.getOrElse(0) { 1 } - 1).coerceIn(0, rows - 1)             // VPA
             'J' -> eraseDisplay(params.getOrElse(0) { 0 })                                       // ED
             'K' -> eraseLine(params.getOrElse(0) { 0 })                                          // EL
-            'S' -> { val n = params.getOrElse(0) { 1 }; repeat(n) { scrollUp() } }               // SU
-            'T' -> { val n = params.getOrElse(0) { 1 }; repeat(n) { scrollDown() } }             // SD
+            // P1 fix（边界值）：\e[999999999S 会触发近 10 亿次全屏滚动导致 ANR，
+            // 滚动次数不可能超过行数，直接 clamp
+            'S' -> { val n = params.getOrElse(0) { 1 }.coerceIn(0, rows); repeat(n) { scrollUp() } }             // SU
+            'T' -> { val n = params.getOrElse(0) { 1 }.coerceIn(0, rows); repeat(n) { scrollDown() } }           // SD
             'm' -> applySgr(params)                                                              // SGR
             'h' -> if (csiPrivate) setMode(params, true)                                         // DECSET
             'l' -> if (csiPrivate) setMode(params, false)                                        // DECRST
@@ -158,6 +174,8 @@ class VT100Emulator(
             }
             state = State.GROUND
         } else {
+            // P1 fix：超长 OSC 丢弃，防畸形序列 OOM
+            if (oscBuf.length >= MAX_OSC_BUF_LENGTH) { oscBuf.clear(); state = State.GROUND; return }
             oscBuf.append(ch)
         }
     }

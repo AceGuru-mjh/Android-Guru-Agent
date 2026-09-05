@@ -25,9 +25,11 @@ import com.apex.agent.core.tools.builtin.browser.BrowserScript
 import com.apex.agent.core.tools.builtin.browser.DomParser
 import com.apex.agent.core.tools.builtin.browser.PageSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,6 +41,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.CopyOnWriteArraySet
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -75,6 +78,15 @@ class BrowserEngine @Inject constructor(
     var currentState: BrowserSessionState = BrowserSessionState.HIDDEN
         private set
 
+    // P1 fix（生命周期竞态）：旧实现在 WebChromeClient 回调里 new 裸
+    // CoroutineScope(Dispatchers.Main)（无 SupervisorJob/异常处理器）—— enterHandoffMode
+    // 内未捕获异常会直接杀进程。改用引擎常驻 mainScope。
+    private val mainScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+            android.util.Log.w("BrowserEngine", "main-scope task failed", e)
+        }
+    )
+
     private val stateMutex = Mutex()
 
     // ───────── UI 回调（浮窗等可视层订阅状态变更） ─────────
@@ -84,7 +96,7 @@ class BrowserEngine @Inject constructor(
     }
 
     @Volatile
-    private var uiCallbacks = mutableSetOf<BrowserUiCallback>()
+    private var uiCallbacks = CopyOnWriteArraySet<BrowserUiCallback>()
 
     /** 浮窗注册自己为状态订阅者（支持多订阅者：霓虹球 + 接管面板） */
     fun addUiCallback(cb: BrowserUiCallback) {
@@ -100,6 +112,8 @@ class BrowserEngine @Inject constructor(
     private fun setState(next: BrowserSessionState) {
         currentState = next
         val tab = activeTab()
+        // P1 fix（生命周期竞态）：uiCallbacks 可能被主线程 add/remove 的同时被 IO 线程
+        // （Agent 工具）遍历 —— CopyOnWriteArraySet 保证迭代器快照语义，不会 CME
         uiCallbacks.forEach { it.onStateChanged(next, tab?.url, tab?.title) }
     }
 
@@ -261,7 +275,7 @@ class BrowserEngine @Inject constructor(
                     lastDialog = "permission: 网页请求敏感权限(摄像头/麦克风/地理)，已默认拒绝并进入人工接管；" +
                         "如需授权请用 browser_show 在真实页面操作"
                     // 进入人工接管，由用户在真实页面上通过浏览器原生对话框授权
-                    CoroutineScope(Dispatchers.Main).launch { enterHandoffMode() }
+                    mainScope.launch { enterHandoffMode() }
                     request.deny() // 隐私最小化：不自动授予敏感权限
                 } else {
                     request.deny()
@@ -631,11 +645,15 @@ class BrowserEngine @Inject constructor(
     // ═════════ 文件上传（P0 #5 / #14 基础） ═════════
 
     /** 由 Agent 指定本地文件路径完成上传；无挂起回调时返回 false（需人工接管） */
-    fun respondFileChooser(uri: android.net.Uri): Boolean {
-        val cb = pendingFileChooser ?: return false
+    // P0 fix（生命周期竞态）：本函数由 Agent 工具在 Dispatchers.IO 上调用（ToolRegistry
+    // flowOn(Dispatchers.IO)），而 onShowFileChooser 在主线程写入 pendingFileChooser，
+    // 且 WebView 的 ValueCallback 契约要求必须在主线程回调 onReceiveValue —— 旧实现在
+    // IO 线程读-置空-回调，既存在数据竞争，也可能触发 Chromium 线程断言 native 崩溃。
+    // 现收敛到主线程执行，与 onShowFileChooser 同线程串行化，竞态消失。
+    suspend fun respondFileChooser(uri: android.net.Uri): Boolean = withContext(Dispatchers.Main) {
+        val cb = pendingFileChooser ?: return@withContext false
         pendingFileChooser = null
-        cb.onReceiveValue(arrayOf(uri))
-        return true
+        runCatching { cb.onReceiveValue(arrayOf(uri)) }.isSuccess
     }
 
     // ═════════ 滚动（含无限滚动检测，P0 #10 增强） ═════════

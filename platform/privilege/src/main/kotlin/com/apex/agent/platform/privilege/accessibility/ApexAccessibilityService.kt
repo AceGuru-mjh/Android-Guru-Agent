@@ -31,18 +31,25 @@ class ApexAccessibilityService : AccessibilityService() {
         fun isRunning(): Boolean = instance != null
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val eventListeners = mutableListOf<(AccessibilityEvent) -> Unit>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
 
-        // 心跳：每30秒检查主进程
-        scope.launch {
+        // 心跳：每30秒检查主进程。
+        // P2 fix（生命周期竞态）：旧实现在主线程做 binder IPC（runningAppProcesses），
+        // 且无 CoroutineExceptionHandler —— system_server 重启/binder 缓冲满时抛出
+        // DeadObjectException/RuntimeException 会逃出 launch 导致无障碍进程崩溃。
+        // 现移到 Default 调度器 + 单次失败不终止心跳循环 + 异常统一记录。
+        scope.launch(Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+            android.util.Log.w("ApexA11yService", "heartbeat iteration failed", e)
+        }) {
             while (isActive) {
                 delay(30_000)
-                checkMainProcessAlive()
+                runCatching { checkMainProcessAlive() }
+                    .onFailure { android.util.Log.w("ApexA11yService", "checkMainProcessAlive failed: ${it.message}") }
             }
         }
     }

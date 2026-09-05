@@ -214,7 +214,9 @@ object AgentModule {
                     maxToolOutputLength = cfg.maxToolOutputLength,
                     temperature = cfg.temperature,
                     reflectionRounds = cfg.reflectionRounds,
-                    enabledToolIds = cfg.enabledToolIds ?: emptyList()
+                    // AgentConfig.enabledToolIds is Set<String>? while the snapshot
+                    // expects List<String>; convert explicitly to satisfy the type.
+                    enabledToolIds = cfg.enabledToolIds?.toList() ?: emptyList()
                 )
             },
             contextInjector = { content -> apex?.injectSystemContext(content) },

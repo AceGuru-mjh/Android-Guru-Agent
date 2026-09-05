@@ -7,6 +7,7 @@ import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.platform.terminal.wait.WaitCondition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -37,13 +38,19 @@ import javax.inject.Inject
 @HiltViewModel
 class TerminalViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val terminalRuntime: TerminalRuntime
+    private val terminalRuntime: TerminalRuntime,
+    // T82: Ubuntu 产品级生命周期 —— 依赖安装中心的路由底座（apt 命令只能跑在 Ubuntu 会话）。
+    private val ubuntuLifecycle: UbuntuLifecycleCoordinator
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("apex_terminal", Context.MODE_PRIVATE)
 
     /** 环境依赖安装器（ATR 2.0 — 用新 Runtime API，非旧 TerminalManager）。 */
-    private val provisioner = EnvironmentProvisioner(terminalRuntime)
+    private val provisioner = EnvironmentProvisioner(terminalRuntime, ubuntuLifecycle)
+
+    /** T82: Ubuntu 生命周期状态（安装/引导进度，UI 可订阅）。 */
+    val ubuntuLifecycleState: StateFlow<UbuntuLifecycleCoordinator.LifecycleState> =
+        ubuntuLifecycle.stateFlow
 
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
@@ -199,6 +206,17 @@ class TerminalViewModel @Inject constructor(
         return sessionId
     }
 
+    /**
+     * T82 断点修复：依赖安装的会话路由 —— DepCatalog 的 apt 命令必须跑在
+     * linux-ubuntu 会话（Android shell 里只有 command not found）。Ubuntu
+     * 拉起失败时诚实降级到 local session（输出真实报错，绝不伪造成功）。
+     */
+    private suspend fun ensureDepInstallSession(): Long? {
+        provisioner.ensureUbuntuSession()?.let { return it }
+        _install.update { it.copy(log = it.log + "⚠️ Ubuntu 会话不可用 — 降级 Android shell（apt 命令可能失败）\n") }
+        return ensureSession()
+    }
+
     /** 安装单个依赖项。 */
     fun installDep(item: DepItem) {
         val useMirror = _useMirror.value
@@ -246,7 +264,7 @@ class TerminalViewModel @Inject constructor(
      * settle-time 已删除，完成靠 waitpid 确认（Spec §4.1）。
      */
     private suspend fun execAndAppend(id: String, cmd: String) {
-        val sid = ensureSession() ?: run {
+        val sid = ensureDepInstallSession() ?: run {
             _install.update { it.copy(log = it.log + "❌ 无法创建终端会话（设备不支持 PTY）\n") }
             return
         }

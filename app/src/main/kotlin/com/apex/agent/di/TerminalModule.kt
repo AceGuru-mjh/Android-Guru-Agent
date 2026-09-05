@@ -290,6 +290,101 @@ object TerminalModule {
             health, linuxPackageManager, provisioner, capabilityProbe
         )
 
+    /**
+     * T82: Ubuntu 产品级生命周期编排器 —— Install → Bootstrap → Capability → READY
+     * 的单一产品入口。App 启动 warmUp（恢复，绝不下载）；Agent/UI ensureReady（按需拉起）。
+     *
+     * bootstrap/probe/repair 以函数端口注入（适配既有单例，不建第二套抽象）：
+     *  - bootstrapFn ← UbuntuBootstrapManager.bootstrap（幂等/续跑/Busy 语义原样透传）
+     *  - bootstrapStateFn ← UbuntuBootstrapManager.state().name
+     *  - probeFn ← LinuxCapabilityProbe.probeAll()
+     *  - repairFn ← EnvironmentRepairService.autoRepair()
+     */
+    @Provides
+    @Singleton
+    fun provideUbuntuLifecycleCoordinator(
+        provisioner: RootfsProvisioner,
+        bootstrap: UbuntuBootstrapManager,
+        capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
+        repairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
+        target: RootfsTarget
+    ): com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator {
+        val lifecycleNs = com.apex.agent.platform.terminal.ubuntu.lifecycle
+        return lifecycleNs.UbuntuLifecycleCoordinator(
+            provisioner = provisioner,
+            bootstrapFn = { force, timeoutMs ->
+                when (val r = bootstrap.bootstrap(force, timeoutMs)) {
+                    is UbuntuBootstrapManager.BootstrapResult.Ready ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.READY, "READY"
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.AlreadyReady ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.ALREADY_READY, r.state.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.InProgress ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.IN_PROGRESS, r.state.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Failed ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.FAILED,
+                            r.partialState.name, r.failedStage, r.error.message
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Cancelled ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.CANCELLED, r.partialState.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Busy ->
+                        lifecycleNs.UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            lifecycleNs.UbuntuLifecycleCoordinator.BootstrapOutcome.BUSY, null, null, r.message
+                        )
+                }
+            },
+            bootstrapStateFn = { bootstrap.state().name },
+            bootstrapProgressFn = {
+                bootstrap.progress().let { flow ->
+                    kotlinx.coroutines.flow.flow {
+                        flow.collect { e ->
+                            emit(
+                                lifecycleNs.UbuntuLifecycleCoordinator.BootstrapProgressEvent(
+                                    stage = e.stage,
+                                    message = when (e) {
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageStarted -> e.message
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageCompleted -> "stage completed (${e.durationMs}ms)"
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageFailed -> e.reason
+                                        is UbuntuBootstrapManager.BootstrapProgress.OverallCompleted -> "bootstrap completed (${e.state.name})"
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            probeFn = {
+                capabilityProbe.probeAll().map { r ->
+                    lifecycleNs.UbuntuLifecycleCoordinator.CapabilityEntry(
+                        name = r.capability,
+                        status = r.status.name,
+                        version = r.version,
+                        aptPackage = r.aptPackage,
+                        detail = r.detail
+                    )
+                }
+            },
+            repairFn = { rf ->
+                rf.autoRepair().let { rr ->
+                    lifecycleNs.UbuntuLifecycleCoordinator.RepairOutcome(
+                        actions = rr.repaired.map { "${it.dimension}: ${it.action} → ${it.outcome}" },
+                        verifiedHealthy = rr.verifiedHealthy,
+                        detail = rr.verification?.summary
+                    )
+                }
+            },
+            target = target
+        )
+    }
+
     /** T76: PackageOperationLock —— apt/dpkg 写串行化（进程内 Mutex + 跨实例 OS 文件锁）。 */
     @Provides
     @Singleton

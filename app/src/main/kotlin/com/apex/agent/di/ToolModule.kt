@@ -133,6 +133,7 @@ object ToolModule {
         linuxPackageManager: LinuxPackageManager,
         linuxCapabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
         environmentRepairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
+        ubuntuLifecycle: com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator,
         skillRegistry: SkillRegistry,
         mcpManager: McpManager
     ): ToolRegistry {
@@ -269,6 +270,12 @@ object ToolModule {
             com.apex.agent.platform.terminal.tools.v2.TerminalLinuxCapabilitiesTool(linuxCapabilityProbe))))
         registry.register(SafeAgentTool(TerminalToolAdapter(
             com.apex.agent.platform.terminal.tools.v2.TerminalLinuxRepairTool(environmentRepairService))))
+        // T82: Ubuntu 产品级生命周期 —— 一键 ensure（install→bootstrap→capability
+        // 聚合入口，替代 Agent 三次调用三套状态机的编排负担）+ 只读 status 快照。
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuEnsureTool(ubuntuLifecycle))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuStatusTool(ubuntuLifecycle))))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))

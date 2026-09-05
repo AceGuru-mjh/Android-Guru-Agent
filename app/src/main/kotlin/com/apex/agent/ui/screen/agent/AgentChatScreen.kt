@@ -64,6 +64,7 @@ import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.component.rememberSlashMenuProvider
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
 import kotlinx.coroutines.launch
 

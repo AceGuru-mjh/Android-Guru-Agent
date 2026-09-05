@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,12 +79,7 @@ internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
         else -> runningLabel
     }
 
-    val pulse by rememberInfiniteTransition(label = "pipeline-banner-pulse").animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
-        label = "pipeline-banner-alpha"
-    )
+    // 脉冲动画仅在运行态创建——完成态横幅不再运行无限动画，避免常驻重组开销。
     Surface(
         color = color.copy(alpha = 0.10f),
         shape = RoundedCornerShape(12.dp),
@@ -140,6 +136,13 @@ internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
                     modifier = Modifier.size(16.dp)
                 )
             } else {
+                // 运行态：脉冲圆点
+                val pulse by rememberInfiniteTransition(label = "pipeline-banner-pulse").animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                    label = "pipeline-banner-alpha"
+                )
                 Box(
                     modifier = Modifier
                         .size(8.dp)

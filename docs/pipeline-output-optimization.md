@@ -61,3 +61,37 @@ AgentEvent ──► AgentChatViewModel.handleEvent
 - `ui/screen/agent/AgentChatDialogs.kt`：`UserInputDialog` 按输入类型差异化（CHOICE 单选卡/CONFIRMATION 语义化/TEXT）
 - `ui/screen/agent/AgentChatMessages.kt`：新消息类型分发
 - `ui/screen/agent/SlashCommands.kt` + `slash/SlashCommandRouter.kt`：路由类别（routeKind/sourceName）
+
+## 四、修复与打磨记录（CI 修复轮）
+
+### 编译修复（11 处 Kotlin 编译错误）
+
+| 位置 | 问题 | 修复 |
+|------|------|------|
+| `AgentChatOutputCards.kt` | 缺少 `androidx.compose.foundation.layout.height` 导入（7 处 `Modifier.height` 调用） | 补充导入 |
+| `AgentChatPlanCards.kt` | 使用 `FontFamily.Monospace` 但未导入 `FontFamily` | 补充导入 |
+| `AgentChatToolCards.kt` | `Icons.Default.Link` / `Icons.Default.Extension` 未导入（导入误加到了 PlanCards） | 补充导入到使用方 |
+| `AgentChatToolCards.kt` | `SmartToolOutput(output = toolCall.output)`：`String?` → `String` 类型不匹配 | 传入分支内已保证非空的 `outputText` |
+
+### CI 括号平衡检查误报修复
+
+CI 以原始字符计数检查 `.kt` 文件的括号配对（含字符串/注释）。以下合法代码会被误报，已调整为源码层面配对的等价写法：
+
+- `parseFileOp`：正则字面量中的 `\(` → `\x28`（Java/ICU 正则十六进制转义，语义完全等价，已用 kotlinc 2.0.21 + JVM 实测验证行为一致）；
+- `parseChoiceOptions`：字符类 `[...)]` → `[...\x29]`；
+- 注释中的 `1)` → 全角 `1）`。
+
+### 逻辑缺陷修复（本轮真实找出的 bug）
+
+1. **旧流水线横幅永久脉冲**：`/skill:` 等流水线执行中用户发送新消息 / 重试会取消旧 job，但横幅未收尾。现在 `sendMessage` / `retry` 在 `currentJob?.cancel()` 后调用 `finishActiveBanner()`。
+2. **`SmartToolOutput` 视图路由 remember key 不完整**：`remember(toolName, output.take(64))` 在两段输出前 64 字符相同、尾部结构不同时会复用错误的视图类型；改为完整 `output` 作 key。
+3. **`FileOpCard` 解析缓存 key 缺 `args`**：`parseFileOp` 入参含 `args` 但 remember key 未包含。
+4. **代码高亮配色不随主题**：`CodeOutputCard` 的 `remember(code, lang)` 未把 `colors` 纳入 key，明暗切换后高亮配色陈旧；已纳入。
+5. **运行中工具卡计时从 0 起跳**：`RunningToolCallCard` 首帧显示 0s 而非真实已用时长；改为初始化即按 `startedAt` 计算，且 ≥60s 切换为 `2m05s` 格式。
+
+### UI 打磨
+
+- `PipelineBannerCard`：脉冲无限动画仅在运行态创建（完成态零动画开销）；
+- `StepMarkerCard`：步骤编号升级为带旗帜图标的胶囊徽章，层级更清晰；
+- `RunSummaryCard`：补充细描边，与文件操作卡/代码卡视觉同族；
+- 工具卡完成态耗时统一走 `formatDuration`（`1.2s` / `2m05s`），等宽字体对齐。

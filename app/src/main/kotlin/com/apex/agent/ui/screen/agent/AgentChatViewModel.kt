@@ -348,6 +348,9 @@ class AgentChatViewModel @Inject constructor(
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
+        // 被取消任务的横幅收尾：若上一轮是 /skill: /connector: /plugin: 流水线且尚未结束，
+        // 此处把横幅置为完成态，避免旧横幅永远脉冲在"运行中"。
+        finishActiveBanner()
 
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
         val currentAttachments = attachmentManager.drainAttachments()
@@ -386,6 +389,8 @@ class AgentChatViewModel @Inject constructor(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         currentJob?.cancel()
+        // 同 sendMessage：被取消的上一轮流水线横幅收尾，避免残留"运行中"脉冲。
+        finishActiveBanner()
         updateInputText("")
         currentJob = viewModelScope.launch {
             runEngine(trimmed, attachments)

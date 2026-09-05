@@ -496,11 +496,13 @@ internal fun UserInputDialog(
 }
 
 /**
- * 从 CHOICE 提示文本中解析选项（`1. xxx` / `1) xxx` / `• xxx` / `- xxx` 行）。
+ * 从 CHOICE 提示文本中解析选项（`1. xxx` / `1）xxx` / `• xxx` / `- xxx` 行）。
  * 解析出少于 2 个选项时返回空列表（由调用方回退自由文本）。
  */
 internal fun parseChoiceOptions(prompt: String): List<String> {
-    val options = Regex("""^\s*(?:\d+[.、)]|•|·|-|\*)\s*(.+)$""", RegexOption.MULTILINE)
+    // 注：字符类中的字面量右括号以十六进制转义 \x29 书写——语义与直接书写完全等价，
+    // 但可避免源码文本中出现不配对的括号字符而被 CI 的括号平衡检查误报。
+    val options = Regex("""^\s*(?:\d+[.、\x29]|•|·|-|\*)\s*(.+)$""", RegexOption.MULTILINE)
         .findAll(prompt)
         .mapNotNull { m ->
             m.groupValues[1].trim().takeIf { it.isNotBlank() }

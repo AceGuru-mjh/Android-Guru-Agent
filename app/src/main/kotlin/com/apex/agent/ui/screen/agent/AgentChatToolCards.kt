@@ -30,10 +30,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -264,8 +266,9 @@ internal fun ToolCallCard(
 
                 if (toolCall.durationMs > 0) {
                     Text(
-                        text = "${toolCall.durationMs}ms",
+                        text = formatDuration(toolCall.durationMs),
                         style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -329,11 +332,13 @@ internal fun ToolCallCard(
                 if (results.isNotEmpty()) {
                     WebSearchResultsCard(results, query = extractSearchQuery(outputText))
                 } else {
-                    // 智能输出渲染：按工具类型自动选择 代码高亮 / 文件卡 / JSON树 / Shell / 文本 卡片
+                    // 智能输出渲染：按工具类型自动选择 代码高亮 / 文件卡 / JSON树 / Shell / 文本 卡片。
+                    // output 直接传 outputText（本分支已保证非空）：展开时它等于 fullOutput ?: output，
+                    // 折叠时等于 output——与卡片将要展示的内容完全一致。
                     SmartToolOutput(
                         toolName = toolCall.toolName,
                         args = toolCall.args,
-                        output = toolCall.output,
+                        output = outputText,
                         fullOutput = toolCall.fullOutput,
                         expanded = expanded,
                         isError = isError
@@ -622,8 +627,13 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
 
-    // 实时耗时计时（每秒刷新，基于 startedAt 计算）
-    var elapsedSec by remember(toolCall.id) { mutableStateOf(0L) }
+    // 实时耗时计时：立即显示真实已用时长（而非从 0 起跳），此后每秒刷新；
+    // ≥60s 后切换为 2m05s 形式，长任务可读性更好。
+    var elapsedSec by remember(toolCall.id) {
+        mutableStateOf(
+            (System.currentTimeMillis() - toolCall.startedAt).coerceAtLeast(0L) / 1000
+        )
+    }
     LaunchedEffect(toolCall.id) {
         while (true) {
             delay(1000)
@@ -686,7 +696,7 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
                 // 实时耗时
                 if (elapsedSec > 0) {
                     Text(
-                        text = "${elapsedSec}s",
+                        text = if (elapsedSec < 60) "${elapsedSec}s" else formatDuration(elapsedSec * 1000),
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

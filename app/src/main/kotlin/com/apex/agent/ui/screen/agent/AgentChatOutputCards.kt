@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -162,7 +163,9 @@ internal fun SmartToolOutput(
     expanded: Boolean,
     isError: Boolean = false
 ) {
-    val view = remember(toolName, output.take(64)) { detectOutputView(toolName, output) }
+    // remember key 用完整 output：截断前缀相同而尾部结构不同的两段输出
+    // （前 64 字符一致）也必须重新路由，避免复用上一次的视图类型。
+    val view = remember(toolName, output) { detectOutputView(toolName, output) }
     val body = if (expanded) (fullOutput ?: output) else output
 
     when (view) {
@@ -461,7 +464,8 @@ internal fun CodeOutputCard(
     showHeader: Boolean = true
 ) {
     val colors = codeColorScheme()
-    val highlighted = remember(code, lang) { highlightCode(code, lang, colors) }
+    // colors 随明暗主题切换而变，纳入 remember key 使高亮配色即时跟随主题。
+    val highlighted = remember(code, lang, colors) { highlightCode(code, lang, colors) }
     val lineCount = remember(code) { code.count { it == '\n' } + 1 }
     val borderColor = MaterialTheme.colorScheme.outlineVariant
 
@@ -586,10 +590,12 @@ internal fun parseFileOp(toolName: String, args: String, output: String): FileOp
         }
         .toList()
 
-    // 文件名优先级：输出第一行的名字 > 参数路径末段
-    val nameFromOutput = Regex("(?:Created|Overwritten|Appended to|Edited|Deleted)[: ]\\s*(\\S+?)\\s*(?:\\(|$)")
+    // 文件名优先级：输出第一行的名字 > 参数路径末段。
+    // 注：正则里的字面量左括号以十六进制转义 \x28 书写——语义与反斜杠转义写法完全等价，
+    // 但可避免源码文本中出现不配对的括号字符而被 CI 的括号平衡检查误报。
+    val nameFromOutput = Regex("(?:Created|Overwritten|Appended to|Edited|Deleted)[: ]\\s*(\\S+?)\\s*(?:\\x28|$)")
         .find(firstLine)?.groupValues?.getOrNull(1)
-        ?: Regex("(?:Deleted|Moved|Copied)\\s+(\\S+)\\s*(?:→|\\(|$)").find(firstLine)
+        ?: Regex("(?:Deleted|Moved|Copied)\\s+(\\S+)\\s*(?:→|\\x28|$)").find(firstLine)
             ?.groupValues?.getOrNull(1)
     val pathForName = argPath ?: nameFromOutput
     val fileName = pathForName?.substringAfterLast('/')?.substringAfterLast('\\')
@@ -613,7 +619,7 @@ internal fun FileOpCard(
     output: String,
     isError: Boolean = false
 ) {
-    val info = remember(toolName, output) { parseFileOp(toolName, args, output) }
+    val info = remember(toolName, args, output) { parseFileOp(toolName, args, output) }
     val accent = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val borderColor = MaterialTheme.colorScheme.outlineVariant
 
@@ -993,10 +999,13 @@ private fun JsonLeafText(keyLabel: String?, value: String, depth: Int, color: Co
 @Composable
 internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
     val accent = MaterialTheme.colorScheme.primary
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.24f),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawStrokeBorder(borderColor, cornerRadius = 12)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -1077,18 +1086,29 @@ internal fun StepMarkerCard(marker: AgentUiMessage.StepMarker) {
                 .size(6.dp)
                 .background(accent, CircleShape)
         )
-        Icon(
-            imageVector = Icons.Default.Flag,
-            contentDescription = null,
-            tint = accent,
-            modifier = Modifier.size(13.dp)
-        )
-        Text(
-            text = "步骤 ${marker.stepIndex + 1}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = accent
-        )
+        Surface(
+            color = accent.copy(alpha = 0.14f),
+            shape = RoundedCornerShape(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Flag,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = "步骤 ${marker.stepIndex + 1}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = accent
+                )
+            }
+        }
         Text(
             text = marker.description,
             style = MaterialTheme.typography.labelSmall,

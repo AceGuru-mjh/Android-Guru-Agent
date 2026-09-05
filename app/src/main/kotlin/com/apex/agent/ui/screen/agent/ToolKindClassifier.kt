@@ -3,13 +3,11 @@ package com.apex.agent.ui.screen.agent
 import com.apex.agent.core.tools.ToolCategory
 import com.apex.agent.core.tools.ToolMetadata
 
-/**
- * # 工具调用来源分类（Tool System v2 抽出的单一职责协作文件）
- *
- * [classifyTool] 原内嵌于 [AgentChatViewModel]，随 v2 元数据接入膨胀后
- * 按职责缝拆出（文件预算门禁：主源 ≤1200 行）。纯函数、无状态——
- * 分类规则与 ViewModel 的会话状态/引擎接线互不纠缠。
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// 工具来源分类 —— 从 AgentChatViewModel.kt 抽出的纯函数职责（God-file 预算拆分：
+// 原文件超过 1200 行 SRP 上限，此顶层函数与 ViewModel 状态零耦合，独立成文件）。
+// 调用点（handleEvent 等）解析不变：同包顶层 fun，无需 import。
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** [classifyTool] 用的 server 字段提取正则（原实现在每次调用时重复编译，现提升到顶层）。 */
 private val SERVER_FIELD_REGEX = Regex("""(?i)"server"\s*:\s*"([^"]+)"""")
@@ -71,3 +69,4 @@ fun classifyTool(
     if (contextKind != null) return contextKind to null
     return ToolKind.LOCAL to null
 }
+

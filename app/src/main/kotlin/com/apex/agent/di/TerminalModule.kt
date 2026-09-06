@@ -19,6 +19,7 @@ import com.apex.agent.platform.terminal.persistence.SessionMetadataStore
 import com.apex.agent.platform.terminal.runtime.TerminalRuntimeImpl
 import com.apex.agent.platform.terminal.tools.*
 import com.apex.agent.platform.terminal.ubuntu.OfficialUbuntuRootfsSource
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.platform.terminal.ubuntu.ProvisionedRootfsProvider
 import com.apex.agent.platform.terminal.ubuntu.RootfsConfigurator
 import com.apex.agent.platform.terminal.ubuntu.RootfsHealthInspector
@@ -289,6 +290,98 @@ object TerminalModule {
         com.apex.agent.platform.terminal.health.EnvironmentRepairService(
             health, linuxPackageManager, provisioner, capabilityProbe
         )
+
+    /**
+     * T82: Ubuntu 产品级生命周期编排器 —— Install → Bootstrap → Capability → READY
+     * 的单一产品入口。App 启动 warmUp（恢复，绝不下载）；Agent/UI ensureReady（按需拉起）。
+     *
+     * bootstrap/probe/repair 以函数端口注入（适配既有单例，不建第二套抽象）：
+     *  - bootstrapFn ← UbuntuBootstrapManager.bootstrap（幂等/续跑/Busy 语义原样透传）
+     *  - bootstrapStateFn ← UbuntuBootstrapManager.state().name
+     *  - probeFn ← LinuxCapabilityProbe.probeAll()
+     *  - repairFn ← EnvironmentRepairService.autoRepair()
+     */
+    @Provides
+    @Singleton
+    fun provideUbuntuLifecycleCoordinator(
+        provisioner: RootfsProvisioner,
+        bootstrap: UbuntuBootstrapManager,
+        capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
+        repairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
+        target: RootfsTarget
+    ): UbuntuLifecycleCoordinator {
+        return UbuntuLifecycleCoordinator(
+            provisioner = provisioner,
+            bootstrapFn = { force, timeoutMs ->
+                when (val r = bootstrap.bootstrap(force, timeoutMs)) {
+                    is UbuntuBootstrapManager.BootstrapResult.Ready ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.READY, "READY"
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.AlreadyReady ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.ALREADY_READY, r.state.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.InProgress ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.IN_PROGRESS, r.state.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Failed ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.FAILED,
+                            r.partialState.name, r.failedStage, r.error.message
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Cancelled ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.CANCELLED, r.partialState.name
+                        )
+                    is UbuntuBootstrapManager.BootstrapResult.Busy ->
+                        UbuntuLifecycleCoordinator.BootstrapStageResult(
+                            UbuntuLifecycleCoordinator.BootstrapOutcome.BUSY, null, null, r.message
+                        )
+                }
+            },
+            bootstrapStateFn = { bootstrap.state().name },
+            bootstrapProgressFn = {
+                bootstrap.progress().let { flow ->
+                    kotlinx.coroutines.flow.flow {
+                        flow.collect { e ->
+                            emit(
+                                UbuntuLifecycleCoordinator.BootstrapProgressEvent(
+                                    stage = e.stage,
+                                    message = when (e) {
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageStarted -> e.message
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageCompleted -> "stage completed (${e.durationMs}ms)"
+                                        is UbuntuBootstrapManager.BootstrapProgress.StageFailed -> e.reason
+                                        is UbuntuBootstrapManager.BootstrapProgress.OverallCompleted -> "bootstrap completed (${e.state.name})"
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            probeFn = {
+                capabilityProbe.probeAll().map { r ->
+                    UbuntuLifecycleCoordinator.CapabilityEntry(
+                        name = r.capability,
+                        status = r.status.name,
+                        version = r.version,
+                        aptPackage = r.aptPackage,
+                        detail = r.detail
+                    )
+                }
+            },
+            repairFn = { repairService.autoRepair().let { rr ->
+                UbuntuLifecycleCoordinator.RepairOutcome(
+                    actions = rr.repaired.map { "${it.dimension}: ${it.action} → ${it.outcome}" },
+                    verifiedHealthy = rr.verifiedHealthy,
+                    detail = rr.verification?.summary
+                )
+            } },
+            target = target
+        )
+    }
 
     /** T76: PackageOperationLock —— apt/dpkg 写串行化（进程内 Mutex + 跨实例 OS 文件锁）。 */
     @Provides

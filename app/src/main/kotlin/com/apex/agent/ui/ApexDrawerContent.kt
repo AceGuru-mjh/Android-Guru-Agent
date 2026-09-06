@@ -4,6 +4,8 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -51,10 +53,13 @@ fun ApexDrawerContent(
         modifier = Modifier.width(288.dp),
         drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
-        // ═══ 品牌头部（霓虹光晕） ═══
+        // 修复：内容总高 ~750dp（头+8 导航+底部状态），短屏/横屏下底部 MODE/THINK/GitHub
+        // 状态区被裁剪且不可达 —— 补垂直滚动
+        // ═══ 品牌头部（霓虹光晕，随内容滚动） ═══
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -101,7 +106,7 @@ fun ApexDrawerContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Surface(
-                            shape = RoundedCornerShape(4.dp),
+                            shape = RoundedCornerShape(6.dp), // 统一 chip 半径（应用级 6dp 标准，原 4 孤例）
                             color = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Text(
@@ -232,7 +237,7 @@ private fun GithubStatusRow(
     username: String?
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp), // 统一 chip 半径（应用级 6dp 标准，原 8）
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
@@ -265,7 +270,7 @@ private fun GithubStatusRow(
 @Composable
 private fun StatusChip(label: String, value: String) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp), // 统一 chip 半径（应用级 6dp 标准，原 8）
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(

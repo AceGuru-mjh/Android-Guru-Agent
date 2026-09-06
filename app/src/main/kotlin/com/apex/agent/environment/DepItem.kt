@@ -12,7 +12,7 @@ package com.apex.agent.environment
  * @param id             stable identifier (e.g. "jdk17")
  * @param name           human-readable name
  * @param group          GENERAL (cross-platform) or ANDROID (Android-specific)
- * @param installOfficial shell command for official install (e.g. winget/scoop/sdkmanager)
+ * @param installOfficial shell command for official install (apt/sdkmanager —— v2 已移除 Windows 的 winget/scoop 遗留)
  * @param installMirror   shell command for mirror install (China mirror, etc.)
  * @param checkCommand    shell command to verify install (e.g. "java -version")
  */

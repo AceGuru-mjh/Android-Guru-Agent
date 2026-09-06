@@ -116,19 +116,23 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    /** 恢复横幅：继续崩溃任务。 */
+    /** 恢复横幅：继续崩溃任务（仅移除被继续的那一项，原实现误清空全部候选）。 */
     fun resumeCrashedTask(taskId: String) {
         taskController.resumeFromCrash(taskId)?.let { flow ->
-            _recoveryCandidates.value = emptyList()
+            _recoveryCandidates.update { list -> list.filterNot { it.taskId == taskId } }
             currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
 
-    /** 恢复横幅：放弃崩溃任务（终态 CANCELLED，重启不再出现）。 */
-    fun dismissCrashedTask() {
-        _recoveryCandidates.value = emptyList()
-        viewModelScope.launch { taskController.abandonCrashed() }
+    /** 恢复横幅：放弃单个崩溃任务（原实现误弃/误清全部候选）。 */
+    fun dismissCrashedTask(taskId: String) {
+        _recoveryCandidates.update { list -> list.filterNot { it.taskId == taskId } }
+        // 仅当被放弃的候选就是当前激活任务（发现扫描会激活首项）时走运行时终态链；
+        // 其余候选只从横幅移除——若其仍处于崩溃态，下次重启扫描会再次出现（诚实语义）
+        if (taskController.taskState.value?.taskId == taskId) {
+            viewModelScope.launch { taskController.abandonCrashed() }
+        }
     }
 
     /**
@@ -143,6 +147,10 @@ class AgentChatViewModel @Inject constructor(
      */
     private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
+
+    /** 一次性 UI 反馈（Toast 级）：异步动作的真实结果由 Screen 收集展示（如整理入记忆成败） */
+    private val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val uiFeedback: SharedFlow<String> = _uiFeedback.asSharedFlow()
 
     /**
      * Agent 主动提问时的待处理问题。
@@ -195,14 +203,6 @@ class AgentChatViewModel @Inject constructor(
     }
 
     /**
-     * 将一条 Agent 回复整理进记忆（UI 占位实现）。
-     *
-     * 当前仅记录日志与埋点占位，尚未接入 CS-Mem 后端：
-     * 后续版本会把 [text] 交给 CsMemSessionManager 做显式整理/蒸馏，
-     * 使本次对话可被后续任务通过 memory_recall_* 工具召回。
-     * Toast 提示由调用方（AgentBubble）负责，本方法保持纯业务占位。
-     */
-    /**
      * 将一条 Agent 回复整理进记忆（接 CS-Mem 显式整理入口）。
      *
      * 委托 [CsMemSessionManager.organizeText] 把文本按行切片为语义节点写入长期记忆，
@@ -212,8 +212,10 @@ class AgentChatViewModel @Inject constructor(
         val goal = text.take(40).trim().ifBlank { "对话整理" }
         viewModelScope.launch {
             runCatching { csMemSessionManager.organizeText(goal, text) }
+                .onSuccess { _uiFeedback.tryEmit("已整理到记忆：$goal") }
                 .onFailure { e ->
                     android.util.Log.e("AgentChatViewModel", "organizeToMemory failed", e)
+                    _uiFeedback.tryEmit("整理到记忆失败：${e.message ?: "未知错误"}")
                 }
         }
     }

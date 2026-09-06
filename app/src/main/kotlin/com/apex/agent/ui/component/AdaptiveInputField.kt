@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -58,7 +61,7 @@ import androidx.compose.ui.window.DialogProperties
  * 自适应输入框 + 手势快捷键系统。
  *
  * 创新点：
- * 1. 根据内容自动扩展行数（1 → 最大 12 行）；
+ * 1. 根据内容自动扩展行数（1 → 最大 5 行）；
  * 2. 长文本（>200 字符）时显示字符计数；
  * 3. 双击触发全屏编辑模式（适合编辑长 prompt / 代码片段）；
  * 4. 全屏模式支持 IME action 完成。
@@ -117,10 +120,8 @@ fun AdaptiveInputField(
                     indication = null,
                     onClick = {},
                     onDoubleClick = {
-                        // 双击触发全屏编辑
-                        if (value.length > 50 || value.count { it == '\n' } > 2) {
-                            isFullscreen = true
-                        }
+                        // 双击触发全屏编辑（无门槛：短文本双击也应可发现该手势）
+                        isFullscreen = true
                     }
                 ),
             placeholder = placeholder,
@@ -201,7 +202,7 @@ fun AdaptiveInputField(
  *
  * - 占满整个屏幕，适合编辑长 prompt / 代码片段；
  * - 支持 IME action 完成；
- * - 点击关闭按钮或返回键保存。
+ * - 点击关闭按钮或返回键均保存（与 KDoc 声明一致；关闭按钮丢弃修改属于静默数据丢失）。
  */
 @Composable
 private fun FullscreenEditorDialog(
@@ -228,6 +229,9 @@ private fun FullscreenEditorDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
@@ -251,10 +255,10 @@ private fun FullscreenEditorDialog(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        IconButton(onClick = onDismiss) {
+                        IconButton(onClick = { onConfirm(text) }) { // 修复：关闭按钮同样保存（原为静默丢弃全部修改）
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "关闭"
+                                contentDescription = "关闭并保存"
                             )
                         }
                     }

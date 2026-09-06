@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +31,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -88,7 +91,7 @@ fun BrainMenuButton(
     )
 
     Box(modifier = modifier) {
-        IconButton(onClick = { menuOpen = !menuOpen }, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = { menuOpen = !menuOpen }, modifier = Modifier.size(40.dp)) { // 对齐修复：与 Attach/Github/Send 统一 40dp（原 36dp）
             Icon(
                 Icons.Default.Psychology,
                 contentDescription = "小大脑",
@@ -110,7 +113,14 @@ fun BrainMenuButton(
             shadowElevation = 8.dp,
             modifier = Modifier.width(300.dp)
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    // 修复：菜单内容（模型卡+可展开列表+3 滑块）可超出窗口高度且不可滚，
+                    // 小屏/横屏下滑块不可达 —— 加滚动上限
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 // ── 第一项：当前模型选择器 ─────────────────────
                 Text(
                     "当前模型",
@@ -358,7 +368,7 @@ private fun BrainSliderRow(
                 activeTrackColor = MaterialTheme.colorScheme.primary,
                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             ),
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).semantics { contentDescription = label } // 修复：TalkBack 播报滑块名称
         )
         Text(
             display,

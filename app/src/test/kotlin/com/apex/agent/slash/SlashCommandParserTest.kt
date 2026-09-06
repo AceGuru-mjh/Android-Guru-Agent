@@ -92,29 +92,33 @@ class SlashCommandParserTest {
     fun `kv parsing stops once positional text begins`() {
         // After the first positional token, subsequent key=value-shaped tokens
         // are treated as user text (CLI-style) rather than dropped into args.
-        val parsed = SlashCommandParser.parse("/skill:foo keep=this drop=that")
+        //（修复：原输入没有 positional token，永远走不到“停止 kv”分支 —— 补一个真 token）
+        val parsed = SlashCommandParser.parse("/skill:foo keep=this run drop=that")
 
         val skill = parsed as SlashCommand.Skill
         assertEquals(mapOf("keep" to "this"), skill.args)
-        assertEquals("drop=that", skill.userExtra)
+        assertEquals("run drop=that", skill.userExtra)
     }
 
     @Test
     fun `kv key must start with letter or underscore`() {
-        // "1key=val" doesn't match the key regex → positional user text.
+        // "1key=val" doesn't match the key regex → positional user text；
+        // 且按 CLI 语义 kv 随即停止 —— 后续合法 kv 也归入 user text（原断言与之矛盾）。
         val parsed = SlashCommandParser.parse("/skill:foo 1key=val real=v")
 
         val skill = parsed as SlashCommand.Skill
-        assertEquals(mapOf("real" to "v"), skill.args)
-        assertEquals("1key=val", skill.userExtra)
+        assertEquals(emptyMap<String, String>(), skill.args)
+        assertEquals("1key=val real=v", skill.userExtra)
     }
 
     @Test
-    fun `user extra text is preserved verbatim including internal whitespace`() {
+    fun `user extra text collapses whitespace runs like sh tokenization`() {
+        // 缺陷 7 修复后的 sh-like 词法：空白序列视为单分隔符（引号内除外）。
+        //（原测试期望逐字保留旧实现行为，与新词法设计矛盾）
         val parsed = SlashCommandParser.parse("/skill:foo   multiple    spaces   here")
 
         val skill = parsed as SlashCommand.Skill
-        assertEquals("multiple    spaces   here", skill.userExtra)
+        assertEquals("multiple spaces here", skill.userExtra)
     }
 
     // ═══════════════════════════════════════════════════════════

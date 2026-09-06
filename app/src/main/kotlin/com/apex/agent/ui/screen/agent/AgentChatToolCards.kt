@@ -223,7 +223,11 @@ internal fun ToolCallCard(
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            // 修复：长 MCP 工具名把状态徽章/时长挤... 出卡片（无 maxLines 时整行溢出）
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         // 状态徽章
                         val status = when {
@@ -549,7 +553,7 @@ internal fun ToolStepTimeline(
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        itemsIndexed(steps) { index, step ->
+        itemsIndexed(steps, key = { _, s -> s.id }) { index, step ->
             val dotColor = when (step.phase) {
                 StepPhase.START -> accent
                 StepPhase.OUTPUT -> MaterialTheme.colorScheme.outline

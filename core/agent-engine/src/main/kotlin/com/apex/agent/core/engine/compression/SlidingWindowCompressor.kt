@@ -46,7 +46,19 @@ class SlidingWindowCompressor : ContextCompressor {
         // 找到system prompt的位置（通常是index 0）
         val systemEnd = if (history.isNotEmpty() && history[0] is LlmMessage.System) 1 else 0
 
-        val preserveStart = maxOf(systemEnd, history.size - preserveRecent)
+        var preserveStart = maxOf(systemEnd, history.size - preserveRecent)
+
+        // ═══ 混沌工程加固（CR #D2）：保留窗首条不得是孤儿 ToolResult ═══
+        //
+        // ReAct 历史中 Assistant(tool_calls) 与 ToolResult 成对出现；OpenAI 兼容端点
+        // 要求 role:"tool" 消息必须紧跟在携带对应 tool_calls 的 assistant 之后。
+        // 旧实现按条数硬切，preserveStart 恰好落在两者之间时：assistant 被压进摘要、
+        // ToolResult 留在保留窗 → 下次请求 400；且 ApexAgentEngine.compressNow() 会把
+        // 损坏历史经 memory.save() 持久化，之后每轮请求都 400，只能清空对话。
+        // 修复：边界向前回扩，把与保留窗内 ToolResult 配对的 assistant 一并保留。
+        while (preserveStart > systemEnd && history[preserveStart] is LlmMessage.ToolResult) {
+            preserveStart--
+        }
 
         if (preserveStart <= systemEnd) {
             return CompressionReport(

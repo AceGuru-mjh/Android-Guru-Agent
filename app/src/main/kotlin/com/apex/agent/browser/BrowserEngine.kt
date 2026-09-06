@@ -28,6 +28,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -78,11 +79,13 @@ class BrowserEngine @Inject constructor(
     var currentState: BrowserSessionState = BrowserSessionState.HIDDEN
         private set
 
-    // P1 fix（生命周期竞态）：旧实现在 WebChromeClient 回调里 new 裸
-    // CoroutineScope(Dispatchers.Main)（无 SupervisorJob/异常处理器）—— enterHandoffMode
-    // 内未捕获异常会直接杀进程。改用引擎常驻 mainScope。
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现 onPermissionRequest 等
+    // WebChromeClient 回调里直接 new 裸 CoroutineScope(Dispatchers.Main).launch ——
+    // 无 SupervisorJob/异常处理器（enterHandoffMode 未捕获异常直接杀进程）且每次
+    // 网页权限请求都产生无主协程抢 stateMutex，连点即堆积、永不取消。改用引擎
+    // 单例持有的常驻 mainScope：Main.immediate + 异常记录不崩溃。
     private val mainScope = CoroutineScope(
-        SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
             android.util.Log.w("BrowserEngine", "main-scope task failed", e)
         }
     )

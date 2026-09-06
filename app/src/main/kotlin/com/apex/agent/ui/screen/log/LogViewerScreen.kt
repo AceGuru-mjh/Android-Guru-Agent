@@ -486,6 +486,9 @@ private val exportScope = kotlinx.coroutines.CoroutineScope(
 private var exportJob: kotlinx.coroutines.Job? = null
 
 private fun exportAndShare(context: android.content.Context, content: String) {
+    // （混沌审查两轮同题：#100 单例作用域+取消旧任务 优于 #101 每次新建 SupervisorJob
+    // 作用域且从不 cancel 的方案 —— 连点仍会积累孤儿 Job；此处取 #100 实现，
+    // appContext 跨异步边界解包两方一致。）
     val appContext = context.applicationContext
     exportJob?.cancel()
     exportJob = exportScope.launch {

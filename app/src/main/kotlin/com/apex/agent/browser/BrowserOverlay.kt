@@ -59,11 +59,13 @@ class BrowserOverlay @Inject constructor(
         appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // P1 fix（生命周期竞态）：旧实现 onCompleteHandoff 每次回调都
-    // mainHandler.post { CoroutineScope(Dispatchers.Main).launch { ... } } ——
-    // 裸 scope 无异常处理器，completeHandoff 内未捕获异常直接杀进程；改用常驻 mainScope。
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现 onCompleteHandoff 每次回调都
+    // `mainHandler.post { CoroutineScope(Dispatchers.Main).launch { ... } }` —— 双重异步
+    // + 裸 scope 无异常处理器（completeHandoff 未捕获异常直接杀进程）+ 每次回调 new
+    // 孤儿作用域（连点“交还”挂起 N 个无主协程排队抢 stateMutex 永不取消）。改用单例
+    // 持有的常驻 mainScope：Main.immediate 已保证主线程 + 异常记录不崩溃。
     private val mainScope = CoroutineScope(
-        SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
             android.util.Log.w("BrowserOverlay", "handoff failed", e)
         }
     )

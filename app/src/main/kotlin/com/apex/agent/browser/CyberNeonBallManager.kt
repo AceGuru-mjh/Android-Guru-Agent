@@ -22,6 +22,8 @@ import androidx.dynamicanimation.animation.SpringForce
 import com.lzf.easyfloat.EasyFloat
 import com.lzf.easyfloat.enums.ShowPattern
 import com.lzf.easyfloat.enums.SidePattern
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,12 +57,13 @@ class CyberNeonBallManager @Inject constructor(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tag = "cyber_neon_ball"
 
-    // P1 fix（生命周期竞态）：旧实现在每次点击时 new 一个裸 CoroutineScope(Dispatchers.Main)，
-    // 无 SupervisorJob / CoroutineExceptionHandler —— completeHandoff/enterHandoffMode 内
-    // 任何未捕获异常直接走默认 UncaughtExceptionHandler 导致进程崩溃，且 scope 永不 cancel。
-    // 现改为管理器持有的常驻作用域：异常被记录而非崩溃，不再泄漏 scope。
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现每次点击都 new 一个裸
+    // CoroutineScope(Dispatchers.Main) —— 无 SupervisorJob / CoroutineExceptionHandler，
+    // completeHandoff/enterHandoffMode 内任何未捕获异常直接杀进程，且孤儿协程
+    // 排队抢 stateMutex 永不取消。单例持有唯一作用域（进程级生命周期与 @Singleton
+    // 一致）+ Main.immediate（点击响应免额外调度延迟）+ 异常记录不崩溃。
     private val mainScope = CoroutineScope(
-        SupervisorJob() + Dispatchers.Main + CoroutineExceptionHandler { _, e ->
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
             android.util.Log.w(tag, "handoff action failed", e)
         }
     )
@@ -230,8 +233,12 @@ class CyberNeonBallManager @Inject constructor(
     }
 
     private fun triggerVibration() {
-        // P0 fix 防御层：部分 ROM 对 Vibrator 有额外限制，未捕获的 SecurityException
-        // 发生在 mainHandler.post 内会直接杀进程（manifest 已补声明 VIBRATE 权限）
+        // P0 fix 防御层（两轮混沌审查同题合并）：VIBRATE 属普通权限，正常打包清单已声明，
+        // 但清单合并被裁剪 / OEM 定制 ROM 等边缘场景下 vibrate() 会抛 SecurityException
+        // （主线程 → 杀进程）。双层防御：① 运行时无权限直接跳过；② runCatching 兜底记录。
+        if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.VIBRATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
         runCatching {
             val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

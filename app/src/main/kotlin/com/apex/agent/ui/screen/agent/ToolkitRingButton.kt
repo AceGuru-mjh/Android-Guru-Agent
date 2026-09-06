@@ -65,9 +65,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.screen.agent.toolkit.ChatRule
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
+import com.apex.agent.core.tools.ToolCategory
 
-/** 工具菜单中展示用的工具引用（id + 显示名）。 */
-data class ToolRef(val id: String, val name: String)
+/** 工具菜单中展示用的工具引用（id + 显示名 + v2 元数据：类别/风险）。 */
+data class ToolRef(
+    val id: String,
+    val name: String,
+    /** 工具类别（v2 元数据）；null → 归入「其他」分组。 */
+    val category: ToolCategory? = null,
+    /** 高风险工具：菜单加 ⚠ 徽标，首次执行需用户确认。 */
+    val highRisk: Boolean = false
+)
 
 /**
  * 输入框"迷你小圆环"工具菜单入口。
@@ -167,24 +175,24 @@ fun ToolkitRingButton(
                             .heightIn(max = 220.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        availableTools.forEach { tool ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onToggleFunction(tool.id) }
-                                    .padding(start = 36.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
-                            ) {
-                                Checkbox(
+                        // v2：按类别分组展示（类别标题行 + 工具行），
+                        // 高风险工具带 ⚠ 徽标 —— 40+ 扁平列表找不到工具，
+                        // 分组让用户按任务类型快速定位。
+                        val grouped = availableTools
+                            .groupBy { it.category }
+                            .toSortedMap(compareBy { it?.order ?: Int.MAX_VALUE })
+                        grouped.forEach { (category, tools) ->
+                            Text(
+                                text = category?.label ?: "其他",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 36.dp, top = 8.dp, bottom = 2.dp)
+                            )
+                            tools.sortedBy { it.id }.forEach { tool ->
+                                ToolCheckboxRow(
+                                    tool = tool,
                                     checked = tool.id in selectedFunctionIds,
-                                    onCheckedChange = { onToggleFunction(tool.id) },
-                                    modifier = Modifier.size(32.dp)
-                                )
-                                Text(
-                                    "${tool.name}  ·  ${tool.id}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    onToggle = { onToggleFunction(tool.id) }
                                 )
                             }
                         }
@@ -275,6 +283,47 @@ fun ToolkitRingButton(
 }
 
 // ═══ 菜单项基础组件 ═══
+
+/**
+ * 函数调用二级菜单的单个工具行（Checkbox + 名称 + id + 风险徽标）。
+ * 高风险工具的 ⚠ 徽标提示：勾选后首次执行仍会弹用户确认（v2 风险门）。
+ */
+@Composable
+private fun ToolCheckboxRow(
+    tool: ToolRef,
+    checked: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(start = 36.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            modifier = Modifier.size(32.dp)
+        )
+        Text(
+            "${tool.name}  ·  ${tool.id}",
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        if (tool.highRisk) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                "⚠",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+    }
+}
 
 @Composable
 private fun ToolkitToggleItem(

@@ -96,8 +96,12 @@ dependencies {
     implementation(libs.security.crypto)
 
     // Shizuku (system privilege access)
-    implementation("dev.rikka.shizuku:api:13.1.0")
-    implementation("dev.rikka.shizuku:provider:13.1.0")
+    // 混沌审查修复（CR #C3）：硬编码 13.1.0 与版本目录（platform:privilege 引用的
+    // libs.shizuku.* = 13.1.5）漂移 —— Gradle 冲突解析静默取高版本，硬编码 pin 实际无效；
+    // 一旦移除 privilege 模块依赖会无声降级到 13.1.0（binder 协议不匹配的运行时风险）。
+    // 统一走 catalog，保证全仓库单一版本源。
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
     implementation(libs.easyfloat)

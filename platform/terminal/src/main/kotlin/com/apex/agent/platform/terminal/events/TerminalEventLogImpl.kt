@@ -51,7 +51,8 @@ class TerminalEventLogImpl(
             val withId = reassignId(event, id)
             log.events.add(withId)
             // T81 (D-4)：有界驱逐 —— 超过容量时移除最旧事件（保持 tail 语义准确）。
-            // 每批最多驱逐到容量内（应对突发大 append）。
+            // 每批最多驱逐到容量内（应对突发大 append）。（混沌审查 P1 同题修复由本实现取代：
+            // 精确驱逐到容量 vs 固定块裁剪，且容量 500 经 BackpressureConfig 接线可调。）
             if (log.events.size > maxEventsPerSession) {
                 val drop = log.events.size - maxEventsPerSession
                 log.evicted.addAndGet(drop.toLong())

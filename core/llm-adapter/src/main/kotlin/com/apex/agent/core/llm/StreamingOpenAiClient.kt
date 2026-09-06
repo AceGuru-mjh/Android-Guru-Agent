@@ -345,10 +345,21 @@ class StreamingOpenAiClient(
     }
     
     private fun parseNonStreamResponse(body: String): LlmResponse {
-        val json = Json.parseToJsonElement(body).jsonObject
+        // P2 fix（边界值，两轮混沌审查同题确认）：旧实现对非流式响应无防护——
+        //   ① 代理/网关对 200 返回 HTML/空体时 Json.parseToJsonElement 抛
+        //      SerializationException，绕过 LlmException 体系，ErrorClassifier 无法归类
+        //      → 重试/降级策略失效。抛 LlmException.Parse 精确映射 ModelResponseInvalid
+        //      （混沌审查 CR #D3 的 Http(-1) 伪码方案会误标为"请求被拒绝"，故取本方案）；
+        //   ② vLLM / Gemini-OpenAI 代理把 usage 返回成 128.0（浮点）或字符串时
+        //      jsonPrimitive.int 抛 NumberFormatException —— choices 已解析成功却因统计
+        //      字段炸掉整个响应（该处下方已换 intOrNull 容忍）。
+        // 流式路径（parseStreamChunk 全量 catch{null}）防护等级对齐。
+        val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrElse {
+            throw LlmException.Parse(it)
+        }
         val choices = json["choices"]?.jsonArray
         val message = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
-        
+
         val content = message?.get("content")?.jsonPrimitive?.contentOrNull
         val toolCalls = message?.get("tool_calls")?.jsonArray?.map { tc ->
             val tcObj = tc.jsonObject
@@ -358,15 +369,16 @@ class StreamingOpenAiClient(
                 arguments = tcObj["function"]?.jsonObject?.get("arguments")?.jsonPrimitive?.content ?: "{}"
             )
         } ?: emptyList()
-        
+
         val usage = json["usage"]?.jsonObject?.let { u ->
+            // intOrNull：容忍代理返回的 "1234.0" / 字符串数值，不再抛 NumberFormatException
             Usage(
-                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.int ?: 0,
-                completionTokens = u["completion_tokens"]?.jsonPrimitive?.int ?: 0,
-                totalTokens = u["total_tokens"]?.jsonPrimitive?.int ?: 0
+                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                completionTokens = u["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                totalTokens = u["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0
             )
         }
-        
+
         return LlmResponse(content = content, toolCalls = toolCalls, usage = usage)
     }
     
@@ -422,5 +434,9 @@ sealed class LlmException(message: String, cause: Throwable? = null) : Exception
 
     /** 网络层错误（连接失败 / DNS / SocketTimeout 等），包装原始 [IOException]。 */
     class Network(cause: java.io.IOException) : LlmException("Network error: ${cause.message}", cause)
+
+    /** P2 fix：响应体非法（HTML 错误页/畸形 JSON/数值类型漂移），供 ErrorClassifier 映射到
+     *  ModelResponseInvalid 而非落入未分类异常。 */
+    class Parse(cause: Throwable? = null) : LlmException("Response parse error: ${cause?.message}", cause)
 }
 

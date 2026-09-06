@@ -34,6 +34,10 @@ class VtParser {
     companion object {
         /** Upper bound on an unterminated OSC/DCS string (§10 robustness, not security). */
         const val MAX_STRING_SEQUENCE_LENGTH = 100_000
+
+        /** P1 fix（边界值）：CSI 参数/中间字节缓冲上限 —— 收到 ESC [ 后若永不出现 final byte，
+         *  csiParams 会随输入无限增长直至 OOM（MAX_STRING_SEQUENCE_LENGTH 只保护了 OSC/DCS）。 */
+        const val MAX_CSI_BUFFER_LENGTH = 4096
     }
 
     data class CSISequence(
@@ -117,9 +121,9 @@ class VtParser {
             cp == '?'.code || cp == '<'.code || cp == '='.code || cp == '>'.code -> {
                 csiPrivateMarker = cp.toChar(); state = State.CSI_PARAM
             }
-            cp in 0x30..0x39 -> { csiParams.append(cp.toChar()); state = State.CSI_PARAM }  // digit
-            cp == ';'.code -> { csiParams.append(';'); state = State.CSI_PARAM }
-            cp in 0x20..0x2F -> { csiIntermediates.append(cp.toChar()); state = State.CSI_INTERMEDIATE }
+            cp in 0x30..0x39 -> { appendCsiParam(cp.toChar()); state = State.CSI_PARAM }  // digit
+            cp == ';'.code -> { appendCsiParam(';'); state = State.CSI_PARAM }
+            cp in 0x20..0x2F -> { appendCsiIntermediate(cp.toChar()); state = State.CSI_INTERMEDIATE }
             cp in 0x40..0x7E -> { emitCsi(cp.toChar(), sink); state = State.GROUND }  // final byte
             else -> { state = State.CSI_IGNORE }
         }
@@ -127,9 +131,9 @@ class VtParser {
 
     private fun handleCsiParam(cp: Int, sink: (Event) -> Unit) {
         when {
-            cp in 0x30..0x39 -> csiParams.append(cp.toChar())  // digit
-            cp == ';'.code -> csiParams.append(';')
-            cp in 0x20..0x2F -> { csiIntermediates.append(cp.toChar()); state = State.CSI_INTERMEDIATE }
+            cp in 0x30..0x39 -> appendCsiParam(cp.toChar())  // digit
+            cp == ';'.code -> appendCsiParam(';')
+            cp in 0x20..0x2F -> { appendCsiIntermediate(cp.toChar()); state = State.CSI_INTERMEDIATE }
             cp in 0x40..0x7E -> { emitCsi(cp.toChar(), sink); state = State.GROUND }
             else -> state = State.CSI_IGNORE
         }
@@ -137,9 +141,26 @@ class VtParser {
 
     private fun handleCsiIntermediate(cp: Int, sink: (Event) -> Unit) {
         when {
-            cp in 0x20..0x2F -> csiIntermediates.append(cp.toChar())
+            cp in 0x20..0x2F -> appendCsiIntermediate(cp.toChar())
             cp in 0x40..0x7E -> { emitCsi(cp.toChar(), sink); state = State.GROUND }
             else -> state = State.CSI_IGNORE
+        }
+    }
+
+    /** P1 fix：超过上限即转入 CSI_IGNORE 态丢弃，防畸形序列 OOM */
+    private fun appendCsiParam(ch: Char) {
+        if (csiParams.length >= MAX_CSI_BUFFER_LENGTH) {
+            csiParams.clear(); csiIntermediates.clear(); state = State.CSI_IGNORE
+        } else {
+            csiParams.append(ch)
+        }
+    }
+
+    private fun appendCsiIntermediate(ch: Char) {
+        if (csiIntermediates.length >= MAX_CSI_BUFFER_LENGTH) {
+            csiParams.clear(); csiIntermediates.clear(); state = State.CSI_IGNORE
+        } else {
+            csiIntermediates.append(ch)
         }
     }
 

@@ -17,6 +17,18 @@ class ToolOutputTruncator(
     private val tailChars: Int = 600
 ) {
 
+    // ═══ 混沌工程加固（CR #D1）：head/tail 必须在构造期收敛到 maxChars 预算内 ═══
+    //
+    // 触发路径：设置页允许 maxToolOutputLength 低至 200（合法值），经 AgentConfig
+    // 原样流入本类；而默认 headChars+tailChars = 1800。旧实现此时：
+    //   1. take(headChars) / takeLast(tailChars) 各自返回全文 → "截断"产物 ≈ 2× 原文，
+    //      截断防线反向膨胀上下文；
+    //   2. "[... output.length - headChars - tailChars chars omitted ...]" 计数为负，
+    //      例如 "[... -1550 chars omitted ...]"。
+    // 修复：按 2:1 比例把 head/tail 收敛进 maxChars，并在截断期 coerce 省略计数 ≥ 0。
+    private val safeHead: Int = minOf(headChars, (maxChars * 2 / 3).coerceAtLeast(1))
+    private val safeTail: Int = minOf(tailChars, (maxChars - safeHead).coerceAtLeast(0))
+
     /**
      * 截断工具输出
      * @return 截断后的文本（如果未截断则返回原文）
@@ -27,11 +39,11 @@ class ToolOutputTruncator(
         }
 
         val truncated = buildString {
-            append(output.take(headChars))
+            append(output.take(safeHead))
             append("\n\n")
-            append("[... ${output.length - headChars - tailChars} chars omitted ...]")
+            append("[... ${(output.length - safeHead - safeTail).coerceAtLeast(0)} chars omitted ...]")
             append("\n\n")
-            append(output.takeLast(tailChars))
+            append(output.takeLast(safeTail))
         }
 
         return TruncationResult(truncated, truncated = true)
@@ -91,8 +103,10 @@ class ToolOutputTruncator(
      * JSON截断：保留外层结构，截断内部
      */
     private fun truncateJson(json: String): TruncationResult {
-        val head = json.take(headChars)
-        val tail = json.takeLast(200)  // JSON尾部通常是闭合括号
+        // 混沌审查加固：与 truncate() 同源——head 用收敛后的 safeHead，tail 也纳入
+        // maxChars 预算（旧实现固定 takeLast(200)，maxChars=200 时产物同样膨胀超限）。
+        val head = json.take(safeHead)
+        val tail = json.takeLast(minOf(200, (maxChars / 5).coerceAtLeast(1)))  // JSON尾部通常是闭合括号
 
         val truncated = "$head\n\n[... JSON truncated, ${json.length} chars total ...]\n\n$tail"
         return TruncationResult(truncated, truncated = true)

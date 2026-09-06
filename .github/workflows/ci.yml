@@ -108,13 +108,18 @@ jobs:
 
       - name: Check tool ID uniqueness
         run: |
-          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ | sort | uniq -d)
+          # Tool System v2: also covers app/src/main (app-level tool classes —
+          # github/csmem/browser/ask_user — must not collide with core ids).
+          # The pattern matches literal id declarations only; dynamic ids
+          # (randomUUID/ID-constant references) are runtime values, not
+          # declarations, and are excluded by design.
+          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | sort | uniq -d)
           if [ -n "$IDS" ]; then
             echo "❌ Duplicate tool IDs found:"
             echo "$IDS"
             exit 1
           fi
-          TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ | wc -l)
+          TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | wc -l)
           echo "✅ $TOTAL unique tool IDs, no duplicates"
 
       - name: Check duplicate classes

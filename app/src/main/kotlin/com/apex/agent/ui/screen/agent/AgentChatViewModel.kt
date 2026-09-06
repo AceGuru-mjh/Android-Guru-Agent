@@ -98,6 +98,7 @@ class AgentChatViewModel @Inject constructor(
     /** 恢复暂停任务：返回的执行流接入与 sendMessage 相同的事件管线。 */
     fun resumeTask() {
         taskController.resume()?.let { flow ->
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
@@ -110,6 +111,7 @@ class AgentChatViewModel @Inject constructor(
     /** 重试失败任务。 */
     fun retryTask() {
         taskController.retry()?.let { flow ->
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
@@ -118,6 +120,7 @@ class AgentChatViewModel @Inject constructor(
     fun resumeCrashedTask(taskId: String) {
         taskController.resumeFromCrash(taskId)?.let { flow ->
             _recoveryCandidates.value = emptyList()
+            currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
             currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
         }
     }
@@ -642,7 +645,8 @@ class AgentChatViewModel @Inject constructor(
                     )
                 )
 
-                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind)
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind,
+                    metadata = toolRegistry.metadataOf(event.toolName))
                 val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 _uiState.update { state ->
@@ -723,7 +727,8 @@ class AgentChatViewModel @Inject constructor(
                 activeToolCallId = null
                 toolOutputBuffer.clear()
 
-                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind)
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind,
+                    metadata = toolRegistry.metadataOf(event.toolName))
                 val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 // 最终过程流：丢弃"活输出"步骤（其快照与完整输出重复），仅保留
@@ -1066,9 +1071,19 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    /** 函数调用二级菜单候选：全部已注册工具（id + 显示名）。 */
-    fun availableTools(): List<Pair<String, String>> =
-        toolRegistry.getAllTools().map { it.id to it.name }.sortedBy { it.first }
+    /** 函数调用二级菜单候选：全部已注册工具（id + 显示名 + v2 元数据）。 */
+    fun availableTools(): List<ToolRef> =
+        toolRegistry.getAllTools()
+            .map { tool ->
+                val meta = tool.metadata
+                ToolRef(
+                    id = tool.id,
+                    name = tool.name,
+                    category = meta.category,
+                    highRisk = meta.isHighRisk
+                )
+            }
+            .sortedWith(compareBy<ToolRef> { it.category?.order ?: Int.MAX_VALUE }.thenBy { it.id })
 
     /**
      * 已注册工具数量（透传 [ToolRegistry.toolCount]）。供 [AgentChatScreen] 作为

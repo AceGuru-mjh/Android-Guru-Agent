@@ -22,11 +22,15 @@ import androidx.dynamicanimation.animation.SpringForce
 import com.lzf.easyfloat.EasyFloat
 import com.lzf.easyfloat.enums.ShowPattern
 import com.lzf.easyfloat.enums.SidePattern
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -52,6 +56,22 @@ class CyberNeonBallManager @Inject constructor(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val tag = "cyber_neon_ball"
+
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现每次点击都 new 一个裸
+    // CoroutineScope(Dispatchers.Main) —— 无 SupervisorJob / CoroutineExceptionHandler，
+    // completeHandoff/enterHandoffMode 内任何未捕获异常直接杀进程，且孤儿协程
+    // 排队抢 stateMutex 永不取消。单例持有唯一作用域（进程级生命周期与 @Singleton
+    // 一致）+ Main.immediate（点击响应免额外调度延迟）+ 异常记录不崩溃。
+    private val mainScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
+            android.util.Log.w(tag, "handoff action failed", e)
+        }
+    )
+
+    // P1 fix（内存泄漏）：无限循环 ObjectAnimator 必须持有引用才能 cancel；
+    // 旧实现 clearAnimation() 只能取消 View tween，取消不了属性动画，
+    // 每次 NEED_HUMAN → RUNNING 往返都泄漏一个持有整棵浮窗视图树的无限动画。
+    private var pulseAnimator: ObjectAnimator? = null
 
     @Volatile private var ballView: View? = null
     @Volatile private var currentState = CyberState.RUNNING
@@ -91,7 +111,7 @@ class CyberNeonBallManager @Inject constructor(
 
     /** 点击球 toggle 显式握手 */
     private fun onBallClick() {
-        CoroutineScope(Dispatchers.Main).launch {
+        mainScope.launch {
             when (engine.currentState) {
                 BrowserEngine.BrowserSessionState.WAITING_HUMAN -> engine.completeHandoff()
                 else -> engine.enterHandoffMode()
@@ -153,6 +173,9 @@ class CyberNeonBallManager @Inject constructor(
             startShake(view)
             triggerVibration()
         } else {
+            // P1 fix：先 cancel 属性动画再隐藏（clearAnimation 对 ObjectAnimator 无效）
+            pulseAnimator?.cancel()
+            pulseAnimator = null
             pulseRing.visibility = View.INVISIBLE
             pulseRing.clearAnimation()
         }
@@ -197,10 +220,12 @@ class CyberNeonBallManager @Inject constructor(
 
     private fun startPulse(pulseView: View) {
         pulseView.clearAnimation()
+        // P1 fix：先取消旧动画再启动，避免多次 NEED_HUMAN 往返叠加多个无限动画实例
+        pulseAnimator?.cancel()
         val pX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1.0f, 1.4f)
         val pY = PropertyValuesHolder.ofFloat(View.SCALE_Y, 1.0f, 1.4f)
         val pA = PropertyValuesHolder.ofFloat(View.ALPHA, 0.8f, 0.0f)
-        ObjectAnimator.ofPropertyValuesHolder(pulseView, pX, pY, pA).apply {
+        pulseAnimator = ObjectAnimator.ofPropertyValuesHolder(pulseView, pX, pY, pA).apply {
             duration = 1200
             repeatCount = ObjectAnimator.INFINITE
             start()
@@ -208,12 +233,22 @@ class CyberNeonBallManager @Inject constructor(
     }
 
     private fun triggerVibration() {
-        val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(150)
+        // P0 fix 防御层（两轮混沌审查同题合并）：VIBRATE 属普通权限，正常打包清单已声明，
+        // 但清单合并被裁剪 / OEM 定制 ROM 等边缘场景下 vibrate() 会抛 SecurityException
+        // （主线程 → 杀进程）。双层防御：① 运行时无权限直接跳过；② runCatching 兜底记录。
+        if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.VIBRATE)
+            != PackageManager.PERMISSION_GRANTED
+        ) return
+        runCatching {
+            val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(150)
+            }
+        }.onFailure { e ->
+            android.util.Log.w(tag, "vibrate failed: ${e.message}")
         }
     }
 }

@@ -28,8 +28,10 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -56,6 +58,17 @@ class BrowserOverlay @Inject constructor(
     private val windowManager =
         appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现 onCompleteHandoff 每次回调都
+    // `mainHandler.post { CoroutineScope(Dispatchers.Main).launch { ... } }` —— 双重异步
+    // + 裸 scope 无异常处理器（completeHandoff 未捕获异常直接杀进程）+ 每次回调 new
+    // 孤儿作用域（连点“交还”挂起 N 个无主协程排队抢 stateMutex 永不取消）。改用单例
+    // 持有的常驻 mainScope：Main.immediate 已保证主线程 + 异常记录不崩溃。
+    private val mainScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
+            android.util.Log.w("BrowserOverlay", "handoff failed", e)
+        }
+    )
 
     @Volatile private var rootView: FrameLayout? = null
     @Volatile private var webViewHost: FrameLayout? = null
@@ -132,7 +145,7 @@ class BrowserOverlay @Inject constructor(
             setContent {
                 OverlayContent(
                     state = uiState,
-                    onCompleteHandoff = { mainHandler.post { CoroutineScope(Dispatchers.Main).launch { engine.completeHandoff() } } },
+                    onCompleteHandoff = { mainScope.launch { engine.completeHandoff() } },
                     onCollapseToggle = { mainHandler.post { toggleCollapse() } },
                     onClose = { mainHandler.post { doHide() } },
                 )

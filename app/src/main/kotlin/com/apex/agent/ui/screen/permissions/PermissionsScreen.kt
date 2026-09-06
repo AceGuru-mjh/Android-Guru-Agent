@@ -309,9 +309,16 @@ private fun ShizukuPermissionCard(
                                 context.startActivity(intent)
                             } catch (e: Exception) {
                                 // Shizuku app 未安装 — 打开下载页
-                                val uri = Uri.parse("https://shizuku.rikka.app/")
-                                val intent = Intent(Intent.ACTION_VIEW, uri)
-                                context.startActivity(intent)
+                                // P2 fix：无浏览器应用的设备（TV/精简 ROM） startActivity
+                                // 抛 ActivityNotFoundException，需兜底，不能二次崩溃
+                                try {
+                                    val uri = Uri.parse("https://shizuku.rikka.app/")
+                                    val intent = Intent(Intent.ACTION_VIEW, uri)
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    // 无浏览器可用：静默降级，仅刷新状态
+                                }
                             }
                         }
                         !shizukuPermission.value -> {

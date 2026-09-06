@@ -345,7 +345,13 @@ class StreamingOpenAiClient(
     }
     
     private fun parseNonStreamResponse(body: String): LlmResponse {
-        val json = Json.parseToJsonElement(body).jsonObject
+        // P2 fix（边界值）：旧实现对非流式响应无防护 —— 代理/网关对 200 返回 HTML 时
+        // Json.parseToJsonElement 直接抛 SerializationException；usage 数值返回
+        // "1234.0"（float）或字符串时 .int 抛 NumberFormatException。两者都绕过
+        // ErrorClassifier 的精确分类。与流式路径（全量 try/catch）防护等级对齐。
+        val json = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrElse {
+            throw LlmException.Parse(it)
+        }
         val choices = json["choices"]?.jsonArray
         val message = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
         
@@ -360,10 +366,11 @@ class StreamingOpenAiClient(
         } ?: emptyList()
         
         val usage = json["usage"]?.jsonObject?.let { u ->
+            // intOrNull：容忍代理返回的 "1234.0" / 字符串数值，不再抛 NumberFormatException
             Usage(
-                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.int ?: 0,
-                completionTokens = u["completion_tokens"]?.jsonPrimitive?.int ?: 0,
-                totalTokens = u["total_tokens"]?.jsonPrimitive?.int ?: 0
+                promptTokens = u["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                completionTokens = u["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                totalTokens = u["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0
             )
         }
         
@@ -422,5 +429,9 @@ sealed class LlmException(message: String, cause: Throwable? = null) : Exception
 
     /** 网络层错误（连接失败 / DNS / SocketTimeout 等），包装原始 [IOException]。 */
     class Network(cause: java.io.IOException) : LlmException("Network error: ${cause.message}", cause)
+
+    /** P2 fix：响应体非法（HTML 错误页/畸形 JSON/数值类型漂移），供 ErrorClassifier 映射到
+     *  ModelResponseInvalid 而非落入未分类异常。 */
+    class Parse(cause: Throwable? = null) : LlmException("Response parse error: ${cause?.message}", cause)
 }
 

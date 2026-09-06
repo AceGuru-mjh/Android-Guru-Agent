@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P1 fix（数据一致性/安全）：Android 12+ 云备份与设备迁移规则。
+  github_secure_prefs 的 Tink keyset 依赖 AndroidKeyStore 硬件绑定 MasterKey，
+  密文文件随备份迁移到新机后 MasterKey 不迁移 → EncryptedSharedPreferences.create
+  抛 AEADBadTagException → catch 分支静默降级为明文 SharedPreferences（永久明文落盘）。
+  排除两份 prefs 使云恢复不再触发该降级路径，用户在新机重新登录即可。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="github_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="github_prefs_fallback.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="github_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="github_prefs_fallback.xml" />
+    </device-transfer>
+</data-extraction-rules>

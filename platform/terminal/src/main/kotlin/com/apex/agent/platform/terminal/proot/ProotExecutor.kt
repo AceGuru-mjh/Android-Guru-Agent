@@ -37,7 +37,10 @@ class ProotExecutor(
      * @param timeoutMs 超时强杀（destroyForcibly）并以 timedOut=true 返回。
      */
     fun execute(command: PRootCommand, timeoutMs: Long = DEFAULT_TIMEOUT_MS): Execution {
-        return executeBounded(command, timeoutMs, maxOutputBytes = Long.MAX_VALUE).let {
+        // T81 (U-9)：默认有界 —— 原实现 Long.MAX_VALUE 把 BoundedOutputCapture 的
+        // halfBudget 压到 Int.MAX_VALUE，head StringBuilder 可积 ~1GB（OOM 风险）。
+        // 需要更大预算的调用方显式传 executeBounded(maxOutputBytes=…)。
+        return executeBounded(command, timeoutMs, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES).let {
             Execution(
                 pid = it.pid,
                 exitCode = it.exitCode,

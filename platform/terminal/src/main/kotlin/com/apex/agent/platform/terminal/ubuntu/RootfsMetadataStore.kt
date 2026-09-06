@@ -115,8 +115,19 @@ class RootfsMetadataStore(
                 health = record.health?.toSummary(),
                 entryCount = record.entryCount
             )
+        }.onFailure {
+            // T81 (U-5)：损坏隔离 —— 原实现 getOrNull() 静默吞 JSON 损坏：
+            // current()=null → 后端报 NeedsRootfs 引导全量重装，健康的 rootfs
+            // 数据被无视。现在重命名 .corrupt 保留现场（诊断 + 防 load 循环重试）。
+            lastLoadQuarantined = true
+            val quarantine = java.io.File(metadataFile.parentFile, metadataFile.name + ".corrupt")
+            runCatching { metadataFile.renameTo(quarantine) }
         }.getOrNull()
     }
+
+    /** T81 (U-5)：是否发生过元数据损坏隔离（诊断）。 */
+    @Volatile var lastLoadQuarantined: Boolean = false
+        private set
 
     suspend fun delete(): Result<Unit> = mutex.withLock {
         runCatching { metadataFile.delete(); Unit }

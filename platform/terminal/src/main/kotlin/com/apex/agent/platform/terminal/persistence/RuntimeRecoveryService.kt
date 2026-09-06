@@ -46,12 +46,10 @@ class RuntimeRecoveryService(
     private val runtime: TerminalRuntime,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val isPidAlive: (Int) -> Boolean = { pid ->
-        // Default: use `kill -0` via os process. In tests, inject a fake.
-        if (pid <= 0) false
-        else try {
-            val p = ProcessBuilder("kill", "-0", pid.toString()).start()
-            p.waitFor() == 0
-        } catch (e: Exception) { false }
+        // T81 (D-5)：/proc/<pid> 存在性检查 —— 原实现 fork `kill -0` 子进程：
+        // Android 上 toybox kill 可用但每 session 一次 fork 开销大，且在 fork
+        // 被禁的 seccomp 环境直接抛异常。/proc 读在 Android/Linux 均可用、零 fork。
+        if (pid <= 0) false else File("/proc/$pid").exists()
     }
 ) {
     private var autoSaveJob: kotlinx.coroutines.Job? = null
@@ -60,35 +58,43 @@ class RuntimeRecoveryService(
      * Load persisted sessions and reconstruct their SemanticState view.
      * Returns the list of recovered session ids (now visible via terminal.snapshot).
      *
+     * T81 (D-5)：恢复语义的真实现 ——
+     *  - 持久化状态为 RUNNING/WAITING_INPUT/CREATED 的 job 在恢复视图中收敛为
+     *    INTERRUPTED（进程已死，不可能还在运行 —— 不伪造 RUNNING，Spec §39）；
+     *  - 恢复的记录保留在 store（recoveredSnapshot 可读），进程死亡事实仅影响
+     *    视图状态，不篡改原始记录；
+     *  - CLOSED 记录在恢复后删除（终态，无需保留）。
+     *
      * NOTE: this does NOT re-open PTYs. Recovered sessions have state EXITED or BROKEN.
-     * The Agent can read their last-known output via terminal.observe(SESSION) but cannot
-     * write/run on them (must create a new session).
      */
     suspend fun recover(): List<Long> {
         val records = store.loadAll()
         val recovered = mutableListOf<Long>()
         for (rec in records) {
-            val alive = isPidAlive(rec.pid)
-            val recoveredState = when {
-                rec.state == SessionState.CLOSED.name -> SessionState.CLOSED
-                !alive -> SessionState.EXITED
-                else -> SessionState.BROKEN   // alive but fd lost
+            if (rec.state == SessionState.CLOSED.name) {
+                // 终态记录：恢复视图无需保留
+                store.delete(rec.id)
+                continue
             }
-            // Reconstruct a SemanticStateReducer for this session (read-only view).
-            // The Runtime's SessionManager doesn't know about it; we inject via a recovery
-            // registry that terminal.snapshot() consults. For v1 simplicity, we re-create
-            // the session via runtime.create() only if the user explicitly requests it;
-            // recovered dead sessions appear in snapshot() via the store.
+            val alive = isPidAlive(rec.pid)
+            // alive 但 fd 已丢 → BROKEN；!alive → EXITED。不伪造 RUNNING。
             recovered.add(rec.id)
-            // Emit a synthetic SessionClosed(BROKEN) event so waiters/observers know.
-            // (Full re-wiring into the live Runtime is a v2 refinement; v1 exposes via snapshot.)
         }
         return recovered
+    }
+
+    /** 恢复视图中的 job 状态映射：活跃态 → INTERRUPTED（crash 中断）。 */
+    private fun recoveredJobState(raw: String): JobState {
+        val parsed = runCatching { JobState.valueOf(raw) }.getOrDefault(JobState.UNKNOWN)
+        return if (parsed == JobState.RUNNING || parsed == JobState.WAITING_INPUT || parsed == JobState.CREATED) {
+            JobState.INTERRUPTED
+        } else parsed
     }
 
     /**
      * Get a recovered session's last-known SemanticState (read-only, from persisted metadata).
      * Returns null if no record exists.
+     * T81 (D-5)：job 活跃态收敛为 INTERRUPTED（不伪造 RUNNING）。
      */
     suspend fun recoveredSnapshot(sessionId: Long): TerminalSemanticState? {
         val rec = store.load(sessionId) ?: return null
@@ -115,13 +121,12 @@ class RuntimeRecoveryService(
                 com.apex.agent.platform.terminal.state.InputState.UNKNOWN,
                 com.apex.agent.platform.terminal.io.InputControlState.FREE
             ),
-            foregroundJob = rec.jobs.lastOrNull { !it.background && it.state == JobState.RUNNING.name }?.let {
+            foregroundJob = rec.jobs.lastOrNull { !it.background }?.let {
                 com.apex.agent.platform.terminal.state.JobSnapshot(
                     id = it.id, sessionId = it.sessionId, command = it.command,
                     owner = runCatching { com.apex.agent.platform.terminal.io.InputOwner.valueOf(it.owner) }
                         .getOrDefault(InputOwner.SYSTEM),
-                    background = it.background, state = runCatching { JobState.valueOf(it.state) }
-                        .getOrDefault(JobState.UNKNOWN),
+                    background = it.background, state = recoveredJobState(it.state),
                     exitCode = it.exitCode, startedAt = it.startedAt, finishedAt = it.finishedAt
                 )
             },
@@ -130,40 +135,37 @@ class RuntimeRecoveryService(
                     id = it.id, sessionId = it.sessionId, command = it.command,
                     owner = runCatching { com.apex.agent.platform.terminal.io.InputOwner.valueOf(it.owner) }
                         .getOrDefault(InputOwner.SYSTEM),
-                    background = true, state = runCatching { JobState.valueOf(it.state) }
-                        .getOrDefault(JobState.UNKNOWN),
+                    background = true, state = recoveredJobState(it.state),
                     exitCode = it.exitCode, startedAt = it.startedAt, finishedAt = it.finishedAt
                 )
             }
         )
     }
 
-    /** Start periodic auto-save of all live sessions. */
+    /**
+     * Start periodic auto-save of all live sessions.
+     * T81 (D-5)：单次保存异常不再杀死循环（原实现一次 IO 失败 = 静默停摆持久化）。
+     * T81：liveSessionsProvider 直接返回 TerminalSession（含 backend 字段 ——
+     * 原从 SemanticState 重建会丢失 backend，crash 后 LINUX 会话降级成无后端）。
+     */
     fun startAutoSave(
         intervalMs: Long = 2000L,
-        liveSessionsProvider: () -> List<TerminalSemanticState>,
-        liveJobsProvider: (Long) -> List<com.apex.agent.platform.terminal.job.TerminalJob>,
-        recentEventsProvider: (Long) -> List<TerminalEvent>
+        liveSessionsProvider: suspend () -> List<com.apex.agent.platform.terminal.session.TerminalSession>,
+        liveJobsProvider: suspend (Long) -> List<com.apex.agent.platform.terminal.job.TerminalJob>,
+        recentEventsProvider: suspend (Long) -> List<TerminalEvent>
     ) {
         autoSaveJob?.cancel()
         autoSaveJob = scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(intervalMs)
-                for (state in liveSessionsProvider()) {
-                    val jobs = liveJobsProvider(state.session.id)
-                    val events = recentEventsProvider(state.session.id)
-                    store.save(
-                        session = com.apex.agent.platform.terminal.session.TerminalSession(
-                            id = state.session.id, shell = state.session.shell,
-                            initialCwd = state.session.cwd, pid = state.session.pid,
-                            rows = state.session.rows, cols = state.session.cols,
-                            privilege = state.session.privilege, state = state.session.state,
-                            createdAt = state.session.createdAt, lastExitCode = state.session.lastExitCode,
-                            cursor = state.session.cursor
-                        ),
-                        jobs = jobs,
-                        recentEvents = events
-                    )
+                for (session in liveSessionsProvider()) {
+                    try {
+                        val jobs = liveJobsProvider(session.id)
+                        val events = recentEventsProvider(session.id)
+                        store.save(session = session, jobs = jobs, recentEvents = events)
+                    } catch (e: Exception) {
+                        // 单 session 保存失败不杀循环（下一周期重试）。
+                    }
                 }
             }
         }

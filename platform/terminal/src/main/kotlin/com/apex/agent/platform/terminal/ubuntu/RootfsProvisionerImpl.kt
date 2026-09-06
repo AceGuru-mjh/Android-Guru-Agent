@@ -63,11 +63,16 @@ class RootfsProvisionerImpl(
     private val _progress = MutableSharedFlow<ProvisioningProgress>(extraBufferCapacity = 64)
     override fun progress(): Flow<ProvisioningProgress> = _progress.asSharedFlow()
 
-    // §19: in-use flag for remove() protection.
-    @Volatile private var inUse: Boolean = false
+    // §19: in-use 保护（T81：引用计数化 —— 多个并发 LINUX 会话各自 bind/unbind，
+    // 原布尔实现第一个会话 unbind 即解除保护，后续会话运行中 remove() 可删整个 rootfs）。
+    private val activeSessions = java.util.concurrent.atomic.AtomicInteger(0)
+    private val inUse: Boolean get() = activeSessions.get() > 0
 
-    fun markInUse() { inUse = true }
-    fun markIdle() { inUse = false }
+    fun markInUse() { activeSessions.incrementAndGet() }
+    fun markIdle() { activeSessions.decrementAndGet() }
+
+    /** T81 (U-1)：运行中 install 的协程 Job —— cancel() 借此真正停止下载/解压。 */
+    @Volatile private var activeInstallJob: kotlinx.coroutines.Job? = null
 
     // ─── §24: install() ───
     override suspend fun install(target: RootfsTarget, force: Boolean): ProvisioningResult {
@@ -90,6 +95,9 @@ class RootfsProvisionerImpl(
             return ProvisioningResult.Busy("Another provisioner instance holds ${layout.baseDir.value}/.provision.lock")
         }
 
+        // T81 (U-1)：记录 install 协程 Job —— cancel() 可真正停止运行中的
+        // 下载/解压（downloader/extractor 的每个循环已带 ensureActive 检查点）。
+        activeInstallJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
         return try {
             doInstall(target)
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -105,6 +113,7 @@ class RootfsProvisionerImpl(
                 _state.value
             )
         } finally {
+            activeInstallJob = null
             runCatching { fileLock.close() }
             installLock.release()
         }
@@ -469,10 +478,30 @@ class RootfsProvisionerImpl(
         )
     }
 
+    private companion object {
+        /** T81 (U-10)：可恢复错误码集合（重试/repair 可自愈）。 */
+        val RECOVERABLE_ERROR_CODES = setOf(
+            com.apex.agent.platform.terminal.ubuntu.ProvisioningErrorCode.CHECKSUM_MISMATCH,
+            com.apex.agent.platform.terminal.ubuntu.ProvisioningErrorCode.NETWORK_FAILURE,
+            com.apex.agent.platform.terminal.ubuntu.ProvisioningErrorCode.DOWNLOAD_FAILED,
+            com.apex.agent.platform.terminal.ubuntu.ProvisioningErrorCode.INSUFFICIENT_STORAGE
+        )
+    }
+
     // ─── §8: cancel() ───
+    // T81 (U-1)：真取消 —— 原实现只置状态 + 删 staging（运行中的下载/解压继续跑，
+    // 且删 staging 与运行中 extractor 竞态；install 协程随后还会覆写 _state）。
+    // 现在：有运行中 install → cancel 其协程（downloader/extractor 的 ensureActive
+    // 检查点响应，走 install 的 CancellationException 分支 → CANCELLED + 有序清理）。
     override suspend fun cancel(): Result<Unit> = runCatching {
-        _state.value = ProvisioningState.CANCELLED
-        File(layout.stagingDir.value).deleteRecursively()
+        val job = activeInstallJob
+        if (job != null && job.isActive) {
+            job.cancel()
+        } else {
+            // 无运行中 install：仅置状态 + 清 staging（原语义保留）
+            _state.value = ProvisioningState.CANCELLED
+            File(layout.stagingDir.value).deleteRecursively()
+        }
     }
 
     // ─── §18: repair() ───

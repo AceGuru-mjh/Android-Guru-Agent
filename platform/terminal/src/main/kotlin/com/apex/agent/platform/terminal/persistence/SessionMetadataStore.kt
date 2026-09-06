@@ -92,17 +92,40 @@ class SessionMetadataStore(
             guestCwd = session.backend?.guestCwd,
             binds = session.backend?.binds ?: emptyList()
         )
-        // PR #54 §18: atomic write — temp file + flush + rename (avoid corruption on mid-write crash)
+        // T81 (D-5)：真原子写 —— tmp 写入 + fsync + rename（同目录 rename 是
+        // POSIX 原子替换）。原实现 tmp.copyTo(target) 是逐字节复制：crash 在
+        // copy 中间留下**截断的目标 JSON**（下次 load 抛异常）；且无 fsync ——
+        // rename 后数据仍在页缓存，掉电即丢。注释自称「PR#54 §18 atomic write」
+        // 但实现不符。
         val target = File(storageDir, "session-${session.id}.json")
         val tmp = File(storageDir, "session-${session.id}.json.tmp")
-        tmp.writeText(json.encodeToString(record))
-        tmp.copyTo(target, overwrite = true)
-        tmp.delete()
+        java.io.FileOutputStream(tmp).use { os ->
+            os.write(json.encodeToString(record).toByteArray(Charsets.UTF_8))
+            os.flush()
+            os.fd.sync()   // fsync：确保 rename 前数据落盘
+        }
+        // 同目录 rename：原子替换（Linux/Android 语义）。旧 target 被原子覆盖。
+        if (!tmp.renameTo(target)) {
+            // 极端文件系统不支持覆盖 rename —— 退化为 delete+rename（非原子但
+            // 可用；tmp 已 fsync，数据安全）。
+            target.delete()
+            tmp.renameTo(target)
+        }
     }
 
     suspend fun loadAll(): List<SessionRecord> = mutex.withLock {
+        // T81 (D-5)：损坏隔离而非整批失败 —— 原实现单个损坏文件抛异常炸掉
+        // loadAll（调用方 catch 后视为「无记录」→ 健康数据被静默无视）。
+        // 现在：损坏文件重命名 .corrupt 隔离（保留现场供诊断），其余正常加载。
         storageDir.listFiles { f -> f.name.startsWith("session-") && f.name.endsWith(".json") }
-            ?.map { json.decodeFromString<SessionRecord>(it.readText()) } ?: emptyList()
+            ?.mapNotNull { f ->
+                runCatching { json.decodeFromString<SessionRecord>(f.readText()) }
+                    .onFailure {
+                        val quarantine = File(f.parentFile, f.name + ".corrupt")
+                        f.renameTo(quarantine)
+                    }
+                    .getOrNull()
+            } ?: emptyList()
     }
 
     suspend fun load(sessionId: Long): SessionRecord? = mutex.withLock {
@@ -110,7 +133,10 @@ class SessionMetadataStore(
         if (f.exists()) json.decodeFromString<SessionRecord>(f.readText()) else null
     }
 
-    suspend fun delete(sessionId: Long) = mutex.withLock { File(storageDir, "session-$sessionId.json").delete() }
+    suspend fun delete(sessionId: Long) = mutex.withLock {
+        File(storageDir, "session-$sessionId.json").delete()
+        File(storageDir, "session-$sessionId.json.tmp").delete()
+    }
     suspend fun clear() = mutex.withLock { storageDir.listFiles()?.forEach { it.delete() } }
 
     private fun TerminalJob.toRecord() = JobRecord(

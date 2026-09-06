@@ -183,6 +183,16 @@ class InputManagerImpl(
         return writeInternal(sessionId, owner, bytes = bytes, kind = InputKind.RAW)
     }
 
+    /**
+     * T81 (D-2)：显式覆写 sendLine —— 此前沿用 [TerminalInput] 接口 default 实现
+     * `write(text+"\n".toByteArray())`，全部降级为 RAW 类型落盘，而 doWrite 的
+     * PolicyEngine 门禁只对 `kind == LINE` 生效 → **生产路径所有命令全部绕过策略**
+     *（门禁死代码）。覆写后 LINE 语义（+ 恰好一次 '\n' + policy 检查）恢复。
+     */
+    override suspend fun sendLine(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> {
+        return writeInternal(sessionId, owner, text = text + "\n", kind = InputKind.LINE)
+    }
+
     override suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<WriteResult> {
         return writeInternal(sessionId, owner, key = key, kind = InputKind.KEY)
     }

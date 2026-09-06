@@ -82,8 +82,12 @@ private:
     PtyEngine(const PtyEngine&) = delete;
     PtyEngine& operator=(const PtyEngine&) = delete;
 
-    // 仅在持有 mutex_ 时调用/使用（返回的裸指针不得在锁外解引用）。
-    PtySession* getSession(int id);
+    /**
+     * T81 (N-1)：锁内拷贝 shared_ptr 后锁外使用（waitForData 模式的推广）。
+     * 返回 nullptr 当 session 不存在。锁外持有期间对象存活（closeSession 只
+     * 是从 map 摘除 + fd 置 -1，析构延迟到最后一个引用）。
+     */
+    std::shared_ptr<PtySession> acquire(int id);
 
     // P70 生命周期加固：waitForData 在锁外等待，closeSession 在锁外执行阻塞的
     // kill/waitpid 序列（最长 ~150ms+）。若 map 存 unique_ptr，锁外 close 触发析构

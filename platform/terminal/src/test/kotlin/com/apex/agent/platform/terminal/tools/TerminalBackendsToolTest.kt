@@ -31,6 +31,9 @@ class TerminalBackendsToolTest {
     }
 
     private class FakeRuntime(private val statuses: List<TerminalRuntime.BackendStatus>) : TerminalRuntime {
+        override suspend fun shutdown(): Result<com.apex.agent.platform.terminal.runtime.TerminalRuntime.ShutdownResult> =
+            Result.success(com.apex.agent.platform.terminal.runtime.TerminalRuntime.ShutdownResult(0, 0, true))
+
         override suspend fun backends(): List<TerminalRuntime.BackendStatus> = statuses
         // 其余门面操作在工具测试中不可达 —— 工具只调 backends()。
         override suspend fun create(shell: String, cwd: String, rows: Int, cols: Int, env: Map<String, String>, privilege: com.apex.agent.platform.terminal.policy.PrivilegeLevel, backendId: String, workspaceId: String?): Result<TerminalRuntime.CreateResult> = throw UnsupportedOperationException()

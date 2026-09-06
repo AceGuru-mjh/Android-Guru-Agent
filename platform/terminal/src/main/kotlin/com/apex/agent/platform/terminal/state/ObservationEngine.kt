@@ -116,7 +116,7 @@ class ObservationEngine(
                     truncated = slice.truncated,
                     overrun = slice.overrun,
                     oldestCursor = if (slice.overrun) ringBuffer.oldestCursor else null,
-                    raw = String(slice.bytes, Charsets.UTF_8)
+                    raw = com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(slice.bytes)  // T81 (D-6)：跳过窗口头部残缺 UTF-8 序列
                 )
             }
         }

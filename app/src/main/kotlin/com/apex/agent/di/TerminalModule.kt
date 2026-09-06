@@ -7,8 +7,10 @@ import com.apex.agent.platform.terminal.policy.TerminalPolicy
 import com.apex.agent.platform.terminal.policy.TerminalPolicyImpl
 import com.apex.agent.platform.terminal.compat.LegacyTerminalManager
 import com.apex.agent.platform.terminal.linux.CpuArchitecture
+import com.apex.agent.platform.terminal.linux.RootfsProvider
 import com.apex.agent.platform.terminal.proot.LinuxPRootBackend
 import com.apex.agent.platform.terminal.proot.NativeLibraryPRootBinaryProvider
+import com.apex.agent.platform.terminal.proot.PRootBinaryProvider
 import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.platform.terminal.runtime.ExecutionBackendRegistry
 import com.apex.agent.platform.terminal.runtime.LocalShellBackend
@@ -120,19 +122,24 @@ object TerminalModule {
         )
     }
 
-    /** RootfsProvider 门面（LinuxPRootBackend 的只读视图；见 ProvisionedRootfsProvider §21）。 */
+    /** RootfsProvider 门面（LinuxPRootBackend 的只读视图；见 ProvisionedRootfsProvider §21）。
+     *  T81 CI fix: 返回接口类型 —— Dagger 需要接口绑定（LinuxExecutionContextFactory 等
+     *  注入点依赖 RootfsProvider 抽象，此前只有具体类绑定 → MissingBinding）。 */
     @Provides
     @Singleton
     fun provideRootfsProvider(
         provisioner: RootfsProvisioner
-    ): ProvisionedRootfsProvider = ProvisionedRootfsProvider(provisioner)
+    ): RootfsProvider = ProvisionedRootfsProvider(provisioner)
 
-    /** libproot.so 定位 + ELF 架构校验（字节级）+ --version 探测（诊断性，不阻断）。 */
+    /** libproot.so 定位 + ELF 架构校验（字节级）+ --version 探测（诊断性，不阻断）。
+     *  T81 CI fix: 返回接口类型（PRootBinaryProvider）—— 与 RootfsProvider 同理，
+     *  LinuxExecutionContextFactory / UbuntuAptPackageManager / LinuxPRootBackend 均
+     *  依赖接口注入，具体类绑定无法满足。 */
     @Provides
     @Singleton
     fun providePRootBinaryProvider(
         hostEnv: PRootHostEnvironment
-    ): NativeLibraryPRootBinaryProvider = NativeLibraryPRootBinaryProvider(
+    ): PRootBinaryProvider = NativeLibraryPRootBinaryProvider(
         hostEnv = hostEnv,
         supportedAbis = { Build.SUPPORTED_ABIS.toList() }
     )
@@ -167,8 +174,8 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideLinuxPRootBackend(
-        binaryProvider: NativeLibraryPRootBinaryProvider,
-        rootfsProvider: ProvisionedRootfsProvider,
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
         workspaces: LinuxWorkspaceManager,
         userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment
@@ -200,12 +207,15 @@ object TerminalModule {
         policy: TerminalPolicy,
         store: SessionMetadataStore,
         backends: ExecutionBackendRegistry,
-        workspaceBinder: LinuxWorkspaceManager
+        workspaceBinder: LinuxWorkspaceManager,
+        provisioner: RootfsProvisioner
     ): TerminalRuntime = TerminalRuntimeImpl(
         native, policy,
         backendRegistry = backends,
         persistenceStore = store,
-        workspaceBinder = workspaceBinder
+        workspaceBinder = workspaceBinder,
+        // T81 (U-10)：rootfs 活跃会话绑定（provisioner.remove 门禁）。
+        rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner)
     )
 
     /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */
@@ -243,6 +253,43 @@ object TerminalModule {
     @Singleton
     fun provideLinuxEnvironmentManager(): LinuxEnvironmentManager = LinuxEnvironmentManager()
 
+    /** T81 (D-6/§34)：Linux 执行上下文工厂 —— 交互会话与 apt 共享的单一解析点。 */
+    @Provides
+    @Singleton
+    fun provideLinuxExecutionContextFactory(
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
+        workspaces: LinuxWorkspaceManager,
+        userHome: GuestUserHome,
+        hostEnv: PRootHostEnvironment,
+        environment: LinuxEnvironmentManager
+    ): com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory =
+        com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory(
+            binaryProvider, rootfsProvider, workspaces, userHome, hostEnv, environment
+        )
+
+    /** T81 (D-7/§29)：环境能力真实探测（which + --version，TTL 缓存）。 */
+    @Provides
+    @Singleton
+    fun provideLinuxCapabilityProbe(
+        contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory,
+        executor: ProotExecutor
+    ): com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe =
+        com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe(contextFactory, executor)
+
+    /** T81 (D-7/§30)：单轮自动修复编排（detect → repair once → verify）。 */
+    @Provides
+    @Singleton
+    fun provideEnvironmentRepairService(
+        health: LinuxEnvironmentHealth,
+        linuxPackageManager: com.apex.agent.platform.terminal.pkg.LinuxPackageManager,
+        provisioner: RootfsProvisioner,
+        capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe
+    ): com.apex.agent.platform.terminal.health.EnvironmentRepairService =
+        com.apex.agent.platform.terminal.health.EnvironmentRepairService(
+            health, linuxPackageManager, provisioner, capabilityProbe
+        )
+
     /** T76: PackageOperationLock —— apt/dpkg 写串行化（进程内 Mutex + 跨实例 OS 文件锁）。 */
     @Provides
     @Singleton
@@ -257,13 +304,14 @@ object TerminalModule {
     @Singleton
     fun provideUbuntuAptPackageManager(
         executor: ProotExecutor,
-        binaryProvider: NativeLibraryPRootBinaryProvider,
-        rootfsProvider: ProvisionedRootfsProvider,
+        binaryProvider: PRootBinaryProvider,
+        rootfsProvider: RootfsProvider,
         userHome: GuestUserHome,
         hostEnv: PRootHostEnvironment,
         workspaces: LinuxWorkspaceManager,
         environment: LinuxEnvironmentManager,
-        lock: PackageOperationLock
+        lock: PackageOperationLock,
+        contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory
     ): UbuntuAptPackageManager = UbuntuAptPackageManager(
         executor = executor,
         binaryProvider = binaryProvider,
@@ -272,7 +320,8 @@ object TerminalModule {
         hostEnv = hostEnv,
         workspaces = workspaces,
         environment = environment,
-        lock = lock
+        lock = lock,
+        contextFactory = contextFactory
     )
 
     /** 把 [UbuntuAptPackageManager] 暴露为 [LinuxPackageManager] 接口（工具层依赖抽象）。 */
@@ -284,7 +333,7 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideLinuxNetworkProbe(
-        rootfsProvider: ProvisionedRootfsProvider,
+        rootfsProvider: RootfsProvider,
         aptManager: LinuxPackageManager,
         target: RootfsTarget
     ): LinuxNetworkProbe = LinuxNetworkProbe(

@@ -15,15 +15,25 @@ import java.util.concurrent.atomic.AtomicLong
  *   - OutputProduced stores only refs (offset+length) — large bytes live in RingBuffer.
  *   - For Phase 1: in-memory. Persistence (Spec §39) is Phase 5.
  *
+ * T81 (D-4)：per-session 容量上限（默认 [DEFAULT_MAX_EVENTS]）—— 原实现
+ * append-only 无上限，长会话下事件列表无限增长（内存泄漏根因之一；
+ * BackpressureConfig.eventBufferLimit 此前零接线）。驱逐最旧事件时递增
+ * evicted 计数；tail()/query() 仍准确（只作用于保留窗口）。
+ *
  * Thread-safety: per-session lock; append is O(1) amortized (append to ArrayList).
  */
-class TerminalEventLogImpl : TerminalEventLog {
+class TerminalEventLogImpl(
+    /** T81 (D-4)：每 session 保留的最大事件数（旧事件被驱逐）。 */
+    private val maxEventsPerSession: Int = DEFAULT_MAX_EVENTS
+) : TerminalEventLog {
 
     private data class SessionLog(
         val events: MutableList<TerminalEvent> = ArrayList(INITIAL_CAPACITY),
         val idCounter: AtomicLong = AtomicLong(0L),
         val cursorCounter: AtomicLong = AtomicLong(0L),
-        val mutex: Mutex = Mutex()
+        val mutex: Mutex = Mutex(),
+        /** T81 (D-4)：被驱逐的事件总数（诊断/测试用）。 */
+        val evicted: AtomicLong = AtomicLong(0L)
     )
 
     private val sessions = ConcurrentHashMap<Long, SessionLog>()
@@ -40,6 +50,17 @@ class TerminalEventLogImpl : TerminalEventLog {
             // reassign id into a new event instance (events are data classes, copy is cheap)
             val withId = reassignId(event, id)
             log.events.add(withId)
+            // T81 (D-4)：有界驱逐 —— 超过容量时移除最旧事件（保持 tail 语义准确）。
+            // 每批最多驱逐到容量内（应对突发大 append）。
+            if (log.events.size > maxEventsPerSession) {
+                val drop = log.events.size - maxEventsPerSession
+                log.evicted.addAndGet(drop.toLong())
+                if (drop >= log.events.size) {
+                    log.events.clear()
+                } else {
+                    log.events.subList(0, drop).clear()
+                }
+            }
             id
         }
     }
@@ -99,6 +120,10 @@ class TerminalEventLogImpl : TerminalEventLog {
         sessions.remove(sessionId)
     }
 
+    /** T81 (D-4)：被驱逐的事件总数（测试/诊断）。 */
+    fun evictedCount(sessionId: Long): Long =
+        sessions[sessionId]?.evicted?.get() ?: 0L
+
     private fun reassignId(event: TerminalEvent, id: Long): TerminalEvent = when (event) {
         is TerminalEvent.SessionCreated -> event.copy(id = id)
         is TerminalEvent.ProcessStarted -> event.copy(id = id)
@@ -116,5 +141,8 @@ class TerminalEventLogImpl : TerminalEventLog {
 
     companion object {
         private const val INITIAL_CAPACITY = 256
+
+        /** T81 (D-4)：默认每 session 保留 500 条事件（BackpressureConfig 接线值）。 */
+        const val DEFAULT_MAX_EVENTS = 500
     }
 }

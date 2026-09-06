@@ -43,7 +43,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 /**
  * Concrete TerminalRuntime. Wires together all subsystems and exposes the 9 Agent operations.
@@ -91,12 +93,21 @@ class TerminalRuntimeImpl(
      * close 成功后 unbind —— LinuxWorkspaceManager 的活跃计数由此驱动
      * （delete 拒绝有活跃会话的 workspace）。生产 DI 注入；测试可传 fake。
      */
-    private val workspaceBinder: com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder? = null
+    private val workspaceBinder: com.apex.agent.platform.terminal.workspace.SessionWorkspaceBinder? = null,
+    /**
+     * T81 (U-10)：rootfs 活跃会话绑定（LINUX 会话创建/关闭维护引用计数 ——
+     * provisioner.remove() 的活跃保护由此驱动，原 markInUse 生产零调用）。
+     */
+    private val rootfsBinder: com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinder? = null
 ) : TerminalRuntime {
 
     private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
         RuntimeRecoveryService(it, this, scope)
     }
+
+    /** T81 §15：shutdown 幂等门（首次进入后 create/reject 新请求）。 */
+    private val shutdownGate = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var shutdownResult: Result<TerminalRuntime.ShutdownResult>? = null
 
     private val eventLog: TerminalEventLog = TerminalEventLogImpl()
     private val eventBus: TerminalEventBus = TerminalEventBusImpl(eventLog, scope)
@@ -113,11 +124,13 @@ class TerminalRuntimeImpl(
         onCancelled = { sessionId, jobId ->
         // Job was cancelled by the agent → emit ProcessExited so wait(ProcessExited(jobId))
         // resolves with a non-RUNNING state (Control Plane contract).
+        // T81 (D-2)：如实上报 —— 取消序列实际发送 SIGTERM（信号 15），合成事件
+        // 不再谎报 SIGINT/130（原实现语义错位：信号类型与 exit code 不匹配）。
         scope.launch {
             val ev = TerminalEvent.ProcessExited(
                 id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
                 cursor = -1, jobId = jobId, pid = 0,
-                exitCode = 130, signal = UnixSignal.SIGINT, cause = ExitCause.USER_INTERRUPT
+                exitCode = 143, signal = UnixSignal.SIGTERM, cause = ExitCause.USER_INTERRUPT
             )
             val eid = eventLog.append(ev)
             eventBus.emit(ev.copy(id = eid))
@@ -128,7 +141,7 @@ class TerminalRuntimeImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, pumpScope  // P70: pumps + exit watchers on the injectable pump scope
     )
-    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope)
+    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope, timeoutController)
 
     init {
         // P70-4: wire the REAL sessionId(Long) → nativeSessionId(Int) mapping into the
@@ -138,14 +151,26 @@ class TerminalRuntimeImpl(
         // writes/signals then landed on the WRONG native session.
         inputManager.nativeIdResolver = { sid -> sessionManager.assembly(sid)?.nativeSessionId }
 
+        // T81 (D-5)：周期性 auto-save 接线（原 startAutoSave 生产零调用 —— 持久化
+        // 只在 ProcessExited 事件时发生，长命令运行中 crash 丢全部中间状态）。
+        // backend 字段经 TerminalSession 原样保留（不再从 SemanticState 重建丢字段）。
+        recoveryService?.startAutoSave(
+            intervalMs = 2000L,
+            liveSessionsProvider = { sessionManager.list() },
+            liveJobsProvider = { sid -> jobManager.listBySession(sid) },
+            recentEventsProvider = { sid -> eventLog.tail(sid, 100) }
+        )
+
         // TM1: wire a recent-output provider into the WaitEngine so OutputMatch.pattern
         // is tested against real PTY bytes (the last 4 KB from the per-session
         // RingBuffer). Without this, WaitEngineImpl.matchOutput returned true on ANY
         // OutputProduced event, making the pattern field dead (every wait(OutputMatch)
         // completed instantly). The RingBuffer is per-session, owned by SessionManager.
         waitEngine.recentOutputProvider = { sid ->
+            // T81 (D-6)：UTF-8 边界安全解码（窗口起点可能落在多字节序列中间）
             sessionManager.assembly(sid)?.ringBuffer
-                ?.latest(4096)?.bytes?.toString(Charsets.UTF_8) ?: ""
+                ?.latest(4096)?.bytes
+                ?.let { com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(it) } ?: ""
         }
     }
 
@@ -155,6 +180,10 @@ class TerminalRuntimeImpl(
         env: Map<String, String>, privilege: PrivilegeLevel,
         backendId: String, workspaceId: String?
     ): Result<CreateResult> {
+        // T81 §15：shutdown 后拒绝新会话
+        if (shutdownGate.get()) {
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.UnsupportedOperation, "runtime 已 shutdown"))
+        }
         // T73: 后端路由。local 默认 —— 与历史行为一致（golden）；
         // linux-ubuntu —— 失败时给出可行动错误（引导 Agent 先装 rootfs）。
         val backend = backendRegistry.get(backendId)
@@ -193,7 +222,7 @@ class TerminalRuntimeImpl(
             workspaceId = workspaceId
         )
         val spec = backend.prepare(request).getOrElse { e ->
-            return Result.failure(RuntimeException("TerminalError:BackendPrepareFailed — ${e.message}", e))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.PtyUnavailable, "backend prepare failed: ${e.message}", e))
         }
         val r = sessionManager.createFromSpec(spec, rows, cols, privilege)
         return r.map { s ->
@@ -243,6 +272,10 @@ class TerminalRuntimeImpl(
         sessionId: Long, command: String, owner: InputOwner,
         background: Boolean, timeoutMs: Long
     ): Result<RunResult> {
+        // T81 §15：shutdown 后拒绝新 job
+        if (shutdownGate.get()) {
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.UnsupportedOperation, "runtime 已 shutdown"))
+        }
         val r = jobManager.startJob(sessionId, command, owner, background, timeoutMs)
         return r.map { j ->
             RunResult(
@@ -258,7 +291,7 @@ class TerminalRuntimeImpl(
         maxBytes: Int, maxEvents: Int
     ): Result<ObserveResult> {
         val a = sessionManager.assembly(sessionId)
-            ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // Delegate to per-session ObservationEngine (Spec §30). Runtime is orchestration only.
         val engine = a.observationEngine
         return Result.success(
@@ -271,7 +304,7 @@ class TerminalRuntimeImpl(
         sessionId: Long, condition: WaitCondition, timeoutMs: Long
     ): Result<WaitResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         val r = waitEngine.await(sessionId, condition, timeoutMs)
         return Result.success(r)
@@ -283,7 +316,7 @@ class TerminalRuntimeImpl(
         text: String?, key: TerminalKey?
     ): Result<WriteResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         val res: Result<com.apex.agent.platform.terminal.io.WriteResult> = when (kind) {
             WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
@@ -305,7 +338,7 @@ class TerminalRuntimeImpl(
         sessionId: Long, signal: UnixSignal, owner: InputOwner, jobId: Long?
     ): Result<SignalResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         // Route through ProcessController: records the session's process group and delegates
         // to InputManager (policy + control-state + SignalSent event). The native layer
@@ -317,7 +350,7 @@ class TerminalRuntimeImpl(
     // ───────── cancel (Spec PR #51 §5) ─────────
     override suspend fun cancel(sessionId: Long, jobId: Long): Result<CancelResult> {
         if (sessionManager.assembly(sessionId) == null) {
-            return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         cancellationController.cancel(sessionId, jobId)
         // Wait briefly for the cancellation to take effect
@@ -330,11 +363,11 @@ class TerminalRuntimeImpl(
     // ───────── resize ─────────
     override suspend fun resize(sessionId: Long, rows: Int, cols: Int): Result<ResizeResult> {
         val a = sessionManager.assembly(sessionId)
-            ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+            ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // 0. Validate dimensions (Spec §34.7). Zero or negative rows/cols are rejected
         //    BEFORE touching the native layer or VT.
         if (rows <= 0 || cols <= 0) {
-            return Result.failure(RuntimeException("TerminalError:InvalidDimensions"))
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.InvalidInput, "rows/cols must be > 0"))
         }
         // 1. Resize the native PTY FIRST (sends SIGWINCH to child). Spec §34.7 / §18.
         //    If native resize fails, VirtualTerminal MUST NOT be updated (correctness: avoid
@@ -392,7 +425,7 @@ class TerminalRuntimeImpl(
     // ───────── stop (Spec PR #54 §5) ─────────
     /** Stop running jobs but keep Session alive. ≠ close(). Idempotent. */
     override suspend fun stop(sessionId: Long): Result<TerminalRuntime.StopResult> {
-        val a = sessionManager.assembly(sessionId) ?: return Result.failure(RuntimeException("TerminalError:SessionNotFound"))
+        val a = sessionManager.assembly(sessionId) ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // Transition to STOPPING (graceful shutdown)
         sessionManager.transition(sessionId, SessionState.STOPPING)
         // Cancel all active jobs in this session
@@ -426,8 +459,17 @@ class TerminalRuntimeImpl(
             processController.unregister(sessionId)
             // T75: 会话关闭 → 释放 workspace 活跃绑定（delete 门禁解除）
             workspaceBinder?.unbind(sessionId)
+            // T81 (D-4)：只收敛本 session 的超时定时器 —— 原实现调
+            // timeoutController.cancelAll()（全局），关 session A 会误杀
+            // session B/C 的 job 超时定时器。
+            timeoutController.cancelSession(sessionId)
+            // T81 (U-10)：解除 rootfs 引用（LINUX 会话；remove 门禁解除）
+            rootfsBinder?.unbind(sessionId)
+            // T81：close 后同步删除持久化记录（§39 语义：CLOSED → 不再保留；
+            // 原路径依赖 collector 收到 SessionClosed 时 autoSave，与 assembly
+            // 移除存在竞态，CLOSED 终态可能从未落盘）。
+            persistenceStore?.delete(sessionId)
         }
-        timeoutController.cancelAll()
         return r.map {
             val cause = when {
                 wasLost -> "LOST"
@@ -443,13 +485,20 @@ class TerminalRuntimeImpl(
     /** Subscribe JobManager to a session's event stream (so it can advance Job states). */
     private fun startSessionListener(sessionId: Long) {
         scope.launch {
-            eventBus.subscribe(sessionId, afterCursor = 0L).collect { ev ->
-                jobManager.onEvent(ev)
-                // Auto-save on significant events (Spec §39)
-                if (persistenceStore != null && (ev is TerminalEvent.ProcessExited || ev is TerminalEvent.SessionClosed)) {
-                    autoSaveSession(sessionId)
+            // T81 (D-4)：SessionClosed 后终止 collect —— 原实现永久 collect 一个
+            // 永不 complete 的 SharedFlow（bus 的 drop 只移除 map 条目，不影响
+            // 已订阅的 collector），每个 session 泄漏一个协程。
+            // 持久化终态在 close() 主路径同步处理（此处 assembly 可能已移除，
+            // autoSave 是 no-op）；ProcessExited 的自动保存仍在事件到达时执行。
+            eventBus.subscribe(sessionId, afterCursor = 0L)
+                .takeWhile { ev -> ev !is TerminalEvent.SessionClosed }
+                .collect { ev ->
+                    jobManager.onEvent(ev)
+                    // Auto-save on significant events (Spec §39)
+                    if (persistenceStore != null && ev is TerminalEvent.ProcessExited) {
+                        autoSaveSession(sessionId)
+                    }
                 }
-            }
         }
     }
 
@@ -492,4 +541,68 @@ class TerminalRuntimeImpl(
     /** Get a recovered session's last-known SemanticState (read-only, from persisted metadata). */
     override suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =
         recoveryService?.recoveredSnapshot(sessionId)
+
+    // ───────── shutdown（T81 §15）─────────
+    /**
+     * 幂等收敛链：停新请求 → cancel 全部 job → close 全部 session（含 pump/bus/log
+     * 清理）→ 停协程域 → nativeCloseAll 兕底（防 Kotlin/native id 失步残留）→
+     * 停 autoSave + 持久化最终 flush。
+     */
+    override suspend fun shutdown(): Result<TerminalRuntime.ShutdownResult> {
+        shutdownResult?.let { return it }
+        if (!shutdownGate.compareAndSet(false, true)) {
+            // 并发 shutdown：等待胜者完成（简化 —— 再次调用返回既有/默认结果）
+            return shutdownResult ?: Result.success(TerminalRuntime.ShutdownResult(0, 0, true))
+        }
+        // 1. cancel 全部活跃 job（三级序列 SIGTERM→grace→SIGKILL）
+        var cancelled = 0
+        for (s in sessionManager.list()) {
+            for (j in jobManager.activeJobs(s.id)) {
+                cancellationController.cancel(s.id, j.id)
+                cancelled++
+            }
+        }
+        // 2. close 全部 session（force：内部 SIGHUP→TERM→KILL 有界序列 + pump 停止 +
+        //    bus/log drop + 持久化记录删除）
+        val sessions = sessionManager.list()
+        var clean = true
+        var closed = 0
+        for (s in sessions) {
+            val wasBroken = s.state == com.apex.agent.platform.terminal.session.SessionState.BROKEN ||
+                s.state == com.apex.agent.platform.terminal.session.SessionState.LOST
+            val r = close(s.id, force = true)
+            if (r.isSuccess) closed++ else clean = false
+            if (wasBroken) clean = false
+        }
+        // 3. 停止全部超时定时器 + autoSave
+        timeoutController.cancelAll()
+        recoveryService?.stopAutoSave()
+        // 4. native 兕底：Kotlin 侧可能因历史 bug/重建失步残留 native session
+        //    （closeAll 幂等，对已关 id 无副作用）。
+        try { native.nativeCloseAll() } catch (_: Exception) {}
+        // 5. 停协程域（listener/exit watcher/pump 域 —— SupervisorJob 的 cancel 是协作式）
+        scope.cancel()
+        pumpScope.cancel()
+        val result = Result.success(TerminalRuntime.ShutdownResult(closed, cancelled, clean))
+        shutdownResult = result
+        return result
+    }
+
+    /** T81 测试钩子：事件总线只读视图（事件收敛回归测试用）。 */
+    internal fun eventBusPublic(): TerminalEventBus = eventBus
+
+    /** T81 测试钩子：SessionManager 只读视图（close 收敛回归测试用）。 */
+    internal fun sessionManagerPublic(): SessionManagerImpl = sessionManager
+
+    /** T81 测试钩子：事件日志计数（验证 close 后无事件再追加）。 */
+    internal suspend fun eventLogCountPublic(sessionId: Long): Long = eventLog.count(sessionId)
+
+    /** T81 测试钩子：job 状态查询（超时/取消收敛测试用）。 */
+    internal suspend fun jobStatePublic(jobId: Long): String? = jobManager.get(jobId)?.state?.name
+
+    /** T81 测试钩子：job 快照（终态字段验证用）。 */
+    internal suspend fun jobPublic(jobId: Long): com.apex.agent.platform.terminal.job.TerminalJob? = jobManager.get(jobId)
+
+    /** T81 测试钩子：native 适配器（shutdown 后无 native 残留验证用）。 */
+    internal fun nativePublic(): com.apex.agent.platform.terminal.pty.NativePty = native
 }

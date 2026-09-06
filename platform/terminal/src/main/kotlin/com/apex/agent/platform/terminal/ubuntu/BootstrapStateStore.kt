@@ -61,6 +61,11 @@ class BootstrapStateStore(
         if (!stateFile.exists()) return@withLock null
         runCatching {
             json.decodeFromString<BootstrapStateRecord>(stateFile.readText())
+        }.onFailure {
+            // T81 (U-5)：损坏隔离（同 RootfsMetadataStore）—— 静默吞损坏会让
+            // bootstrap 从 NOT_STARTED 全量重跑（网络/时间浪费）；隔离保留现场。
+            val quarantine = java.io.File(stateFile.parentFile, stateFile.name + ".corrupt")
+            runCatching { stateFile.renameTo(quarantine) }
         }.getOrNull()
     }
 

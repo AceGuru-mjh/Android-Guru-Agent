@@ -209,3 +209,11 @@ Termux bootstrap ships a curated minimal set; ours ships a larger Ubuntu Base + 
 
 Every 🏗️ row above is implemented + unit-tested in this branch; see `docs/T82_TERMINAL_CAPABILITY_REPORT.md`
 for the per-item verification ledger (same honesty rules as T81/T82-r1: local-verified vs CI-verified vs NOT VERIFIED).
+
+---
+
+## Status after T82 — verified ledger (post-merge)
+
+Every 🏗️ row above was implemented in branch `t82/terminal-full-capability`.
+Per-item verification status (local-verified / CI-verified / NOT VERIFIED) is
+recorded in `docs/T82_TERMINAL_CAPABILITY_REPORT.md` §2/§7.

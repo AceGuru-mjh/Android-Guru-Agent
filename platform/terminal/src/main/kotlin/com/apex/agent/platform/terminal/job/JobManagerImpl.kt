@@ -182,7 +182,9 @@ class JobManagerImpl(
         val lineToSend = if (enableShellMarkers) ShellMarkers.wrapCommand(jobId, command) else command
 
         // Write the command (LINE mode appends \n)
-        val writeResult = inputManager.sendLine(sessionId, owner, lineToSend)
+        // T82：marker 开启时写入的是包装行 —— 策略检查基准传 **原命令**
+        //（printf 插桩不是 Agent 意图，不应触发 complex-command 拒绝）。
+        val writeResult = inputManager.sendLine(sessionId, owner, lineToSend, policyCommand = command)
         if (writeResult.isFailure) {
             transition(jobId, JobState.FAILED)
             return Result.failure(RuntimeException("TerminalError:WriteFailed"))
@@ -238,6 +240,20 @@ class JobManagerImpl(
         trackerFor(sessionId).record(marker)
         val job = jobs[marker.jobId] ?: return
         if (job.state != JobState.RUNNING) return
+        // 确定性终态推进：不经「listener 事件往返」（runtime listener 是异步协程 ——
+        // 事件驱动足够通知 WaitEngine/观察者，但 job 状态读取方需要同步可见）。
+        transition(marker.jobId, JobState.EXITED)
+        jobs[marker.jobId]?.let { cur ->
+            jobs[marker.jobId] = cur.copy(
+            exitCode = marker.exitCode, signal = null,
+            finishedAt = System.currentTimeMillis(),
+                endCursor = sessionManager.assembly(sessionId)?.ringBuffer?.totalCursor
+            )
+        }
+        if (foregroundJobIdBySession[sessionId] == marker.jobId) {
+            foregroundJobIdBySession.remove(sessionId)
+        }
+        // 事件通知（WaitEngine/观察者/persistence autoSave —— 与 onEvent 路径幂等收敛）。
         emitProcessExited(marker.jobId, sessionId, ExitCause.NORMAL, marker.exitCode)
     }
 

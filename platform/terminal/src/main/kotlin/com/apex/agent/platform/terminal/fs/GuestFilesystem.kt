@@ -235,11 +235,28 @@ class GuestFilesystem(
     internal fun guardWritable(path: String): String? {
         val p = normalize(path)
         if (p.isEmpty()) return null
+        // T82 安全修复：按解析 `..`/`.` 后的路径判定 —— `/workspace/../../etc/x`
+        // 前缀匹配通过但 guest shell 会解析到沙箱外。
+        val canonical = canonicalize(p) ?: return null
         val allowed = allowedWriteRoots.any { root ->
             val r = root.trimEnd('/')
-            p == r || p.startsWith("$r/")
+            canonical == r || canonical.startsWith("$r/")
         }
         return if (allowed) p else null
+    }
+
+    /** 解析 `.`/`..` 段后的绝对路径；越出根的 `..` 钳制在 `/`；含 NUL → null。 */
+    internal fun canonicalize(path: String): String? {
+        if (path.isEmpty() || path.any { it == '\u0000' }) return null
+        val stack = ArrayDeque<String>()
+        for (seg in path.split('/')) {
+            when (seg) {
+                "", "." -> {}
+                ".." -> if (stack.isNotEmpty()) stack.removeLast()
+                else -> stack.addLast(seg)
+            }
+        }
+        return "/" + stack.joinToString("/")
     }
 
     private fun writeDeniedMessage(path: String): String =

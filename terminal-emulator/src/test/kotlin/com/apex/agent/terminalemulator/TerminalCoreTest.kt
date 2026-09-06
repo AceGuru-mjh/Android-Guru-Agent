@@ -163,26 +163,26 @@ class TerminalCoreTest {
 
     @Test fun `cursor movement CUU CUD CUF CUB`() {
         val c = TerminalCore(10, 10)
-        c.feed("\u001B[5;5H")  // CUP row 5 col 5
-        c.feed("X")
+        c.feed("\u001B[5;5H".toByteArray())  // CUP row 5 col 5
+        c.feed("X".toByteArray())
         var s = c.snapshot()
         assertEquals(4, s.cursorRow)
-        assertEquals(4, s.cursorCol)
-        c.feed("\u001B[A")  // up
+        assertEquals(5, s.cursorCol)   // printing X advances the column
+        c.feed("\u001B[A".toByteArray())  // up
         s = c.snapshot()
         assertEquals(3, s.cursorRow)
-        c.feed("\u001B[2B")  // down 2
+        c.feed("\u001B[2B".toByteArray())  // down 2
         s = c.snapshot()
         assertEquals(5, s.cursorRow)
     }
 
     @Test fun `alternate screen switch and restore`() {
         val c = core("main content")
-        c.feed("\u001B[?1049h")  // enter alt screen
+        c.feed("\u001B[?1049h".toByteArray())  // enter alt screen
         var s = c.snapshot()
         assertTrue(s.alternateScreen)
-        c.feed("alt content")
-        c.feed("\u001B[?1049l")  // exit alt screen
+        c.feed("alt content".toByteArray())
+        c.feed("\u001B[?1049l".toByteArray())  // exit alt screen
         s = c.snapshot()
         assertFalse(s.alternateScreen)
         // main content should be restored
@@ -198,7 +198,7 @@ class TerminalCoreTest {
 
     @Test fun `CJK at last column wraps`() {
         val c = TerminalCore(5, 3)
-        c.feed("ab中")  // 'a'(0) 'b'(1) '中'(width2) — at col 2, only 1 col left → wrap
+        c.feed("ab中".toByteArray())  // 'a'(0) 'b'(1) '中'(width2) — at col 2, only 1 col left → wrap
         val s = c.snapshot()
         // '中' should be on row 1 (wrapped), not overwriting
         val lines = s.renderedText!!.split('\n')
@@ -212,9 +212,9 @@ class TerminalCoreTest {
 
     @Test fun `scroll region DECSTBM`() {
         val c = TerminalCore(6, 10)
-        c.feed("\u001B[2;4r")  // scroll region rows 2-4
-        c.feed("\u001B[2;1H")  // cursor to row 2 col 1
-        c.feed("a\nb\nc\nd")   // 4 lines, should scroll within region
+        c.feed("\u001B[2;4r".toByteArray())  // scroll region rows 2-4
+        c.feed("\u001B[2;1H".toByteArray())  // cursor to row 2 col 1
+        c.feed("a\nb\nc\nd".toByteArray())   // 4 lines, should scroll within region
         val s = c.snapshot()
         assertNotNull(s)
     }
@@ -226,7 +226,7 @@ class TerminalCoreTest {
 
     @Test fun `RIS resets everything`() {
         val c = core("\u001B[31mhello\u001B[5;5H")
-        c.feed("\u001Bc")  // RIS
+        c.feed("\u001Bc".toByteArray())  // RIS
         val s = c.snapshot()
         assertEquals(0, s.cursorRow)
         assertEquals(0, s.cursorCol)
@@ -253,8 +253,8 @@ class TerminalCoreTest {
 
     @Test fun `unterminated OSC does not hang`() {
         val c = TerminalCore(5, 5)
-        c.feed("\u001B]0;unterminated")  // no BEL/ST
-        c.feed("more text")  // should recover
+        c.feed("\u001B]0;unterminated".toByteArray())  // no BEL/ST
+        c.feed("more text".toByteArray())  // should recover
         assertNotNull(c.snapshot())
     }
 
@@ -291,28 +291,28 @@ class TerminalCoreTest {
 
     @Test fun `DECOM origin mode offsets CUP to scroll-region top`() {
         val c = TerminalCore(10, 10)
-        c.feed("\u001B[2;5r")    // DECSTBM: scroll region rows 2..5 (0-based)
-        c.feed("\u001B[?6h")     // DECOM on
-        c.feed("\u001B[1;1H")    // CUP 1;1 → region-relative → row 2, col 0
+        c.feed("\u001B[2;5r".toByteArray())    // DECSTBM: scroll region rows 2..5 (0-based)
+        c.feed("\u001B[?6h".toByteArray())     // DECOM on (origin mode)
+        c.feed("\u001B[1;1H".toByteArray())    // CUP 1;1 → region-relative → 0-based row 1, col 0
         val s = c.snapshot()
-        assertEquals(2, s.cursorRow)
+        assertEquals(1, s.cursorRow)
         assertEquals(0, s.cursorCol)
     }
 
     @Test fun `DECOM origin mode offsets VPA`() {
         val c = TerminalCore(10, 10)
-        c.feed("\u001B[3;7r")    // region rows 3..7
-        c.feed("\u001B[?6h")     // DECOM on
-        c.feed("\u001B[2d")      // VPA 2 → row 3+1 = 4
-        assertEquals(4, c.snapshot().cursorRow)
+        c.feed("\u001B[3;7r".toByteArray())    // region rows 3..7
+        c.feed("\u001B[?6h".toByteArray())     // DECOM on (origin mode)
+        c.feed("\u001B[2d".toByteArray())      // VPA 2 → 0-based top(2)+1 = 3
+        assertEquals(3, c.snapshot().cursorRow)
     }
 
     @Test fun `DECSET 1049 saves and restores cursor`() {
         val c = TerminalCore(10, 10)
-        c.feed("\u001B[5;5H")    // cursor at row 4, col 4
-        c.feed("\u001B[?1049h")  // enter alt screen (save cursor)
-        c.feed("alt content")
-        c.feed("\u001B[?1049l")  // exit alt screen (restore cursor)
+        c.feed("\u001B[5;5H".toByteArray())    // cursor at row 4, col 4
+        c.feed("\u001B[?1049h".toByteArray())  // enter alt screen (save cursor)
+        c.feed("alt content".toByteArray())
+        c.feed("\u001B[?1049l".toByteArray())  // exit alt screen (restore cursor)
         val s = c.snapshot()
         assertEquals(4, s.cursorRow)
         assertEquals(4, s.cursorCol)
@@ -320,28 +320,28 @@ class TerminalCoreTest {
 
     @Test fun `ICH inserts blank cells shifting rest right`() {
         val c = TerminalCore(1, 10)
-        c.feed("ABCDE")
-        c.feed("\u001B[1;1H")    // cursor to col 0
-        c.feed("\u001B[2@")      // ICH: insert 2 blanks at col 0
+        c.feed("ABCDE".toByteArray())
+        c.feed("\u001B[1;1H".toByteArray())    // cursor to col 0
+        c.feed("\u001B[2@".toByteArray())      // ICH: insert 2 blanks at col 0
         val line = c.snapshot().renderedText!!.split('\n')[0]
         assertTrue("expected leading blanks then ABCDE, got '$line'", line.startsWith("  ABCDE"))
     }
 
     @Test fun `DCH deletes cells shifting rest left`() {
         val c = TerminalCore(1, 10)
-        c.feed("ABCDE")
-        c.feed("\u001B[1;1H")
-        c.feed("\u001B[2P")      // DCH: delete 2 chars at col 0
+        c.feed("ABCDE".toByteArray())
+        c.feed("\u001B[1;1H".toByteArray())
+        c.feed("\u001B[2P".toByteArray())      // DCH: delete 2 chars at col 0
         val line = c.snapshot().renderedText!!.split('\n')[0]
         assertTrue("expected CDE, got '$line'", line.startsWith("CDE"))
     }
 
     @Test fun `IRM insert mode inserts without overwriting`() {
         val c = TerminalCore(1, 10)
-        c.feed("abc")
-        c.feed("\u001B[1;1H")
-        c.feed("\u001B[4h")      // IRM on
-        c.feed("X")              // insert X at col 0, shifting "abc" right
+        c.feed("abc".toByteArray())
+        c.feed("\u001B[1;1H".toByteArray())
+        c.feed("\u001B[4h".toByteArray())      // IRM on (ANSI mode 4)
+        c.feed("X".toByteArray())              // insert X at col 0, shifting "abc" right
         val line = c.snapshot().renderedText!!.split('\n')[0]
         assertTrue("expected Xabc, got '$line'", line.startsWith("Xabc"))
     }
@@ -355,19 +355,19 @@ class TerminalCoreTest {
 
     @Test fun `variation selector 16 is not an independent cell`() {
         val c = TerminalCore(1, 10)
-        c.feed("e\uFE0F")        // e + VS16
+        c.feed("e\uFE0F".toByteArray())        // e + VS16
         assertEquals(1, c.snapshot().cursorCol)  // VS16 combines, no extra cell
     }
 
     @Test fun `ZWJ is not an independent cell`() {
         val c = TerminalCore(1, 10)
-        c.feed("a\u200D")        // a + ZWJ
+        c.feed("a\u200D".toByteArray())        // a + ZWJ
         assertEquals(1, c.snapshot().cursorCol)
     }
 
     @Test fun `OSC terminated by ESC backslash ST is emitted`() {
         val c = TerminalCore(5, 5)
-        c.feed("\u001B]2;My Title\u001B\\")  // ESC ] 2 ; My Title ESC \
+        c.feed("\u001B]2;My Title\u001B\\".toByteArray())  // ESC ] 2 ; My Title ESC \
         assertEquals("My Title", c.snapshot().title)
     }
 }

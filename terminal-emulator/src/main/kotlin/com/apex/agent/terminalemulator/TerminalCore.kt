@@ -161,6 +161,8 @@ class TerminalCore(
             0x08 -> { if (cursor.column > 0) cursor.column--; cursor.wrapPending = false }  // BS
             0x09 -> { cursor.column = tabStops.nextTab(cursor.column); cursor.wrapPending = false }  // HT
             0x0A, 0x0B, 0x0C -> {  // LF/VT/FF
+                // T82: LNM (ANSI 20) —— LF 同时回列首（NEWLINE MODE 语义）
+                if (modes.newlineMode) cursor.column = 0
                 cursor.row++
                 cursor.wrapPending = false
                 if (cursor.row > scrollRegion.bottom) {
@@ -207,8 +209,12 @@ class TerminalCore(
                 cursor.row = if (modes.originMode) scrollRegion.top else 0
                 cursor.column = 0
             }
+            // T82 bug fix: ANSI modes (no '?' prefix) were dropped — CSI 4 h is IRM
+            // (the insert-mode path existed but was unreachable via its own standard code).
             'h' -> if (seq.privateMarker == '?') setMode(seq.params, true)   // DECSET
+                   else setAnsiMode(seq.params, true)                        // ANSI (IRM 4 / LNM 20)
             'l' -> if (seq.privateMarker == '?') setMode(seq.params, false)  // DECRST
+                   else setAnsiMode(seq.params, false)
             's' -> { savedCursor = cursor.saveTo(); savedStyle = currentStyle }  // save cursor (ANSI.SYS)
             'u' -> { cursor.restoreFrom(savedCursor); currentStyle = savedStyle }  // restore
             'g' -> {  // TBC — tab clear
@@ -349,7 +355,9 @@ class TerminalCore(
             // Empty payload = clipboard QUERY — we do not answer (host never
             // injects clipboard text into the guest unsolicited).
             52 -> {
-                val payload = seq.data.substringAfter(';', "").substringAfter(';', "")
+                // data = "c;<b64>"（可选 selection 前缀）或直接 "<b64>"
+                val semi = seq.data.indexOf(';')
+                val payload = if (semi >= 0) seq.data.substring(semi + 1) else seq.data
                 if (payload.isNotEmpty()) {
                     val decoded = runCatching {
                         java.util.Base64.getDecoder().decode(payload).toString(Charsets.UTF_8)
@@ -390,6 +398,14 @@ class TerminalCore(
             }
             'E' -> { cursor.row++; cursor.column = 0 }  // NEL
             else -> { /* unknown ESC ignored */ }
+        }
+    }
+
+    /** T82: ANSI（非 '?'）模式集 —— IRM(4) 与 LNM(20)。 */
+    private fun setAnsiMode(params: IntArray, enable: Boolean) {
+        for (p in params) when (p) {
+            4 -> modes.insertMode = enable
+            20 -> modes.newlineMode = enable
         }
     }
 
@@ -455,6 +471,7 @@ class TerminalCore(
         modes.originMode = false
         modes.insertMode = false
         modes.bracketedPaste = false
+        modes.newlineMode = false
         utf8.reset(); parser.reset()
         title = null
         mutations += ScreenMutation.FULL

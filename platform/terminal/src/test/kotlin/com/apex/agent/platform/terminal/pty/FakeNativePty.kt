@@ -248,6 +248,13 @@ class FakeNativePty : NativePty {
     // ─── minimal shell simulator ───
 
     private fun executeCommand(s: Session, line: String) {
+        // T82 — Shell Marker Protocol awareness：runtime（markers 开启）写入的行形如
+        // `cmd; printf '\033]633;APEX;j=<jobId>;e=%d\007' <jobId> $?`。真实 bash 会让
+        // printf 在命令结束后输出该 OSC 帧 —— fake 同样模拟（使 JVM 测试能跑通
+        // wrap → write → output → parser → JobManager 全链路）。
+        val markerMatch = MARKER_WRAP.find(line)
+        val baseLine = if (markerMatch != null) line.substring(0, markerMatch.range.first).trim() else line
+        val markerJobId = markerMatch?.groupValues?.get(1)?.toIntOrNull()
         s.currentCommand = line
         s.runningJob.set(true)
         s.interrupted.set(false)
@@ -255,7 +262,7 @@ class FakeNativePty : NativePty {
         s.commandThread = Thread({
             try {
                 val out = StringBuilder()
-                val parts = line.split(Regex("\\s+"))
+                val parts = baseLine.split(Regex("\\s+"))
                 val cmd = parts.firstOrNull() ?: ""
                 val args = parts.drop(1)
                 var exit = 0
@@ -298,6 +305,11 @@ class FakeNativePty : NativePty {
                     else -> { out.append("$cmd: command not found\n"); exit = 127 }
                 }
                 if (out.isNotEmpty()) synchronized(s.outputBuffer) { s.outputBuffer.append(out) }
+                // T82：marker 在命令输出之后、prompt 重绘之前（真实 bash 的 printf 次序）。
+                if (markerJobId != null) {
+                    val code = if (s.interrupted.get() && exit == 0) 130 else exit
+                    synchronized(s.outputBuffer) { s.outputBuffer.append("\u001B]633;APEX;j=$markerJobId;e=$code\u0007") }
+                }
                 if (!s.exited.get()) {
                     s.outputBuffer.append("\$ ")
                 }
@@ -312,6 +324,9 @@ class FakeNativePty : NativePty {
             }
         }, "fake-pty-${s.id}-cmd").apply { isDaemon = true; start() }
     }
+
+    /** T82：runtime 包装的 marker 后缀（与 ShellMarkers.wrapCommand 产出的文本一致）。 */
+    private val MARKER_WRAP = Regex("""; printf '\\033\]633;APEX;j=(\d+);e=%d\\007' \d+ \$\?""")
 
     /** Test helper: inject raw output bytes (simulates a program writing to stdout). */
     fun injectOutput(sessionId: Int, text: String) {

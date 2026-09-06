@@ -48,9 +48,9 @@ object AptMirrorRegistry {
         else -> "archive.ubuntu.com"
     }
 
-    /** spec+arch → UbuntuSourcesList.Mirror。official 的 host 经 [officialHost]。 */
+    /** spec+arch → UbuntuSourcesList.Mirror。official 的 host 经 [officialHost]；未知 id → null。 */
     fun mirrorFor(id: String?, arch: CpuArchitecture): UbuntuSourcesList.Mirror? {
-        val spec = id?.let { byId(it) } ?: byId("official") ?: return null
+        val spec = if (id == null) byId("official") ?: return null else byId(id) ?: return null
         val host = if (spec.id == "official") officialHost(arch) else spec.host
         val path = when (arch) {
             CpuArchitecture.ARM64, CpuArchitecture.ARM32 -> spec.ubuntuPortsPath

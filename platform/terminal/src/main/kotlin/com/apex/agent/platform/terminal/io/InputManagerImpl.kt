@@ -76,6 +76,8 @@ class InputManagerImpl(
                               val fgScope: Boolean = false,
                               /** T82：SIGNAL 携带的 jobId（SignalSent 事件不再丢弃目标 —— E-17）。 */
                               val jobId: Long? = null,
+                              /** T82：LINE 策略检查基准（marker 包装行 → 原命令；null = 用 text）。 */
+                              val policyBasis: String? = null,
                               val result: kotlinx.coroutines.CompletableDeferred<Result<WriteResult>>)
     }
 
@@ -113,8 +115,10 @@ class InputManagerImpl(
             return Result.failure(RuntimeException("TerminalError:OwnerBusy"))
         }
         // 2. Policy check (only for LINE/RAW that look like commands)
+        //    T82：检查基准 = policyBasis（marker 包装时为原命令）—— 对 Agent 意图判定。
         if (op.kind == InputKind.LINE && op.text != null) {
-            val req = InputRequest(sessionId, command = op.text, bytes = null, owner = op.owner)
+            val basis = op.policyBasis ?: op.text
+            val req = InputRequest(sessionId, command = basis, bytes = null, owner = op.owner)
             when (policy.check(req)) {
                 is Decision.Deny -> return Result.failure(RuntimeException("TerminalError:PermissionDenied"))
                 Decision.Allow -> {}
@@ -207,8 +211,15 @@ class InputManagerImpl(
      * PolicyEngine 门禁只对 `kind == LINE` 生效 → **生产路径所有命令全部绕过策略**
      *（门禁死代码）。覆写后 LINE 语义（+ 恰好一次 '\n' + policy 检查）恢复。
      */
-    override suspend fun sendLine(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> {
-        return writeInternal(sessionId, owner, text = text + "\n", kind = InputKind.LINE)
+    override suspend fun sendLine(
+        sessionId: Long, owner: InputOwner, text: String,
+        policyCommand: String?
+    ): Result<WriteResult> {
+        // T82：策略基准 = 调用方指定的原命令（marker 包装行对策略不可见——插桩非意图）。
+        return writeInternal(
+            sessionId, owner, text = text + "\n", kind = InputKind.LINE,
+            policyBasis = policyCommand ?: text
+        )
     }
 
     override suspend fun sendKey(sessionId: Long, owner: InputOwner, key: TerminalKey): Result<WriteResult> {
@@ -270,13 +281,14 @@ class InputManagerImpl(
         signal: UnixSignal? = null,
         kind: InputKind,
         fgScope: Boolean = false,
-        jobId: Long? = null
+        jobId: Long? = null,
+        policyBasis: String? = null
     ): Result<WriteResult> {
         val w = writerFor(sessionId)
         val deferred = kotlinx.coroutines.CompletableDeferred<Result<WriteResult>>()
         val effectiveText = text ?: (if (kind == InputKind.LINE && bytes != null) String(bytes, Charsets.UTF_8) else null)
         val effectiveBytes = bytes ?: text?.toByteArray(Charsets.UTF_8)
-        w.channel.send(WriteOp.WriteBytes(owner, effectiveBytes ?: ByteArray(0), kind, effectiveText, key, signal, fgScope, jobId, deferred))
+        w.channel.send(WriteOp.WriteBytes(owner, effectiveBytes ?: ByteArray(0), kind, effectiveText, key, signal, fgScope, jobId, policyBasis, deferred))
         return deferred.await()
     }
 

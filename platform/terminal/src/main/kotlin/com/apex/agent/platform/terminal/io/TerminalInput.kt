@@ -28,8 +28,17 @@ interface TerminalInput {
     suspend fun writeRaw(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> =
         write(sessionId, owner, text.toByteArray(Charsets.UTF_8))
 
-    /** Convenience: write text + "\n" (LINE mode). Most common for running commands. */
-    suspend fun sendLine(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> =
+    /**
+     * Convenience: write text + "\n" (LINE mode). Most common for running commands.
+     *
+     * T82：[policyCommand] —— 策略检查的基准命令。Runtime 的 marker 协议会把写入行
+     * 包装为 `cmd; printf …`（结构上被判「complex」）—— 策略必须针对 **Agent 请求的
+     * 原命令** 判定，而不是 runtime 自己的插桩。null（默认）= 以 [text] 为基准（历史行为）。
+     */
+    suspend fun sendLine(
+        sessionId: Long, owner: InputOwner, text: String,
+        policyCommand: String? = null
+    ): Result<WriteResult> =
         write(sessionId, owner, (text + "\n").toByteArray(Charsets.UTF_8))
 
     /** Send a special key (ENTER, CTRL_C, ARROW_UP, ...). */

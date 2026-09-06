@@ -331,6 +331,78 @@ class UbuntuAptPackageManager(
     // repair (dpkg --configure -a)
     // ──────────────────────────────────────────────────────────────────
 
+    /**
+     * T82（Termux 基线 §5.2）：真实已安装包列表。
+     *
+     * 旧 `terminal.linux.packages installed` action 是诚实记录的 stub（只回
+     * brokenPackages + 让 Agent 自己 shell `dpkg -l`）。本实现经
+     * `dpkg-query -W -f=${binary:Package}\t${db:Status-Abbrev}\t${Version}` 解析
+     * （只读、无锁、有界），status 以 `ii` 开头 = 正确安装。
+     */
+    override suspend fun installed(limit: Int): List<com.apex.agent.platform.terminal.pkg.InstalledPackage> {
+        val rootfs = rootfsProvider.current() ?: return emptyList()
+        // dpkg -W 模板含 ${...}（dpkg 占位符语法）—— Kotlin 模板转义为 ${'$'}{…}。
+        val format = "-f=" + "$" + "{binary:Package}" + "\t" + "$" + "{db:Status-Abbrev}" + "\t" + "$" + "{Version}" + "\n"
+        val argv = listOf("dpkg-query", "-W", format)
+        val exec = runAptRead(rootfs, argv, timeoutMs = 30_000) ?: return emptyList()
+        if (exec.exitCode != 0) return emptyList()
+        return exec.stdout.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { line ->
+                val parts = line.split('\t')
+                if (parts.size < 3) return@mapNotNull null
+                val pkg = parts[0].trim()
+                if (pkg.isEmpty()) return@mapNotNull null
+                com.apex.agent.platform.terminal.pkg.InstalledPackage(
+                    name = pkg,
+                    status = parts[1].trim(),
+                    version = parts.drop(2).joinToString("\t").trim()
+                )
+            }
+            .filter { it.properlyInstalled }
+            .take(limit.coerceAtMost(2000))
+            .toList()
+    }
+
+    /** T82（基线 §5.5）：apt autoremove —— 统一写操作框架（锁 + 事件 + 磁盘 preflight）。 */
+    override suspend fun autoremove(): PackageOperation {
+        val opId = newOpId()
+        val argv = listOf("apt-get", "-y", "autoremove")
+        return runWriteOp(opId, PackageOperationType.REMOVE, emptyList(), argv, defaultTimeoutMs) { exec, _ ->
+            PackageOperationResult(
+                durationMs = exec.durationMs,
+                exitCode = exec.exitCode,
+                operationId = opId,
+                state = if (exec.ok) PackageOperationState.SUCCEEDED else PackageOperationState.FAILED,
+                stdout = exec.stdout,
+                stderr = exec.stderr,
+                stdoutTruncated = exec.stdoutTruncated,
+                stderrTruncated = exec.stderrTruncated,
+                maxOutputBytes = maxOutputBytes
+            )
+        }
+    }
+
+    /** T82（基线 §5.5）：apt clean —— 下载缓存清理。 */
+    override suspend fun clean(): PackageOperation {
+        val opId = newOpId()
+        val argv = listOf("apt-get", "clean")
+        return runWriteOp(opId, PackageOperationType.REPAIR, emptyList(), argv, defaultTimeoutMs) { exec, _ ->
+            PackageOperationResult(
+                durationMs = exec.durationMs,
+                exitCode = exec.exitCode,
+                operationId = opId,
+                state = if (exec.ok) PackageOperationState.SUCCEEDED else PackageOperationState.FAILED,
+                stdout = exec.stdout,
+                stderr = exec.stderr,
+                stdoutTruncated = exec.stdoutTruncated,
+                stderrTruncated = exec.stderrTruncated,
+                maxOutputBytes = maxOutputBytes
+            )
+        }
+    }
+
     override suspend fun repair(): PackageOperation {
         val opId = newOpId()
         val argv = listOf("dpkg", "--configure", "-a")

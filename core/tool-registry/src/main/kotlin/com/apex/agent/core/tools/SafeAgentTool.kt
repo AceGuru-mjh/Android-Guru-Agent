@@ -44,6 +44,9 @@ class SafeAgentTool(
     override val description: String get() = delegate.description
     override val parametersSchema: String get() = delegate.parametersSchema
 
+    /** v2 元数据透传：包装层不丢失类别/风险/标签（engine 与 UI 依赖它）。 */
+    override val metadata: ToolMetadata get() = delegate.metadata
+
     override suspend fun execute(arguments: String): String {
         return try {
             delegate.execute(arguments)

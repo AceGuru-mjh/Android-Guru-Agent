@@ -160,6 +160,22 @@ class FakeNativePty : NativePty {
         return true
     }
 
+    /**
+     * T82：只信号前台作业组 —— shell 存活。与真实 native 语义对齐：
+     * • 有前台作业（runningJob）→ 作业被信号打断（128+sig 退出码语义由 shell 侧
+     *   合成路径负责，这里只驱动 fake 的作业状态），shell 存活；返回 true。
+     * • 无前台作业（shell 自身在前台 / 空闲）→ false（调用方退化到 session 级信号）。
+     */
+    override fun nativeSignalForegroundGroup(sessionId: Int, signal: Int): Boolean {
+        val s = sessions[sessionId] ?: return false
+        if (!s.runningJob.get()) return false
+        s.interrupted.set(true)
+        for ((_, alive) in s.groupChildren) alive.set(false)
+        s.runningJob.set(false)
+        // shell stays alive — foreground-scope signal never kills the session shell.
+        return true
+    }
+
     override fun nativeResize(sessionId: Int, rows: Int, cols: Int): Boolean {
         val s = sessions[sessionId] ?: return false
         s.rows = rows; s.cols = cols

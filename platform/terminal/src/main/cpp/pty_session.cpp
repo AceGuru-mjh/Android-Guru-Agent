@@ -350,6 +350,16 @@ bool PtySession::killProcessGroup(int sig) {
     return delivered;
 }
 
+bool PtySession::signalForegroundGroup(int sig) {
+    // T82：仅前台作业组（tcgetpgrp）。fg == pid_ 表示 shell 自身在前台（空闲
+    // prompt / 无前台作业）—— 此时绝不能把信号发给 shell 的组（那就是整个会话）。
+    const int fd = masterFd_.load(std::memory_order_acquire);
+    if (fd < 0 || pid_ <= 0) return false;
+    const int fg = tcgetpgrp(fd);
+    if (fg <= 0 || fg == pid_) return false;
+    return kill(-fg, sig) == 0;
+}
+
 void PtySession::resize(int rows, int cols) {
     const int fd = masterFd_.load(std::memory_order_acquire);
     if (fd < 0) return;

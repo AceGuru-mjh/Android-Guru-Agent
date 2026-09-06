@@ -36,6 +36,14 @@ class TerminalCore(
     private var savedStyle = TerminalStyle.DEFAULT
     private var title: String? = null
 
+    // T82: G0 charset designation (ESC ( 0 / ESC ( B) — DEC Special Graphics.
+    private var g0Charset = CharsetStatus.ASCII
+
+    // T82: OSC 52 clipboard-write requests from the guest (vim/tmux "copy to system
+    // clipboard"). Host drains them and may apply to the platform clipboard.
+    // Bounded (a stuck guest loop must not grow memory).
+    private val pendingClipboardRequests = ArrayDeque<String>()
+
     // Anchor of the last placed printable's base cell — combining marks attach here (§10/§11).
     private var lastBaseRow = 0
     private var lastBaseCol = 0
@@ -60,14 +68,20 @@ class TerminalCore(
 
     private fun handleEvent(ev: VtParser.Event) {
         when (ev) {
-            is VtParser.Event.Printable -> putPrintable(ev.codePoint)
+            is VtParser.Event.Printable -> putPrintable(mapCharset(ev.codePoint))
             is VtParser.Event.C0Control -> handleC0(ev.byte)
             is VtParser.Event.Csi -> handleCsi(ev.seq)
             is VtParser.Event.Osc -> handleOsc(ev.seq)
-            is VtParser.Event.Esc -> handleEsc(ev.final)
+            is VtParser.Event.Esc -> handleEsc(ev.final, ev.intermediates)
             is VtParser.Event.Dcs -> { /* DCS ignored (§27) */ }
             is VtParser.Event.Unknown -> { /* safely ignore (§24) */ }
         }
+    }
+
+    /** T82: apply G0 charset mapping (DEC Special Graphics, ESC ( 0). */
+    private fun mapCharset(cp: Int): Int {
+        if (g0Charset != CharsetStatus.DEC_GRAPHICS) return cp
+        return DEC_SPECIAL_GRAPHICS[cp] ?: cp
     }
 
     // ─── printable + wide char ───
@@ -259,7 +273,9 @@ class TerminalCore(
                 currentBuffer.eraseRow(cursor.row, 0, cursor.column, currentStyle)
             }
             2 -> currentBuffer.eraseRows(0, rows - 1, currentStyle)
-            3 -> currentBuffer.eraseRows(0, rows - 1, currentStyle)  // scrollback (simplified)
+            // T82: ED 3 (xterm "Erase Saved Lines") — clear the MAIN screen's
+            // scrollback only (visible screen untouched; alt screen has none).
+            3 -> mainBuffer.clearScrollback()
         }
         mutations += ScreenMutation(ScreenMutation.MutationType.ERASE, 0 until rows)
     }
@@ -328,12 +344,35 @@ class TerminalCore(
         when (seq.code) {
             0, 1, 2 -> title = seq.data    // set title
             8 -> { /* hyperlink — stored as flag on cell in future */ }
+            // T82: OSC 52 — clipboard write request (base64 payload). Format:
+            //   OSC 52 ; [selection: c|p|s] ; [base64-data]  (selection part optional)
+            // Empty payload = clipboard QUERY — we do not answer (host never
+            // injects clipboard text into the guest unsolicited).
+            52 -> {
+                val payload = seq.data.substringAfter(';', "").substringAfter(';', "")
+                if (payload.isNotEmpty()) {
+                    val decoded = runCatching {
+                        java.util.Base64.getDecoder().decode(payload).toString(Charsets.UTF_8)
+                    }.getOrNull() ?: return
+                    if (pendingClipboardRequests.size >= MAX_PENDING_CLIPBOARD) pendingClipboardRequests.removeFirst()
+                    pendingClipboardRequests.addLast(decoded)
+                }
+            }
             else -> { /* other OSC ignored */ }
         }
     }
 
     // ─── ESC (§25 RIS etc) ───
-    private fun handleEsc(final: Char) {
+    private fun handleEsc(final: Char, intermediates: CharArray = CharArray(0)) {
+        // T82: SCS — G0 charset designation. ESC ( 0 = DEC Special Graphics,
+        // ESC ( B = US ASCII. Only G0 is tracked (modern emulators ignore G1+ here;
+        // programs that need G1 send RC/SI explicitly).
+        if (intermediates.size == 1 && intermediates[0] == '(') {
+            when (final) {
+                '0' -> { g0Charset = CharsetStatus.DEC_GRAPHICS; return }
+                'B', 'A' -> { g0Charset = CharsetStatus.ASCII; return }
+            }
+        }
         when (final) {
             'c' -> reset()                  // RIS — full reset
             '7' -> { savedCursor = cursor.saveTo(); savedStyle = currentStyle }  // DECSC
@@ -428,14 +467,53 @@ class TerminalCore(
         alternateScreen = modes.alternateScreen,
         cursorVisible = modes.cursorVisible,
         title = title,
-        renderedText = currentBuffer.renderedText()
+        renderedText = currentBuffer.renderedText(),
+        scrollbackLineCount = mainBuffer.scrollbackLineCount
     )
+
+    // ─── T82: capability exposure (input translation + scrollback observation) ───
+
+    /** DECCKM (mode 1): arrows/home/end must be sent as SS3 when set. */
+    fun applicationCursorKeys(): Boolean = modes.applicationCursor
+
+    /** Bracketed paste (mode 2004): paste writes must wrap 200~/201~. */
+    fun bracketedPasteMode(): Boolean = modes.bracketedPaste
+
+    /** Number of saved scrollback lines (main screen only). */
+    fun scrollbackLineCount(): Int = mainBuffer.scrollbackLineCount
+
+    /** The last [maxLines] scrollback lines, oldest first (main screen only). */
+    fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
+
+    /** Drain OSC 52 clipboard-write requests (host may apply to platform clipboard). */
+    fun drainClipboardRequests(): List<String> {
+        val out = pendingClipboardRequests.toList()
+        pendingClipboardRequests.clear()
+        return out
+    }
 
     /** Drain pending mutations (for dirty-region UI/observation). */
     fun drainMutations(): List<ScreenMutation> {
         val out = mutations.toList()
         mutations.clear()
         return out
+    }
+
+    private enum class CharsetStatus { ASCII, DEC_GRAPHICS }
+
+    private companion object {
+        const val MAX_PENDING_CLIPBOARD = 8
+
+        /** DEC Special Graphics (ESC ( 0) — xterm-standard substitution table. */
+        val DEC_SPECIAL_GRAPHICS: Map<Int, Int> = mapOf(
+            0x60 to 0x25C6, 0x61 to 0x2592, 0x62 to 0x2409, 0x63 to 0x240C, 0x64 to 0x240D,
+            0x65 to 0x240A, 0x66 to 0x00B0, 0x67 to 0x00B1, 0x68 to 0x2424, 0x69 to 0x240B,
+            0x6A to 0x2518, 0x6B to 0x2510, 0x6C to 0x250C, 0x6D to 0x2514, 0x6E to 0x253C,
+            0x6F to 0x23BA, 0x70 to 0x23BB, 0x71 to 0x2500, 0x72 to 0x23BC, 0x73 to 0x23BD,
+            0x74 to 0x251C, 0x75 to 0x2524, 0x76 to 0x2534, 0x77 to 0x252C, 0x78 to 0x2502,
+            0x79 to 0x2264, 0x7A to 0x2265, 0x7B to 0x03C0, 0x7C to 0x2260, 0x7D to 0x00A3,
+            0x7E to 0x00B7
+        )
     }
 }
 
@@ -446,5 +524,7 @@ data class TerminalScreenSnapshot(
     val alternateScreen: Boolean,
     val cursorVisible: Boolean,
     val title: String?,
-    val renderedText: String
+    val renderedText: String,
+    /** T82: saved scrollback depth (main screen; 0 on alt screen). */
+    val scrollbackLineCount: Int = 0
 )

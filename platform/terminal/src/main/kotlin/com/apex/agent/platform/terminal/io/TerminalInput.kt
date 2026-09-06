@@ -38,6 +38,14 @@ interface TerminalInput {
     /** Send a Unix signal (SIGINT/SIGTERM/SIGKILL/...). */
     suspend fun sendSignal(sessionId: Long, owner: InputOwner, signal: UnixSignal, jobId: Long? = null): Result<Unit>
 
+    /**
+     * T82：括号粘贴写入（xterm 2004）。VT 开启括号粘贴模式时应包裹
+     * ESC[200~/ESC[201~（实现类查询会话 VT 模式）；默认退化 = 原样字节、
+     * **不追加换行**（与 LINE 的区别）。粘贴的多行文本由 guest 自行处理。
+     */
+    suspend fun sendPaste(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> =
+        write(sessionId, owner, text.toByteArray(Charsets.UTF_8))
+
     // PR #52 §1: stdin lifecycle — closeStdin sends EOF (Ctrl+D), distinct from close() (kills PTY) and signal.
     suspend fun closeStdin(sessionId: Long, owner: InputOwner): Result<Unit>
 

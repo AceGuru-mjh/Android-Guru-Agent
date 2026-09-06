@@ -645,10 +645,8 @@ class AgentChatViewModel @Inject constructor(
                     )
                 )
 
-                val (kind, server) = classifyTool(
-                    event.toolName, event.arguments, routeContextKind,
-                    metadata = toolRegistry.metadataOf(event.toolName)
-                )
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind,
+                    metadata = toolRegistry.metadataOf(event.toolName))
                 val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 _uiState.update { state ->
@@ -729,10 +727,8 @@ class AgentChatViewModel @Inject constructor(
                 activeToolCallId = null
                 toolOutputBuffer.clear()
 
-                val (kind, server) = classifyTool(
-                    event.toolName, event.arguments, routeContextKind,
-                    metadata = toolRegistry.metadataOf(event.toolName)
-                )
+                val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind,
+                    metadata = toolRegistry.metadataOf(event.toolName))
                 val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 // 最终过程流：丢弃"活输出"步骤（其快照与完整输出重复），仅保留

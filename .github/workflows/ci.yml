@@ -290,6 +290,16 @@ jobs:
           tail -30 compile.log
           exit 1
 
+      - name: Run app unit tests
+        run: |
+          # app 模块 JVM 单测首次进入 CI：此前该任务从未在远端执行，
+          # 导致 BrowserTracerTest 缺 import / RetryPolicyTest 嵌套 runTest /
+          # SlashCommandParserTest 期望矛盾三类损坏长期隐形（本地 61/61 绿）。
+          ./gradlew :app:testDebugUnitTest \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
       - name: Install proot 5.4 (for T72 E2E + P71 smoke tests)
         # T72: UbuntuRootfsEndToEndIntegrationTest downloads the REAL Ubuntu
         # 24.04.4 amd64 archive and runs REAL proot processes against it

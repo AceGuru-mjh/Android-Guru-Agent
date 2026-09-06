@@ -197,7 +197,7 @@ internal fun QuestionCard(
 
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp), // 统一卡片半径（Plan/Spec/ToolCall/TaskStatus 均 12dp，原 16 为孤例）
         colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
         )

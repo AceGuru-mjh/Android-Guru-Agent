@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,15 +65,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
 /**
- * 终端页：左上角三条杠菜单（终端专属设置抽屉），含三个分区：
- *  1. 终端设置（字号/行数/单色）
+ * 终端页：顶栏左汉堡开导航抽屉（ApexRoot 传入），右侧 Tune 图标开终端专属设置抽屉，含三个分区：
+ *  1. 终端设置（字号/单色）
  *  2. Agent 命令黑名单 / 白名单
  *  3. 环境依赖下载中心（官方源+镜像，一键全装 / 独立装 / Android 依赖一键装）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(
-    viewModel: TerminalViewModel = hiltViewModel()
+    viewModel: TerminalViewModel = hiltViewModel(),
+    onOpenNavDrawer: () -> Unit = {}
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val blacklist by viewModel.blacklist.collectAsStateWithLifecycle()
@@ -112,8 +114,15 @@ fun TerminalScreen(
                 TopAppBar(
                     title = { Text("终端") },
                     navigationIcon = {
+                        // 修复双顶栏：根顶栏在本屏隐藏，左汉堡改为打开全局导航抽屉
+                        IconButton(onClick = onOpenNavDrawer) {
+                            Icon(Icons.Default.Menu, contentDescription = "打开导航", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    actions = {
+                        // 终端专属设置抽屉入口（原左汉堡职能，避免双汉堡歧义）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "终端设置", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Tune, contentDescription = "终端设置", tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -172,8 +181,8 @@ private fun TerminalSettingsDrawer(
 
             // ═══ 1. 终端设置 ═══
             SettingsCard(Icons.Default.Settings, "终端外观") {
+                // 注：原“最大行数”设置项已移除 —— VT 终端渲染器不消费该值（遗留死设置）
                 LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
-                LabeledNumber("最大行数", settings.maxLines, 100, 10000) { onSettings { copy(maxLines = it) } }
                 ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
             }
 
@@ -223,7 +232,7 @@ private fun TerminalSettingsDrawer(
                 // 一键全装 / Android 一键装
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ActionButton("一键安装全部", install.runningId != null, Modifier.weight(1f)) { onInstallAll() }
-                    ActionButton("Android 依赖", install.runningId == "__android__", Modifier.weight(1f)) { onInstallAndroid() }
+                    ActionButton("Android 依赖", install.runningId != null, Modifier.weight(1f)) { onInstallAndroid() }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text("可独立安装：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -231,6 +240,9 @@ private fun TerminalSettingsDrawer(
                 depItems.forEach { item ->
                     DepRow(
                         item = item,
+                        // 修复并发：任一安装（含批量 __all__ / __android__）进行中时，所有行按钮均禁用，
+                        // 避免单行安装覆写 runningId 打断批量状态、两命令在同会话交错
+                        busy = install.runningId != null,
                         installing = install.runningId == item.id,
                         onInstall = { onInstallDep(item) }
                     )
@@ -239,7 +251,7 @@ private fun TerminalSettingsDrawer(
                 if (install.log.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -303,8 +315,14 @@ private fun LabeledNumber(label: String, value: Int, min: Int, max: Int, onSet: 
             value = text,
             onValueChange = { t ->
                 text = t
-                t.toIntOrNull()?.coerceIn(min, max)?.let(onSet)
+                // 修复静默分叉：越界输入只标红不落盘（原 coerce 后写入但框内仍显示越界值）
+                val n = t.toIntOrNull()
+                if (n != null && n in min..max) onSet(n)
             },
+            isError = text.toIntOrNull()?.let { it !in min..max } ?: true,
+            supportingText = if (text.toIntOrNull()?.let { it !in min..max } ?: true) {
+                { Text("$min–$max") }
+            } else null,
             modifier = Modifier.width(88.dp),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -345,9 +363,9 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
 }
 
 @Composable
-private fun DepRow(item: TerminalViewModel.DepItem, installing: Boolean, onInstall: () -> Unit) {
+private fun DepRow(item: TerminalViewModel.DepItem, busy: Boolean, installing: Boolean, onInstall: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(8.dp))
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest).padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -360,7 +378,7 @@ private fun DepRow(item: TerminalViewModel.DepItem, installing: Boolean, onInsta
             )
             Text(item.name, style = MaterialTheme.typography.bodyMedium)
         }
-        TextButton(enabled = !installing, onClick = onInstall) {
+        TextButton(enabled = !busy, onClick = onInstall) {
             Text(if (installing) "安装中…" else "安装")
         }
     }
@@ -369,9 +387,9 @@ private fun DepRow(item: TerminalViewModel.DepItem, installing: Boolean, onInsta
 @Composable
 private fun ActionButton(label: String, loading: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = if (loading) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-        modifier = modifier.clip(RoundedCornerShape(10.dp)).then(Modifier.clickableSafe(enabled = !loading, onClick = onClick))
+        modifier = modifier.clip(RoundedCornerShape(12.dp)).then(Modifier.clickableSafe(enabled = !loading, onClick = onClick))
     ) {
         Box(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
             Text(

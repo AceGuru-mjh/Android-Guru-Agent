@@ -16,10 +16,13 @@ import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -68,6 +71,10 @@ fun MarketScreen(viewModel: MarketViewModel = hiltViewModel()) {
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // 修复跨屏 stale 开关：VM 为 Activity 级单例，在 Skill 页切换的开关不会自动同步到市场页 ——
+    // 每次进入本屏时强制刷新快照（原仅 init 刷新一次）
+    LaunchedEffect(Unit) { viewModel.refresh() }
+
     LaunchedEffect(state.lastMessage) {
         state.lastMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -109,6 +116,7 @@ private fun PluginsTab(state: MarketUiState, viewModel: MarketViewModel) {
 
     MarketList(
         items = state.plugins,
+        key = { it.packageName }, // 修复：无 key 时行内状态在插件列表变化后可能串行
         emptyHint = "未发现已安装的 Apex 插件（安装包含 PLUGIN intent 服务的插件 APK 后自动出现）",
         header = {
             item {
@@ -216,7 +224,12 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                                 onCheckedChange = { viewModel.toggleSkill(skill.id, it) }
                             )
                             IconButton(onClick = { pendingUninstall = skill }) {
-                                Text("🗑", style = MaterialTheme.typography.bodyMedium)
+                                // 修复：原用 emoji 文本当图标，无障碍不可读且与 Skill/Memory 页 Delete 图标不一致
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "卸载技能",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     } else {
@@ -316,12 +329,14 @@ private fun McpTab(state: MarketUiState, viewModel: MarketViewModel) {
                             onCheckedChange = { viewModel.toggleMcp(server.name, it) }
                         )
                         TextButton(
+                            // 连接中禁用该行按钮防双击并发重连（断开不受影响）
+                            enabled = state.mcpConnecting != server.name,
                             onClick = {
                                 if (server.connected) viewModel.disconnectMcp(server.name)
                                 else viewModel.connectMcp(server.name)
                             }
                         ) {
-                            Text(if (server.connected) "断开" else "连接")
+                            Text(if (server.connected) "断开" else if (state.mcpConnecting == server.name) "连接中…" else "连接")
                         }
                         TextButton(
                             onClick = { pendingDelete = server }
@@ -644,7 +659,9 @@ private fun MarketCard(
                     Text(
                         title,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, // 修复：尾部控件（开关+双按钮 ~220dp）挤压时标题无限换行撑高卡片
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (!subtitle.isNullOrBlank()) {
                         Text(

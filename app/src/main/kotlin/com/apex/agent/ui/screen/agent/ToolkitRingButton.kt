@@ -120,7 +120,7 @@ fun ToolkitRingButton(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(32.dp)
+                .size(40.dp) // 对齐修复：与 Attach/Github/Send 统一 40dp（原 32dp，输入行图标行高低不齐）
                 .clip(CircleShape)
                 .border(width = 1.5.dp, color = ringColor, shape = CircleShape)
                 .clickable { menuOpen = !menuOpen }

@@ -1,11 +1,13 @@
 package com.apex.agent.ui.screen.agent
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -126,6 +128,13 @@ fun AgentChatScreen(
         viewModel.requestGithubConnect.collect { showGithubConnectDialog = true }
     }
 
+    // 异步动作真实结果反馈（整理入记忆等：原“发起即报成功”，失败也误报）
+    LaunchedEffect(Unit) {
+        viewModel.uiFeedback.collect { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ═══ 缺陷 4 修复：智能滚动策略 ═══
     // 追踪用户是否在底部附近（150px 阈值）
     val isAtBottom by remember {
@@ -155,28 +164,34 @@ fun AgentChatScreen(
         }
     }
 
+    // 修复：列表总项数统一计算（原漏计 Plan 确认 / Spec 确认 / ask_user 对话框三项，
+    // 出现时自动滚动定位到对话框上方；FAB 回底同样用此值）
+    val totalListItems by remember {
+        derivedStateOf {
+            uiState.messages.size +
+                (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
+                (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
+                (if (uiState.currentToolCall != null) 1 else 0) +
+                (if (pendingQuestion != null) 1 else 0) +
+                (if (uiState.awaitingPlanConfirmation && uiState.plan != null) 1 else 0) +
+                (if (uiState.awaitingSpecConfirmation && uiState.spec != null) 1 else 0) +
+                (if (uiState.pendingUserInput != null) 1 else 0)
+        }
+    }
+
     // 仅在用户处于底部 或 未进入阅读模式时自动滚动。
-    // key 只含"列表结构变化"（消息数 / 流式项出现与消失 / 加载态），
-    // 不含 currentResponse 文本——否则每 token 重启动画导致抖动。
+    // key 只含"列表结构变化"（总项数 / 加载态），不含 currentResponse 文本——
+    // 否则每 token 重启动画导致抖动。
     // 流式期间用即时 scrollToItem（跟手、无动画叠加）；非流式收尾保留动画。
     LaunchedEffect(
-        uiState.messages.size,
-        uiState.isLoading,
-        uiState.currentThinking.isNotEmpty(),
-        uiState.currentResponse.isNotEmpty(),
-        uiState.currentToolCall != null,
-        pendingQuestion != null
+        totalListItems,
+        uiState.isLoading
     ) {
-        val total = uiState.messages.size +
-            (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
-            (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
-            (if (uiState.currentToolCall != null) 1 else 0) +
-            (if (pendingQuestion != null) 1 else 0)
-        if (total > 0 && (isAtBottom || !userScrolledUp)) {
+        if (totalListItems > 0 && (isAtBottom || !userScrolledUp)) {
             if (uiState.isLoading) {
-                listState.scrollToItem(total - 1)
+                listState.scrollToItem(totalListItems - 1)
             } else {
-                listState.animateScrollToItem(total - 1)
+                listState.animateScrollToItem(totalListItems - 1)
             }
             userScrolledUp = false
         }
@@ -247,7 +262,7 @@ fun AgentChatScreen(
             TaskRecoveryBanner(
                 tasks = recoveryCandidates,
                 onResume = { viewModel.resumeCrashedTask(it.taskId) },
-                onDismiss = { viewModel.dismissCrashedTask() }
+                onDismiss = { task -> viewModel.dismissCrashedTask(task.taskId) }
             )
         }
 
@@ -264,12 +279,12 @@ fun AgentChatScreen(
             )
         }
 
-        // ═══ 消息列表 ═══
+        // ═══ 消息列表（FAB 收纳进列表区域，不再压住输入栏）═══
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
@@ -324,17 +339,6 @@ fun AgentChatScreen(
                 }
             }
 
-            // Agent 通过 ask_user 请求用户输入，等待用户回答
-            uiState.pendingUserInput?.let { request ->
-                item {
-                    UserInputDialog(
-                        request = request,
-                        onSubmit = { viewModel.submitUserInput(it) },
-                        onCancel = { viewModel.cancelUserInput() }
-                    )
-                }
-            }
-
             // Agent 主动提问
             pendingQuestion?.let { question ->
                 item {
@@ -351,6 +355,33 @@ fun AgentChatScreen(
             }
         }
 
+            // ═══ 缺陷 4 修复：回到底部 FAB ═══
+            // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮
+            //（修复：原挂全屏底部 padding 80dp，输入栏高于 80dp 时 FAB 压在附件区/发送键上；
+            // 现收纳进列表区域，天然位于输入栏之上。限定顶层 AnimatedVisibility——
+            // 此处外层 Column 作用域在隐式接收链上，否则被解析为 ColumnScope 扩展）═══
+            androidx.compose.animation.AnimatedVisibility(
+                visible = userScrolledUp && uiState.isLoading,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 16.dp, end = 16.dp)
+            ) {
+                FilledIconButton(
+                    onClick = {
+                        userScrolledUp = false
+                        scrollScope.launch {
+                            if (totalListItems > 0) {
+                                listState.animateScrollToItem(totalListItems - 1)
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "回到底部")
+                }
+            }
+        }
+
         // ═══ 加载条 ═══
         AnimatedVisibility(uiState.isLoading) {
             LinearProgressIndicator(
@@ -362,7 +393,9 @@ fun AgentChatScreen(
         // ═══ 输入栏（/ 斜杠 + GitHub + 旋转加号 + 输入框 + 发送）═══
         Surface(
             tonalElevation = 3.dp,
-            shadowElevation = 8.dp
+            shadowElevation = 8.dp,
+            // 精修：底部输入面板顶部双角圆角（原矩形硬边 + 矩形阴影）
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 // ═══ 附件预览条（发送前）═══
@@ -398,13 +431,6 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击回填）═══
-                    SlashAutoCompleteHost(
-                        inputText = inputText,
-                        slashMenuProvider = slashMenuProvider,
-                        onCommandSelected = { viewModel.updateInputText(it) }
-                    )
-
                     // ═══ 迷你小圆环：工具菜单（搜索/时间/函数/结构化输出/规则）═══
                     ToolkitRingButton(
                         webSearchEnabled = webSearchEnabled,
@@ -422,7 +448,7 @@ fun AgentChatScreen(
                         onUpsertRule = { toolkit.upsertRule(it) },
                         onDeleteRule = { toolkit.deleteRule(it) },
                         onToggleRule = { id, enabled -> toolkit.setRuleEnabled(id, enabled) },
-                        modifier = Modifier.padding(bottom = 6.dp)
+                        modifier = Modifier.padding(bottom = 4.dp) // 对齐修复：与其他 40dp 圆形图标钮统一底垫 4dp
                     )
 
                     // ═══ / 斜杠指令按钮 ═══
@@ -476,29 +502,37 @@ fun AgentChatScreen(
                     )
 
                     // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
-                    AdaptiveInputField(
-                        value = inputText,
-                        onValueChange = { viewModel.updateInputText(it) },
-                        modifier = Modifier.weight(1f),
-                        onSend = {
-                            if (inputText.isNotBlank() && !uiState.isLoading) {
-                                viewModel.sendMessage(inputText.trim())
+                    //（斜杠实时联想收纳进输入框 Box：菜单锚定在文本框下方而非整行左缘）
+                    Box(modifier = Modifier.weight(1f)) {
+                        AdaptiveInputField(
+                            value = inputText,
+                            onValueChange = { viewModel.updateInputText(it) },
+                            onSend = {
+                                if (inputText.isNotBlank() && !uiState.isLoading) {
+                                    viewModel.sendMessage(inputText.trim())
+                                }
+                            },
+                            placeholder = {
+                                Text(
+                                    text = when (uiState.mode) {
+                                        AgentMode.PLAN -> "描述任务，Agent先规划..."
+                                        AgentMode.SPEC -> "描述需求，Agent先产出规格..."
+                                        AgentMode.REFLECTION -> "描述任务，Agent生成→评审→修正..."
+                                        AgentMode.HUMAN_ASSIST -> "描述任务，有选择时Agent弹出选项菜单..."
+                                        AgentMode.CUSTOM -> "输入指令（自定义模式生效）..."
+                                        AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        },
-                        placeholder = {
-                            Text(
-                                text = when (uiState.mode) {
-                                    AgentMode.PLAN -> "描述任务，Agent先规划..."
-                                    AgentMode.SPEC -> "描述需求，Agent先产出规格..."
-                                    AgentMode.REFLECTION -> "描述任务，Agent生成→评审→修正..."
-                                    AgentMode.HUMAN_ASSIST -> "描述任务，有选择时Agent弹出选项菜单..."
-                                    AgentMode.CUSTOM -> "输入指令（自定义模式生效）..."
-                                    AgentMode.BUILD -> "输入指令，/ 触发快捷..."
-                                },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
+                        )
+                        // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击回填）═══
+                        SlashAutoCompleteHost(
+                            inputText = inputText,
+                            slashMenuProvider = slashMenuProvider,
+                            onCommandSelected = { viewModel.updateInputText(it) }
+                        )
+                    }
 
                     // ═══ 发送/停止（带按压缩放反馈）═══
                     val sendInteraction = remember { MutableInteractionSource() }
@@ -540,33 +574,15 @@ fun AgentChatScreen(
         }
     }
 
-        // ═══ 缺陷 4 修复：回到底部 FAB ═══
-        // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮
-        AnimatedVisibility(
-            visible = userScrolledUp && uiState.isLoading,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 80.dp, end = 16.dp)
-        ) {
-            FilledIconButton(
-                onClick = {
-                    userScrolledUp = false
-                    scrollScope.launch {
-                        val total = uiState.messages.size +
-                            (if (uiState.currentThinking.isNotEmpty()) 1 else 0) +
-                            (if (uiState.currentResponse.isNotEmpty()) 1 else 0) +
-                            (if (uiState.currentToolCall != null) 1 else 0) +
-                            (if (pendingQuestion != null) 1 else 0)
-                        if (total > 0) {
-                            listState.animateScrollToItem(total - 1)
-                        }
-                    }
-                },
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "回到底部")
-            }
-        }
+    // ═══ ask_user 模态对话框（Agent 请求用户输入）═══
+    // 修复：原挂在 LazyColumn item 内，滚动出视口即被销毁——用户填一半的答案丢失；
+    // 提升到屏幕层级与生命周期解耦，只要 pendingUserInput 存在就常驻。
+    uiState.pendingUserInput?.let { request ->
+        UserInputDialog(
+            request = request,
+            onSubmit = { viewModel.submitUserInput(it) },
+            onCancel = { viewModel.cancelUserInput() }
+        )
     }
 
     // ═══ Lightbox 全屏预览（点击附件图片时展开）═══
@@ -603,6 +619,7 @@ fun AgentChatScreen(
                 showCustomInstructionDialog = false
             }
         )
+    }
     }
 }
 

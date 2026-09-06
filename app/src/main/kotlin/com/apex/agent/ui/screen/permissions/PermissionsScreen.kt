@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
@@ -45,6 +47,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,12 +88,10 @@ fun PermissionsScreen() {
         notifGranted = granted || NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
-    // 在后台检测权限
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            hasRoot = PrivilegeDetector.detectRoot()
-            hasShizuku = PrivilegeDetector.detectShizuku()
-        }
+    // 在后台检测权限（ON_RESUME 也会重检：从系统设置页返回后刷新"未获得→已获得"）
+    suspend fun refreshPermissionStates() = withContext(Dispatchers.IO) {
+        hasRoot = PrivilegeDetector.detectRoot()
+        hasShizuku = PrivilegeDetector.detectShizuku()
         accessibilityGranted = context.isAccessibilityServiceEnabled()
         overlayGranted = Settings.canDrawOverlays(context)
         notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -100,6 +102,16 @@ fun PermissionsScreen() {
         }
     }
 
+    // 修复：原仅 LaunchedEffect(Unit) 首次组合时检测一次 ——
+    // 用户跳到系统设置授权后返回本屏，状态仍显示"未获得"直到切屏重进
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch { refreshPermissionStates() }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshPermissionStates()
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("权限管理") }) }
     ) { padding ->
@@ -107,6 +119,8 @@ fun PermissionsScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // 修复：6 张卡片 ~600dp+ 在短屏/横屏下溢出不可滚 —— 补垂直滚动
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -388,7 +402,7 @@ private fun PermissionCard(
     }
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(12.dp) // 统一卡片半径（Skill/Memory/Market/聊天均 12dp，原 16 为孤例）
     ) {
         Row(
             modifier = Modifier

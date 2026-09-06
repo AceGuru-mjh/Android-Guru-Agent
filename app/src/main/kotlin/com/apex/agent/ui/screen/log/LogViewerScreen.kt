@@ -34,8 +34,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -128,16 +131,17 @@ fun LogViewerScreen() {
             onSessionSelected = { sessionId = it }
         )
 
-        // ── 工具条：复制全部 / 清空 / 导出 ──
+        // ── 工具条：复制全部 / 清空（带确认） / 导出 ──
+        var showClearConfirm by remember { mutableStateOf(false) } // 修复：清空整个环形缓冲区为破坏性操作，原一点即清
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val text = remember(records) { records.joinToString("\n") { it.toFlatString() } }
             FilledTonalButton(
-                onClick = { clipboard.setText(AnnotatedString(text)) },
+                // 修复性能：导出串点击时才构建（原 remember(records) 每 250ms 快照追加即全量 joinToString，主线程 O(n)）
+                onClick = { clipboard.setText(AnnotatedString(records.joinToString("\n") { it.toFlatString() })) },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.width(16.dp))
@@ -145,10 +149,7 @@ fun LogViewerScreen() {
                 Text("复制")
             }
             FilledTonalButton(
-                onClick = {
-                    AppLogger.instance.clear()
-                    records = emptyList()
-                },
+                onClick = { showClearConfirm = true },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
                 Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.width(16.dp))
@@ -156,7 +157,7 @@ fun LogViewerScreen() {
                 Text("清空")
             }
             FilledTonalButton(
-                onClick = { exportAndShare(context, text) },
+                onClick = { exportAndShare(context, records.joinToString("\n") { it.toFlatString() }) },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.width(16.dp))
@@ -181,7 +182,25 @@ fun LogViewerScreen() {
                 "${records.size} 条 · ${(stats.totalBytes / 1024 / 1024)}MB/${stats.maxBytes / 1024 / 1024}MB",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis, // 修复：窄屏 4 按钮 + 计数文本被挤出屏
                 modifier = Modifier.align(Alignment.CenterVertically)
+            )
+        }
+
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                title = { Text("清空日志缓冲区") },
+                text = { Text("将丢弃内存中的全部 ${records.size} 条日志记录（最高可至 ${stats.maxBytes / 1024 / 1024}MB），不可恢复。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        AppLogger.instance.clear()
+                        records = emptyList()
+                        showClearConfirm = false
+                    }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
             )
         }
 
@@ -209,7 +228,9 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
     Surface(
         tonalElevation = 1.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
+        // 精修：全屏唯一硬角容器补圆角（与屏内其余 bar/chip 的圆角语言一致）
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
             Row(

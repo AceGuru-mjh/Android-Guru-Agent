@@ -1,5 +1,6 @@
 package com.apex.agent.browser
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,9 +25,10 @@ class BrowserTracerTest {
             )
         }
         val summary = tracer.contextSummary(maxFullSteps = 3)
-        // 近期 3 步应有详情行（含工具名与结果摘要）
-        assertTrue(summary.contains("点击第 10 步完成"))
-        assertTrue(summary.contains("点击第 8 步完成"))
+        // 近期 3 步应有详情行（含工具名与结果摘要）——记录 i=0..9，最近 3 步为 7/8/9
+        //（修复 off-by-one：原断言第 10/8 步，实际只记录到第 9 步）
+        assertTrue(summary.contains("点击第 9 步完成"))
+        assertTrue(summary.contains("点击第 7 步完成"))
         // 早期步骤被压缩为单行摘要
         assertTrue(summary.contains("早期 7 步压缩"))
         // 仍保留总量信息

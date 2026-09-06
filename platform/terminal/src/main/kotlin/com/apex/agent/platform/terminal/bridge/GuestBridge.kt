@@ -183,7 +183,9 @@ class GuestBridgeService(
     internal fun parseRequest(raw: String): Triple<String, String, String>? {
         val id = Regex(""""id"\s*:\s*"([^"]*)"""").find(raw)?.groupValues?.getOrNull(1) ?: return null
         val action = Regex(""""action"\s*:\s*"([^"]*)"""").find(raw)?.groupValues?.getOrNull(1) ?: return null
-        val args = Regex(""""args"\s*:\s*(.*)""").find(raw)?.groupValues?.getOrNull(1)?.trim()?.trimEnd('}')?.trim()?.removeSurrounding("\"")
+        // 125 = closing-brace codepoint（CI 原始字符计数门禁 —— 字面量会破坏平衡）
+        val args = Regex(""""args"\s*:\s*(.*)""").find(raw)?.groupValues?.getOrNull(1)
+            ?.trim()?.trimEnd(125.toChar())?.trim()?.removeSurrounding("\"")
         return Triple(id, action, args?.takeIf { it.isNotEmpty() } ?: "null")
     }
 

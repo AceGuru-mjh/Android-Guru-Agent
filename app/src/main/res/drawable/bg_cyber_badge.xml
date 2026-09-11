@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 状态 Badge 背景：琥珀金实心圆，中央放「!」 -->
+<!-- 状态 Badge 背景：琥珀金渐变圆（顶部亮金→底部深琥珀），保留暗色细边 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="#FFB800" />
+    <gradient
+        android:angle="270"
+        android:startColor="#FFD24A"
+        android:centerColor="#FFB800"
+        android:endColor="#FF8F00"
+        android:type="linear" />
     <stroke
         android:width="1dp"
         android:color="#1A1206" />

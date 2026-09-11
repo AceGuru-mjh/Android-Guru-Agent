@@ -35,7 +35,7 @@ class ToolTraceRecorderTest {
         assertEquals(ToolTraceRecorder.Outcome.SUCCESS, span.outcome)
         assertEquals(1, span.attempt)
         assertTrue(span.durationMs >= 0)
-        assertTrue(span.argsDigest.contains("args("))
+        assertTrue(span.argsDigest.contains("ch/"))
         assertNull(span.errorSlug)
         assertTrue(span.callId >= 1)
 

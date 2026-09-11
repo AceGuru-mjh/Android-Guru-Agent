@@ -6,6 +6,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.apex.agent.attachment.AttachmentCleanupManager
 import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.platform.EnvironmentStateUpdater
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.dream.DreamRenderer
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
@@ -45,6 +46,11 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var ubuntuLifecycle: UbuntuLifecycleCoordinator
 
+    // Tool System v3：环境能力遥测桥（无障碍连接态 → 环境门控与 prompt 快照；
+    // 可编辑焦点事件 → keyboard_active TTL 信号）。
+    @Inject
+    lateinit var environmentStateUpdater: EnvironmentStateUpdater
+
     /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -65,6 +71,21 @@ class ApexApp : Application(), Configuration.Provider {
 
         // T82: Ubuntu 生命周期现场恢复（不下载、不 bootstrap —— 只做 reconcile）。
         initUbuntuLifecycleRecovery()
+
+        // Tool System v3：环境能力遥测桥（accessibility_ready / keyboard_active）。
+        initEnvironmentTelemetry()
+    }
+
+    /**
+     * Tool System v3 环境遥测：无障碍可用性 StateFlow → ToolEnvironmentState。
+     * 桥接失败不阻断启动（未知态 = fail-open，门控行为退回 v1）。
+     */
+    private fun initEnvironmentTelemetry() {
+        runCatching {
+            environmentStateUpdater.start()
+        }.onFailure {
+            Log.w("ApexAgent", "EnvironmentStateUpdater start failed: ${it.message}")
+        }
     }
 
     /**

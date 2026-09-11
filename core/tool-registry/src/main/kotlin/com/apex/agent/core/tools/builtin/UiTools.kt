@@ -1,6 +1,8 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.EnvironmentAwareTool
+import com.apex.agent.core.tools.ToolEnvironmentState
 import kotlinx.serialization.json.*
 
 /**
@@ -293,10 +295,17 @@ class ScreenshotTool(
  *
  * Type text into the currently focused input field.
  * Make sure the target input field is focused (tap it first with ui_tap).
+ *
+ * v3：声明硬前置条件 [EnvironmentAwareTool.requiredEnv] —— 键盘未激活时
+ * `input text` 必然失败，门控在执行前就挡下并给出修复指引（Mobile-Agent
+ * 的键盘门控范式）。遥测未接入时（未知态）fail-open，行为与 v1 一致。
  */
 class InputTextTool(
     private val shellExecutor: suspend (String) -> String
-) : AgentTool {
+) : AgentTool, EnvironmentAwareTool {
+
+    override val requiredEnv: List<String> =
+        listOf(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE)
 
     override val id = "input_text"
     override val name = "Input Text"

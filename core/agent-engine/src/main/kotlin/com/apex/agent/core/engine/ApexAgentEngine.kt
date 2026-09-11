@@ -60,6 +60,7 @@ class ApexAgentEngine(
     private val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
+    private val environmentInfoProvider: EnvironmentInfoProvider? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null,
     /**
      * T72 — 多模型运行时。非空时所有 LLM 调用按 [LlmRequestContext.role] 路由到
@@ -957,7 +958,8 @@ class ApexAgentEngine(
         visibleTools = toolRegistry.getAllTools().let { all ->
             config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
         },
-        skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList()
+        skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
+        environmentSummary = environmentInfoProvider?.environmentSummary()
     )
 
     private fun buildPlanPrompt(input: String): String =

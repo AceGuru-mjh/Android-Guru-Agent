@@ -158,3 +158,33 @@ class ToolPermissionManager(
     fun hasPrompted(toolId: String): Boolean =
         decisions[toolId] != null && decisions[toolId] != SessionToolDecision.UNDECIDED
 }
+
+/**
+ * # Tool System v3 — Gate Composition
+ *
+ * The v2 executor accepts ONE gate; production needs several (risk
+ * approval, environment preconditions, breaker-adjacent policy checks).
+ * [CompositeToolGate] chains them with all-of semantics: the first
+ * [GateDecision.Deny] wins, later gates are not consulted.
+ *
+ * Ordering guidance (used by the app's ToolModule wiring):
+ * cheap, model-recoverable checks first (environment preconditions),
+ * expensive, user-facing prompts last (risk approval) — a capability
+ * denial should not burn the user's one-session risk prompt.
+ */
+class CompositeToolGate(
+    private val gates: List<ToolExecutionGate>
+) : ToolExecutionGate {
+
+    constructor(vararg gates: ToolExecutionGate) : this(gates.toList())
+
+    override suspend fun check(tool: AgentTool, arguments: String): GateDecision {
+        for (gate in gates) {
+            when (val decision = gate.check(tool, arguments)) {
+                is GateDecision.Deny -> return decision
+                is GateDecision.Allow -> Unit
+            }
+        }
+        return GateDecision.Allow
+    }
+}

@@ -26,12 +26,15 @@ internal object EnginePrompts {
      *   else → normal shell guidance)
      * @param visibleTools tool list AFTER the enabledToolIds whitelist filter
      * @param skillPrompts active skill prompt injections (may be empty)
+     * @param environmentSummary v3 live capability snapshot (null → section
+     *   omitted; same source the environment gate enforces)
      */
     fun buildSystemPrompt(
         config: AgentConfig,
         privilegeLevel: String,
         visibleTools: List<AgentTool>,
-        skillPrompts: List<String>
+        skillPrompts: List<String>,
+        environmentSummary: String? = null
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
@@ -60,6 +63,18 @@ internal object EnginePrompts {
                 }
             }
             appendLine()
+
+            // ═══ Tool System v3：实时环境能力快照（与执行侧环境门同源）═══
+            // Mobile-Agent 范式：每轮注入环境真值（键盘/无障碍/网络/Ubuntu），
+            // 让模型在被门控拒绝前就知道前置条件不满足 —— prompt 里的与
+            // gate 里的永远是同一份状态（都来自 ToolEnvironmentState）。
+            if (!environmentSummary.isNullOrBlank()) {
+                appendLine("## Live Environment")
+                appendLine(environmentSummary)
+                appendLine("Tools declaring an environment precondition are rejected before running")
+                appendLine("when it is explicitly off; unknown capabilities are allowed (fail-open).")
+                appendLine()
+            }
 
             when (config.mode) {
                 AgentMode.PLAN -> {

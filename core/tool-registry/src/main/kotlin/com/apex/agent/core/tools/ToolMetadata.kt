@@ -94,12 +94,17 @@ enum class ToolRisk(val label: String) {
  * @param category functional category.
  * @param risk invocation risk.
  * @param tags free-form lowercase tags for search (e.g. "json", "parse").
+ * @param annotations v3 MCP-aligned behavioural hints (readOnly /
+ *   destructive / idempotent / openWorld / sensitive). Defaults to
+ *   [ToolAnnotations.infer] over id + risk so every existing tool gets
+ *   hints without code changes; explicit declaration wins.
  */
 data class ToolMetadata(
     val id: String,
     val category: ToolCategory,
     val risk: ToolRisk,
-    val tags: List<String> = emptyList()
+    val tags: List<String> = emptyList(),
+    val annotations: ToolAnnotations = ToolAnnotations.infer(id, risk)
 ) {
     /** True when this tool's risk level requires gated approval. */
     val isHighRisk: Boolean get() = risk == ToolRisk.HIGH
@@ -112,6 +117,7 @@ data class ToolMetadata(
         append(id)
         append(" [").append(category.name).append('/').append(risk.label).append(']')
         if (tags.isNotEmpty()) append(" tags: ").append(tags.joinToString(","))
+        append(" · ").append(annotations.summary())
     }
 
     /** Builder for tools that declare metadata explicitly. */
@@ -120,6 +126,7 @@ data class ToolMetadata(
     ) {
         private var category: ToolCategory? = null
         private var risk: ToolRisk? = null
+        private var annotations: ToolAnnotations? = null
         private val tags = mutableListOf<String>()
 
         /** Set the category; inferred from the id if never called. */
@@ -127,6 +134,18 @@ data class ToolMetadata(
 
         /** Set the risk; inferred from the id if never called. */
         fun risk(risk: ToolRisk) = apply { this.risk = risk }
+
+        /**
+         * Declare v3 behavioural annotations explicitly, overriding the
+         * id-based inference (e.g. `clipboard` is a mutating write even
+         * though its id alone doesn't say so).
+         */
+        fun annotations(annotations: ToolAnnotations) =
+            apply { this.annotations = annotations }
+
+        /** Fluent annotation shortcut: `annotations { readOnly() }`-style. */
+        fun annotations(block: ToolAnnotations.Companion.() -> ToolAnnotations) =
+            apply { this.annotations = ToolAnnotations.block() }
 
         /** Append a search tag (lowercased, deduped). */
         fun tag(vararg tag: String) = apply {
@@ -136,12 +155,17 @@ data class ToolMetadata(
             }
         }
 
-        fun build(): ToolMetadata = ToolMetadata(
-            id = id,
-            category = category ?: inferCategory(id),
-            risk = risk ?: inferRisk(id, category ?: inferCategory(id)),
-            tags = tags
-        )
+        fun build(): ToolMetadata {
+            val resolvedCategory = category ?: inferCategory(id)
+            val resolvedRisk = risk ?: inferRisk(id, resolvedCategory)
+            return ToolMetadata(
+                id = id,
+                category = resolvedCategory,
+                risk = resolvedRisk,
+                tags = tags,
+                annotations = annotations ?: ToolAnnotations.infer(id, resolvedRisk)
+            )
+        }
     }
 
     companion object {

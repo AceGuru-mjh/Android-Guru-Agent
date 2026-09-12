@@ -38,6 +38,18 @@ object AgentModule {
     }
 
     /**
+     * Tool System v3：环境能力信息提供者（ToolEnvironmentState 快照 →
+     * system prompt Live Environment 段，与环境门同源）。
+     */
+    @Provides
+    @Singleton
+    fun provideEnvironmentInfoProvider(
+        environmentState: com.apex.agent.core.tools.ToolEnvironmentState
+    ): EnvironmentInfoProvider {
+        return AndroidEnvironmentInfoProvider(environmentState)
+    }
+
+    /**
      * AgentConfig 组装（@Provides @Singleton 一次性快照）。
      * 注意：设置变更需重启应用生效（Singleton 快照），新会话不会重读设置。
      */
@@ -125,6 +137,7 @@ object AgentModule {
         memory: ConversationMemory,
         contextCompressor: ContextCompressor,
         privilegeInfoProvider: PrivilegeInfoProvider,
+        environmentInfoProvider: EnvironmentInfoProvider,
         skillRegistry: SkillRegistry,
         memoryObserver: ExecutionMemoryObserver,
         // T72：注入多模型运行时，按角色路由 PRIMARY/VISION/REASONING/SUMMARY
@@ -139,6 +152,7 @@ object AgentModule {
             contextCompressor = contextCompressor,
             skillRegistry = skillRegistry,
             privilegeInfoProvider = privilegeInfoProvider,
+            environmentInfoProvider = environmentInfoProvider,
             memoryObserver = memoryObserver,
             modelRuntime = modelRuntime
         )

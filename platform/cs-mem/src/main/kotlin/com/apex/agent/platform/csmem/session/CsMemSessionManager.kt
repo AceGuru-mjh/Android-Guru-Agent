@@ -188,8 +188,10 @@ class CsMemSessionManager @Inject constructor(
                     actionType = canonicalActionType(actionDescription),
                     actionDescription = actionDescription,
                     actionResult = if (success) "ok" else "Error: $actionDescription",
-                    beforeFingerprints = prev.nodes.map { it.fingerprint },
-                    afterFingerprints = currentGraph.nodes.map { it.fingerprint },
+                    // P2 fix（审计 6-b）：取全树展平指纹 —— 原实现只取顶层节点指纹，
+                    // 深层节点状态变化不进轨迹，蒸馏出的 FSM 转移表只覆盖顶层容器。
+                    beforeFingerprints = UiTreePruner.flattenFingerprints(prev.nodes),
+                    afterFingerprints = UiTreePruner.flattenFingerprints(currentGraph.nodes),
                     isLlmThinking = false
                 )
             )

@@ -298,6 +298,11 @@ fun AgentChatScreen(
         }
 
         // ═══ 消息列表（FAB 收纳进列表区域，不再压住输入栏）═══
+        // ═══ UX-4：列表项稳定 key 契约 ═══
+        // 消息项用 AgentUiMessage.id（UUID，copy() 保 id）；流式/确认卡等临时项
+        // 用固定字符串 key。新增列表项时必须显式提供 key，禁止回落 index ——
+        // index key 在删除/截断（UX-1 菜单）时会让气泡内部状态（菜单展开态、
+        // ThinkingBubble 折叠态）错位串项，且整列表无差别重组。
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             state = listState,
@@ -330,24 +335,24 @@ fun AgentChatScreen(
                 )
             }
 
-            // 流式思考中
+            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）
             if (uiState.currentThinking.isNotEmpty()) {
-                item { ThinkingBubble(uiState.currentThinking) }
+                item(key = "streaming-thinking") { ThinkingBubble(uiState.currentThinking) }
             }
 
             // 流式回复中
             if (uiState.currentResponse.isNotEmpty()) {
-                item { StreamingResponseBubble(uiState.currentResponse) }
+                item(key = "streaming-response") { StreamingResponseBubble(uiState.currentResponse) }
             }
 
             // 当前工具调用
             uiState.currentToolCall?.let { toolCall ->
-                item { RunningToolCallCard(toolCall) }
+                item(key = "active-tool-call") { RunningToolCallCard(toolCall) }
             }
 
             // Plan 确认
             if (uiState.awaitingPlanConfirmation && uiState.plan != null) {
-                item {
+                item(key = "plan-confirmation") {
                     PlanConfirmationCard(
                         plan = uiState.plan!!,
                         onConfirm = { viewModel.confirmPlan(true) },
@@ -358,7 +363,7 @@ fun AgentChatScreen(
 
             // Spec 确认
             if (uiState.awaitingSpecConfirmation && uiState.spec != null) {
-                item {
+                item(key = "spec-confirmation") {
                     SpecConfirmationCard(
                         spec = uiState.spec!!,
                         onConfirm = { viewModel.submitSpecConfirmation(true) },
@@ -369,7 +374,7 @@ fun AgentChatScreen(
 
             // Agent 主动提问
             pendingQuestion?.let { question ->
-                item {
+                item(key = "agent-question") {
                     QuestionCard(
                         question = question,
                         onAnswer = { optionId, customText ->

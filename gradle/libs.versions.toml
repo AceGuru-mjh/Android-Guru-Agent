@@ -20,6 +20,10 @@ junit = "4.13.2"
 room = "2.6.1"
 # 赛博霓虹悬浮球（JitPack；仅允许该 group 走 jitpack 仓库，版本固定避免动态解析）
 easyfloat = "2.0.4"
+# Liquid Glass 底层 —— Haze：GPU GraphicsLayer 背景采样 + RenderEffect 模糊（Maven Central）
+# 选型 1.4.0：字节码级验证 90 个 Compose 引用全部存在于本项目 Compose 1.7.6；
+# compileSdk 35 对齐；Kotlin 2.1.0 元数据对 2.0.21 消费端一版向前兼容。
+haze = "1.4.0"
 
 [libraries]
 # Compose
@@ -73,6 +77,9 @@ security-crypto = { group = "androidx.security", name = "security-crypto", versi
 
 # 赛博霓虹悬浮球（JitPack 发布，坐标 group 为 com.github.princekin-f）
 easyfloat = { group = "com.github.princekin-f", name = "EasyFloat", version.ref = "easyfloat" }
+
+# Liquid Glass 底层引擎（Maven Central，dev.chrisbanes.haze）—— ui/glass 包唯一底层依赖
+haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

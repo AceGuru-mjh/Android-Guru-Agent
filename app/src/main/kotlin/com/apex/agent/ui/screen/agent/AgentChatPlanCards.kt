@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ExecutionSpec
 import com.apex.agent.core.engine.RiskLevel
+import com.apex.agent.ui.glass.GlassCard
 
 /**
  * 流水线路由横幅：`/skill:xxx` `/connector:xxx` `/plugin:xxx` 触发时的专用卡片。
@@ -155,7 +155,8 @@ internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
 
 @Composable
 internal fun PlanCard(plan: ExecutionPlan) {
-    ElevatedCard(
+    // Liquid Glass 迁移：GlassCard Frosted 档 —— 列表内卡片不冒充 backdrop
+    GlassCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
     ) {
@@ -190,11 +191,10 @@ internal fun PlanConfirmationCard(
     onConfirm: () -> Unit,
     onReject: () -> Unit
 ) {
-    ElevatedCard(
+    // Liquid Glass 迁移：GlassCard Frosted 档 + secondary accent 延续确认卡语义色
+    GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
+        accent = MaterialTheme.colorScheme.secondary
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("确认执行此计划？", style = MaterialTheme.typography.titleSmall)
@@ -226,12 +226,11 @@ internal fun riskColor(level: RiskLevel): Color = when (level) {
  */
 @Composable
 internal fun SpecCard(spec: ExecutionSpec) {
-    ElevatedCard(
+    // Liquid Glass 迁移：GlassCard Frosted 档 + primary 倾向着色
+    GlassCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.16f)
-        )
+        accent = MaterialTheme.colorScheme.primary
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -332,11 +331,10 @@ internal fun SpecConfirmationCard(
     onConfirm: () -> Unit,
     onReject: () -> Unit
 ) {
-    ElevatedCard(
+    // Liquid Glass 迁移：GlassCard Frosted 档 + primary 倾向着色
+    GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        accent = MaterialTheme.colorScheme.primary
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("确认此规格并开始执行？", style = MaterialTheme.typography.titleSmall)

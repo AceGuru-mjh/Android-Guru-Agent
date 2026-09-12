@@ -309,6 +309,8 @@ fun AgentChatScreen(
                 AgentMessageItem(
                     message = message,
                     vm = viewModel,
+                    // UX-1：流式生成中禁用消息删除/重生成（菜单内对应条目置灰，复制仍可用）
+                    actionsEnabled = !uiState.isLoading,
                     onImageClick = { att ->
                         lightboxImage = att.thumbnailUri ?: att.localPath
                     },

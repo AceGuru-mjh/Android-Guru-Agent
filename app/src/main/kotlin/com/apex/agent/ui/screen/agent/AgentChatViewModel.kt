@@ -153,8 +153,9 @@ class AgentChatViewModel @Inject constructor(
     private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
 
-    /** 一次性 UI 反馈（Toast 级）：异步动作的真实结果由 Screen 收集展示（如整理入记忆成败） */
-    private val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** 一次性 UI 反馈（Toast 级）：异步动作的真实结果由 Screen 收集展示（如整理入记忆成败）。
+     * UX-1：internal（非 private）——AgentMessageActions.kt 的删除/重生成扩展同包访问。 */
+    internal val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val uiFeedback: SharedFlow<String> = _uiFeedback.asSharedFlow()
 
     /**

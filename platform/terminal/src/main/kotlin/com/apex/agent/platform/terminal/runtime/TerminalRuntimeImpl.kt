@@ -231,6 +231,14 @@ class TerminalRuntimeImpl(
         return r.map { s ->
             // T75: LINUX 会话创建成功 → 绑定 workspace（活跃计数；delete 门禁）
             spec.metadata.workspaceId?.let { wsId -> workspaceBinder?.bind(s.id, wsId) }
+            // P2 fix（审计 P2-1 / T81 U-10）：LINUX/proot 会话创建成功 → 绑定 rootfs
+            // 引用（与 close() 的 unbind 对称）。原实现 bind 全工程零调用 ——
+            // RootfsProvisionerImpl.remove() 的活跃会话保护是死代码，运行中的
+            // LINUX 会话 rootfs 可被整删（会话立即变僵尸）。仅 LINUX 后端绑
+            //（LOCAL 会话不占 rootfs）。
+            if (backend.runtimeType == BackendRuntimeType.LINUX) {
+                rootfsBinder?.bind(s.id)
+            }
             // start a JobManager listener for this session
             startSessionListener(s.id)
             // Register the session's process group (v1: pgid == shell pid — forkpty makes the

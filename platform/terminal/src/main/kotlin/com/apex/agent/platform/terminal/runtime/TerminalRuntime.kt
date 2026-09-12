@@ -246,6 +246,13 @@ interface TerminalRuntime {
     /** Push-based semantic state for a session. Emits on every state change. Null if session not found. */
     fun semanticStateFlow(sessionId: Long): Flow<com.apex.agent.platform.terminal.state.TerminalSemanticState>?
 
+    /**
+     * P83: push-based STYLED render state for a session (colors / cursor / scrollback),
+     * for the terminal UI grid renderer. Emits only while collected (the styled
+     * projection is computed on demand — see ObservationEngine). Null if session not found.
+     */
+    fun styledScreenFlow(sessionId: Long): Flow<com.apex.agent.terminalemulator.TerminalRenderSnapshot?>?
+
     // ───────── recover ─────────
     // Spec §39 — crash recovery. Call once on startup. Returns recovered session ids.
     // Dead PTY sessions appear as EXITED/BROKEN (never faked alive).

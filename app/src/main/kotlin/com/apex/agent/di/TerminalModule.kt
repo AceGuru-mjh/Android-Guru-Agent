@@ -499,4 +499,38 @@ object TerminalModule {
         guestUserHome = guestUserHome,
         rootfsHealthInspector = RootfsHealthInspector(expectedArch = target.architecture)
     )
+
+    // ───────── P83 (T4): Ubuntu 开发环境闭环 —— Project → Analyzer → Ubuntu → Toolchain ─────────
+
+    /**
+     * P83: ProjectEnvironmentAnalyzer —— workspace 标记文件扫描（python/node/jdk/cpp/
+     * rust/go profile → requirements）。PR#66 以来首次接入生产 DI。
+     */
+    @Provides
+    @Singleton
+    fun provideProjectEnvironmentAnalyzer(): com.apex.agent.platform.terminal.environment.ProjectEnvironmentAnalyzer =
+        com.apex.agent.platform.terminal.environment.DefaultProjectEnvironmentAnalyzer(
+            com.apex.agent.platform.terminal.environment.BuiltInProfileRegistry()
+        )
+
+    /**
+     * P83: ProjectEnvironmentCoordinator —— Ubuntu 就绪 → 项目分析 → 能力探测 →
+     * 缺失工具链批量 apt install → 复测。Agent 入口：terminal.workspace.environment。
+     */
+    @Provides
+    @Singleton
+    fun provideProjectEnvironmentCoordinator(
+        analyzer: com.apex.agent.platform.terminal.environment.ProjectEnvironmentAnalyzer,
+        capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
+        packageManager: LinuxPackageManager,
+        ubuntuLifecycle: com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator,
+        workspaceManager: LinuxWorkspaceManager
+    ): com.apex.agent.platform.terminal.environment.ProjectEnvironmentCoordinator =
+        com.apex.agent.platform.terminal.environment.ProjectEnvironmentCoordinator(
+            analyzer = analyzer,
+            probe = capabilityProbe,
+            packageManager = packageManager,
+            lifecycle = ubuntuLifecycle,
+            workspaces = workspaceManager
+        )
 }

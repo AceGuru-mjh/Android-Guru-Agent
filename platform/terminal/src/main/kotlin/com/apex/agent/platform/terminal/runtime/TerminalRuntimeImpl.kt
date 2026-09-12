@@ -535,6 +535,12 @@ class TerminalRuntimeImpl(
         return a.observationEngine.semanticState
     }
 
+    // P83: styled render state for the UI grid renderer — computed only while collected.
+    override fun styledScreenFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.terminalemulator.TerminalRenderSnapshot?>? {
+        val a = sessionManager.assembly(sessionId) ?: return null
+        return a.observationEngine.styledState
+    }
+
     /**
      * Recover persisted sessions on startup (Spec §39).
      * Returns recovered session ids (now visible via snapshot()).

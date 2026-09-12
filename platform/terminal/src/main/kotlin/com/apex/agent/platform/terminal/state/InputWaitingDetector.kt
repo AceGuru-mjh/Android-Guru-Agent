@@ -115,8 +115,9 @@ class InputWaitingDetector {
     }
 
     /**
-     * Convenience: detect from a plain text screen (used when VirtualTerminal is not RealVirtualTerminal,
-     * e.g. StubVirtualTerminal in Phase 1 tests).
+     * Convenience: detect from a plain text screen (for tests / non-RealVirtualTerminal
+     * implementations using the default [com.apex.agent.platform.terminal.screen.VirtualTerminal]
+     * styledSnapshot fallback).
      */
     fun detectFromText(renderedText: String?, foregroundCommand: String?): Confidence {
         if (renderedText.isNullOrBlank()) return Confidence.UNKNOWN

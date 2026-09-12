@@ -139,6 +139,42 @@ Linux sessions get two host-backed persistent mounts on top of the rootfs:
   carries `HOME=/root`, `USER=root`, `LOGNAME=root`.
 - LOCAL sessions reject `workspaceId` (InvalidInput — explicit over silent).
 
+
+## P83 Additions (Terminal Finalization)
+
+- **Project-aware environment** (`terminal.workspace.environment` tool):
+  - `analyze` (read-only): scans a workspace's marker files
+    (requirements.txt / package.json / build.gradle.kts / Cargo.toml / go.mod /
+    CMakeLists.txt / Makefile / *.c|cc|cpp …) → detected language profiles →
+    per-requirement capability status (probe / dpkg-verified). Never installs.
+  - `ensure`: Ubuntu lifecycle `ensureReady` → analyze → one batched
+    `apt install` for missing toolchains (python3+pip+venv, nodejs+npm,
+    default-jdk, gcc/g++/make/cmake, rustc+cargo, golang-go) → probe
+    invalidate → honest re-verify (READY / INSTALLED / STILL_MISSING /
+    INSTALL_FAILED / UNKNOWN per requirement; ENV: pseudo-requirements such as
+    JAVA_HOME are reported as `ENV_ADVISORY`, not installed).
+- **Interactive Terminal UI** (app): styled grid renderer over the same VT core
+  (per-cell ANSI/256/TrueColor, blinking cursor, scrollback follow + manual
+  scroll, cell-level long-press selection & clipboard copy), IME + hardware-key
+  input (DECCKM-aware arrows, Ctrl+letter, bracketed paste), view-driven PTY
+  resize (SIGWINCH), multi-session tabs with backend badges, Ubuntu lifecycle
+  banner (install / progress / retry), status chips (session state / foreground
+  job / waiting-input prompt detection).
+- **Unified workspace**: the Agent file tools (`read_file` / `write_file` /
+  `list_files` / `edit_file` / `search_files` / `glob_files` / `copy_move` /
+  `delete_file` / `file_hash`) now sandbox to the **default Linux workspace**
+  (`<filesDir>/linux/workspaces/default`, guest `/workspace`) — the same file
+  area the Ubuntu terminal sessions see. The legacy flat
+  `<filesDir>/workspace` sandbox is migrated once (content moved into the
+  default workspace; skipped when the target is non-empty — old dir retained
+  for manual salvage).
+- **VT core**: `renderSnapshot()` styled projection (colors / attributes /
+  cursor / DEC modes / styled scrollback) exposed via
+  `TerminalRuntime.styledScreenFlow()` — computed only while a UI collector is
+  attached (backpressure contract); `CSI 3 J` now erases only the scrollback;
+  HTS / CBT implemented; F1-F12 key encodings added; `changedRows` wired via
+  drained dirty-region mutations.
+
 ## API Freeze Rules
 
 After P60:

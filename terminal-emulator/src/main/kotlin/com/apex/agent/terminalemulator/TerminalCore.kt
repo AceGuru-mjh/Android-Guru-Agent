@@ -206,6 +206,7 @@ class TerminalCore(
             'l' -> if (seq.privateMarker == '?') setMode(seq.params, false)  // DECRST
             's' -> { savedCursor = cursor.saveTo(); savedStyle = currentStyle }  // save cursor (ANSI.SYS)
             'u' -> { cursor.restoreFrom(savedCursor); currentStyle = savedStyle }  // restore
+            'Z' -> { cursor.column = tabStops.prevTab(cursor.column); cursor.wrapPending = false }  // CBT — cursor backward tab
             'g' -> {  // TBC — tab clear
                 when (seq.param(0, 0)) {
                     0 -> tabStops.clear(cursor.column)
@@ -268,7 +269,9 @@ class TerminalCore(
                 currentBuffer.eraseRow(cursor.row, 0, cursor.column, currentStyle)
             }
             2 -> currentBuffer.eraseRows(0, rows - 1, currentStyle)
-            3 -> currentBuffer.eraseRows(0, rows - 1, currentStyle)  // scrollback (simplified)
+            // ED 3（xterm "erase saved lines"）：只清 scrollback，不清可见屏幕。
+            // 旧实现误将可见屏一同擦除 —— `clear` 命令（发送 CSI 3 J）会闪烁整屏。
+            3 -> currentBuffer.clearScrollback()
         }
         mutations += ScreenMutation(ScreenMutation.MutationType.ERASE, 0 until rows)
     }
@@ -367,6 +370,7 @@ class TerminalCore(
                 }
             }
             'E' -> { cursor.row++; cursor.column = 0 }  // NEL
+            'H' -> tabStops.set(cursor.column)   // HTS — set horizontal tab stop at cursor column
             else -> { /* unknown ESC ignored */ }
         }
     }
@@ -448,6 +452,105 @@ class TerminalCore(
         renderedText = currentBuffer.renderedText()
     )
 
+    /** Current cursor visibility (DECTCEM, CSI ?25 h/l). */
+    val cursorVisible: Boolean get() = modes.cursorVisible
+
+    /** DECCKM application cursor keys mode (CSI ?1 h/l) — arrow-key encoding hint for the input layer. */
+    val applicationCursor: Boolean get() = modes.applicationCursor
+
+    /** Bracketed paste mode (CSI ?2004 h/l) — paste wrapper hint for the input layer. */
+    val bracketedPaste: Boolean get() = modes.bracketedPaste
+
+    /** Total lines currently held in the main screen's scrollback. */
+    val scrollbackCount: Int get() = mainBuffer.scrollbackLineCount
+
+    /**
+     * Styled render snapshot for the UI grid renderer (colors / attributes / cursor /
+     * scrollback). Unlike [snapshot] (plain text for Agent observation), this exposes
+     * per-cell style so the renderer can draw ANSI colors, bold/underline, inverse video
+     * and the scrollback buffer.
+     *
+     * @param maxScrollbackLines render at most this many most-recent scrollback lines
+     *        (0 = none). Only the main screen has scrollback; alternate screen ignores it.
+     */
+    fun renderSnapshot(maxScrollbackLines: Int = 0): TerminalRenderSnapshot {
+        val visible = (0 until rows).map { renderRow(currentBuffer.row(it)) }
+        val sb = if (maxScrollbackLines > 0 && !modes.alternateScreen) {
+            val total = mainBuffer.scrollbackLineCount
+            val from = (total - maxScrollbackLines).coerceAtLeast(0)
+            if (total > from) {
+                (from until total).map { renderRow(mainBuffer.scrollbackLine(it)) }
+            } else emptyList()
+        } else emptyList()
+        return TerminalRenderSnapshot(
+            rows = rows, cols = cols,
+            cursorRow = cursor.row, cursorCol = cursor.column,
+            cursorVisible = modes.cursorVisible,
+            alternateScreen = modes.alternateScreen,
+            applicationCursor = modes.applicationCursor,
+            bracketedPaste = modes.bracketedPaste,
+            reverseVideo = modes.reverseVideo,
+            title = title,
+            lines = visible,
+            scrollback = sb,
+            scrollbackTotal = mainBuffer.scrollbackLineCount
+        )
+    }
+
+    /** Render one row of cells, trimming trailing default-blank cells (they are pure background). */
+    private fun renderRow(cells: Array<TerminalCell>): List<RenderCell> {
+        var last = cells.size - 1
+        while (last >= 0) {
+            val c = cells[last]
+            if (c.isWideTrail) break  // a wide lead precedes — non-blank content
+            if (c.codePoint == ' '.code && c.style == TerminalStyle.DEFAULT && c.combining.isEmpty()) {
+                last--
+                continue
+            }
+            break
+        }
+        if (last < 0) return emptyList()
+        val out = ArrayList<RenderCell>(last + 1)
+        var i = 0
+        while (i <= last) {
+            val c = cells[i]
+            if (c.isWideTrail) { i++; continue }  // rendered as part of its wide lead
+            out.add(cellToRender(c))
+            i++
+        }
+        return out
+    }
+
+    private fun cellToRender(c: TerminalCell): RenderCell {
+        val sb = StringBuilder()
+        sb.appendCodePoint(if (c.codePoint == 0) ' '.code else c.codePoint)
+        for (m in c.combining) sb.appendCodePoint(m)
+        var flags = 0
+        if (c.style.bold) flags = flags or RenderCell.FLAG_BOLD
+        if (c.style.dim) flags = flags or RenderCell.FLAG_DIM
+        if (c.style.italic) flags = flags or RenderCell.FLAG_ITALIC
+        if (c.style.underline != UnderlineStyle.NONE) flags = flags or RenderCell.FLAG_UNDERLINE
+        if (c.style.blink) flags = flags or RenderCell.FLAG_BLINK
+        if (c.style.hidden) flags = flags or RenderCell.FLAG_HIDDEN
+        if (c.style.strikethrough) flags = flags or RenderCell.FLAG_STRIKE
+        // Inverse video: cell-level SGR 7 XOR global DECSCNM (5) — resolved at render time
+        // by the UI (keeps default-vs-explicit color semantics in one place).
+        if (c.style.inverse || modes.reverseVideo) flags = flags or RenderCell.FLAG_INVERSE
+        if (c.width == 2) flags = flags or RenderCell.FLAG_WIDE
+        return RenderCell(
+            text = sb.toString(),
+            fg = colorArgb(c.style.foreground),
+            bg = colorArgb(c.style.background),
+            flags = flags
+        )
+    }
+
+    /** Map a [TerminalColor] to an opaque 0xAARRGGBB long; 0 = theme default. */
+    private fun colorArgb(c: TerminalColor): Long = when (c) {
+        is TerminalColor.Default -> 0L
+        else -> 0xFF000000L or TerminalColor.toRgb(c).toLong().and(0xFFFFFFL)
+    }
+
     /** Drain pending mutations (for dirty-region UI/observation). */
     fun drainMutations(): List<ScreenMutation> {
         val out = mutations.toList()
@@ -488,4 +591,64 @@ data class TerminalScreenSnapshot(
     val cursorVisible: Boolean,
     val title: String?,
     val renderedText: String
+)
+
+/**
+ * One renderable cell for the UI grid renderer.
+ *
+ * @param text  display text (base char + combining marks; wide chars carry FLAG_WIDE and
+ *              occupy two columns visually — their trail cell is folded into this cell)
+ * @param fg    foreground as opaque 0xAARRGGBB; **0 = theme default**
+ * @param bg    background as opaque 0xAARRGGBB; **0 = transparent / theme default**
+ * @param flags [RenderCell] FLAG_* bit set (bold/dim/italic/underline/blink/hidden/strike/inverse/wide)
+ */
+data class RenderCell(
+    val text: String,
+    val fg: Long,
+    val bg: Long,
+    val flags: Int
+) {
+    companion object {
+        const val FLAG_BOLD = 1
+        const val FLAG_DIM = 1 shl 1
+        const val FLAG_ITALIC = 1 shl 2
+        const val FLAG_UNDERLINE = 1 shl 3
+        const val FLAG_BLINK = 1 shl 4
+        const val FLAG_HIDDEN = 1 shl 5
+        const val FLAG_STRIKE = 1 shl 6
+        /** SGR 7 (inverse) or global DECSCNM — UI swaps fg/bg (defaults become theme-inverted). */
+        const val FLAG_INVERSE = 1 shl 7
+        /** East-Asian wide char — occupies two columns; monospace CJK glyph advance ≈ 2 cells. */
+        const val FLAG_WIDE = 1 shl 8
+    }
+}
+
+/**
+ * Styled render snapshot for the UI grid renderer (P83): full-fidelity screen state —
+ * per-cell colors/attributes, cursor, DEC modes, and scrollback lines (styled too).
+ *
+ * Rendering contract: `scrollback` lines come FIRST (oldest→newest), then `lines`
+ * (visible screen, top→bottom). Cursor position is relative to the visible screen
+ * ([cursorRow] indexes [lines]); add `scrollback.size` when positioning in the full view.
+ */
+data class TerminalRenderSnapshot(
+    val rows: Int,
+    val cols: Int,
+    val cursorRow: Int,
+    val cursorCol: Int,
+    val cursorVisible: Boolean,
+    val alternateScreen: Boolean,
+    /** DECCKM — arrows should be encoded ESC O A instead of ESC [ A when true. */
+    val applicationCursor: Boolean,
+    /** Bracketed paste (CSI ?2004) — paste text should be wrapped in ESC[200~ … ESC[201~. */
+    val bracketedPaste: Boolean,
+    /** DECSCNM global reverse video — already folded into per-cell FLAG_INVERSE. */
+    val reverseVideo: Boolean,
+    val title: String?,
+    /** Visible screen rows, styled (trailing default-blank cells trimmed). */
+    val lines: List<List<RenderCell>>,
+    /** The [maxScrollbackLines] most recent scrollback rows, oldest first (main screen only). */
+    val scrollback: List<List<RenderCell>>,
+    /** Total scrollback lines held (may exceed [scrollback].size). */
+    val scrollbackTotal: Int
 )

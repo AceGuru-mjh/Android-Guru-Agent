@@ -40,9 +40,27 @@ class ObservationEngine(
     private val _screenState = MutableStateFlow(virtualTerminal.snapshot())
     val screenState: StateFlow<com.apex.agent.platform.terminal.screen.TerminalScreenState> = _screenState.asStateFlow()
 
+    /**
+     * P83: styled render state for the UI grid renderer (colors / cursor / scrollback).
+     *
+     * Computed LAZILY — only while a collector is attached (subscriptionCount > 0).
+     * This is the backpressure contract between the PTY feed rate and the UI: the
+     * plain [screenState] stays token-cheap for Agent observation, while the styled
+     * projection costs O(cells) and is skipped entirely when no terminal UI is open
+     * (agent-only usage, background sessions, etc.).
+     */
+    private val _styledState = MutableStateFlow<com.apex.agent.terminalemulator.TerminalRenderSnapshot?>(null)
+    val styledState: StateFlow<com.apex.agent.terminalemulator.TerminalRenderSnapshot?> = _styledState.asStateFlow()
+
+    /** Scrollback lines included in each styled snapshot (bounded for frame cost). */
+    private val styledScrollbackLines: Int = 400
+
     /** Called by PtyOutputPump after feeding bytes to VT — pushes new screen snapshot. */
     fun refreshScreenState() {
         _screenState.value = virtualTerminal.snapshot()
+        if (_styledState.subscriptionCount.value > 0) {
+            _styledState.value = virtualTerminal.styledSnapshot(styledScrollbackLines)
+        }
     }
 
     /** Push-based semantic state (from SemanticStateReducer, already a StateFlow). */

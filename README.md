@@ -10,7 +10,7 @@
 **An autonomous AI agent that lives entirely on your Android device.**
 
 一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、6 种执行模式、
-100 个内置工具、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
+102 个内置工具、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
@@ -49,7 +49,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **项目事实**
 
-<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-100-ff69b4" alt="100 Tools"/></a>
+<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-100-ff69b4" alt="102 Tools"/></a>
 <a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
 <a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-13-8A2BE2" alt="13 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-74_files-2EA44F" alt="74 Tests"/></a>
@@ -88,7 +88,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 - [🗜️ 上下文工程（P7 三级压缩）](#context-compression)
 - [🖥️ 终端运行时（Ubuntu + PRoot）](#terminal-runtime)
 - [🌐 浏览器智能体](#browser)
-- [🔧 工具全景（100 个）](#tools)
+- [🔧 工具全景（102 个）](#tools)
 - [⚡ 权限执行链](#privilege)
 
 </td>
@@ -145,7 +145,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 | 运行位置 | 📱 全程在设备上 | 💻 PC / 服务器 | 📱 设备上 | ☁️ 云端 |
 | 需要服务器/PC | ❌ 不需要 | ✅ 需要 | ❌ 不需要 | ✅（厂商云） |
 | LLM 可换性 | ✅ 任意 OpenAI 兼容端点 / 局域网 Ollama | 固定模型或自配 | 无 LLM | ❌ 固定 |
-| 执行能力 | 100 工具：shell / 文件 / 结构化查询 / UI 自动化 / 浏览器 / 终端 | 文件 + shell + web | 规则触发，无推理 | 仅对话 |
+| 执行能力 | 102 工具：shell / 文件 / 结构化查询 / UI 自动化 / 浏览器 / 终端 | 文件 + shell + web | 规则触发，无推理 | 仅对话 |
 | Linux 环境 | ✅ PRoot Ubuntu 24.04 沙箱 | ✅ 宿主 OS | ❌ | ❌ |
 | 跨会话记忆 | ✅ 认知记忆：陈述性（语义图）+ 程序性（FSM 宏旁路回放） | 仓库内文件（CLAUDE.md 等） | ❌ | 云端会话 |
 | 离线记忆 | ✅ Room 本地图数据库 | — | — | ❌ |
@@ -183,7 +183,7 @@ flowchart TB
         direction LR
         PRIV["privilege<br/>Root / Shizuku / Shell<br/>三级权限链"]
         PERSIST["persistence<br/>前台服务 + 看门狗"]
-        TERM["terminal<br/>Ubuntu rootfs · PRoot<br/>原生 PTY · 16 工具"]
+        TERM["terminal<br/>Ubuntu rootfs · PRoot<br/>原生 PTY · 19 工具"]
         CSMEM["cs-mem 认知记忆<br/>蒸馏 · 旁路回放 · 梦境<br/>Room 图数据库"]
     end
 
@@ -474,7 +474,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 ---
 
 <a id="tools"></a>
-## 🔧 工具全景（100 个）
+## 🔧 工具全景（102 个）
 
 <details open>
 <summary><b>📦 点击展开 / 折叠完整工具清单（按模块分组）</b></summary>

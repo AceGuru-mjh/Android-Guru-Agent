@@ -1,36 +1,32 @@
 package com.apex.agent.terminalemulator
 
 /**
- * `:terminal-emulator` module — vendored Termux terminal-emulator (Apache-2.0).
+ * `:terminal-emulator` — the pure-JVM VT/ANSI engine (ATR 2.0 Final Spec §1, PR #53).
  *
- * Spec ref: ATR 2.0 Final Spec §24 / §44.6
+ * **Status: PRODUCTION.** The original Phase-0 plan vendored Termux's terminal-emulator
+ * here; that plan was replaced by a hand-written engine (the spec's explicit fallback
+ * allowance) which is now the single VT core used in production:
  *
- * CRITICAL: The real Android-Guru-Agent repo has NO terminal-emulator module. ANSI handling is
- * strip-only (ansi_filter.cpp). This module is NEW in Phase 0.
+ *   PTY bytes → [TerminalCore.feed] → [Utf8Decoder] → [VtParser] → [TerminalState]/[ScreenBuffer]
  *
- * Phase 0 status: SCAFFOLD ONLY. The actual Termux terminal-emulator source must be vendored
- * here in Phase 2 (Spec §45 Phase 2: "接入 :terminal-emulator，实现 VirtualTerminal + ScreenState").
+ * What this module provides:
+ *  - [TerminalCore] — the ONLY VT engine (CSI/OSC/ESC dispatch, SGR incl. 256/TrueColor,
+ *    scroll regions, alternate screen, DECOM/IRM/DECCKM/bracketed paste, tab stops,
+ *    wide chars + combining marks, bounded scrollback, resize).
+ *    - `snapshot()` — plain-text screen for Agent observation (SCREEN mode).
+ *    - `renderSnapshot()` — styled per-cell state for the UI grid renderer (colors,
+ *      attributes, cursor, DEC modes, scrollback).
+ *    - `drainMutations()` — dirty-region batches for incremental observation.
+ *  - [ScreenBuffer] / [TerminalCell] / [TerminalStyle] / [TerminalColor] — cell model
+ *    (width-aware, combining-aware, style-complete).
+ *  - [Utf8Decoder] / [VtParser] — incremental binary-safe front end.
  *
- * What to vendor (from Termux repo, Apache-2.0):
- *   - com.termux.terminal.TerminalEmulator     (VT100/ANSI parser, cursor, modes)
- *   - com.termux.terminal.TerminalBuffer       (screen row/col cell model)
- *   - com.termux.terminal.TerminalSession      (STRIP its PTY creation — we feed bytes via Runtime)
- *   - com.termux.terminal.ScreenBuffer         (alternate screen)
- *   - com.termux.terminal.TextStyle            (colors, attributes)
- *   - com.termux.terminal.ByteQueue            (byte queue helper)
- *
- * What to STRIP from vendored Termux:
- *   - TerminalSession's own forkpty / JNI / TermExecService (Runtime owns PTY).
- *   - Any Android UI dependencies (we only need the pure-JVM VT core).
- *
- * Build: pure Android library (no native code), Kotlin/Java.
- * Consumers: ONLY `:platform:terminal` (via screen/VirtualTerminal.kt). Spec §7.3 forbids
- * `:terminal-emulator` depending on `:platform:terminal`.
- *
- * This file is a placeholder so the Gradle module compiles in Phase 0.
+ * Boundaries (Spec §7.3):
+ *  - This module depends on NOTHING internal (pure JVM, no Android, no Hilt, no Compose).
+ *  - Sole consumer: `:platform:terminal` (via screen/VirtualTerminal.kt); the app module
+ *    consumes it transitively (UI render types) — it must never reach back into platform.
  */
 object TerminalEmulatorModule {
-    const val VENDOR = "Termux terminal-emulator (Apache-2.0)"
-    const val VENDOR_VERSION = "0.114"   // pin the Termux version to vendor
-    const val PHASE_0_STATUS = "SCAFFOLD — vendor actual source in Phase 2"
+    const val ENGINE = "TerminalCore 2.0 (in-house, hand-written)"
+    const val ENGINE_STATUS = "PRODUCTION — single VT core since PR #53 (VT100Emulator fallback removed)"
 }

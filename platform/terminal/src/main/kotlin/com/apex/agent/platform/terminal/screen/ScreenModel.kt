@@ -1,12 +1,16 @@
 package com.apex.agent.platform.terminal.screen
 
+import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.TerminalRenderSnapshot
+
 /**
- * Parsed virtual terminal screen state.
+ * Parsed virtual terminal screen state (plain-text projection for Agent observation).
  *
  * Spec ref: ATR 2.0 Final Spec §25
  *
- * Produced by [VirtualTerminal] (vendored Termux terminal-emulator) from the PTY byte stream.
- * Supports: ANSI / VT100 / 256 color / cursor / alternate screen / scrollback / resize.
+ * Produced by [VirtualTerminal] (TerminalCore 2.0) from the PTY byte stream.
+ * For the styled UI projection (colors / scrollback / DEC modes) use
+ * [VirtualTerminal.styledSnapshot] → `TerminalRenderSnapshot`.
  */
 data class TerminalScreenState(
     val rows: Int,
@@ -14,6 +18,8 @@ data class TerminalScreenState(
     val cursorRow: Int,
     val cursorCol: Int,
     val alternateScreen: Boolean,
+    /** DECTCEM cursor visibility (CSI ?25 h/l) — UI draws the caret only when true. */
+    val cursorVisible: Boolean = true,
     val title: String?,
     /** Plain-text rendering of the visible screen, row-joined with \n. For Agent SCREEN observation. */
     val renderedText: String?,

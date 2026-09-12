@@ -245,7 +245,21 @@ class InputManagerImpl(
         TerminalKey.PAGE_UP -> byteArrayOf(0x1B, 0x5B, 0x35, 0x7E)
         TerminalKey.PAGE_DOWN -> byteArrayOf(0x1B, 0x5B, 0x36, 0x7E)
         TerminalKey.INSERT -> byteArrayOf(0x1B, 0x5B, 0x32, 0x7E)
-        // TM4: unmapped keys (F1-F12, etc.) MUST NOT silently send ENTER — that could
+        // P83: F1-F12 (xterm encodings). F1-F4 use the SS3 form ESC O P/Q/R/S;
+        // F5-F12 use CSI with the xterm parameter numbering (gaps at 16, 22 are historic).
+        TerminalKey.F1 -> byteArrayOf(0x1B, 0x4F, 0x50)
+        TerminalKey.F2 -> byteArrayOf(0x1B, 0x4F, 0x51)
+        TerminalKey.F3 -> byteArrayOf(0x1B, 0x4F, 0x52)
+        TerminalKey.F4 -> byteArrayOf(0x1B, 0x4F, 0x53)
+        TerminalKey.F5 -> byteArrayOf(0x1B, 0x5B, 0x31, 0x35, 0x7E)
+        TerminalKey.F6 -> byteArrayOf(0x1B, 0x5B, 0x31, 0x37, 0x7E)
+        TerminalKey.F7 -> byteArrayOf(0x1B, 0x5B, 0x31, 0x38, 0x7E)
+        TerminalKey.F8 -> byteArrayOf(0x1B, 0x5B, 0x31, 0x39, 0x7E)
+        TerminalKey.F9 -> byteArrayOf(0x1B, 0x5B, 0x32, 0x30, 0x7E)
+        TerminalKey.F10 -> byteArrayOf(0x1B, 0x5B, 0x32, 0x31, 0x7E)
+        TerminalKey.F11 -> byteArrayOf(0x1B, 0x5B, 0x32, 0x33, 0x7E)
+        TerminalKey.F12 -> byteArrayOf(0x1B, 0x5B, 0x32, 0x34, 0x7E)
+        // TM4: unmapped keys MUST NOT silently send ENTER — that could
         // confirm a destructive prompt ("Remove file? [y/N]") the Agent intended to
         // inspect. Send nothing and warn once per unmapped key for diagnosis.
         else -> {

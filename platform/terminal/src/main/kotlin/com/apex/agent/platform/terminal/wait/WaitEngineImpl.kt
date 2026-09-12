@@ -85,6 +85,27 @@ class WaitEngineImpl(
     }
 
     /**
+     * 歧义条件（jobId=null 的 ProcessStarted/ProcessExited、OutputMatch 等）的
+     * 「当前操作窗口」锚点：最近一次 ProcessStarted 事件。
+     *
+     * 语义（v3，修复 ProcessGroupSignalTest 契约回归）：
+     * wait 的歧义条件指「我发起的这次操作的结果」。锚定在最近一次 run() 的
+     * ProcessStarted 上——
+     *   - catch-up ✓：cancel() → 退出事件先于 wait() 调用落地（id > start.id）
+     *     仍可匹配（v1 契约：cancel 后 wait 同步 shell 退出）；
+     *   - 防陈旧 ✓：审计 P2-2 场景 run(echo) 完成 → run(sleep) → wait() 不带
+     *     jobId —— echo 的退出事件 id < sleep 的 start.id，被正确判陈旧。
+     * 保留窗（500 条）内找不到 ProcessStarted 时回退 (0,0)（全新会话/超长会话
+     * 的宽容回退 —— 与旧全量重放行为一致）。
+     */
+    private suspend fun operationAnchorFor(sessionId: Long): Anchor {
+        val log = eventLog ?: return Anchor(0L, 0L)
+        val recent = log.tail(sessionId, 500)
+        val lastStart = recent.lastOrNull { it is TerminalEvent.ProcessStarted } ?: return Anchor(0L, 0L)
+        return Anchor(lastStart.cursor, lastStart.id)
+    }
+
+    /**
      * 锚点新鲜度判定：id > 锚点（经 EventLog 分配过 id 的新事件）恒新；
      * id == 0（未经 EventLog 的裸事件，测试/诊断直发路径）无法判龄，视作新；
      * SessionClosed 恒放行（终态语义优先 —— 历史里的 SessionClosed 同样意味着会话已关闭）。
@@ -153,12 +174,23 @@ class WaitEngineImpl(
             return awaitIdle(sessionId, condition, timeoutMs)
         }
         val result = withTimeoutOrNull(timeoutMs) {
-            // P2 fix（审计 P2-5）：订阅锚定在「调用时刻之后」—— 原实现 afterCursor=0
-            // 全量重放历史，陈旧事件（含 cursor=-1 的合成 ProcessExited）直接假阳性
-            // 匹配返回（Agent 误判任务完成）。
-            val anchor = anchorFor(sessionId)
-            val ev = bus.subscribe(sessionId, afterCursor = anchor.cursor).first { e ->
-                isFresh(e, anchor) &&
+            // P2 fix（审计 P2-5，语义修正 v3）：按条件消歧能力分流。
+            //
+            // 1) 精确条件（携带 jobId 的 ProcessStarted/ProcessExited）：事件自身 jobId
+            //    已消歧，afterCursor=0 重放匹配即期望的 catch-up 语义——典型链路
+            //    cancel(jobId) → wait(PROCESS_EXITED, jobId)：退出事件可能先于 wait
+            //    调用落地（ControlPlaneTest/ProcessGroupSignalTest 契约），按调用时刻
+            //    取锚会吞掉目标事件本身 → 永久 Timeout。
+            // 2) 歧义条件（jobId=null / OutputMatch / ScreenChanged…）：锚定在最近一次
+            //    ProcessStarted（operationAnchorFor，见其 KDoc）——既保留 catch-up，
+            //    又阻断「上一次操作的陈旧退出/输出」假阳性（审计 P2-2 场景）。
+            val preciseJobCondition =
+                (condition is WaitCondition.ProcessExited && condition.jobId != null) ||
+                    (condition is WaitCondition.ProcessStarted && condition.jobId != null)
+            val anchor = if (preciseJobCondition) Anchor(0L, 0L) else operationAnchorFor(sessionId)
+            val subCursor = if (preciseJobCondition) 0L else anchor.cursor
+            val ev = bus.subscribe(sessionId, afterCursor = subCursor).first { e ->
+                (preciseJobCondition || isFresh(e, anchor)) &&
                     (matchEvent(condition, e).matched || e is TerminalEvent.SessionClosed)
             }
             val m = matchEvent(condition, ev)

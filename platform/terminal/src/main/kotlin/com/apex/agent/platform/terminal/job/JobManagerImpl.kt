@@ -150,14 +150,17 @@ class JobManagerImpl(
         foregroundJobIdBySession[sessionId] = jobId
         stateFlows[jobId] = MutableStateFlow(JobState.CREATED)
 
+        // P3 fix（审计 6-b）：J1 CREATED → RUNNING 先于命令写入 —— 命令可能在写入后
+        // 立即完成（短命令/快 echo），事件监听器在 CREATED 态收到 WaitingInput/
+        // ProcessExited 时 `job.state != RUNNING` 分支会丢弃合成退出信号，job 卡死在
+        // CREATED 直到超时。写入失败时照旧迁移 FAILED。
+        transition(jobId, JobState.RUNNING)
         // Write the command (LINE mode appends \n)
         val writeResult = inputManager.sendLine(sessionId, owner, command)
         if (writeResult.isFailure) {
             transition(jobId, JobState.FAILED)
             return Result.failure(RuntimeException("TerminalError:WriteFailed"))
         }
-        // J1: CREATED → RUNNING
-        transition(jobId, JobState.RUNNING)
         val ev = TerminalEvent.ProcessStarted(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
             cursor = startCursor, jobId = jobId, command = command, owner = owner,

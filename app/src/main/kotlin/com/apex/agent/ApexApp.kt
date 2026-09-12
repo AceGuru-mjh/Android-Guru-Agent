@@ -51,6 +51,10 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var environmentStateUpdater: EnvironmentStateUpdater
 
+    /** T82：apexctl 桥（guest 脚本 ↔ Android 能力，经持久化 home bind 的文件队列）。 */
+    @Inject
+    lateinit var guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService
+
     /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -74,6 +78,11 @@ class ApexApp : Application(), Configuration.Provider {
 
         // Tool System v3：环境能力遥测桥（accessibility_ready / keyboard_active）。
         initEnvironmentTelemetry()
+
+        // T82：启动 apexctl 桥轮询（幂等 —— 目录 + 脚本在启动时 ensure；Handler 已在
+        // DI 注册）。guest 侧 rootfs 安装后即可 `apexctl <action>` 调用 Android 能力。
+        runCatching { guestBridgeService.start() }
+            .onFailure { Log.w("ApexAgent", "guest bridge start failed: ${it.message}") }
     }
 
     /**

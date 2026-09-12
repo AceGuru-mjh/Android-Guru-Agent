@@ -108,6 +108,12 @@ bool PtyEngine::sendSignal(int sessionId, int signal) {
     return s ? s->sendSignal(signal) : false;
 }
 
+// T82：只信号前台作业组（不碰 shell 组）—— Ctrl-C 语义保 shell 存活。
+bool PtyEngine::signalForeground(int sessionId, int signal) {
+    auto s = acquire(sessionId);
+    return s ? s->signalForegroundGroup(signal) : false;
+}
+
 void PtyEngine::resize(int sessionId, int rows, int cols) {
     auto s = acquire(sessionId);
     if (s) s->resize(rows, cols);

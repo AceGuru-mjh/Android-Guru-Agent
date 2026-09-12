@@ -146,6 +146,9 @@ class JniBridgeMappingTest {
             return true
         }
 
+        /** T82：前台组信号（fake：恒 false —— 无前台作业）。 */
+        override fun nativeSignalForegroundGroup(sessionId: Int, signal: Int): Boolean = false
+
         override fun nativeResize(sessionId: Int, rows: Int, cols: Int) {}
         override fun nativeIsAlive(sessionId: Int): Boolean = sessions[sessionId]?.alive == true
         override fun nativeGetPid(sessionId: Int): Int = sessions[sessionId]?.id ?: -1

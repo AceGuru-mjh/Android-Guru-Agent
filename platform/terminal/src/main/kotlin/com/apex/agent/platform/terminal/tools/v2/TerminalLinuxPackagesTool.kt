@@ -37,7 +37,14 @@ import kotlinx.serialization.json.put
  * 输出有界（首-N + 尾-M，默认 1 MB）—— 不让 apt 输出撑爆 Agent context（T76 §35）。
  */
 class TerminalLinuxPackagesTool(
-    private val packageManager: LinuxPackageManager
+    private val packageManager: LinuxPackageManager,
+    /**
+     * T82：镜像操作（action=mirror）需要 UbuntuSourcesList + rootfs 目录 + 架构。
+     * null → mirror action 返回结构化不支持（测试/JVM 环境未接线时诚实降级）。
+     */
+    private val sources: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList? = null,
+    private val rootfsDir: () -> java.io.File? = { null },
+    private val arch: () -> com.apex.agent.platform.terminal.linux.CpuArchitecture? = { null }
 ) : TerminalTool {
     override val id: String = "terminal.linux.packages"
     override val name: String = id
@@ -52,7 +59,7 @@ class TerminalLinuxPackagesTool(
     """.trimIndent()
 
     override val parametersSchema: String = """
-        {"type":"object","properties":{"action":{"type":"string","enum":["update","install","remove","upgrade","search","info","isInstalled","installed","status"]},"packages":{"type":"array","items":{"type":"string"}},"query":{"type":"string"},"options":{"type":"object","properties":{"noInstallRecommends":{"type":"boolean"},"purge":{"type":"boolean"}}}},"required":["action"]}
+        {"type":"object","properties":{"action":{"type":"string","enum":["update","install","remove","upgrade","search","info","isInstalled","installed","status","autoremove","clean","mirror"]},"packages":{"type":"array","items":{"type":"string"}},"query":{"type":"string"},"limit":{"type":"integer","default":500},"op":{"type":"string","enum":["list","set"]},"mirror":{"type":"string"},"options":{"type":"object","properties":{"noInstallRecommends":{"type":"boolean"},"purge":{"type":"boolean"}}}},"required":["action"]}
     """.trimIndent()
 
     override suspend fun invoke(arguments: String): String {
@@ -71,6 +78,10 @@ class TerminalLinuxPackagesTool(
             "isInstalled" -> handleIsInstalled(json)
             "installed" -> handleInstalled(json)
             "status" -> handleStatus()
+            // T82：autoremove/clean/mirror（Termux 基线 §5.3/§5.5）
+            "autoremove" -> handleAutoremove()
+            "clean" -> handleClean()
+            "mirror" -> handleMirror(json)
             else -> errorResult("InvalidInput", "unknown action: $action")
         }
     }
@@ -156,17 +167,85 @@ class TerminalLinuxPackagesTool(
     }
 
     private suspend fun handleInstalled(json: JsonObject): String {
-        // 列出已装包：用 dpkg-query --list（经 packageManager.search 不合适；这里用 info 的轻量探针）
-        // 简化：返回 status 的 brokenPackages（不完整但契约稳定；完整列表由 Agent 在 shell 内 dpkg -l 获取）
-        val status = packageManager.status()
+        // T82：真实 dpkg-query 列表（此前为诚实记录的 stub —— 见 T82 能力矩阵 §5.2）。
+        val limit = json["limit"]?.jsonPrimitive?.content?.toIntOrNull() ?: 500
+        val pkgs = packageManager.installed(limit)
         return buildJsonObject {
             put("ok", true)
             put("action", "installed")
-            put("available", status.available)
-            put("manager", status.manager)
-            put("brokenPackages", buildJsonArray { status.brokenPackages.forEach { add(JsonPrimitive(it)) } })
-            put("message", "for full list, run `dpkg -l` inside terminal.create(backend=\"linux-ubuntu\")")
+            put("count", pkgs.size)
+            put("packages", buildJsonArray {
+                pkgs.take(limit).forEach {
+                    add(buildJsonObject {
+                        put("name", it.name)
+                        put("version", it.version)
+                        put("status", it.status)
+                    })
+                }
+            })
         }.toString()
+    }
+
+    private suspend fun handleAutoremove(): String {
+        val op = packageManager.autoremove()
+        return opToJson(op, "autoremove")
+    }
+
+    private suspend fun handleClean(): String {
+        val op = packageManager.clean()
+        return opToJson(op, "clean")
+    }
+
+    /**
+     * T82：镜像查看/切换（termux-change-repo 等价物）。
+     *  - `{action:"mirror"}` / `{action:"mirror", op:"list"}` → 可选镜像清单 + 当前 inspect；
+     *  - `{action:"mirror", op:"set", mirror:"tuna"}` → 重写 sources（force）。
+     *    未接线（sources==null）→ 结构化不支持。
+     */
+    private suspend fun handleMirror(json: JsonObject): String {
+        val op = json["op"]?.jsonPrimitive?.content ?: "list"
+        if (sources == null) {
+            return errorResult("AptError:UNSUPPORTED", "mirror action not wired (sources list unavailable)")
+        }
+        val dir = rootfsDir() ?: return errorResult("AptError:ROOTFS_NOT_READY", "no installed rootfs")
+        val archV = arch() ?: return errorResult("AptError:UNSUPPORTED", "architecture unknown")
+        return when (op) {
+            "list" -> {
+                val inspection = sources.inspect(dir)
+                buildJsonObject {
+                    put("ok", true)
+                    put("action", "mirror")
+                    put("op", "list")
+                    put("current", buildJsonArray { inspection.mirrorHosts.forEach { add(JsonPrimitive(it)) } })
+                    put("codename", inspection.codename ?: "")
+                    put("available", buildJsonArray {
+                        com.apex.agent.platform.terminal.ubuntu.AptMirrorRegistry.available().forEach {
+                            add(buildJsonObject {
+                                put("id", it.id)
+                                put("label", it.label)
+                                put("httpsCapable", it.httpsCapable)
+                            })
+                        }
+                    })
+                }.toString()
+            }
+            "set" -> {
+                val mirrorId = json["mirror"]?.jsonPrimitive?.content
+                    ?: return errorResult("InvalidInput", "missing 'mirror' id for op=set")
+                val result = sources.apply(dir, archV, mirrorId, force = true)
+                buildJsonObject {
+                    put("ok", result.written)
+                    put("action", "mirror")
+                    put("op", "set")
+                    put("mirror", mirrorId)
+                    put("mirrorHost", result.mirrorHost)
+                    put("mirrorPath", result.mirrorPath)
+                    put("actions", buildJsonArray { result.actions.forEach { add(JsonPrimitive(it)) } })
+                    put("message", if (result.written) "sources rewritten to '$mirrorId' — run action=update to refresh indexes" else result.actions.firstOrNull() ?: "no change")
+                }.toString()
+            }
+            else -> errorResult("InvalidInput", "unknown mirror op: $op (list|set)")
+        }
     }
 
     private suspend fun handleStatus(): String {

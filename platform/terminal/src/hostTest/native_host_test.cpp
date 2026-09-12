@@ -146,6 +146,46 @@ int main() {
         eng.closeSession(id);
     }
 
+    // ─── T82: 前台作业组信号（Ctrl-C 语义 —— shell 存活） ───
+    {
+        printf("[T82] foreground-group-only signal keeps shell alive\n");
+        PtyEngine& eng = PtyEngine::instance();
+        // 交互 bash + 一个前台 sleep。注意：native 安全默认 PATH 是 Android 侧
+        //（/system/bin…），在 Linux host 上必须显式传 PATH —— 否则 bash 找不到
+        // sleep，作业永远不成立（生产 LocalShellBackend 显式传同一组 env，同理）。
+        std::vector<std::pair<std::string, std::string>> hostEnv{{"PATH", "/usr/bin:/bin:/usr/sbin:/sbin"}};
+        int id = eng.createSessionArgv({"/bin/bash", "-i"}, "", hostEnv, 24, 80);
+        CHECK(id > 0, "interactive session created");
+        // 给 bash 一点时间完成初始化（prompt / job-control 启用）
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        const char* cmd = "sleep 300\n";
+        eng.write(id, cmd, strlen(cmd));
+        // 等 sleep 成为前台作业（作业控制：tcgetpgrp != shell pid）
+        bool fgJob = false;
+        for (int i = 0; i < 200; ++i) {
+            if (eng.signalForeground(id, SIGTERM)) { fgJob = true; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        CHECK(fgJob, "foreground job detected and signaled");
+        // shell 必须仍然存活（fg-scoped 信号绝不杀 shell）
+        bool shellAlive = true;
+        for (int i = 0; i < 100; ++i) {
+            if (!eng.isAlive(id)) { shellAlive = false; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        CHECK(shellAlive, "shell SURVIVES foreground-scoped SIGTERM");
+        // 空闲状态（作业已死、shell 回 prompt）→ signalForeground 应拒绝（false）
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        bool refusedAtIdle = false;
+        for (int i = 0; i < 100; ++i) {
+            if (!eng.signalForeground(id, SIGTERM)) { refusedAtIdle = true; break; }
+            // shell 可能还没回到 prompt（fg 仍是旧作业组）—— 继续等
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        CHECK(refusedAtIdle, "no-foreground-job signal refused at idle prompt");
+        eng.closeSession(id);
+    }
+
     printf("== %s (%d failures) ==\n", g_failures == 0 ? "ALL PASS" : "FAILURES", g_failures);
     return g_failures == 0 ? 0 : 1;
 }

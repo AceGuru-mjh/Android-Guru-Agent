@@ -99,6 +99,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 - [💬 斜杠命令](#slash-commands)
 - [🔌 插件 SDK](#plugin-sdk)
 - [🎨 ComposeFoundry（伴侣工程）](#composefoundry)
+- [💎 Liquid Glass 玻璃组件系统](#liquid-glass)
 - [📱 应用界面](#ui-screens)
 - [🚀 快速开始](#quickstart)
 - [🧪 测试与质量保障](#testing)
@@ -615,10 +616,27 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 
 ---
 
+<a id="liquid-glass"></a>
+## 💎 Liquid Glass 玻璃组件系统
+
+普通 Android UI + 精确使用的 Liquid Glass 组件，而非“整个 App 一坨透明塑料”：
+
+- **两个诚实材质档**：Backdrop 档经 [Haze](https://github.com/chrisbanes/haze) 以 `GraphicsLayer` 真实采样背后内容（API 32+ 走 GPU `RenderEffect` 模糊，低版本自动 scrim 降级）；Frosted 档仅主题色薄霜 + 边缘光 + 高光，不冒充 backdrop
+- **七档材质**：`Subtle / Control / Card / Navigation / Floating / Dialog / Strong`，tint、边缘、高光、噪声全部从 MaterialTheme 动态派生，Light / Dark / Dynamic Color 自适应
+- **已玻璃化**：抽屉导航项（悬浮于氛围背景之上）、聊天悬浮输入栏（采样消息流）、回到底部 FAB、工具卡 / 计划卡 / 任务状态卡、顶栏菜单钮、玻璃对话框（HazeDialog 跨窗口采样）
+- **明确不玻璃化**：终端渲染区（性能敏感）、页面背景、气泡正文
+- **未实现即声明**：Refraction（折射位移）明确标注 NOT IMPLEMENTED，拒绝“alpha + blur 冒充玻璃”
+
+组件 API 与验收细则见 [docs/liquid-glass-system.md](docs/liquid-glass-system.md)，抽屉内“玻璃实验室”屏可真机验证 backdrop / blur / 边缘 / 交互。
+
+<p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
+
+---
+
 <a id="ui-screens"></a>
 ## 📱 应用界面
 
-单 Activity Compose 应用，`ModalNavigationDrawer` 抽屉导航 8 屏：
+单 Activity Compose 应用，`ModalNavigationDrawer` 抽屉导航 9 屏：
 
 | 屏 | 内容 |
 |----|------|
@@ -629,6 +647,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | **记忆** | cs-mem 可视化：Episode 统计 / 宏技能数 / 近期情景 / 删除 |
 | **权限** | Root / Shizuku（三态卡片）/ 无障碍 / 悬浮窗 / 通知 / 存储 |
 | **运行日志** | 结构化运行日志浏览 |
+| **玻璃实验室** | Liquid Glass 内部验收页：可拖动玻璃片 / 档位阶梯 / 工具卡状态 / 诚实验收清单 |
 | **设置** | LLM 预设（OpenAI/DeepSeek/OpenRouter/Ollama/自定义）+ Base URL/Key/模型 + 温度 + 连接测试 + 通用设置 |
 
 另有赛博霓虹悬浮球（EasyFloat）快速唤起。
@@ -816,6 +835,7 @@ Android-Guru-Agent/
 |------|------|
 | [docs/tool-system-v3.md](docs/tool-system-v3.md) | **工具系统 v3**：执行硬化八层（超时/重试/限流/熔断/追踪/批量/组合动作/环境门控），MCP·LangGraph·Anthropic CU·Mobile-Agent-E 对标 |
 | [docs/TESTING.md](docs/TESTING.md) | **测试总指南**：理念/矩阵/替身规范/FAQ/74 文件清单 |
+| [docs/liquid-glass-system.md](docs/liquid-glass-system.md) | **Liquid Glass 玻璃组件系统**：架构/七档材质/组件 API/真实性验收矩阵 |
 | [docs/memory-and-workflow-research.md](docs/memory-and-workflow-research.md) | **记忆与工作流调研报告**：对标 MemGPT/Mem0/A-MEM/Zep/Voyager/Claude Code/OpenHands/SWE-agent |
 | [docs/terminal-api.md](docs/terminal-api.md) | 终端 API 契约 |
 | [docs/ubuntu-rootfs-t72.md](docs/ubuntu-rootfs-t72.md) | T72 Ubuntu rootfs 供给设计 |

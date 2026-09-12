@@ -54,9 +54,12 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:tool-registry"))
+    // T82 SDK-boundary pruning: `core:tool-registry` had ZERO Kotlin imports from
+    // this module (TerminalTool is a local bridge interface precisely to avoid the
+    // dependency); `core.ktx` was likewise unused. Dropping both keeps the module
+    // a pure (coroutines + serialization + terminal-emulator) JVM library — the
+    // graduation prerequisite recorded in docs/terminal/TERMINAL_SDK_BOUNDARY.md.
     implementation(project(":terminal-emulator"))  // ATR 2.0 VT100/ANSI emulator
-    implementation(libs.core.ktx)
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.hilt.android)

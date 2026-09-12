@@ -25,7 +25,13 @@ import java.io.File
  */
 class UbuntuSourcesList(
     /** Ubuntu 发行版代号（24.04 = noble）。 */
-    private val codename: String = DEFAULT_CODENAME
+    private val codename: String = DEFAULT_CODENAME,
+    /**
+     * T82：镜像选择键（AptMirrorRegistry id；null/"official" = 官方）。
+     * 默认官方 —— bootstrap 的 HTTP-first 契约不变；切换走 `mirror` tool action
+     * 的 [apply]（force 重写 sources）。
+     */
+    private val mirrorId: String? = null
 ) {
 
     /** 配置结果。 */
@@ -50,6 +56,38 @@ class UbuntuSourcesList(
      */
     fun ensure(rootfsDir: File, arch: CpuArchitecture): SourcesResult {
         val mirror = mirrorFor(arch)
+
+        // T82：apply 时 target mirror 已定 —— 幂等检查按目标镜像判断
+        return applyInternal(rootfsDir, arch, mirror, force = false)
+    }
+
+    /**
+     * T82：镜像切换（termux-change-repo 等价物）。force=true：即使 sources 里已
+     * 有可用 host 也按目标镜像重写（切换语义）；force=false：同 [ensure]。
+     * 未知镜像 id → 结构化失败（返回 error 信息，不写文件）。
+     */
+    fun apply(rootfsDir: File, arch: CpuArchitecture, mirrorId: String, force: Boolean): SourcesResult {
+        val spec = AptMirrorRegistry.byId(mirrorId)
+            ?: return errorResult(arch, "SourcesError:UnknownMirror — '$mirrorId'（可选: ${AptMirrorRegistry.available().joinToString { it.id }}）")
+        val host = if (spec.id == "official") AptMirrorRegistry.officialHost(arch) else spec.host
+        val path = when (arch) {
+            CpuArchitecture.ARM64, CpuArchitecture.ARM32 -> spec.ubuntuPortsPath
+            else -> spec.ubuntuPath
+        }
+        return applyInternal(rootfsDir, arch, UbuntuSourcesList.Mirror(host, path), force)
+    }
+
+    private fun errorResult(arch: CpuArchitecture, message: String): SourcesResult = SourcesResult(
+        written = false,
+        architecture = arch,
+        mirrorHost = "",
+        mirrorPath = "",
+        components = DEFAULT_COMPONENTS,
+        filePath = "",
+        actions = listOf(message)
+    )
+
+    private fun applyInternal(rootfsDir: File, arch: CpuArchitecture, mirror: Mirror, force: Boolean): SourcesResult {
         val components = DEFAULT_COMPONENTS
         val actions = mutableListOf<String>()
 
@@ -64,9 +102,9 @@ class UbuntuSourcesList(
         val expectedHost = mirror.host
         val expectedCodename = codename
 
-        // 已含正确 mirror + codename → 幂等跳过
+        // 已含正确 mirror + codename → 幂等跳过（T82：force 镜像切换除外）
         // deb822 用 Suites: <codename> <codename>-updates <codename>-security
-        if (existing.contains(expectedHost) && existing.contains("Suites: $expectedCodename ")) {
+        if (!force && existing.contains(expectedHost) && existing.contains("Suites: $expectedCodename ")) {
             return SourcesResult(
                 written = false,
                 architecture = arch,
@@ -130,20 +168,18 @@ class UbuntuSourcesList(
         val codename: String?
     )
 
-    private fun mirrorFor(arch: CpuArchitecture): Mirror = when (arch) {
-        CpuArchitecture.ARM64, CpuArchitecture.ARM32 -> Mirror(
-            host = "ports.ubuntu.com",
-            path = "ubuntu-ports"
-        )
-        CpuArchitecture.X86_64, CpuArchitecture.X86 -> Mirror(
-            host = "archive.ubuntu.com",
-            path = "ubuntu"
-        )
-        else -> Mirror(
-            host = "archive.ubuntu.com",
-            path = "ubuntu"
-        )
-    }
+    private fun mirrorFor(arch: CpuArchitecture): Mirror =
+        // T82：构造期指定镜像 → registry；否则官方（历史行为逐字节不变）
+        AptMirrorRegistry.mirrorFor(mirrorId, arch) ?: when (arch) {
+            CpuArchitecture.ARM64, CpuArchitecture.ARM32 -> Mirror(
+                host = "ports.ubuntu.com",
+                path = "ubuntu-ports"
+            )
+            else -> Mirror(
+                host = "archive.ubuntu.com",
+                path = "ubuntu"
+            )
+        }
 
     private fun buildDeb822Content(
         mirror: Mirror,

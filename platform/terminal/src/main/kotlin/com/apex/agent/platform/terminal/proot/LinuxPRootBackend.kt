@@ -57,6 +57,18 @@ class LinuxPRootBackend(
      */
     private val environment: com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager =
         com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager(),
+    /**
+     * T82：系统级 bind 集（/proc /dev /sys —— proot-distro 同款语义）。
+     * 默认 [SystemBindProfile.STANDARD]：procps（essential 包）在 guest 内
+     * 真实可用、/dev/urandom 供 python(ssl)/curl 使用。host 侧不存在的路径
+     * 被诚实过滤。选 [SystemBindProfile.NONE] 恢复旧裸 -r 行为。
+     */
+    private val systemBinds: SystemBindProfile = SystemBindProfile.STANDARD,
+    /**
+     * T82：共享存储桥（host /storage/emulated/0 → guest /sdcard，
+     * termux-setup-storage 等价物）。null 或目录不可用 → 不 bind（诚实降级）。
+     */
+    private val sharedStorage: SharedStorageBridge? = null,
     override val id: String = ID
 ) : ExecutionBackend {
 
@@ -119,13 +131,20 @@ class LinuxPRootBackend(
 
         // 5. 构造 launch request（guest env 只经 -E；T75: 用户 home → /root 持久化 bind）
         val guestEnv = buildGuestEnv(request.env)
+        // T82：home bind + 系统级 bind（/proc /dev /sys，proot-distro 语义）+
+        // 共享存储 bind（授权可用时 → guest /sdcard）。
+        val binds = buildList {
+            add(PRootBind(AbsolutePath(userHomeDir.absolutePath), GuestUserHome.GUEST_PATH))
+            addAll(systemBinds.toBinds())
+            sharedStorage?.toBind()?.let { add(it) }
+        }
         val launch = PRootLaunchRequest(
             rootfs = rootfs,
             executable = GUEST_SHELL,
             arguments = listOf("-i"),
             workingDirectory = com.apex.agent.platform.terminal.workspace.WorkspacePath(guestCwd),
             environment = guestEnv,
-            binds = listOf(PRootBind(AbsolutePath(userHomeDir.absolutePath), GuestUserHome.GUEST_PATH)),
+            binds = binds,
             terminalMode = com.apex.agent.platform.terminal.api.TerminalMode.AUTO,
             fakeRoot = true,
             killOnExit = true
@@ -156,10 +175,8 @@ class LinuxPRootBackend(
                     rootfsId = rootfs.id,
                     workspaceId = workspaceId,
                     workspaceDir = workspaceHostDir.value,
-                    binds = listOf(
-                        "${workspaceHostDir.value}:/workspace",
-                        "${userHomeDir.absolutePath}:${GuestUserHome.GUEST_PATH}"
-                    ),
+                    binds = binds.map { "${it.hostPath.value}:${it.guestPath}" } +
+                        listOf("${workspaceHostDir.value}:/workspace"),
                     guestCwd = guestCwd
                 )
             )

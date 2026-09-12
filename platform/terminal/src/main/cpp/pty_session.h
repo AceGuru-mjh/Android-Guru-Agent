@@ -81,6 +81,21 @@ public:
     bool hasData();
     bool waitForData(int timeoutMs);
     bool sendSignal(int sig);
+
+    /**
+     * T82：只向控制终端的前台进程组（tcgetpgrp）发信号 —— **不碰 shell 自己的组**。
+     *
+     * 与 [sendSignal]（killProcessGroup：前台组 + 会话组，用于取消/关闭）互补：
+     * 本方法面向「打断当前命令但保留 shell」的语义（Termux 基线 §2.3 —— Ctrl-C
+     * 语义：杀前台命令，shell 活着回到 prompt）。
+     *
+     * 返回 false 的情况（调用方应退化到 session 级信号）：
+     *   - 无前台作业（fg == shell pid —— shell 自身在前台，即空闲 prompt）；
+     *   - tcgetpgrp 失败 / master fd 已关；
+     *   - kill(-fg) 失败（ESRCH —— 组已消失）。
+     */
+    bool signalForegroundGroup(int sig);
+
     void resize(int rows, int cols);
     void close();
     int exitCode() const { return exitCode_.load(std::memory_order_relaxed); }

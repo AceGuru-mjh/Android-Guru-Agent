@@ -30,7 +30,8 @@ class RealVirtualTerminal(
             rows = s.rows, cols = s.cols,
             cursorRow = s.cursorRow, cursorCol = s.cursorCol,
             alternateScreen = s.alternateScreen, title = s.title,
-            renderedText = s.renderedText, changedRows = null
+            renderedText = s.renderedText, changedRows = null,
+            scrollbackLineCount = s.scrollbackLineCount
         )
     }
 
@@ -38,6 +39,23 @@ class RealVirtualTerminal(
 
     /** Drain pending screen mutations (for event-driven UI / observation delta). */
     fun drainMutations(): List<com.apex.agent.terminalemulator.ScreenMutation> = core.drainMutations()
+
+    // ─── T82: input-translation + scrollback/clipboard capability exposure ───
+
+    /** DECCKM: when true the input layer must send SS3 (ESC O x) arrows/home/end. */
+    fun applicationCursorKeys(): Boolean = core.applicationCursorKeys()
+
+    /** Bracketed paste mode 2004: paste writes must wrap ESC[200~ … ESC[201~. */
+    fun bracketedPasteMode(): Boolean = core.bracketedPasteMode()
+
+    /** Last [maxLines] scrollback rows, oldest first (main screen only). */
+    fun scrollbackLines(maxLines: Int): List<String> = core.scrollbackText(maxLines)
+
+    /** Scrollback depth (main screen only). */
+    fun scrollbackLineCount(): Int = core.scrollbackLineCount()
+
+    /** Drain OSC 52 clipboard-write requests emitted by guest programs (vim/tmux). */
+    fun drainClipboardRequests(): List<String> = core.drainClipboardRequests()
 
     override val cursorRow: Int get() = core.snapshot().cursorRow
     override val cursorCol: Int get() = core.snapshot().cursorCol

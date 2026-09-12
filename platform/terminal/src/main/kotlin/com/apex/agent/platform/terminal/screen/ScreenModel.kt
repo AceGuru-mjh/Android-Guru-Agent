@@ -18,7 +18,12 @@ data class TerminalScreenState(
     /** Plain-text rendering of the visible screen, row-joined with \n. For Agent SCREEN observation. */
     val renderedText: String?,
     /** When returning an incremental update, the set of row indices that changed (null = full screen). */
-    val changedRows: Set<Int>?
+    val changedRows: Set<Int>?,
+    /**
+     * T82: saved scrollback depth (main screen only; 0/null on alt screen).
+     * The SCROLL observation layer can additionally request the scrollback tail.
+     */
+    val scrollbackLineCount: Int? = null
 ) {
     companion object {
         fun empty(rows: Int, cols: Int): TerminalScreenState = TerminalScreenState(

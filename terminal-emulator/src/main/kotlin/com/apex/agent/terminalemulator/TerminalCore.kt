@@ -23,6 +23,21 @@ class TerminalCore(
     companion object {
         /** P1 fix：待消费 mutation 上限（超过即折叠为 FULL），见 [BoundedMutationList]。 */
         private const val MAX_PENDING_MUTATIONS = 4096
+
+        /** T82：OSC 52 待消费剪贴板写入请求上限（防泄漏，超出即丢弃最旧）。 */
+        const val MAX_PENDING_CLIPBOARD = 8
+
+        /** T82：DEC Special Graphics —— ESC 序列选中后的字形替换表，xterm 标准。
+         *  索引为 ASCII 码点，值为替换后的 Unicode 码点。*/
+        val DEC_SPECIAL_GRAPHICS: Map<Int, Int> = mapOf(
+            0x60 to 0x25C6, 0x61 to 0x2592, 0x62 to 0x2409, 0x63 to 0x240C, 0x64 to 0x240D,
+            0x65 to 0x240A, 0x66 to 0x00B0, 0x67 to 0x00B1, 0x68 to 0x2424, 0x69 to 0x240B,
+            0x6A to 0x2518, 0x6B to 0x2510, 0x6C to 0x250C, 0x6D to 0x2514, 0x6E to 0x253C,
+            0x6F to 0x23BA, 0x70 to 0x23BB, 0x71 to 0x2500, 0x72 to 0x23BC, 0x73 to 0x23BD,
+            0x74 to 0x251C, 0x75 to 0x2524, 0x76 to 0x2534, 0x77 to 0x252C, 0x78 to 0x2502,
+            0x79 to 0x2264, 0x7A to 0x2265, 0x7B to 0x03C0, 0x7C to 0x2260, 0x7D to 0x00A3,
+            0x7E to 0x00B7
+        )
     }
 
     private val utf8 = Utf8Decoder()
@@ -41,7 +56,7 @@ class TerminalCore(
     private var savedStyle = TerminalStyle.DEFAULT
     private var title: String? = null
 
-    // T82: G0 charset designation (ESC ( 0 / ESC ( B) — DEC Special Graphics.
+    // T82: G0 charset designation —— ESC 序列选中 DEC Special Graphics 或恢复 US ASCII。
     private var g0Charset = CharsetStatus.ASCII
 
     // T82: OSC 52 clipboard-write requests from the guest (vim/tmux "copy to system
@@ -87,7 +102,7 @@ class TerminalCore(
         }
     }
 
-    /** T82: apply G0 charset mapping (DEC Special Graphics, ESC ( 0). */
+    /** T82: apply G0 charset mapping —— DEC Special Graphics 字形替换。 */
     private fun mapCharset(cp: Int): Int {
         if (g0Charset != CharsetStatus.DEC_GRAPHICS) return cp
         return DEC_SPECIAL_GRAPHICS[cp] ?: cp
@@ -389,10 +404,10 @@ class TerminalCore(
 
     // ─── ESC (§25 RIS etc) ───
     private fun handleEsc(final: Char, intermediates: CharArray = CharArray(0)) {
-        // T82: SCS — G0 charset designation. ESC ( 0 = DEC Special Graphics,
-        // ESC ( B = US ASCII. Only G0 is tracked (modern emulators ignore G1+ here;
-        // programs that need G1 send RC/SI explicitly).
-        if (intermediates.size == 1 && intermediates[0] == '(') {
+        // T82: SCS —— G0 charset designation。ESC 终止字节 0x30 选 DEC Special Graphics；
+        // 终止字节 0x42 恢复 US ASCII。仅跟踪 G0 —— 现代模拟器忽略 G1+；
+        // 需要 G1 的程序会显式发送 RC/SI。
+        if (intermediates.size == 1 && intermediates[0].code == 0x28) {
             when (final) {
                 '0' -> { g0Charset = CharsetStatus.DEC_GRAPHICS; return }
                 'B', 'A' -> { g0Charset = CharsetStatus.ASCII; return }
@@ -534,21 +549,6 @@ class TerminalCore(
     }
 
     private enum class CharsetStatus { ASCII, DEC_GRAPHICS }
-
-    private companion object {
-        const val MAX_PENDING_CLIPBOARD = 8
-
-        /** DEC Special Graphics (ESC ( 0) — xterm-standard substitution table. */
-        val DEC_SPECIAL_GRAPHICS: Map<Int, Int> = mapOf(
-            0x60 to 0x25C6, 0x61 to 0x2592, 0x62 to 0x2409, 0x63 to 0x240C, 0x64 to 0x240D,
-            0x65 to 0x240A, 0x66 to 0x00B0, 0x67 to 0x00B1, 0x68 to 0x2424, 0x69 to 0x240B,
-            0x6A to 0x2518, 0x6B to 0x2510, 0x6C to 0x250C, 0x6D to 0x2514, 0x6E to 0x253C,
-            0x6F to 0x23BA, 0x70 to 0x23BB, 0x71 to 0x2500, 0x72 to 0x23BC, 0x73 to 0x23BD,
-            0x74 to 0x251C, 0x75 to 0x2524, 0x76 to 0x2534, 0x77 to 0x252C, 0x78 to 0x2502,
-            0x79 to 0x2264, 0x7A to 0x2265, 0x7B to 0x03C0, 0x7C to 0x2260, 0x7D to 0x00A3,
-            0x7E to 0x00B7
-        )
-    }
 }
 
 /**

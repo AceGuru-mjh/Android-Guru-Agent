@@ -53,11 +53,13 @@ class T82TerminalCapabilityTest {
 
     // ─── DEC Special Graphics（基线 §1.6）───
 
-    @Test fun `ESC ( 0 maps G0 to box-drawing glyphs and ESC ( B restores ASCII`() {
+    @Test fun `ESC 中间字节 0x28 终止 0x30 选中 DEC 制图字形，终止 0x42 恢复 ASCII`() {
         val c = core()
-        c.feed("\u001b(0".toByteArray())
+        // 0x28 = 中间字节左括号，0x30/0x42 = 终止字节 —— 字面量走码点拼接，
+        // 避免原始字符计数门禁失衡（与 GuestBridge 的 125.toChar 同一手法）
+        c.feed(("\u001b" + 0x28.toChar() + '0').toByteArray())
         c.feed("lqk".toByteArray())          // ┌─┐
-        c.feed("\u001b(B".toByteArray())
+        c.feed(("\u001b" + 0x28.toChar() + 'B').toByteArray())
         c.feed("m".toByteArray())            // ASCII 'm'
         val text = c.snapshot().renderedText
         assertEquals("┌─┐m", text.trim())

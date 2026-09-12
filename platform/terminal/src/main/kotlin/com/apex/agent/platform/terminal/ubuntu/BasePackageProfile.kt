@@ -50,7 +50,9 @@ data class BasePackageProfile(
                 // 版本控制
                 "git",
                 // 运行时
-                "python3", "python3-pip"
+                "python3", "python3-pip",
+                // T82：locale（locale-gen 经 /etc/locale.gen）与时区 —— Termux 基线 §3.5/§3.6
+                "locales", "tzdata"
             ),
             recommended = listOf(
                 "openssh-client", "vim-tiny", "nano-tiny",

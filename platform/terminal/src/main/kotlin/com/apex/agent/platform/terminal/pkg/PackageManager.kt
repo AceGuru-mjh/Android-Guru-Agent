@@ -23,9 +23,38 @@ interface LinuxPackageManager {
     suspend fun info(packageName: String): PackageInfo
     suspend fun isInstalled(packageName: String): Boolean
     suspend fun installedVersion(packageName: String): String?
+
+    /**
+     * T82（基线 §5.2）：真实已安装包列表（dpkg-query，status=ii*）。
+     * 默认空实现保持既有 Fake/契约兼容 —— [UbuntuAptPackageManager] 提供真实现。
+     */
+    suspend fun installed(limit: Int = 500): List<InstalledPackage> = emptyList()
+
     suspend fun repair(): PackageOperation
+
+    /** T82（基线 §5.5）：apt autoremove（写操作；默认不支持 → 结构化异常）。 */
+    suspend fun autoremove(): PackageOperation =
+        throw UnsupportedOperationException("AptError:UNSUPPORTED — autoremove not supported by this manager")
+
+    /** T82（基线 §5.5）：apt clean（写操作；默认不支持 → 结构化异常）。 */
+    suspend fun clean(): PackageOperation =
+        throw UnsupportedOperationException("AptError:UNSUPPORTED — clean not supported by this manager")
+
     fun operations(): Flow<PackageOperationEvent>
 }
+
+/**
+ * T82：一个已安装包的记录（dpkg-query -W 解析）。
+ * status 三字母（db:Status-Abbrev）：ii* = 已正确安装；rc* = 已卸载留配置。
+ */
+data class InstalledPackage(
+    val name: String,
+    val version: String,
+    val status: String
+) {
+    val properlyInstalled: Boolean get() = status.startsWith("ii")
+}
+
 
 // ─── Section 3: PackageSpec ───
 data class PackageSpec(

@@ -146,24 +146,42 @@ class ScreenBuffer(
 
     /** Render visible screen as plain text (rows joined by \n, trailing trim). */
     fun renderedText(): String {
-        return (0 until rows).joinToString("\n") { r ->
-            val sb = StringBuilder()
-            var lastNonBlank = -1
-            for (c in 0 until cols) {
-                val cell = cells[r][c]
-                if (cell.isWideTrail) {
-                    // trail has no char; skip (lead already rendered)
-                } else {
-                    val cp = if (cell.codePoint == 0) ' '.code else cell.codePoint
-                    sb.appendCodePoint(cp)
-                    if (!cell.isBlank) lastNonBlank = sb.length - 1
-                }
+        return (0 until rows).joinToString("\n") { r -> renderRowCells(cells[r]) }
+    }
+
+    /** T82: single-row renderer shared by visible screen and scrollback. */
+    private fun renderRowCells(cellsRow: Array<TerminalCell>): String {
+        val sb = StringBuilder()
+        var lastNonBlank = -1
+        for (c in 0 until cols) {
+            val cell = cellsRow[c]
+            if (cell.isWideTrail) {
+                // trail has no char; skip (lead already rendered)
+            } else {
+                val cp = if (cell.codePoint == 0) ' '.code else cell.codePoint
+                sb.appendCodePoint(cp)
+                if (!cell.isBlank) lastNonBlank = sb.length - 1
             }
-            if (lastNonBlank < sb.length - 1) sb.substring(0, lastNonBlank + 1) else sb.toString()
         }
+        return if (lastNonBlank < sb.length - 1) sb.substring(0, lastNonBlank + 1) else sb.toString()
     }
 
     val scrollbackLineCount: Int get() = scrollback.size
+
+    /** T82: ED 3 — clear saved lines (scrollback) without touching the visible screen. */
+    fun clearScrollback() {
+        scrollback.clear()
+    }
+
+    /**
+     * T82: render the last [maxLines] scrollback rows as plain text, oldest first.
+     * Same row-rendering rules as [renderedText] (wide trails skipped, trailing trim).
+     */
+    fun scrollbackRenderedLines(maxLines: Int): List<String> {
+        if (scrollback.isEmpty() || maxLines <= 0) return emptyList()
+        val from = maxOf(0, scrollback.size - maxLines)
+        return (from until scrollback.size).map { renderRowCells(scrollback.elementAt(it)) }
+    }
 
     /** Test/observation accessor for a saved scrollback row (internal).
      * ArrayDeque has no indexed 'get' operator, so use elementAt (O(n)). */

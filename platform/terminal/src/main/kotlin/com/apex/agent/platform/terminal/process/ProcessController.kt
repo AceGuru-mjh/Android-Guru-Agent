@@ -82,6 +82,20 @@ class ProcessController(
         jobId: Long?
     ): Result<Unit> = inputManager.sendSignal(sessionId, owner, signal, jobId)
 
+    /**
+     * T82：只信号前台作业组（tcgetpgrp）—— **shell 不受影响**（Ctrl-C 语义：
+     * 打断当前命令，shell 存活回 prompt）。native 侧 tcgetpgrp(master) 取前台组，
+     * fg == shell pid（空闲 prompt）时返回 false —— 调用方退化到 signalGroup 或放弃。
+     */
+    suspend fun signalForegroundJob(
+        sessionId: Long,
+        owner: InputOwner,
+        signal: UnixSignal,
+        jobId: Long?
+    ): Boolean =
+        inputManager.sendForegroundSignal(sessionId, owner, signal, jobId)
+            .fold(onSuccess = { it.bytesWritten > 0 }, onFailure = { false })
+
     /** Remove a process group (on session close). */
     fun unregister(sessionId: Long) {
         groups.remove(sessionId)

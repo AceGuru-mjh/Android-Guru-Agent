@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive icon background — solid primary color.
-  Defined as a drawable so <adaptive-icon> can reference it.
+  Adaptive icon background — clean white plate.
+
+  Faithful to the source art (lavender glyph on white). On light launchers the
+  masked white plate reads as a soft card; on dark launchers the lavender
+  mascot pops. Solid color (no gradient) keeps masked edges artifact-free.
 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#1A73E8" />
+    <solid android:color="#FFFFFF" />
 </shape>

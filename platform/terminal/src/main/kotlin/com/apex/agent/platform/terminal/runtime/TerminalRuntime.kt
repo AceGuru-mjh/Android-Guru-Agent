@@ -117,7 +117,12 @@ interface TerminalRuntime {
         mode: ObserveMode = ObserveMode.SEMANTIC,
         afterCursor: Long = 0,
         maxBytes: Int = 12000,
-        maxEvents: Int = 200
+        maxEvents: Int = 200,
+        /**
+         * T82：SCREEN 模式下附带 scrollback 尾部行数（0 = 不带 —— 历史行为）。
+         * VT 主屏保存最近 1000 行（Termux 基线 §1.5），此前无任何 API 能读到。
+         */
+        scrollbackLines: Int = 0
     ): RuntimeResult<ObserveResult>
 
     enum class ObserveMode { SEMANTIC, EVENT, SCREEN, RAW }
@@ -134,7 +139,9 @@ interface TerminalRuntime {
         val semantic: TerminalSemanticState? = null,   // mode=SEMANTIC
         val events: List<TerminalEvent>? = null,        // mode=EVENT
         val screen: TerminalScreenState? = null,        // mode=SCREEN
-        val raw: String? = null                          // mode=RAW (utf-8 or base64)
+        val raw: String? = null,                        // mode=RAW (utf-8 or base64)
+        /** T82：SCREEN + scrollbackLines>0 —— VT 主屏 scrollback 尾部（oldest→newest）。 */
+        val scrollbackTail: List<String>? = null        // mode=SCREEN
     )
 
     // ───────── wait ─────────
@@ -155,7 +162,7 @@ interface TerminalRuntime {
         key: TerminalKey? = null
     ): RuntimeResult<WriteResult>
 
-    enum class WriteKind { RAW, LINE, KEY }
+    enum class WriteKind { RAW, LINE, KEY, PASTE }
 
     data class WriteResult(
         val written: Boolean,
@@ -176,8 +183,24 @@ interface TerminalRuntime {
     data class SignalResult(
         val sent: Boolean,
         val signal: UnixSignal,
-        val targetJobId: Long?
+        val targetJobId: Long?,
+        /** T82：scope=JOB 时的前台送达结果 —— NO_FOREGROUND_JOB = shell 自身在前台（空闲）。 */
+        val foregroundDelivered: Boolean? = null
     )
+
+    /**
+     * T82：只向控制终端前台作业组发信号 —— shell 不受影响（Ctrl-C 语义：打断当前
+     * 命令，session 存活）。与 [signal]（session 级 —— kill(-PGID) 含 shell）互补。
+     *
+     * @return foregroundDelivered=false 表示无前台作业（空闲 prompt）—— 未发送任何
+     * 信号（调用方决定是否退化到 session 级）。
+     */
+    suspend fun signalForeground(
+        sessionId: Long,
+        signal: UnixSignal,
+        owner: InputOwner,
+        jobId: Long? = null
+    ): RuntimeResult<SignalResult>
 
     // ───────── cancel (Spec PR #51 §5) ─────────
     /** Cancel a job: graceful SIGTERM → grace period → SIGKILL. Agent doesn't manage signals manually. */

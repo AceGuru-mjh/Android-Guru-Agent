@@ -197,7 +197,15 @@ class TerminalViewModel @Inject constructor(
 
     private suspend fun ensureSession(): Long? {
         if (sessionId == null) {
-            val r = terminalRuntime.create()
+            // T82（Termux 基线 §4.1/§12）：Ubuntu READY 时用户可见终端默认进
+            // linux-ubuntu 会话（真实 Ubuntu CLI 环境 —— 此前 UI 恒 local Android
+            // shell）。未安装/未就绪 → 诚实回落 local（与历史行为一致）。
+            val backendId = runCatching {
+                ubuntuLifecycle.stateFlow.value.phase
+            }.getOrNull()?.let { phase ->
+                if (phase == UbuntuLifecycleCoordinator.Phase.READY) "linux-ubuntu" else "local"
+            } ?: "local"
+            val r = terminalRuntime.create(backendId = backendId)
             if (r.isSuccess) {
                 sessionId = r.getOrThrow().sessionId
                 observeScreenState()

@@ -18,16 +18,18 @@ import kotlinx.serialization.json.jsonArray
  *
  * Write input to a Session. Owner is assigned automatically by Runtime (Agent tool calls → AGENT,
  * UI → USER); do NOT pass owner. Use kind=LINE to append newline, RAW for exact bytes, KEY for
- * special keys (Ctrl+C etc.). For interactive prompts detected by InputWaiting.
+ * special keys (Ctrl+C etc.), PASTE for bracketed paste (T82: wraps ESC[200~/ESC[201~ when the
+ * session enabled paste mode 2004 — vim/readline treat it as one atomic paste, no auto-newline).
+ * For interactive prompts detected by InputWaiting.
  *
  * JSON Schema (input):
- *   { sessionId: int, kind?: "RAW"|"LINE"|"KEY"=LINE, text?: string, key?: string }
+ *   { sessionId: int, kind?: "RAW"|"LINE"|"KEY"|"PASTE"=LINE, text?: string, key?: string }
  * JSON Schema (output):
  *   { written: bool, bytesWritten: int, cursor: int, inputOwner: "AGENT"|"USER"|"SYSTEM" }
  * Errors: SessionNotFound, SessionClosed, PermissionDenied, OwnerBusy, WriteFailed, InvalidInput
  *
  * KEY names: ENTER, TAB, BACKSPACE, ESC, CTRL_C, CTRL_D, CTRL_Z, ARROW_UP/DOWN/LEFT/RIGHT,
- *   HOME, END, DELETE, PAGE_UP, PAGE_DOWN, F1-F12
+ *   HOME, END, DELETE, PAGE_UP, PAGE_DOWN, INSERT, F1-F12（T82：F 键已全量映射）
  */
 class TerminalWriteTool(
     private val runtime: TerminalRuntime
@@ -37,11 +39,12 @@ class TerminalWriteTool(
     override val description: String = """
         Write input to a Session. Owner is assigned automatically by Runtime (Agent tool calls →
         AGENT, UI → USER); do NOT pass owner. Use kind=LINE to append newline, RAW for exact bytes,
-        KEY for special keys (Ctrl+C etc.). For interactive prompts detected by InputWaiting.
+        KEY for special keys (Ctrl+C, arrows, F1-F12), PASTE for bracketed paste (atomic insert,
+        no newline). For interactive prompts detected by InputWaiting.
     """.trimIndent()
 
     override val parametersSchema: String = """
-{"type":"object","properties":{"sessionId":{"type":"integer"},"kind":{"type":"string","default":"LINE"},"text":{"type":"string"},"key":{"type":"string"}},"required":["sessionId"]}
+{"type":"object","properties":{"sessionId":{"type":"integer"},"kind":{"type":"string","enum":["RAW","LINE","KEY","PASTE"],"default":"LINE"},"text":{"type":"string"},"key":{"type":"string"}},"required":["sessionId"]}
 """.trimIndent()
 
     suspend fun execute(input: Input): Output {

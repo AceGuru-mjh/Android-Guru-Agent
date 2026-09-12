@@ -27,6 +27,16 @@ interface InputManager : TerminalInput {
     /** Human releases control back to Agent (UI "release" button). I3. */
     suspend fun releaseTakeover(sessionId: Long): Result<Unit>
 
+    /**
+     * T82：只向控制终端前台作业组（tcgetpgrp）发信号 —— shell 存活（Ctrl-C 语义）。
+     * 成功时 WriteResult.bytesWritten>0；==0 表示无前台作业（未发送）。
+     * 默认实现退化到 session 级 sendSignal（测试替身无需覆写）。
+     */
+    suspend fun sendForegroundSignal(
+        sessionId: Long, owner: InputOwner, signal: UnixSignal, jobId: Long?
+    ): Result<WriteResult> =
+        sendSignal(sessionId, owner, signal, jobId).map { WriteResult(true, 1, 0L, owner) }
+
     /** Inject the PolicyEngine (set once at construction). */
     val policy: TerminalPolicy
 }

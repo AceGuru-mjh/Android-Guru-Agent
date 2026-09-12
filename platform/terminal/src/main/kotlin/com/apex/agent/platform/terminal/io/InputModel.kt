@@ -85,4 +85,15 @@ enum class UnixSignal(val number: Int) {
 }
 
 /** Kind of input written (carried in InputWritten event). */
-enum class InputKind { RAW, LINE, KEY, SIGNAL }
+enum class InputKind { RAW, LINE, KEY, SIGNAL, PASTE }
+
+/**
+ * T82：会话 VT 当前输入相关模式的只读快照 —— InputManager 按键翻译用。
+ * • [applicationCursorKeys]（DECCKM，CSI ?1h）：方向键/Home/End 必须发 SS3
+ *   （ESC O A/B/C/D/H/F）而非 CSI —— 否则 vim/less 等应用光标模式下方向键失效。
+ * • [bracketedPaste]（模式 2004）：粘贴写入需包裹 ESC[200~ … ESC[201~。
+ */
+data class VtInputModes(
+    val applicationCursorKeys: Boolean = false,
+    val bracketedPaste: Boolean = false
+)

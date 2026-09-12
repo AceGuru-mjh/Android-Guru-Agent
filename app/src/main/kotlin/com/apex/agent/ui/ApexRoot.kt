@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
@@ -51,8 +52,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.ui.component.ContextMeterBar
+import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
+import com.apex.agent.ui.screen.glass.GlassLabScreen
 import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
@@ -78,6 +81,8 @@ sealed class DrawerDestination(
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
+    // 玻璃实验室 —— 内部 Liquid Glass 验收页（Spec §20：背景变化/网格/高对比文字/移动元素）
+    data object GlassLab : DrawerDestination("glasslab", "玻璃实验室", Icons.Default.BlurOn)
 }
 
 /**
@@ -176,13 +181,14 @@ fun ApexRoot() {
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = "打开导航",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        // 顶栏菜单钮 → GlassIconButton —— Frosted 档：
+                        // 顶栏无内容可采样，诚实降级为主题薄霜 + 边缘光 + 高光
+                        GlassIconButton(
+                            icon = Icons.Default.Menu,
+                            contentDescription = "打开导航",
+                            onClick = { scope.launch { drawerState.open() } },
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -224,6 +230,7 @@ fun ApexRoot() {
                             // TopAppBar 的返回键原为空操作（默认 onBack={}）；接回 Agent 页。
                             onBack = { currentDestination = DrawerDestination.Agent }
                         )
+                        DrawerDestination.GlassLab -> GlassLabScreen()
                     }
                 }
             }

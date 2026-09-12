@@ -67,6 +67,8 @@ public:
     bool hasData(int sessionId);
     bool waitForData(int sessionId, int timeoutMs);
     bool sendSignal(int sessionId, int signal);
+    // T82：只信号前台作业组（不碰 shell 组）—— Ctrl-C 语义保 shell 存活。
+    bool signalForeground(int sessionId, int signal);
     void resize(int sessionId, int rows, int cols);
     bool isAlive(int sessionId);
     int getPid(int sessionId);

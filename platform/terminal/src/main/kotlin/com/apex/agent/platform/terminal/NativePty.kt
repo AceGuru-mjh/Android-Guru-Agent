@@ -42,6 +42,13 @@ interface NativePtyJniBridge {
     fun nativeHasData(sessionId: Int): Boolean
     fun nativeWaitForData(sessionId: Int, timeoutMs: Int): Boolean
     fun nativeSendSignal(sessionId: Int, signal: Int): Boolean
+
+    /**
+     * T82：只向控制终端前台进程组（tcgetpgrp）发信号 —— shell 自身组不受影响
+     * （Ctrl-C 语义：打断当前命令，shell 存活）。无前台作业（fg == shell pid /
+     * 空闲 prompt）或会话不存在 → false（调用方退化到 session 级信号）。
+     */
+    fun nativeSignalForegroundGroup(sessionId: Int, signal: Int): Boolean
     fun nativeResize(sessionId: Int, rows: Int, cols: Int)
     fun nativeIsAlive(sessionId: Int): Boolean
     fun nativeGetPid(sessionId: Int): Int
@@ -123,6 +130,8 @@ class NativePty : NativePtyJniBridge {
     override external fun nativeHasData(sessionId: Int): Boolean
     override external fun nativeWaitForData(sessionId: Int, timeoutMs: Int): Boolean
     override external fun nativeSendSignal(sessionId: Int, signal: Int): Boolean
+    /** T82：只信号前台作业组（见 [NativePtyJniBridge.nativeSignalForegroundGroup]）。 */
+    override external fun nativeSignalForegroundGroup(sessionId: Int, signal: Int): Boolean
     override external fun nativeResize(sessionId: Int, rows: Int, cols: Int)
     override external fun nativeIsAlive(sessionId: Int): Boolean
     override external fun nativeGetPid(sessionId: Int): Int

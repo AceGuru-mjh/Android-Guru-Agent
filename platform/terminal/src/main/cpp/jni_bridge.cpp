@@ -220,6 +220,14 @@ Java_com_apex_agent_platform_terminal_NativePty_nativeSendSignal(
     return PtyEngine::instance().sendSignal(sessionId, signal);
 }
 
+// T82：只向控制终端前台进程组（tcgetpgrp）发信号 —— shell 自身组不受影响。
+// 无前台作业（fg == shell pid）/ 会话不存在 → false（调用方退化到 session 级信号）。
+JNIEXPORT jboolean JNICALL
+Java_com_apex_agent_platform_terminal_NativePty_nativeSignalForegroundGroup(
+    JNIEnv*, jobject, jint sessionId, jint signal) {
+    return PtyEngine::instance().signalForeground(sessionId, signal);
+}
+
 JNIEXPORT void JNICALL
 Java_com_apex_agent_platform_terminal_NativePty_nativeResize(
     JNIEnv*, jobject, jint sessionId, jint rows, jint cols) {

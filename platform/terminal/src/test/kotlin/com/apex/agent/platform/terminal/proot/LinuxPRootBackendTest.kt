@@ -97,10 +97,17 @@ class LinuxPRootBackendTest {
         assertEquals("-r", argv[1]); assertEquals("/fake/rootfs", argv[2])
         assertEquals("-0", argv[3])
         assertEquals("--kill-on-exit", argv[4])
-        // T75: binds —— home:/root（request.binds，先）+ workspace:/workspace（builder 追加）
+        // T75+T82: binds —— home:/root（request.binds，先）+ 系统三连（STANDARD profile：
+        // /proc /dev /sys）+ workspace:/workspace（builder 追加）。
+        // （T82 漏更新的两个期望之一：实现加入 SystemBindProfile.STANDARD 后
+        // 此测试从未同步 —— 远端 main 上即红，本合并补齐期望。）
         val bindArgs = argv.zipWithNext().filter { (a, _) -> a == "-b" }.map { it.second }
         assertEquals(
-            listOf("${homeRoot.absolutePath}:/root", "${File(wsRoot, "default").absolutePath}:/workspace"),
+            listOf(
+                "${homeRoot.absolutePath}:/root",
+                "/proc:/proc", "/dev:/dev", "/sys:/sys",
+                "${File(wsRoot, "default").absolutePath}:/workspace"
+            ),
             bindArgs
         )
         // guest cwd（默认 /workspace）
@@ -175,11 +182,13 @@ class LinuxPRootBackendTest {
         val wsBind = spec.argv.zipWithNext().first { p -> p.first == "-b" && p.second.endsWith(":/workspace") }.second
         assertEquals("${File(wsRoot, "task-42").absolutePath}:/workspace", wsBind)
         assertTrue(File(wsRoot, "task-42").isDirectory)
-        // 元数据携带 workspaceId + 双 bind
+        // 元数据携带 workspaceId + 全量 bind（T82 STANDARD 系统三连后共 5 项）
         assertEquals("task-42", spec.metadata.workspaceId)
         assertEquals(File(wsRoot, "task-42").absolutePath, spec.metadata.workspaceDir)
-        assertEquals(2, spec.metadata.binds.size)
+        assertEquals(5, spec.metadata.binds.size)
         assertTrue(spec.metadata.binds.any { it.endsWith(":/root") })
+        assertTrue(spec.metadata.binds.any { it.endsWith(":/workspace") })
+        assertTrue("T82 系统三连应在 metadata.binds 中", spec.metadata.binds.any { it == "/proc:/proc" })
     }
 
     @Test

@@ -98,7 +98,13 @@ class TerminalRuntimeImpl(
      * T81 (U-10)：rootfs 活跃会话绑定（LINUX 会话创建/关闭维护引用计数 ——
      * provisioner.remove() 的活跃保护由此驱动，原 markInUse 生产零调用）。
      */
-    private val rootfsBinder: com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinder? = null
+    private val rootfsBinder: com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinder? = null,
+    /**
+     * T82 — Shell Marker Protocol 总开关（真实退出码）。默认 false（历史测试行为
+     * 不变）；生产 DI（TerminalModule）传 true。开启后 job 命令携带 OSC 633
+     * marker，session listener 解析 marker 并以真实退出码推进 job 终态。
+     */
+    private val enableShellMarkers: Boolean = false
 ) : TerminalRuntime {
 
     private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
@@ -144,7 +150,10 @@ class TerminalRuntimeImpl(
         native, eventLog, eventBus, waitEngine, inputManager, virtualTerminalFactory, policy,
         inputDetector, pumpScope  // P70: pumps + exit watchers on the injectable pump scope
     )
-    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope, timeoutController)
+    private val jobManager = JobManagerImpl(sessionManager, inputManager, eventLog, eventBus, scope, timeoutController, enableShellMarkers)
+
+    /** T82：per-session shell marker 解析器（退出码协议；仅 enableShellMarkers 时使用）。 */
+    private val markerParsers = java.util.concurrent.ConcurrentHashMap<Long, com.apex.agent.platform.terminal.protocol.ShellMarkerParser>()
 
     init {
         // P70-4: wire the REAL sessionId(Long) → nativeSessionId(Int) mapping into the
@@ -153,6 +162,14 @@ class TerminalRuntimeImpl(
         // is rebuilt in-process (Kotlin counter resets, native counter never does) —
         // writes/signals then landed on the WRONG native session.
         inputManager.nativeIdResolver = { sid -> sessionManager.assembly(sid)?.nativeSessionId }
+
+        // T82：输入模式感知接线 —— 按键翻译（DECCKM → SS3 方向键）与括号粘贴需要
+        // 知道会话 VT 的当前模式。模式由 guest 程序 DECSET/DECRST 动态切换。
+        inputManager.vtModeProvider = { sid ->
+            (sessionManager.assembly(sid)?.virtualTerminal
+                as? com.apex.agent.platform.terminal.screen.RealVirtualTerminal)
+                ?.let { com.apex.agent.platform.terminal.io.VtInputModes(it.applicationCursorKeys(), it.bracketedPasteMode()) }
+        }
 
         // T81 (D-5)：周期性 auto-save 接线（原 startAutoSave 生产零调用 —— 持久化
         // 只在 ProcessExited 事件时发生，长命令运行中 crash 丢全部中间状态）。
@@ -299,14 +316,14 @@ class TerminalRuntimeImpl(
     // ───────── observe ─────────
     override suspend fun observe(
         sessionId: Long, mode: ObserveMode, afterCursor: Long,
-        maxBytes: Int, maxEvents: Int
+        maxBytes: Int, maxEvents: Int, scrollbackLines: Int
     ): Result<ObserveResult> {
         val a = sessionManager.assembly(sessionId)
             ?: return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         // Delegate to per-session ObservationEngine (Spec §30). Runtime is orchestration only.
         val engine = a.observationEngine
         return Result.success(
-            engine.observe(sessionId, mode, afterCursor, maxBytes, maxEvents)
+            engine.observe(sessionId, mode, afterCursor, maxBytes, maxEvents, scrollbackLines)
         )
     }
 
@@ -333,6 +350,9 @@ class TerminalRuntimeImpl(
             WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
             WriteKind.LINE -> inputManager.sendLine(sessionId, owner, text ?: "")
             WriteKind.KEY -> inputManager.sendKey(sessionId, owner, key ?: TerminalKey.ENTER)
+            // T82：括号粘贴 —— VT 开启 2004 模式时包裹 ESC[200~/ESC[201~（InputManager
+            // 内部按会话实际模式决定，未开启则退化为原样字节，不追加换行）。
+            WriteKind.PASTE -> inputManager.sendPaste(sessionId, owner, text ?: "")
         }
         return res.map { wr ->
             // bytesWritten reflects the actual bytes written to the PTY (LINE appends '\n', RAW does not).
@@ -360,6 +380,24 @@ class TerminalRuntimeImpl(
         // delivers the signal to the WHOLE process group (kill(-PGID)), not just the shell.
         val res = processController.signalGroup(sessionId, owner, signal, jobId)
         return res.map { SignalResult(sent = true, signal = signal, targetJobId = jobId) }
+    }
+
+    // ───────── signalForeground（T82：Ctrl-C 语义 —— 只打断前台命令，shell 存活） ─────────
+    override suspend fun signalForeground(
+        sessionId: Long, signal: UnixSignal, owner: InputOwner, jobId: Long?
+    ): Result<SignalResult> {
+        if (sessionManager.assembly(sessionId) == null) {
+            return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
+        }
+        val delivered = processController.signalForegroundJob(sessionId, owner, signal, jobId)
+        return Result.success(
+            SignalResult(
+                sent = delivered,
+                signal = signal,
+                targetJobId = jobId,
+                foregroundDelivered = delivered
+            )
+        )
     }
 
     // ───────── cancel (Spec PR #51 §5) ─────────
@@ -483,6 +521,8 @@ class TerminalRuntimeImpl(
             timeoutController.cancelSession(sessionId)
             // T81 (U-10)：解除 rootfs 引用（LINUX 会话；remove 门禁解除）
             rootfsBinder?.unbind(sessionId)
+            // T82：回收 marker 解析器（per-session 状态不随 close 泄漏）。
+            markerParsers.remove(sessionId)
             // T81：close 后同步删除持久化记录（§39 语义：CLOSED → 不再保留；
             // 原路径依赖 collector 收到 SessionClosed 时 autoSave，与 assembly
             // 移除存在竞态，CLOSED 终态可能从未落盘）。
@@ -511,12 +551,39 @@ class TerminalRuntimeImpl(
             eventBus.subscribe(sessionId, afterCursor = 0L)
                 .takeWhile { ev -> ev !is TerminalEvent.SessionClosed }
                 .collect { ev ->
+                    // T82 — Shell Marker Protocol：marker 解析先于 job 状态处理 ——
+                    // OutputProduced 事件到达时字节已写入 ring（pump 先 append 后
+                    // emit），此处读取 chunk 范围并扫描 OSC 633 帧。同一 collect
+                    // 协程内顺序保证：marker 的 ProcessExited 先于后续 WaitingInput。
+                    if (enableShellMarkers && ev is TerminalEvent.OutputProduced) {
+                        feedShellMarkers(sessionId, ev)
+                    }
                     jobManager.onEvent(ev)
                     // Auto-save on significant events (Spec §39)
                     if (persistenceStore != null && ev is TerminalEvent.ProcessExited) {
                         autoSaveSession(sessionId)
                     }
                 }
+        }
+    }
+
+    /**
+     * T82：从 ring 读取一个 OutputProduced chunk 的字节并喂给该 session 的
+     * marker 解析器。解析出的 marker 交给 JobManager（真实退出码终态推进）。
+     */
+    private suspend fun feedShellMarkers(sessionId: Long, ev: TerminalEvent.OutputProduced) {
+        val len = (ev.endCursor - ev.startCursor).toInt()
+        if (len <= 0) return
+        val ring = sessionManager.assembly(sessionId)?.ringBuffer ?: return
+        val slice = ring.getSince(ev.startCursor, len)
+        // 诚实降级：chunk 已被环形淘汰（256KB 窗口内不可能 —— chunk ≤ 8KB）或读不齐
+        // → 跳过该 chunk（marker 丢失时退回 prompt 启发式 fallback）。
+        if (slice.overrun || slice.bytes.size != len) return
+        val parser = markerParsers.getOrPut(sessionId) {
+            com.apex.agent.platform.terminal.protocol.ShellMarkerParser()
+        }
+        for (m in parser.feed(slice.bytes, ev.startCursor)) {
+            jobManager.onShellMarker(sessionId, m)
         }
     }
 

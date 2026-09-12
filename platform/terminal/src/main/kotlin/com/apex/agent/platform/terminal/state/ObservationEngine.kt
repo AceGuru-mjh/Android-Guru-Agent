@@ -61,7 +61,8 @@ class ObservationEngine(
         mode: TerminalRuntime.ObserveMode,
         afterCursor: Long,
         maxBytes: Int,
-        maxEvents: Int
+        maxEvents: Int,
+        scrollbackLines: Int = 0
     ): TerminalRuntime.ObserveResult {
         val currentCursor = ringBuffer.totalCursor
         return when (mode) {
@@ -97,11 +98,18 @@ class ObservationEngine(
             }
 
             TerminalRuntime.ObserveMode.SCREEN -> {
+                // T82：scrollback 尾部（oldest→newest）—— 主屏保存最近 1000 行；
+                // 仅 RealVirtualTerminal 支持（Stub 不带 —— null 字段保持诚实）。
+                val tail = if (scrollbackLines > 0) {
+                    (virtualTerminal as? com.apex.agent.platform.terminal.screen.RealVirtualTerminal)
+                        ?.scrollbackLines(scrollbackLines)
+                } else null
                 TerminalRuntime.ObserveResult(
                     mode = mode,
                     sessionId = sessionId,
                     cursor = currentCursor,
-                    screen = virtualTerminal.snapshot()
+                    screen = virtualTerminal.snapshot(),
+                    scrollbackTail = tail
                 )
             }
 

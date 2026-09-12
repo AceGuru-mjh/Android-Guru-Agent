@@ -82,7 +82,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(
-    viewModel: TerminalViewModel,
+    // 默认 hiltViewModel()：与 AgentChatScreen/MemoryScreen 等既有屏一致
+    viewModel: TerminalViewModel = hiltViewModel(),
     onOpenNavDrawer: () -> Unit = {}
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()

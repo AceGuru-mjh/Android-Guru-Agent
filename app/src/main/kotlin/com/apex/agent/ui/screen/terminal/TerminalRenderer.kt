@@ -53,7 +53,6 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -132,7 +131,7 @@ private object TerminalTheme {
     val toolbarKey = Color(0xFF232A35)
 }
 
-/** cell 级选择区间（行/列，闭开混合：col 区间 [from, to)）。 */
+/** cell 级选择区间（行/列；列区间左闭右开，含 from 至 to 前一列）。 */
 private data class SelRange(val startRow: Int, val startCol: Int, val endRow: Int, val endCol: Int)
 
 @Composable
@@ -258,7 +257,7 @@ fun TerminalGrid(
             Key.MoveEnd -> { onKey(TerminalKey.END); true }
             Key.PageUp -> { onKey(TerminalKey.PAGE_UP); true }
             Key.PageDown -> { onKey(TerminalKey.PAGE_DOWN); true }
-            Key.ForwardDelete -> { onKey(TerminalKey.DELETE); true }
+            Key.Delete -> { onKey(TerminalKey.DELETE); true }
             else -> false
         }
     }

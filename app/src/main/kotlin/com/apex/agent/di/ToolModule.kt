@@ -155,7 +155,7 @@ object ToolModule {
         guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
         ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
         rootfsBaseDir: java.io.File,
-        // merge note: rootfsTarget 参数已在方法签名上方以短名声明（T82 合并时去重）
+        // 注：rootfsTarget 已在上方参数区声明（同一类型），本地与远端 CI 红修复同款合并去重
         skillRegistry: SkillRegistry,
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,

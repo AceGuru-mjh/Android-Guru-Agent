@@ -40,7 +40,6 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -63,6 +62,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.apex.agent.ui.glass.GlassToolCard
+import com.apex.agent.ui.glass.GlassToolStatus
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -179,18 +180,16 @@ internal fun ToolCallCard(
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = if (isError) MaterialTheme.colorScheme.error else kindStyle.color
 
-    ElevatedCard(
+    // ═══ Liquid Glass 迁移：ElevatedCard → GlassToolCard Frosted 档 ═══
+    // 卡片位于消息源LazyColumn 内部 —— Haze 1.4 不支持源内嵌套采样，
+    // 诚实降级为 Frosted：主题薄霜 + 状态着色 + 边缘光 + 高光，不冒充 backdrop。
+    GlassToolCard(
+        status = if (isError) GlassToolStatus.FAILED else GlassToolStatus.COMPLETED,
+        expanded = expanded,
+        accent = accent,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded },
-        shape = RoundedCornerShape(12.dp),
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = if (isError) {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        )
+            .clickable { expanded = !expanded }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -649,12 +648,12 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
         smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
     }
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = accent.copy(alpha = 0.10f)
-        )
+    // ═══ Liquid Glass 迁移：ElevatedCard → GlassToolCard Frosted 档 ═══
+    // 运行态：工具类型色 accent 驱动着色 + 边缘光，保留既有脉冲反馈环
+    GlassToolCard(
+        status = GlassToolStatus.RUNNING,
+        accent = accent,
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(

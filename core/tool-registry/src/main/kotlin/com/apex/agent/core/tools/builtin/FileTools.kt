@@ -130,8 +130,19 @@ class ListFilesTool(
     }
 
     private fun matchesGlob(name: String, glob: String): Boolean {
-        val regex = glob.replace(".", "\\.").replace("*", ".*").replace("?", ".")
-        return Regex(regex).matches(name)
+        // P3-g 修复：旧实现只转义 `.`——`[`（如 "file[1].txt"、"[abc]*"）会被按
+        // 正则字符类解析：非法类直接 PatternSyntaxException，合法类则语义错误。
+        // 改单遍扫描：`*`→`.*`、`?`→`.`，其余字面字符用 Regex.escape 转义。
+        val sb = StringBuilder(glob.length + 8)
+        var i = 0
+        while (i < glob.length) {
+            when (glob[i]) {
+                '*' -> { sb.append(".*"); i++ }
+                '?' -> { sb.append('.'); i++ }
+                else -> { sb.append(Regex.escape(glob[i].toString())); i++ }
+            }
+        }
+        return Regex(sb.toString()).matches(name)
     }
 
     private fun formatSize(bytes: Long): String = when {

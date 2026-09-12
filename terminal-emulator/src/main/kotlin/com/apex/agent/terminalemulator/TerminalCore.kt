@@ -428,7 +428,17 @@ class TerminalCore(
                     cursor.row = scrollRegion.bottom
                 }
             }
-            'E' -> { cursor.row++; cursor.column = 0 }  // NEL
+            'E' -> {  // NEL — next line：下移一行 + 复位列 0；越滚屏区下界时滚屏
+                // P3 fix（审计 6-b）：补齐与 IND 'D' 一致的滚屏逻辑 —— 原实现裸
+                // cursor.row++，光标可越过 scrollRegion.bottom 悬在屏外（后续 putChar
+                // 越界/静默丢字符）。
+                cursor.row++
+                if (cursor.row > scrollRegion.bottom) {
+                    currentBuffer.scrollUp(1, scrollRegion.top, scrollRegion.bottom)
+                    cursor.row = scrollRegion.bottom
+                }
+                cursor.column = 0
+            }
             else -> { /* unknown ESC ignored */ }
         }
     }

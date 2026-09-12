@@ -65,8 +65,15 @@ class ProotExecutorProotSmokeTest {
                 .redirectErrorStream(true)
             pb.environment()["PROOT_NO_SECCOMP"] = "1"
             val proc = pb.start()
-            proc.inputStream.bufferedReader().readText()
-            proc.waitFor() == 0
+            // 有界等待（30s）：与 UbuntuRootfsEndToEndIntegrationTest.prootWorks 同一防御 ——
+            // 无限期 waitFor 在 ptrace 受限环境下挂住整个测试任务（CI 症状：无任何
+            // 测试事件直至任务超时）。超时即判 proot 不可用，冒烟组诚实跳过。
+            val exited = proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!exited) {
+                runCatching { proc.destroyForcibly() }
+                return false
+            }
+            proc.exitValue() == 0
         } catch (e: Exception) {
             false
         }

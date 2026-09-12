@@ -139,10 +139,30 @@ class StreamingOpenAiClient(
         } else {
             maxTokens
         }
+
+        // P1-3 修复：max_tokens 与 max_completion_tokens 互斥。旧实现两者同时发送
+        //（thinkingBudget 非空或 ReasoningEffort.MAX 时），OpenAI 端点对同时携带
+        // 两个参数的请求直接 400（"Unsupported parameter: 'max_tokens' is not
+        // supported with this model"）。现在发送 max_completion_tokens 时不再发
+        // max_tokens；未设置思维预算时才发 max_tokens。
+        // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准。
+        val maxCompletion = config.thinkingBudget ?: run {
+            if (config.reasoningEffort == ReasoningEffort.MAX && config.capabilities.reasoning) maxOf(maxTokens, 8192) else null
+        }
+
         return buildJsonObject {
             put("model", config.model)
-            put("temperature", temperature)
-            put("max_tokens", effectiveMaxTokens)
+            // P3-c 修复：仅对非推理模型发送 temperature。o-series 等原生推理模型
+            // 不接受 temperature（OpenAI 返回 400），capabilities.reasoning == true
+            // 时省略，让服务端使用模型默认值。
+            if (!config.capabilities.reasoning) {
+                put("temperature", temperature)
+            }
+            if (maxCompletion != null) {
+                put("max_completion_tokens", maxCompletion)
+            } else {
+                put("max_tokens", effectiveMaxTokens)
+            }
             put("stream", stream)
 
             // ── Sampling 参数（完整开放）─────────────────────────
@@ -170,11 +190,7 @@ class StreamingOpenAiClient(
                     put("reasoning_effort", effort)
                 }
             }
-            // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准
-            val maxCompletion = config.thinkingBudget ?: run {
-                if (config.reasoningEffort == ReasoningEffort.MAX && config.capabilities.reasoning) maxOf(maxTokens, 8192) else null
-            }
-            maxCompletion?.let { put("max_completion_tokens", it) }
+            // max_completion_tokens 已在上方请求体开头写入（P1-3：与 max_tokens 互斥）
 
             // ── Structured Output ───────────────────────────────
             // T72 §二十二修复：仅当模型声明 structuredOutput 能力时才发送

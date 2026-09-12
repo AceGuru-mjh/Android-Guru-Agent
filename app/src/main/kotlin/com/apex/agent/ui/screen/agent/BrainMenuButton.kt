@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.llm.ModelProfile
 import kotlin.math.roundToInt
+import java.util.Locale
 
 /** 模型列表单项行高；列表展开高度固定为其 3 倍（规格要求）。 */
 private val MODEL_ITEM_HEIGHT = 48.dp
@@ -316,7 +317,7 @@ private fun BrainParamSliders(
             label = "Temperature",
             value = temperature,
             valueRange = 0f..2f,
-            display = "%.2f".format(temperature),
+            display = String.format(Locale.US, "%.2f", temperature),
             onDrag = { temperature = it },
             onCommit = { commit() }
         )
@@ -324,7 +325,7 @@ private fun BrainParamSliders(
             label = "Top-P",
             value = topP,
             valueRange = 0f..1f,
-            display = "%.2f".format(topP),
+            display = String.format(Locale.US, "%.2f", topP),
             onDrag = { topP = it },
             onCommit = { commit() }
         )

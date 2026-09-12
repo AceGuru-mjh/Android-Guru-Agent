@@ -6,7 +6,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,14 +64,27 @@ import java.time.format.DateTimeFormatter
 internal fun AgentMessageItem(
     message: AgentUiMessage,
     vm: AgentChatViewModel,
+    // UX-1：消息操作菜单门禁（流式生成中禁用删除/重生成，复制仍可用）。
+    actionsEnabled: Boolean = true,
     onImageClick: (MessageAttachment) -> Unit = {},
     onFileClick: (MessageAttachment) -> Unit = {}
 ) {
     when (message) {
-        is AgentUiMessage.User -> UserBubble(message, onImageClick, onFileClick)
+        is AgentUiMessage.User -> UserBubble(
+            message = message,
+            actionsEnabled = actionsEnabled,
+            onDelete = { vm.deleteMessage(message.id) },
+            onDeleteFrom = { vm.deleteMessagesFrom(message.id) },
+            onImageClick = onImageClick,
+            onFileClick = onFileClick
+        )
         is AgentUiMessage.Agent -> AgentBubble(
             message = message,
-            onOrganize = { text -> vm.organizeToMemory(text) }
+            actionsEnabled = actionsEnabled,
+            onOrganize = { text -> vm.organizeToMemory(text) },
+            onRegenerate = { vm.regenerateResponse(message.id) },
+            onDelete = { vm.deleteMessage(message.id) },
+            onDeleteFrom = { vm.deleteMessagesFrom(message.id) }
         )
         is AgentUiMessage.ToolCall -> ToolCallCard(
             toolCall = message,
@@ -100,9 +116,14 @@ internal fun retryLastUser(vm: AgentChatViewModel): () -> Unit = {
     lastUser?.let { vm.retry(it.text, it.attachments) }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun UserBubble(
     message: AgentUiMessage.User,
+    // UX-1：消息操作菜单（门禁 + 回调；默认空实现保持既有调用兼容）。
+    actionsEnabled: Boolean = true,
+    onDelete: () -> Unit = {},
+    onDeleteFrom: () -> Unit = {},
     onImageClick: (MessageAttachment) -> Unit = {},
     onFileClick: (MessageAttachment) -> Unit = {}
 ) {
@@ -113,6 +134,9 @@ internal fun UserBubble(
                 .toLocalDateTime()
         )
     }
+    // UX-1：气泡菜单状态。入口两处：头部（非文本区域）长按 + 头部 overflow 钮；
+    // 文本区长按仍归 SelectionContainer 选择，互不冲突。
+    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -123,11 +147,16 @@ internal fun UserBubble(
             modifier = Modifier.widthIn(max = 320.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                // 角色标识 + 时间戳
+                // 角色标识 + 时间戳 + overflow 菜单入口（长按本行 = 非文本区域长按）
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(bottom = 6.dp)
+                    modifier = Modifier
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { menuExpanded = true }
+                        )
+                        .padding(bottom = 6.dp)
                 ) {
                     Text(
                         text = "YOU",
@@ -144,6 +173,29 @@ internal fun UserBubble(
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                        )
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "消息操作",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        MessageActionsMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            copyText = message.text,
+                            showRegenerate = false,
+                            actionsEnabled = actionsEnabled,
+                            onRegenerate = {},
+                            onDelete = onDelete,
+                            onDeleteFrom = onDeleteFrom
                         )
                     }
                 }
@@ -173,13 +225,22 @@ internal fun UserBubble(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun AgentBubble(
     message: AgentUiMessage.Agent,
     onOrganize: (String) -> Unit,
+    // UX-1：消息操作菜单（门禁 + 回调；默认空实现保持既有调用兼容）。
+    actionsEnabled: Boolean = true,
+    onRegenerate: () -> Unit = {},
+    onDelete: () -> Unit = {},
+    onDeleteFrom: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // UX-1：气泡菜单状态。入口两处：头部（非文本区域）长按 + 头部 overflow 钮；
+    // 文本区长按仍归 SelectionContainer 选择，互不冲突。
+    var menuExpanded by remember { mutableStateOf(false) }
     val timeStr = remember(message.timestamp) {
         DateTimeFormatter.ofPattern("HH:mm").format(
             java.time.Instant.ofEpochMilli(message.timestamp)
@@ -217,11 +278,16 @@ internal fun AgentBubble(
                 }
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                // 头像 + 角色标识 + 时间戳
+                // 头像 + 角色标识 + 时间戳 + overflow 菜单入口（长按本行 = 非文本区域长按）
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(bottom = 6.dp)
+                    modifier = Modifier
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { menuExpanded = true }
+                        )
+                        .padding(bottom = 6.dp)
                 ) {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
@@ -253,6 +319,29 @@ internal fun AgentBubble(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Box {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "消息操作",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        MessageActionsMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            copyText = message.text,
+                            showRegenerate = true,
+                            actionsEnabled = actionsEnabled,
+                            onRegenerate = onRegenerate,
+                            onDelete = onDelete,
+                            onDeleteFrom = onDeleteFrom
+                        )
+                    }
                 }
 
                 // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）
@@ -273,7 +362,7 @@ internal fun AgentBubble(
                             clipboard.setText(AnnotatedString(message.text))
                             Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
@@ -287,7 +376,7 @@ internal fun AgentBubble(
                             // 修复：整理入记忆不再“发起即报成功”——结果反馈由 VM 异步链路决定（原失败也提示已整理）
                             onOrganize(message.text)
                         },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Psychology,

@@ -29,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.core.llm.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import java.util.Locale
 
 /**
  * 设置中心（三页签：模型 / Agent / 界面）。
@@ -632,25 +633,25 @@ private fun GenerationSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit)
     SectionCard("Generation · 采样参数", Icons.Outlined.Tune) {
         SliderRow("Temperature", p.temperature, 0f..2f, 20,
             description = "越高越发散，低值更稳定可复现；Agent 任务建议 0.2~0.7",
-            onValueChange = { onUpdate(p.copy(temperature = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(temperature = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         SliderRow("Top P", p.topP, 0f..1f, 10,
             description = "核采样截断；与 Temperature 二选一调整即可",
-            onValueChange = { onUpdate(p.copy(topP = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(topP = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         SliderRow("Top K (0=禁用)", p.topK.toFloat(), 0f..200f, 200,
             description = "仅本地模型（Qwen/Gemma/llama.cpp）常用",
             onValueChange = { onUpdate(p.copy(topK = it.toInt())) }, fmt = { it.toInt().toString() })
         SliderRow("Min P", p.minP, 0f..1f, 20,
             description = "按概率比例截断，本地模型推荐 0.05~0.1",
-            onValueChange = { onUpdate(p.copy(minP = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(minP = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         SliderRow("Frequency Penalty", p.frequencyPenalty, -2f..2f, 40,
             description = "按出现次数惩罚重复 token",
-            onValueChange = { onUpdate(p.copy(frequencyPenalty = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(frequencyPenalty = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         SliderRow("Presence Penalty", p.presencePenalty, -2f..2f, 40,
             description = "只要出现过就惩罚，鼓励新话题",
-            onValueChange = { onUpdate(p.copy(presencePenalty = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(presencePenalty = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         SliderRow("Repetition Penalty", p.repetitionPenalty, 0f..2f, 40,
             description = "本地模型常用，1.0 为不惩罚",
-            onValueChange = { onUpdate(p.copy(repetitionPenalty = it)) }, fmt = { "%.2f".format(it) })
+            onValueChange = { onUpdate(p.copy(repetitionPenalty = it)) }, fmt = { String.format(Locale.US, "%.2f", it) })
         IntFieldRow("Seed (0=Auto)", p.seed?.toInt() ?: 0,
             description = "固定随机种子以复现输出，0 为自动") {
             onUpdate(p.copy(seed = if (it == 0) null else it.toLong()))
@@ -969,7 +970,7 @@ private fun CompressionSection(agent: AgentSettings, onAgent: (AgentSettings) ->
         SliderRow("Compression Threshold", agent.compressionThreshold, 0.5f..0.95f, 8,
             description = "上下文占用达到该比例时触发压缩",
             onValueChange = { onAgent(agent.copy(compressionThreshold = it)) },
-            fmt = { "%.2f".format(it) })
+            fmt = { String.format(Locale.US, "%.2f", it) })
         IntFieldRow("Preserve Recent Turns", agent.preserveRecentTurns,
             description = "压缩时保留最近 N 轮对话原文", min = 1, max = 50) {
             onAgent(agent.copy(preserveRecentTurns = it))

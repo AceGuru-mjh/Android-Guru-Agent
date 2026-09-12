@@ -690,6 +690,9 @@ class DurationConvertTool : BaseTool(
             text = text.trimEnd('0').trimEnd('.')
             if (text.isEmpty() || text == "-") text += "0"
         }
+        // P3-i 修复：整数值补回 ".0"，与 KDoc 声明及 StringDistanceTool.formatScore
+        // 的语义对齐（旧实现 "1.000000" → "1"，文档承诺 "1.0"）。
+        if ("." !in text) text += ".0"
         return text
     }
 

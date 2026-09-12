@@ -1,5 +1,7 @@
 package com.apex.agent.core.engine
 
+import java.util.concurrent.ConcurrentHashMap
+
 /**
  * 简单高风险命令确认门。
  *
@@ -15,7 +17,17 @@ class CommandPermissionGate(
     private val gateway: UserQuestionGateway
 ) {
 
-    private val sessionAllowedCommands = mutableSetOf<String>()
+    // P2-8 修复：ensureAllowed 是 suspend，可能从多个工具执行协程并发进入；
+    // mutableSetOf 非线程安全，并发 add 会丢条目甚至损坏内部结构。
+    private val sessionAllowedCommands: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    // P2-8 修复：旧实现匹配前只 trim——高危模式全部要求空格（"rm "、"dd "），
+    // `rm\t-rf /`、`rm\n-rf /` 等用 TAB/换行分隔的命令绕过门禁。
+    // 匹配前统一归一化：trim + 把任意空白折叠为单个空格。
+    private val whitespaceRun = Regex("\\s+")
+
+    private fun normalize(command: String): String =
+        command.trim().replace(whitespaceRun, " ")
 
     private val highRiskPatterns = listOf(
         "rm ",
@@ -46,7 +58,7 @@ class CommandPermissionGate(
     )
 
     suspend fun ensureAllowed(command: String): Boolean {
-        val normalized = command.trim()
+        val normalized = normalize(command)
 
         if (!isHighRisk(normalized)) {
             return true

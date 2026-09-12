@@ -55,7 +55,17 @@ sealed interface UiAction {
 
 data class UiResult(val success: Boolean, val message: String = "")
 data class UiTreeResult(val success: Boolean, val treeXml: String = "", val nodes: List<UiNode> = emptyList())
-data class ScreenshotResult(val success: Boolean, val imageBytes: ByteArray? = null)
+/**
+ * 截图结果。
+ *
+ * P2 fix（审计 6-b）：新增可选 [error] 字段 —— base64 通道解码失败/screencap 失败时
+ * 携带可诊断的错误说明（默认 null，既有调用点/测试的 2 参构造不受影响）。
+ */
+data class ScreenshotResult(
+    val success: Boolean,
+    val imageBytes: ByteArray? = null,
+    val error: String? = null
+)
 
 data class UiNode(
     val className: String,

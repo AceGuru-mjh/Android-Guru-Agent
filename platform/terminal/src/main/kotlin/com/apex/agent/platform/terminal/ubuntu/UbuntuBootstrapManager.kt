@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -36,9 +37,10 @@ import java.io.RandomAccessFile
  *    同时首次访问 Ubuntu → 只有一个执行 bootstrap，其余等待并共享结果。
  *  - **崩溃恢复**（T76 §18 / §27）：阶段进度持久化到 [BootstrapStateStore]。App
  *    重启后 [reconcile] 检测 IN_PROGRESS 状态 → 重新执行未完成阶段。绝不假报 READY。
- *  - **取消正确**（T76 §36）：CancellationException 重抛，状态置 FAILED（可 retry），
- *    锁释放。
- *  - **超时**（T76 §37）：bootstrap 整体可配超时；内部 apt 操作各自超时。
+ *  - **取消正确**（T76 §36）：CancellationException 重抛（P2 fix：原实现吞掉），
+ *    状态置 FAILED（可 retry），锁释放。
+ *  - **超时**（T76 §37 / P2 fix）：bootstrap 整体可配超时，超时返回 InProgress
+ *   （已完成阶段证据持久化，重试可续跑）；内部 apt 操作各自超时。
  */
 class UbuntuBootstrapManager(
     private val provisioner: RootfsProvisioner,
@@ -109,15 +111,37 @@ class UbuntuBootstrapManager(
         if (st == BootstrapState.READY && !force) {
             return BootstrapResult.AlreadyReady(st)
         }
+        // P3 fix（审计 6-b）：rootfs 未安装（hostDir==null）→ 明确的 ROOTFS_NOT_READY
+        // 结构化错误 —— 原实现 acquireOsLock 对 null hostDir 同样返回 null，被误报成
+        // Busy（“另一实例持锁”），Agent 会徒劳地稍后重试而非先去安装 rootfs。
+        if (rootfsHostDirProvider() == null) {
+            return BootstrapResult.Failed(
+                LinuxEnvironmentError.rootfsNotReady(
+                    "rootfs host dir unavailable — call terminal.ubuntu.install first"
+                ),
+                BootstrapState.CHECKING.name,
+                BootstrapState.NOT_STARTED
+            )
+        }
         // 并发：拿不到锁说明另一 bootstrap 在进行
         val osLock = acquireOsLock()
             ?: return BootstrapResult.Busy("another bootstrap instance holds the OS lock")
         return try {
             mutex.withLock {
-                runBootstrapInternal(force, timeoutMs)
+                // P2 fix（审计 6-b / T76 §37）：timeoutMs 实际生效 —— 原实现参数完全
+                // 未使用，超时永不发生（InProgress 结果永不产生，调用方无限等待）。
+                // 超时返回 InProgress：已完成的阶段证据已持久化，重试可续跑。
+                withTimeoutOrNull(timeoutMs) { runBootstrapInternal(force, timeoutMs) }
+                    ?: BootstrapResult.InProgress(
+                        currentState,
+                        "bootstrap timed out after ${timeoutMs}ms — progress persisted, retry to resume"
+                    )
             }
         } catch (ce: CancellationException) {
-            BootstrapResult.Cancelled(currentState)
+            // T76 §36 契约（P2 fix）：状态置 FAILED（可 retry）后重抛 ——
+            // 原实现吞掉 CancellationException，结构化取消传播失效。
+            currentState = BootstrapState.FAILED
+            throw ce
         } catch (e: Exception) {
             val err = LinuxEnvironmentError.unknown("bootstrap crashed: ${e.message}", e)
             BootstrapResult.Failed(err, currentState.name, currentState)

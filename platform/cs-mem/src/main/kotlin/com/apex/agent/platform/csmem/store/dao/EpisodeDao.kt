@@ -34,7 +34,9 @@ interface EpisodeDao {
     @Query("SELECT * FROM episodes WHERE app_package = :packageName ORDER BY started_at DESC LIMIT :limit")
     suspend fun getByPackage(packageName: String, limit: Int = 10): List<EpisodeEntity>
 
-    @Query("UPDATE episodes SET energy = energy * :decayFactor WHERE episode_id IN (SELECT episode_id FROM episodes)")
+    // P3 fix（审计 6-b）：删除无意义自引用子查询 —— WHERE episode_id IN (SELECT
+    // episode_id FROM episodes) 等价于全表，徒增一次全表扫描。
+    @Query("UPDATE episodes SET energy = energy * :decayFactor")
     suspend fun decayAllEnergy(decayFactor: Float)
 
     @Query("DELETE FROM episodes WHERE energy < :threshold AND is_distilled = 0")

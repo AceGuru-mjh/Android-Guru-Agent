@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import android.net.Uri
+import java.util.Locale
 
 enum class AttachmentType { FILE, IMAGE, AUDIO, VIDEO, ARCHIVE }
 enum class UploadStatus { UPLOADING, SUCCESS, ERROR }
@@ -71,16 +72,16 @@ fun formatFileSize(bytes: Long): String = when {
     bytes < 1024L * 1024L -> {
         val kb = bytes / 1024.0
         if (kb >= 100) "${kb.toInt()}KB"
-        else "%.1fKB".format(kb)
+        else String.format(Locale.US, "%.1fKB", kb)
     }
     bytes < 1024L * 1024L * 1024L -> {
         val mb = bytes / (1024.0 * 1024.0)
         if (mb >= 100) "${mb.toInt()}MB"
-        else "%.1fMB".format(mb)
+        else String.format(Locale.US, "%.1fMB", mb)
     }
     else -> {
         val gb = bytes / (1024.0 * 1024.0 * 1024.0)
         if (gb >= 100) "${gb.toInt()}GB"
-        else "%.2fGB".format(gb)
+        else String.format(Locale.US, "%.2fGB", gb)
     }
 }

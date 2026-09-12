@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -151,21 +152,26 @@ fun AgentChatScreen(
         }
     }
 
-    // 追踪用户是否主动向上滑动（进入「阅读模式」）
+    // 追踪用户是否主动向上滚动（进入「阅读模式」）
+    // P2-1（6-c）反模式修复：原实现只在 isScrollInProgress 翻转瞬间采样一次
+    // firstVisibleItemIndex——手势从底部起步时采样值仍在列表尾端，userScrolledUp
+    // 永不置位，流式 auto-follow 与用户拖动互相打架。改为 snapshotFlow 监听
+    // firstVisibleItemIndex 的递减方向：本屏所有程序化滚动（auto-follow/FAB 回底）
+    // 只会使索引递增，索引递减 ⇔ 用户主动向列表上方滚动（拖动/惯性/滚轮）。
     var userScrolledUp by remember { mutableStateOf(false) }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
-            val firstVisibleIndex = listState.firstVisibleItemIndex
-            val totalItems = uiState.messages.size
-            if (firstVisibleIndex < totalItems - 2) {
-                userScrolledUp = true
-            }
+    LaunchedEffect(listState) {
+        var previousIndex = listState.firstVisibleItemIndex
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
+            if (index < previousIndex) userScrolledUp = true
+            previousIndex = index
         }
     }
 
     // 修复：列表总项数统一计算（原漏计 Plan 确认 / Spec 确认 / ask_user 对话框三项，
-    // 出现时自动滚动定位到对话框上方；FAB 回底同样用此值）
+    // 出现时自动滚动定位到对话框上方；FAB 回底同样用此值）。
+    // P3-i（6-c）：UserInputDialog 已提升到屏级（不再占列表项），去掉 pendingUserInput
+    // 计数，修复 off-by-one（原自动滚动目标索引多 1，仅靠 clamp 兼底）。
     val totalListItems by remember {
         derivedStateOf {
             uiState.messages.size +
@@ -174,8 +180,7 @@ fun AgentChatScreen(
                 (if (uiState.currentToolCall != null) 1 else 0) +
                 (if (pendingQuestion != null) 1 else 0) +
                 (if (uiState.awaitingPlanConfirmation && uiState.plan != null) 1 else 0) +
-                (if (uiState.awaitingSpecConfirmation && uiState.spec != null) 1 else 0) +
-                (if (uiState.pendingUserInput != null) 1 else 0)
+                (if (uiState.awaitingSpecConfirmation && uiState.spec != null) 1 else 0)
         }
     }
 
@@ -194,6 +199,17 @@ fun AgentChatScreen(
                 listState.animateScrollToItem(totalListItems - 1)
             }
             userScrolledUp = false
+        }
+    }
+
+    // ═══ P2-2（6-c）：流式期间 auto-follow（节流档位）═══
+    // 主 auto-scroll 的键只含"列表结构变化"（totalListItems/isLoading），流式期间
+    // 气泡数固定、totalListItems 不变 → 长回复把"底部"推出视口无人跟随。
+    // 以（回复+思考）字符数 / 200 作节流档位（键不含文本本身 → 不会每 token
+    // 重启 effect）；档位推进且用户在底部附近 / 未进入阅读模式时即时跟随末项。
+    LaunchedEffect((uiState.currentResponse.length + uiState.currentThinking.length) / 200) {
+        if (uiState.isLoading && totalListItems > 0 && (isAtBottom || !userScrolledUp)) {
+            listState.scrollToItem(totalListItems - 1)
         }
     }
 
@@ -508,7 +524,8 @@ fun AgentChatScreen(
                             value = inputText,
                             onValueChange = { viewModel.updateInputText(it) },
                             onSend = {
-                                if (inputText.isNotBlank() && !uiState.isLoading) {
+                                // P2-9（6-c）：附件-only 消息同样可发送（原仅文本非空才发）
+                                if ((inputText.isNotBlank() || attachments.isNotEmpty()) && !uiState.isLoading) {
                                     viewModel.sendMessage(inputText.trim())
                                 }
                             },
@@ -555,12 +572,12 @@ fun AgentChatScreen(
                     } else {
                         FilledIconButton(
                             onClick = {
-                                if (inputText.isNotBlank()) {
+                                if (inputText.isNotBlank() || attachments.isNotEmpty()) {
                                     viewModel.sendMessage(inputText.trim())
                                     // ★ viewModel.sendMessage 内部已调用 updateInputText("")
                                 }
                             },
-                            enabled = inputText.isNotBlank(),
+                            enabled = inputText.isNotBlank() || attachments.isNotEmpty(),
                             interactionSource = sendInteraction,
                             modifier = Modifier
                                 .size(40.dp)

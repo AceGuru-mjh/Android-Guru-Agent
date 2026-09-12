@@ -69,6 +69,8 @@ import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.component.ViroPetHost
+import com.apex.agent.ui.component.ViroPetMood
 import com.apex.agent.ui.component.rememberSlashMenuProvider
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassFloatingButton
@@ -126,6 +128,9 @@ fun AgentChatScreen(
     val taskState by viewModel.taskState.collectAsStateWithLifecycle()
     val recoveryCandidates by viewModel.recoveryCandidates.collectAsStateWithLifecycle()
     val showTaskCard = taskState?.isActive == true
+
+    // ═══ Viro 桌宠情绪：Agent 运行态 → 宠物动画形态（推导见文件尾 viroPetMoodOf）═══
+    val viroMood = viroPetMoodOf(uiState, pendingQuestion, taskState)
 
     // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
     var showCustomInstructionDialog by remember { mutableStateOf(false) }
@@ -412,6 +417,15 @@ fun AgentChatScreen(
                     )
                 }
 
+                // ═══ Viro 桌宠：站于输入栏上方（独占 56dp 行槽位，不遮挡消息列表与功能控件）═══
+                // 情绪随 Agent 运行态切换（思考/执行工具/回复/等待输入/出错/完成），
+                // 新会话挥手打招呼、RunSummary 出现跳跃庆祝、点击可随机跳跃/挥手。
+                ViroPetHost(
+                    mood = viroMood,
+                    chatEmpty = uiState.messages.isEmpty(),
+                    celebrationKey = (uiState.messages.lastOrNull() as? AgentUiMessage.RunSummary)?.id
+                )
+
                 // ═══ 玻璃输入栏（/ 斜杠 + GitHub + 旋转加号 + 输入框 + 发送）═══
                 // GlassStyle.Floating：悬浮主面 —— 比卡片更强的 blur/边缘/高光；
                 // 文本/光标/IME 行为零改动（AdaptiveInputField 原样保留）。
@@ -652,6 +666,44 @@ fun AgentChatScreen(
     }
 }
 
+
+/**
+ * Viro 桌宠情绪推导：聊天流式状态优先 → 用户交互等待 → 消息尾态 → 后台任务状态兜底。
+ *
+ * 映射到宠物形态（见 ViroPetHost）：思考中/待确认 → Review（放大镜审视）、
+ * 执行工具 → Running、回复中 → RunningRight、等待输入 → Waiting、
+ * 出错 → Failed、完成 → Idle（RunSummary 触发的跳跃庆祝由 celebrationKey 驱动）。
+ */
+private fun viroPetMoodOf(
+    uiState: AgentChatUiState,
+    pendingQuestion: com.apex.agent.core.engine.AgentQuestion?,
+    taskState: com.apex.agent.core.engine.task.AgentTask?
+): ViroPetMood {
+    val lastMessage = uiState.messages.lastOrNull()
+    return when {
+        // ── Agent 正在干活：工具 > 流式回复 > 思考 ──
+        uiState.isLoading && uiState.currentToolCall != null -> ViroPetMood.ToolRunning
+        uiState.isLoading && uiState.currentResponse.isNotEmpty() -> ViroPetMood.Streaming
+        uiState.isLoading -> ViroPetMood.Thinking
+        // ── 需要用户决策 / 输入 ──
+        uiState.awaitingPlanConfirmation || uiState.awaitingSpecConfirmation -> ViroPetMood.ReviewPlan
+        uiState.pendingUserInput != null || pendingQuestion != null -> ViroPetMood.WaitingUser
+        // ── 本轮收尾态（消息流末尾）──
+        lastMessage is AgentUiMessage.Error -> ViroPetMood.Error
+        lastMessage is AgentUiMessage.RunSummary -> ViroPetMood.Success
+        // ── 后台任务兜底（TaskStatusCard 同源状态机）──
+        else -> when (taskState?.status) {
+            com.apex.agent.core.engine.task.TaskStatus.PLANNING,
+            com.apex.agent.core.engine.task.TaskStatus.RUNNING,
+            com.apex.agent.core.engine.task.TaskStatus.RECOVERING,
+            com.apex.agent.core.engine.task.TaskStatus.RETRYING,
+            com.apex.agent.core.engine.task.TaskStatus.CANCELLING -> ViroPetMood.ToolRunning
+            com.apex.agent.core.engine.task.TaskStatus.WAITING_USER -> ViroPetMood.WaitingUser
+            com.apex.agent.core.engine.task.TaskStatus.FAILED -> ViroPetMood.Error
+            else -> ViroPetMood.Idle
+        }
+    }
+}
 
 /**
  * T76 — 任务状态文案（TaskStatusCard 用；与 Controller 状态机一致）。

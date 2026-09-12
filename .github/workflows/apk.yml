@@ -94,7 +94,8 @@ jobs:
         run: |
           VARIANT=${{ steps.variant.outputs.type }}
           echo "🚀 Building $VARIANT APK..."
-          ./gradlew :app:assemble${ VARIANT^ } \
+          # ${VARIANT^} = bash 首字母大写(debug→Debug, release→Release);花括号内禁止空格
+          ./gradlew ":app:assemble${VARIANT^}" \
             --no-daemon \
             -Pkotlin.incremental=false \
             --stacktrace

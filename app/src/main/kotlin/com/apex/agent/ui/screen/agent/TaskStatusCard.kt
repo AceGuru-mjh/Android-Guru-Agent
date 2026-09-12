@@ -13,8 +13,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.task.AgentTask
 import com.apex.agent.core.engine.task.TaskStatus
+import com.apex.agent.ui.glass.GlassCard
+import com.apex.agent.ui.glass.GlassStyle
 
 /**
  * T76 — 任务状态卡（N-11）。
@@ -50,11 +50,12 @@ fun TaskStatusCard(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    // ═══ Liquid Glass 迁移：Card → GlassCard Frosted 档 ═══
+    // 任务状态卡位于消息源上方直排区，无重叠 —— 诚实 Frosted 材质 + 状态 accent
+    GlassCard(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        )
+        style = GlassStyle.Card,
+        accent = statusColor(task.status)
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
 

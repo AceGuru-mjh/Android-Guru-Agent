@@ -153,6 +153,12 @@ object ToolModule {
         ubuntuLifecycle: com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator,
         // P83 (T4): 项目感知环境闭环（terminal.workspace.environment 工具）
         projectEnvironment: com.apex.agent.platform.terminal.environment.ProjectEnvironmentCoordinator,
+        // T82：guest fs API + apexctl 桥 + 镜像/ensure 接线
+        // 注：rootfsTarget 已在上方 P83 参数区声明（同一类型），此处不重复。
+        guestFilesystem: com.apex.agent.platform.terminal.fs.GuestFilesystem,
+        guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
+        ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
+        rootfsBaseDir: java.io.File,
         skillRegistry: SkillRegistry,
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,
@@ -329,10 +335,22 @@ object ToolModule {
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxStatusTool(linuxEnvironmentHealth))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxBootstrapTool(ubuntuBootstrapManager))))
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxNetworkTool(linuxNetworkProbe))))
-        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalLinuxPackagesTool(linuxPackageManager))))
-        // T81: 环境能力真实探测（§29）+ 单轮自动修复编排（§30）
+        // T82：镜像（mirror list/set）+ 真实 installed 列表 + autoremove/clean。
         registry.register(SafeAgentTool(TerminalToolAdapter(
-            com.apex.agent.platform.terminal.tools.v2.TerminalLinuxCapabilitiesTool(linuxCapabilityProbe))))
+            TerminalLinuxPackagesTool(
+                packageManager = linuxPackageManager,
+                sources = ubuntuSourcesList,
+                rootfsDir = { rootfsBaseDir.takeIf { it.isDirectory } },
+                arch = { rootfsTarget.architecture }
+            )
+        )))
+        // T81: 环境能力真实探测（§29）+ 单轮自动修复编排（§30）
+        // T82：ensure action（probe → install missing → re-probe 一发式工具链供给）。
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalLinuxCapabilitiesTool(
+                probe = linuxCapabilityProbe,
+                packages = linuxPackageManager
+            ))))
         registry.register(SafeAgentTool(TerminalToolAdapter(
             com.apex.agent.platform.terminal.tools.v2.TerminalLinuxRepairTool(environmentRepairService))))
         // T82: Ubuntu 产品级生命周期 —— 一键 ensure（install→bootstrap→capability
@@ -341,6 +359,12 @@ object ToolModule {
             com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuEnsureTool(ubuntuLifecycle))))
         registry.register(SafeAgentTool(TerminalToolAdapter(
             com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuStatusTool(ubuntuLifecycle))))
+        // T82: Terminal 全能力增强 —— guest 结构化文件 API（写沙箱 + base64 二进制
+        // 安全）与 apexctl Android 能力桥（guest 脚本与 Agent 共用同一 handler 集）。
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalFsTool(guestFilesystem))))
+        registry.register(SafeAgentTool(TerminalToolAdapter(
+            com.apex.agent.platform.terminal.tools.v2.TerminalBridgeTool(guestBridgeService))))
         // 4 legacy compat aliases (@Deprecated, Spec §35) — old tool ids preserved for backward compat.
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyExecTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacySendTool(terminalRuntime))))

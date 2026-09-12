@@ -32,6 +32,11 @@ import com.apex.agent.platform.terminal.ubuntu.UbuntuBootstrapManager
 import com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList
 import com.apex.agent.platform.terminal.ubuntu.BasePackageProfile
 import com.apex.agent.platform.terminal.ubuntu.BootstrapStateStore
+import com.apex.agent.platform.terminal.bridge.GuestBridgeService
+import com.apex.agent.platform.terminal.environment.ProxyConfig
+import com.apex.agent.platform.terminal.fs.GuestFilesystem
+import com.apex.agent.platform.terminal.proot.SharedStorageBridge
+import com.apex.agent.platform.terminal.proot.SystemBindProfile
 import com.apex.agent.platform.terminal.workspace.AbsolutePath
 import com.apex.agent.platform.terminal.workspace.GuestUserHome
 import com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager
@@ -103,7 +108,12 @@ object TerminalModule {
         return RootfsTarget(distribution = "ubuntu", version = "24.04", architecture = arch)
     }
 
-    /** T72 生产 provisioner：真实下载 + SHA-256 + 原子解压 + 配置 + 健康检查 + 阶段证据。 */
+    /** T72 生产 provisioner：真实下载 + SHA-256 + 原子解压 + 配置 + 健康检查 + 阶段证据。
+     *
+     *  T82（Termux 基线 §3.5/§3.6/§9.2）：DNS 注入（Android LinkProperties —— 此前
+     *  DI 未传，public-DNS fallback 在 DNS 受限网络直接失败）；locale.gen（zh_CN/
+     *  en_US —— locales 包 postinst 自动生成）；timezone（Android 当前时区写入
+     *  /etc/timezone，tzdata postinst 生效）。 */
     @Provides
     @Singleton
     fun provideRootfsProvisioner(
@@ -118,10 +128,22 @@ object TerminalModule {
             validator = null,                       // 布局校验由 health inspector 承担（T72）
             layout = layout,
             metadataStore = RootfsMetadataStore(File(layout.metadataFile.value)),
-            configurator = RootfsConfigurator(),
+            configurator = RootfsConfigurator(
+                dnsServers = { resolveAndroidDnsServers(context) },
+                localeGen = listOf("zh_CN.UTF-8 UTF-8", "en_US.UTF-8 UTF-8"),
+                timezone = java.util.TimeZone.getDefault().id
+            ),
             healthCheck = RootfsHealthInspector(expectedArch = target.architecture)
         )
     }
+
+    /** T82：Android 系统 DNS（ConnectivityManager LinkProperties；无权限/无网络 → 空 → 兑底链）。 */
+    private fun resolveAndroidDnsServers(context: Context): List<String> =
+        runCatching {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val linkProps = cm?.activeNetwork?.let { cm.getLinkProperties(it) }
+            linkProps?.dnsServers?.mapNotNull { it.hostAddress } ?: emptyList()
+        }.getOrDefault(emptyList())
 
     /** RootfsProvider 门面（LinuxPRootBackend 的只读视图；见 ProvisionedRootfsProvider §21）。
      *  T81 CI fix: 返回接口类型 —— Dagger 需要接口绑定（LinuxExecutionContextFactory 等
@@ -179,14 +201,31 @@ object TerminalModule {
         rootfsProvider: RootfsProvider,
         workspaces: LinuxWorkspaceManager,
         userHome: GuestUserHome,
-        hostEnv: PRootHostEnvironment
+        hostEnv: PRootHostEnvironment,
+        sharedStorage: SharedStorageBridge
     ): LinuxPRootBackend = LinuxPRootBackend(
         binaryProvider = binaryProvider,
         rootfsProvider = rootfsProvider,
         workspaces = workspaces,
         userHome = userHome,
-        hostEnv = hostEnv
+        hostEnv = hostEnv,
+        // T82：系统级 bind（/proc /dev /sys，proot-distro 语义 —— procps 在 guest 内
+        // 真实可用）+ 共享存储桥（授权可用时 → guest /sdcard；不可用 → 不 bind）。
+        systemBinds = SystemBindProfile.STANDARD,
+        sharedStorage = sharedStorage
     )
+
+    /**
+     * T82：共享存储桥（termux-setup-storage 等价物）。Android 无权限时
+     * `/storage/emulated/0` 不可列 → [SharedStorageBridge] 返回 null bind ——
+     * 诚实降级，绝不伪造空目录。
+     */
+    @Provides
+    @Singleton
+    fun provideSharedStorageBridge(): SharedStorageBridge =
+        SharedStorageBridge(
+            hostDirProvider = { File("/storage/emulated/0").takeIf { it.isDirectory } }
+        )
 
     /** 后端注册表：local（默认，golden 行为）+ linux-ubuntu。 */
     @Provides
@@ -216,7 +255,10 @@ object TerminalModule {
         persistenceStore = store,
         workspaceBinder = workspaceBinder,
         // T81 (U-10)：rootfs 活跃会话绑定（provisioner.remove 门禁）。
-        rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner)
+        rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner),
+        // T82：Shell Marker Protocol —— 每个前台 job 携带 OSC 633 marker（真实
+        // 退出码 + jobId）；prompt 启发式降级为 fallback。生产默认开启。
+        enableShellMarkers = true
     )
 
     /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */
@@ -249,10 +291,20 @@ object TerminalModule {
             hostEnv.hostEnv()
         })
 
-    /** T76: LinuxEnvironmentManager —— 三层 env 模型（host/proot/guest）+ apt env 变体。 */
+    /** T76: LinuxEnvironmentManager —— 三层 env 模型（host/proot/guest）+ apt env 变体。
+     *
+     *  T82（基线 §9.3）：Android 系统代理（JVM system properties —— 部分 ROM/WiFi
+     *  代理下发在此）注入 guest http(s)_proxy；未设置 → null（直连，历史行为）。 */
     @Provides
     @Singleton
-    fun provideLinuxEnvironmentManager(): LinuxEnvironmentManager = LinuxEnvironmentManager()
+    fun provideLinuxEnvironmentManager(): LinuxEnvironmentManager {
+        val proxyHost = System.getProperty("http.proxyHost")
+        val proxyPort = System.getProperty("http.proxyPort")?.toIntOrNull()
+        val proxy = if (!proxyHost.isNullOrBlank() && proxyPort != null && proxyPort > 0) {
+            ProxyConfig(host = proxyHost, port = proxyPort)
+        } else null
+        return LinuxEnvironmentManager(proxy = proxy)
+    }
 
     /** T81 (D-6/§34)：Linux 执行上下文工厂 —— 交互会话与 apt 共享的单一解析点。 */
     @Provides
@@ -533,4 +585,41 @@ object TerminalModule {
             lifecycle = ubuntuLifecycle,
             workspaces = workspaceManager
         )
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // T82: Terminal 全能力增强 —— guest fs API + apexctl 桥（Termux 基线 §4.8/§11）
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * T82: GuestFilesystem —— 结构化 guest 文件操作（base64 二进制安全 +
+     * 写沙箱）。与 apt/交互会话共享 rootfs/workspace/home（同 contextFactory）。
+     */
+    @Provides
+    @Singleton
+    fun provideGuestFilesystem(
+        contextFactory: com.apex.agent.platform.terminal.proot.LinuxExecutionContextFactory,
+        executor: ProotExecutor
+    ): GuestFilesystem = GuestFilesystem(
+        contextFactory = contextFactory,
+        executor = executor
+    )
+
+    /**
+     * T82: GuestBridgeService —— apexctl 桥宿主（guest 脚本 ↔ Android 能力）。
+     * 桥根目录落在持久化 home bind 下（host `<filesDir>/linux/home/.apex/bridge`
+     * = guest `/root/.apex/bridge`）—— 复用既有 bind，不引入新 bind 面。
+     * Android 侧 handler 见 [com.apex.agent.bridge.AndroidBridgeHandlers]。
+     */
+    @Provides
+    @Singleton
+    fun provideGuestBridgeService(
+        @ApplicationContext context: Context,
+        userHome: GuestUserHome
+    ): GuestBridgeService = GuestBridgeService(
+        bridgeRoot = java.io.File(userHome.hostDir(), ".apex/bridge"),
+        handlers = com.apex.agent.bridge.AndroidBridgeHandlers.all(context),
+        scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+        )
+    )
 }

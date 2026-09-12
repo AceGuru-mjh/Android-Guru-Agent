@@ -31,7 +31,14 @@ import com.apex.agent.platform.terminal.workspace.GuestUserHome
  */
 class LinuxEnvironmentManager(
     /** guest 默认 cwd（workspace 绑定到 /workspace）。 */
-    private val defaultGuestCwd: String = "/workspace"
+    private val defaultGuestCwd: String = "/workspace",
+    /**
+     * T82（Termux 基线 §9.3）：guest 内的 HTTP(S) 代理配置（Android 生产由 DI
+     * 从系统代理解析；null = 不注入 —— 历史行为）。注入键：
+     * http_proxy / https_proxy / all_proxy / no_proxy（小写 —— curl/wget/-
+     * apt/python requests 的公约集合）。requestEnv 显式键仍最后覆盖。
+     */
+    private val proxy: ProxyConfig? = null
 ) {
 
     /**
@@ -56,6 +63,7 @@ class LinuxEnvironmentManager(
             "PWD" to defaultGuestCwd,
             "OLDPWD" to defaultGuestCwd
         )
+        proxy?.let { env.putAll(it.toGuestEnv()) }
         env.putAll(requestEnv)
         return env
     }
@@ -141,5 +149,26 @@ class LinuxEnvironmentManager(
 
         /** T81 (U-7)：仅允许出现在 apt env 的键（泄入交互 env = 违规）。 */
         val APT_ONLY_KEYS = listOf("DEBIAN_FRONTEND", "DEBIAN_PRIORITY", "APT_LISTBUGS_FRONTEND", "APT_LISTCHANGES_FRONTEND")
+    }
+}
+
+/**
+ * T82 — guest HTTP(S) 代理配置（Termux 基线 §9.3）。app 层从 Android 系统代理
+ * 解析后注入；null = 直连（历史行为）。
+ */
+data class ProxyConfig(
+    val host: String,
+    val port: Int,
+    /** 直连绕过列表（host 或域后缀）。 */
+    val noProxy: List<String> = listOf("localhost", "127.0.0.1")
+) {
+    fun toGuestEnv(): Map<String, String> {
+        val env = linkedMapOf(
+            "http_proxy" to "http://$host:$port",
+            "https_proxy" to "http://$host:$port",
+            "all_proxy" to "http://$host:$port"
+        )
+        if (noProxy.isNotEmpty()) env["no_proxy"] = noProxy.joinToString(",")
+        return env
     }
 }

@@ -13,7 +13,10 @@ data class TerminalModes(
     var insertMode: Boolean = false,        // IRM (4)
     var bracketedPaste: Boolean = false,    // (2004)
     var reverseVideo: Boolean = false,      // DECSCNM (5)
-    var alternateScreen: Boolean = false    // (1049/47/1047)
+    var alternateScreen: Boolean = false,   // (1049/47/1047)
+    // T82 bug fix: ANSI modes (CSI h/l WITHOUT '?' prefix) were entirely ignored —
+    // CSI 4 h (IRM insert mode) and CSI 20 h (LNM newline mode) never took effect.
+    var newlineMode: Boolean = false        // LNM (ANSI 20): LF also returns carriage
 )
 
 /**

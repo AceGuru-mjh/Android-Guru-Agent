@@ -108,6 +108,8 @@ dependencies {
 
     // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
     implementation(libs.easyfloat)
+    // Liquid Glass UI System 底层引擎 —— 仅 ui/glass 包内部使用，业务层经 Glass 组件 API 访问
+    implementation(libs.haze)
     // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
     implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
 

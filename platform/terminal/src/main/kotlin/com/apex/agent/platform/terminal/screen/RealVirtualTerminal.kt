@@ -125,6 +125,23 @@ class RealVirtualTerminal(
     override val rows: Int get() = snapshot().rows
     override val cols: Int get() = snapshot().cols
 
+    // ─── T82: input-translation + scrollback/clipboard capability exposure ───
+
+    /** DECCKM: when true the input layer must send SS3 (ESC O x) arrows/home/end. */
+    fun applicationCursorKeys(): Boolean = core.applicationCursorKeys()
+
+    /** Bracketed paste mode 2004: paste writes must wrap ESC[200~ … ESC[201~. */
+    fun bracketedPasteMode(): Boolean = core.bracketedPasteMode()
+
+    /** Last [maxLines] scrollback rows, oldest first (main screen only). */
+    fun scrollbackLines(maxLines: Int): List<String> = core.scrollbackText(maxLines)
+
+    /** Scrollback depth (main screen only). */
+    fun scrollbackLineCount(): Int = core.scrollbackLineCount()
+
+    /** Drain OSC 52 clipboard-write requests emitted by guest programs (vim/tmux). */
+    fun drainClipboardRequests(): List<String> = core.drainClipboardRequests()
+
     /**
      * Last visible (cursor) line as plain text — for InputWaiting heuristic (Spec §29).
      * The cursor row of the rendered screen, trimmed.

@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +56,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -370,7 +370,9 @@ internal data class CodeColorScheme(
 
 @Composable
 private fun codeColorScheme(): CodeColorScheme {
-    val dark = isSystemInDarkTheme()
+    // P2-3（6-c）：isSystemInDarkTheme() 无视应用内强制主题（设置中心可强制深/浅色）；
+    // 改用 MaterialTheme.colorScheme.background.luminance() < 0.5f 判定当前实际生效主题。
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     return if (dark) {
         CodeColorScheme(
             keyword = Color(0xFFC792EA),
@@ -855,7 +857,8 @@ internal fun JsonOutputCard(json: String) {
 /** JSON 值的配色。 */
 @Composable
 private fun jsonValueColor(prim: JsonPrimitive): Color {
-    val dark = isSystemInDarkTheme()
+    // P2-3（6-c）：同上，跟随应用内实际生效主题而非系统深色模式。
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     return when {
         prim is JsonNull -> MaterialTheme.colorScheme.onSurfaceVariant
         prim.booleanOrNull != null -> if (dark) Color(0xFFC792EA) else Color(0xFF7C3AED)

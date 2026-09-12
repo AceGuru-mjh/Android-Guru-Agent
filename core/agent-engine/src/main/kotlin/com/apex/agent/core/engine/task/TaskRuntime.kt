@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -142,10 +144,23 @@ class TaskRuntime(
      */
     fun execute(input: UserInput): Flow<AgentEvent> = executeAsTask(input, resumeOf = null)
 
-    private fun executeAsTask(input: UserInput, resumeOf: AgentTask?): Flow<AgentEvent> {
+    /**
+     * P2-12：[alreadyClaimed] = true 表示调用方（resume/retry/resumeFromCrash）
+     * 已在入口用 tryClaim() 原子占位，这里不再重复 check（避免双占/误拒）。
+     */
+    private fun executeAsTask(
+        input: UserInput,
+        resumeOf: AgentTask?,
+        alreadyClaimed: Boolean = false
+    ): Flow<AgentEvent> {
         // 互斥：并发第二次 execute 直接拒绝（任务书 §18H 并发场景）
-        check(tryClaim()) {
-            "TaskRuntime rejects concurrent execution: an active execution is already running"
+        // P2-12 修复：execute() 入口保留 check() 语义（抛 IllegalStateException，
+        // 测试断言依赖）；resume/retry 改为入口处 tryClaim()，占位失败返回 null，
+        // 消除“先 claiming.get() 后 check(tryClaim())”两步检查之间的竞态窗口。
+        if (!alreadyClaimed) {
+            check(tryClaim()) {
+                "TaskRuntime rejects concurrent execution: an active execution is already running"
+            }
         }
 
         val now = clock()
@@ -365,7 +380,20 @@ class TaskRuntime(
         pauseRequested = true
         engine.abort()
         // 等待引擎流收尾（镜像 collector 的 finally 落盘 PAUSED）
-        streamDone?.await()
+        //
+        // P2-14 修复：旧实现无超时等待 streamDone——引擎正挂在 LLM 调用时
+        // （OkHttp readTimeout 默认最长 120s），UI 的 pause() 会挂起同样时长。
+        // 10s 后放弃等待，按当前状态返回；PAUSED 落盘由镜像 collector 的
+        // finally 迟到补齐（pauseRequested 标志已置位，终态裁决不受影响）。
+        try {
+            streamDone?.let { withTimeout(PAUSE_AWAIT_TIMEOUT_MS) { it.await() } }
+        } catch (e: TimeoutCancellationException) {
+            AppLogger.instance.warn(
+                LogCategory.ENGINE, TAG,
+                "pause(): stream finalize did not complete within ${PAUSE_AWAIT_TIMEOUT_MS / 1000}s; " +
+                    "PAUSED checkpoint will be persisted late"
+            )
+        }
         return _activeTask.value?.status == TaskStatus.PAUSED
     }
 
@@ -396,13 +424,24 @@ class TaskRuntime(
     fun resume(): Flow<AgentEvent>? {
         val task = _activeTask.value ?: return null
         if (task.status != TaskStatus.PAUSED) return null
-        if (claiming.get()) return null
+        // P2-12 修复：原子占位替代先查后占——并发 resume 的输家在这里拿到 false，
+        // 直接返回 null（文档语义），而不是让 executeAsTask 的 check() 抛
+        // IllegalStateException。
+        if (!tryClaim()) return null
 
         // 注入恢复提示：告诉 LLM 从中断点继续（上下文同引擎连续）
         val resumeNote = "[RESUME] 此前任务被用户暂停。当前进度：${
             if (task.steps.isNotEmpty()) "步骤 ${task.completedSteps}/${task.steps.size} 完成" else "进行中"
         }。从中断处继续，不要重复已完成的操作。"
-        return executeAsTask(UserInput.text(resumeNote), resumeOf = task)
+        // 二轮审计 A-2：与 retry()/resumeFromCrash() 同款占位释放护栏——
+        // executeAsTask 在 scope.launch 前同步抛出（persist IO 失败/非法迁移）时
+        // 释放互斥位再重抛，否则此后所有 execute/resume/retry 永久被拒（锁死）。
+        return try {
+            executeAsTask(UserInput.text(resumeNote), resumeOf = task, alreadyClaimed = true)
+        } catch (e: Throwable) {
+            claiming.set(false)
+            throw e
+        }
     }
 
     /** 重试失败任务（retryCount 上限校验）。返回执行流；null = 不允许重试。 */
@@ -413,15 +452,22 @@ class TaskRuntime(
             emitRuntimeSync(TaskRuntimeEvent.RetryExhausted(task.taskId, task.retryCount))
             return null
         }
-        if (claiming.get()) return null
+        // P2-12 修复：同 resume——原子占位，竞态输家返回 null 而非抛 IllegalStateException。
+        if (!tryClaim()) return null
 
-        val retrying = TaskStatusMachine.transition(task, TaskStatus.RETRYING, clock())
-            .copy(retryCount = task.retryCount + 1)
-        persist(retrying, CheckpointBoundary.RETRY_STARTED)
+        try {
+            val retrying = TaskStatusMachine.transition(task, TaskStatus.RETRYING, clock())
+                .copy(retryCount = task.retryCount + 1)
+            persist(retrying, CheckpointBoundary.RETRY_STARTED)
 
-        val retryNote = "[RETRY] 上次执行失败：${task.error ?: "unknown"}。重试整个任务，" +
-            "已完成且成功的操作（见对话历史）不要重复执行。"
-        return executeAsTask(UserInput.text(retryNote), resumeOf = retrying)
+            val retryNote = "[RETRY] 上次执行失败：${task.error ?: "unknown"}。重试整个任务，" +
+                "已完成且成功的操作（见对话历史）不要重复执行。"
+            return executeAsTask(UserInput.text(retryNote), resumeOf = retrying, alreadyClaimed = true)
+        } catch (e: Throwable) {
+            // 占位后、launch 前抛出（如非法状态迁移）：释放占位再重抛，避免互斥锁死
+            claiming.set(false)
+            throw e
+        }
     }
 
     // ═══ 崩溃恢复（N-5/D-3）═══
@@ -463,16 +509,22 @@ class TaskRuntime(
         val task = _activeTask.value?.takeIf { it.taskId == taskId }
             ?: store.load(taskId)?.takeIf { it.isActive }
             ?: return null
-        if (claiming.get()) return null
+        // P2-12 修复（同 resume/retry）：原子占位，竞态输家返回 null
+        if (!tryClaim()) return null
 
-        val plan = RecoveryPolicy.planForTask(
-            task,
-            classify = { toolPolicy.classify(it) },
-            isUserInteraction = { toolPolicy.isUserInteractionTool(it) }
-        )
-        val prompt = RecoveryPolicy.buildRecoveryPrompt(plan, task)
-        // 状态迁移统一由 executeAsTask 处理（PAUSED/RECOVERING→RUNNING）
-        return executeAsTask(UserInput.text(prompt), resumeOf = task)
+        try {
+            val plan = RecoveryPolicy.planForTask(
+                task,
+                classify = { toolPolicy.classify(it) },
+                isUserInteraction = { toolPolicy.isUserInteractionTool(it) }
+            )
+            val prompt = RecoveryPolicy.buildRecoveryPrompt(plan, task)
+            // 状态迁移统一由 executeAsTask 处理（PAUSED/RECOVERING→RUNNING）
+            return executeAsTask(UserInput.text(prompt), resumeOf = task, alreadyClaimed = true)
+        } catch (e: Throwable) {
+            claiming.set(false)
+            throw e
+        }
     }
 
     /** 恢复前修补持久化对话历史中的悬空 toolCall（R-5）。 */
@@ -613,6 +665,9 @@ class TaskRuntime(
 
     companion object {
         private const val TAG = "TaskRuntime"
+
+        /** P2-14：pause() 等待引擎流收尾的上限（引擎可能挂在最长 readTimeout 的 LLM 调用上）。 */
+        internal const val PAUSE_AWAIT_TIMEOUT_MS = 10_000L
 
         /** 用户显式重试上限（任务书 §7：不允许无限 retry）。 */
         const val DEFAULT_RETRY_LIMIT = 3

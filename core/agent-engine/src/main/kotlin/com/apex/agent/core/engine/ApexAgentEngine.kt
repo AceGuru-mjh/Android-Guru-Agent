@@ -19,11 +19,14 @@ import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -108,6 +111,12 @@ class ApexAgentEngine(
     private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
         memory?.load()?.let { addAll(it) }
     }
+    // P2-10 修复：isRunning 由 UI/abort 线程跨线程读写（abort() 在引擎循环外被调用），
+    // 非 volatile 时 JMM 不保证写入对其他线程可见 → abort 后引擎状态卡在“运行中”。
+    // TODO(结构化改造): conversationHistory 被 TaskRuntime 的 contextInjector /
+    // tagsSetter 钩子从其他线程裸写，当前只能靠调用方自律；后续应改为注入
+    // 显式消息队列（Channel）或统一在引擎调度器内串行化所有历史变更。
+    @Volatile
     private var isRunning = false
 
     /**
@@ -321,12 +330,21 @@ class ApexAgentEngine(
                     totalIterations = maxOf(totalIterations, iter)
                 }
             }
+        } catch (e: TimeoutCancellationException) {
+            // P2-4 修复：TimeoutCancellationException 是 CancellationException 的子类，
+            // 必须先于父类 catch，否则 Plan/Spec 确认超时被误报为 Aborted（超时分支死代码）。
+            // 二轮审计 A-3：TCE 也可能来自外层 withTimeout（任务级/工具级取消穿透）——
+            // 协程已不活跃时必须重抛（保持取消语义），仅在自身活跃（本层确认超时）时
+            // 才折叠为 Error 事件，避免吞掉外层超时取消并误报。
+            if (!currentCoroutineContext().isActive) {
+                AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "外层超时取消穿透引擎，重抛 TCE")
+                throw e
+            }
+            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
+            emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: CancellationException) {
             AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "任务被中止 (CancellationException)")
             emit(AgentEvent.Aborted)
-        } catch (e: TimeoutCancellationException) {
-            AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
-            emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: ModelRuntimeException) {
             // T72 §十四：模型运行时错误（能力不匹配 / 降级耗尽 / 限流 / 超时…），
             // 单独分类记录，便于诊断。可降级类（限流/超时/不可用/鉴权）标记 recoverable，
@@ -687,8 +705,11 @@ class ApexAgentEngine(
                             } catch (_: Exception) {
                                 emptyMap<String, String>()
                             }
-                            val question = args["question"]?.toString()?.trim('"') ?: "Please provide input:"
-                            val inputType = args["type"]?.toString()?.trim('"')?.lowercase() ?: "text"
+                            // P3-d 修复：旧实现 `?.toString()?.trim('"')` 依赖 JsonPrimitive.toString()
+                            // 的带引号表示，非字符串 JSON 值（数字/嵌套对象）会变成 JSON 文本，
+                            // 且 trim 会误伤字符串末尾本身含引号的内容。改用 jsonPrimitive.content。
+                            val question = (args["question"] as? JsonPrimitive)?.contentOrNull ?: "Please provide input:"
+                            val inputType = (args["type"] as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "text"
                             val eventType = when (inputType) {
                                 "confirmation" -> InputType.CONFIRMATION
                                 "choice" -> InputType.CHOICE

@@ -74,8 +74,10 @@ class FileSearchTool(
             val fileType = json["file_type"]?.jsonPrimitive?.content ?: "all"
             val fileExt = json["file_ext"]?.jsonPrimitive?.content
             val contextLines = (json["context_lines"]?.jsonPrimitive?.intOrNull ?: 0).coerceIn(0, 5)
-            val maxResults = json["max_results"]?.jsonPrimitive?.intOrNull ?: 15
-            val page = json["page"]?.jsonPrimitive?.intOrNull ?: 1
+            // P3-f 修复：page<=0 时 (page-1)*maxResults 为负、maxResults=0 时下方
+            // totalPages 计算除零抛 ArithmeticException——都钳到 >=1。
+            val maxResults = (json["max_results"]?.jsonPrimitive?.intOrNull ?: 15).coerceAtLeast(1)
+            val page = (json["page"]?.jsonPrimitive?.intOrNull ?: 1).coerceAtLeast(1)
             val caseSensitive = json["case_sensitive"]?.jsonPrimitive?.booleanOrNull ?: false
 
             val dir = try {

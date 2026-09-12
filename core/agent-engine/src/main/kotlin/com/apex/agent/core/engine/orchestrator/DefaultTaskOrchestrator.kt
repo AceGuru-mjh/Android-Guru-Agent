@@ -11,6 +11,7 @@ import com.apex.agent.core.engine.PrivilegeInfoProvider
 import com.apex.agent.core.engine.StreamingToolCallAccumulator
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.UserInput
+import com.apex.agent.core.engine.task.DanglingToolCallRepair
 import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
@@ -380,6 +381,21 @@ class DefaultTaskOrchestrator(
             // Persist memory (BUILD mode only — delegate owns its own memory)
             if (memory != null && agentConfig.mode == AgentMode.BUILD) {
                 try {
+                    // P2-7 修复：异常/超时/取消中断批执行后，历史尾部可能留下没有
+                    // 配对 ToolResult 的 Assistant.toolCalls（悬空 toolCall）——直接
+                    // 持久化会让下次 LLM 请求 400（OpenAI 要求 tool_calls 必须紧跟
+                    // tool 消息），且被 memory.save 固化后每轮都炸。保存前先跑
+                    // DanglingToolCallRepair 修补（TaskRuntime 恢复路径同款逻辑）。
+                    val repairReport = DanglingToolCallRepair.repair(conversationHistory)
+                    if (repairReport.hasRepairs) {
+                        OrchestratorLog.log(
+                            LogLevel.WARN,
+                            "repaired ${repairReport.repairedCallIds.size} dangling toolCalls " +
+                                "before memory.save: ${repairReport.repairedCallIds.joinToString(",")}"
+                        )
+                        conversationHistory.clear()
+                        conversationHistory.addAll(repairReport.repairedHistory)
+                    }
                     memory.save(conversationHistory.toList())
                 } catch (e: Throwable) {
                     OrchestratorLog.log(LogLevel.WARN, "Failed to save conversation memory: ${e.message}")

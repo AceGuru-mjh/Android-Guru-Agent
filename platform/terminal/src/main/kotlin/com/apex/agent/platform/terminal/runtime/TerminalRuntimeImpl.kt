@@ -111,7 +111,10 @@ class TerminalRuntimeImpl(
 
     private val eventLog: TerminalEventLog = TerminalEventLogImpl()
     private val eventBus: TerminalEventBus = TerminalEventBusImpl(eventLog, scope)
-    private val waitEngine = WaitEngineImpl(eventBus, scope)
+    // P1/P2 fix（审计 P1-3/P2-5）：注入 eventLog 作为订阅锚点来源 ——
+    // WaitEngine 的 await/awaitIdle 只匹配「调用时刻之后」的新事件（原 afterCursor=0
+    // 全量重放历史：IdleFor 永不满足+忙转；wait() 被陈旧事件假阳性命中）。
+    private val waitEngine = WaitEngineImpl(eventBus, scope, eventLog)
     internal val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
     // PR #51: process/timeout/cancellation controllers
@@ -228,6 +231,14 @@ class TerminalRuntimeImpl(
         return r.map { s ->
             // T75: LINUX 会话创建成功 → 绑定 workspace（活跃计数；delete 门禁）
             spec.metadata.workspaceId?.let { wsId -> workspaceBinder?.bind(s.id, wsId) }
+            // P2 fix（审计 P2-1 / T81 U-10）：LINUX/proot 会话创建成功 → 绑定 rootfs
+            // 引用（与 close() 的 unbind 对称）。原实现 bind 全工程零调用 ——
+            // RootfsProvisionerImpl.remove() 的活跃会话保护是死代码，运行中的
+            // LINUX 会话 rootfs 可被整删（会话立即变僵尸）。仅 LINUX 后端绑
+            //（LOCAL 会话不占 rootfs）。
+            if (backend.runtimeType == BackendRuntimeType.LINUX) {
+                rootfsBinder?.bind(s.id)
+            }
             // start a JobManager listener for this session
             startSessionListener(s.id)
             // Register the session's process group (v1: pgid == shell pid — forkpty makes the
@@ -461,6 +472,9 @@ class TerminalRuntimeImpl(
         val r = sessionManager.close(sessionId, force)
         if (r.isSuccess) {
             processController.unregister(sessionId)
+            // 二轮审计 C-1：会话关闭 → 清理 JobManager 的 job 记录/状态流/前台标记
+            //（原实现只增不减，常驻服务进程下无上限累积）。
+            jobManager.drop(sessionId)
             // T75: 会话关闭 → 释放 workspace 活跃绑定（delete 门禁解除）
             workspaceBinder?.unbind(sessionId)
             // T81 (D-4)：只收敛本 session 的超时定时器 —— 原实现调

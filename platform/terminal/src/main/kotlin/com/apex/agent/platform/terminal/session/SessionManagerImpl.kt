@@ -77,6 +77,15 @@ class SessionManagerImpl(
     private val idCounter = AtomicLong(0)
     private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<SessionState>>()
     private val mutex = Mutex()
+    /**
+     * P3 fix（审计 6-b）：per-session 迁移互斥 —— transition 的 check-then-set +
+     * StateChanged 事件发射原子化。原实现无锁：并发 stop()/close()/exit-watcher
+     * 同刻迁移同一会话时读旧值交错（丢事件/乱序：如 STOPPING 与 EXITED 竞争时
+     * 观测者看到 EXITED→STOPPING 的非法序列）。
+     * 锁序恒为 全局 mutex → 本锁（transition 不反向获取全局 mutex，无死锁环）；
+     * close() 持全局锁清理时一并移除条目（与 assemblies/stateFlows 同生命周期）。
+     */
+    private val transitionLocks = ConcurrentHashMap<Long, Mutex>()
 
     override suspend fun create(
         shell: String, cwd: String, rows: Int, cols: Int,
@@ -232,6 +241,9 @@ class SessionManagerImpl(
         waitEngine.drop(id)
         assemblies.remove(id)
         stateFlows.remove(id)
+        // P3 fix（审计 6-b）：迁移锁随会话清理（在途 transition 已拿到旧锁实例，
+        // 会安全完成且因 stateFlows 已移除而是 no-op）
+        transitionLocks.remove(id)
         // T81 (D-4)：释放 bus（正在 collect 的订阅者持有 SharedFlow 引用不受影响；
         // EventLog 不 drop —— 有界（500）且持久化/恢复路径还要读 tail）。
         if (eventBus is TerminalEventBusImpl) eventBus.drop(id)
@@ -276,18 +288,22 @@ class SessionManagerImpl(
 
     /** Internal: transition a session's state + emit StateChanged. */
     suspend fun transition(sessionId: Long, to: SessionState) {
-        val flow = stateFlows[sessionId] ?: return
-        val from = flow.value
-        if (from == to) return
-        flow.value = to
-        assemblies[sessionId]?.let { a ->
-            val ev = TerminalEvent.StateChanged(
-                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
-                kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
-                targetId = sessionId, from = from.name, to = to.name
-            )
-            val eid = eventLog.append(ev)
-            eventBus.emit(ev.copy(id = eid))
+        // P3 fix（审计 6-b）：per-session 互斥（见 transitionLocks 注释）。
+        val lock = transitionLocks.computeIfAbsent(sessionId) { Mutex() }
+        lock.withLock {
+            val flow = stateFlows[sessionId] ?: return
+            val from = flow.value
+            if (from == to) return
+            flow.value = to
+            assemblies[sessionId]?.let { a ->
+                val ev = TerminalEvent.StateChanged(
+                    id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                    kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
+                    targetId = sessionId, from = from.name, to = to.name
+                )
+                val eid = eventLog.append(ev)
+                eventBus.emit(ev.copy(id = eid))
+            }
         }
     }
 

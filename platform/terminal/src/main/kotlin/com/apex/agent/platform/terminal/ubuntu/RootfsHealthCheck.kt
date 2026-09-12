@@ -200,7 +200,9 @@ class RootfsHealthInspector(
         val f = File(root, path.removePrefix("/"))
         if (!f.isSymlinkSafe()) return true   // regular file — existence already checked
         val target = f.symlinkTarget() ?: return false
-        val resolved = if (target.startsWith("/")) File(root, target.removePrefix("/")) else f.parentFile.resolve(target)
+        val resolved =
+            if (target.startsWith("/")) File(root, target.removePrefix("/"))
+            else f.parentFile?.resolve(target) ?: return false   // 无父目录（相对 rootfs 根）视为不可解析
         return resolved.exists()
     }
 

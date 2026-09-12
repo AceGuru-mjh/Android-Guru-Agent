@@ -414,18 +414,24 @@ class UbuntuAptPackageManager(
                     else -> PackageOperationState.FAILED
                 }
                 val finalResult = result.copy(state = finalState)
-                if (finalState == PackageOperationState.SUCCEEDED) {
+                // P3 fix（审计 6-b）：mapExecToError 只调一次 —— 原实现事件发射与 op
+                // 构造各调一次（重复构造 + 双份日志噪音）。
+                val err = if (finalState == PackageOperationState.SUCCEEDED) null
+                    else mapExecToError(exec, aptArgv)
+                if (err == null) {
                     emit(PackageOperationEvent.Completed(opId, finalResult))
                 } else {
-                    val err = mapExecToError(exec, aptArgv)
                     emit(PackageOperationEvent.Failed(opId, err))
                 }
-                opOf(opId, type, packages, startedAt, finalState, finalResult, if (finalState == PackageOperationState.SUCCEEDED) null else mapExecToError(exec, aptArgv))
+                opOf(opId, type, packages, startedAt, finalState, finalResult, err)
             }
         } catch (ce: CancellationException) {
+            // 状态发射：订阅者看到真实取消（RUNNING → CANCELLED），而非 FAILED
             emit(PackageOperationEvent.StateChanged(opId, PackageOperationState.RUNNING, PackageOperationState.CANCELLED))
-            val err = PackageOperationError(PackageErrorCode.CANCELLED, "operation cancelled", false)
-            return cancelledOp(opId, type, packages, startedAt, err)
+            // P2 fix（审计 6-b，与类文档第 5 条契约对齐）：CancellationException 必须
+            // 重抛（保留 finally 释放锁）—— 原实现吞掉后返回 cancelledOp，调用方
+            // Job 已被取消却看到写操作“正常返回”，结构化取消传播失效。
+            throw ce
         } catch (e: Exception) {
             val err = mapExceptionToError(e, aptArgv)
             emit(PackageOperationEvent.Failed(opId, err))
@@ -452,7 +458,9 @@ class UbuntuAptPackageManager(
     internal var diskPreflight: suspend (rootfsDir: java.io.File, requiredBytes: Long, stage: String) -> Unit =
         { dir, required, stage ->
             val usable = dir.usableSpace
-            if (usable in 1 until required) {
+            // P3 fix（审计 6-b）：usable==0（卷满/不可读）也会触发 DISK_FULL ——
+            // 原 `usable in 1 until required` 把 0 排除在外，满盘反而漏判放行。
+            if (usable < required) {
                 throw RuntimeException(
                     "PackageError:DISK_FULL — ${'$'}stage 前磁盘不足（需 ${'$'}{required / (1024 * 1024)}MB，" +
                         "可用 ${'$'}{usable / (1024 * 1024)}MB）"
@@ -651,14 +659,6 @@ class UbuntuAptPackageManager(
         startedAt: Long, error: PackageOperationError
     ): PackageOperation = opOf(
         opId, type, packages, startedAt, PackageOperationState.FAILED,
-        result = null, error = error
-    )
-
-    private fun cancelledOp(
-        opId: String, type: PackageOperationType, packages: List<PackageSpec>,
-        startedAt: Long, error: PackageOperationError
-    ): PackageOperation = opOf(
-        opId, type, packages, startedAt, PackageOperationState.CANCELLED,
         result = null, error = error
     )
 

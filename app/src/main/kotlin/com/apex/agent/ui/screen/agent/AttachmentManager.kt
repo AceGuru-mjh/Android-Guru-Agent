@@ -206,9 +206,10 @@ internal class AttachmentManager(
      * 收集并清空当前附件列表（发送消息时调用）。
      *
      * ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留。
+     * P3-h（6-c）：过滤掉 ERROR 状态附件（"读取失败"/"文件过大"占位项不应随消息发出）。
      */
     fun drainAttachments(): List<Attachment> {
-        val snapshot = _attachments.value.toList()
+        val snapshot = _attachments.value.filter { it.status != UploadStatus.ERROR }
         _attachments.value = emptyList()
         return snapshot
     }

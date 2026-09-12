@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- P3-d（6-c）：深色冷启动主题。主 values/themes.xml 固定 Light 父类，系统深色
+         模式下冷启动阶段（Compose 主题尚未生效前）窗口背景为亮色 → 白闪。本文件
+         提供同名主题的深色版（parent 用原生 android:Theme.Material.NoActionBar——
+         原生主题无 DayNight 变体，DayNight 属 appcompat），windowBackground 与
+         Theme.kt 深色配色 background(#0A0E14) 对齐。 -->
+    <style name="Theme.ApexAgent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0A0E14</item>
+    </style>
+</resources>

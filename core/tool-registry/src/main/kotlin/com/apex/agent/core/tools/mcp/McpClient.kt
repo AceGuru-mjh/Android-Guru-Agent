@@ -43,7 +43,12 @@ class McpClient(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val requestId = AtomicInteger(0)
+
+    // P2-6 修复：initialize/shutdown 与工具调用可能来自不同线程/协程，
+    // 非 volatile 时状态变更对其他线程不可见（isInitialized 竞态读到旧值）。
+    @Volatile
     private var initialized = false
+    @Volatile
     private var serverCapabilities: McpCapabilities? = null
 
     /**
@@ -129,6 +134,10 @@ class McpClient(
         arguments: String
     ): Result<McpToolResult> = withContext(Dispatchers.IO) {
         try {
+            // P2-6（顺手修）：与 listTools 对齐——未握手就发 tools/call 会以未初始化
+            // 状态打到服务器（多数实现直接 400），却在这里被折叠成假成功。
+            if (!initialized) return@withContext Result.failure(Exception("Not initialized"))
+
             val request = McpRequest(
                 jsonrpc = "2.0",
                 id = requestId.incrementAndGet(),
@@ -289,13 +298,32 @@ class McpClient(
         }
 
         val httpRequest = builder.build()
-        val response = httpClient.newCall(httpRequest).execute()
-        val responseBody = response.body?.string() ?: return null
+        // P2-6 修复：旧实现不检查 response.isSuccessful——404/500/HTML 错误页
+        // 都进入 JSON 解析、解析失败返回 null，上层折叠成"已连接、空工具"的
+        // 假成功（initialize 甚至置 initialized=true）。非 2xx 直接抛
+        // [McpException]，让调用方看到真实 HTTP 状态码与错误体；
+        // use{} 保证异常/短路路径也归还连接。
+        return httpClient.newCall(httpRequest).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errBody = response.body?.string()
+                val errSnippet = errBody?.take(200)?.trim().orEmpty()
+                    .ifEmpty { response.message }
+                throw McpException("HTTP ${response.code}: $errSnippet")
+            }
+            val responseBody = response.body?.string() ?: return@use null
 
-        return try {
-            Json.parseToJsonElement(responseBody).jsonObject
-        } catch (e: Exception) {
-            null
+            try {
+                Json.parseToJsonElement(responseBody).jsonObject
+            } catch (e: Exception) {
+                // 二轮审计 B-3：HTTP 200 + 非 JSON body（网关 HTML 登录页/代理拦截页）
+                // 折叠成 null 会让 initialize() 走「已连接、空能力」假成功——与
+                // P2-6 修的 404 假成功同款病根。显式抛 McpException 携带 body
+                // 片段，让调用方看到真实原因。
+                throw McpException(
+                    "HTTP ${response.code} 返回非 JSON 响应（疑似网关/鉴权拦截页）: " +
+                        responseBody.take(120).replace('\n', ' ').trim()
+                )
+            }
         }
     }
 

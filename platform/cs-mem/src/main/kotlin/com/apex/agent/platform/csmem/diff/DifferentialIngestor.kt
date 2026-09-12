@@ -38,11 +38,17 @@ object DifferentialIngestor {
         transitionAction: String,
         episodeId: String
     ): GraphDelta {
-        val prevFps = UiTreePruner.flattenFingerprints(prev.nodes).toSet()
-        val currFps = UiTreePruner.flattenFingerprints(curr.nodes).toSet()
+        // P2 fix（审计 6-b）：added/moved 判定改为全树展平后比较 —— 原实现只看顶层
+        // 节点（prev.nodes/curr.nodes 是树根列表），已存在容器下新增/位移的深层
+        // 节点系统性丢失（对应新边也被丢弃）。树归并语义保留：ingestNodes
+        // 自身递归展平，addedNodes 携带子树不影响落库。
+        val prevFlat = flattenAll(prev.nodes)
+        val currFlat = flattenAll(curr.nodes)
+        val prevFps = prevFlat.map { it.fingerprint }.toSet()
+        val currFps = currFlat.map { it.fingerprint }.toSet()
 
-        // 1. 新增节点
-        val addedNodes = curr.nodes.filter { it.fingerprint !in prevFps }
+        // 1. 新增节点（展平后全节点比较）
+        val addedNodes = currFlat.filter { it.fingerprint !in prevFps }
 
         // 2. 消失节点
         val removedFps = prevFps.subtract(currFps).toList()
@@ -51,8 +57,10 @@ object DifferentialIngestor {
         val movedNodes = mutableListOf<MovedNode>()
         val commonFps = prevFps.intersect(currFps)
         if (commonFps.isNotEmpty() && !isPageTransition(prev, curr)) {
-            val prevNodeMap = prev.nodes.associateBy { it.fingerprint }
-            val currNodeMap = curr.nodes.associateBy { it.fingerprint }
+            // P2 fix：映射表也用展平集合 —— 原实现只映射顶层节点，深层公共指纹全部
+            // `?: continue` 跳过（moved 判定永远只覆盖顶层）。
+            val prevNodeMap = prevFlat.associateBy { it.fingerprint }
+            val currNodeMap = currFlat.associateBy { it.fingerprint }
             for (fp in commonFps) {
                 val p = prevNodeMap[fp] ?: continue
                 val c = currNodeMap[fp] ?: continue
@@ -97,6 +105,18 @@ object DifferentialIngestor {
 
         // 相同节点比例低于阈值 → 页面跳转
         return ratio < (1.0f - PAGE_TRANSITION_RATIO)
+    }
+
+    /** P2 fix（审计 6-b）：全树展平（含全部后代）—— added/moved 判定的输入。 */
+    private fun flattenAll(nodes: List<SemanticNode>): List<SemanticNode> {
+        val out = mutableListOf<SemanticNode>()
+        for (n in nodes) flattenInto(n, out)
+        return out
+    }
+
+    private fun flattenInto(node: SemanticNode, out: MutableList<SemanticNode>) {
+        out.add(node)
+        for (c in node.children) flattenInto(c, out)
     }
 
     /**

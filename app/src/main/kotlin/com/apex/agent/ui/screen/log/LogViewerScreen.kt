@@ -61,7 +61,6 @@ import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.logging.LogRecord
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

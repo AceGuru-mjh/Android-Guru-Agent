@@ -131,6 +131,7 @@ fun SettingsScreen(
                     providers = providers,
                     selectedId = selectedId,
                     selected = selected,
+                    viewModel = viewModel,
                     onSelect = { selectedId = it },
                     onAdd = {
                         val id = "profile_${System.currentTimeMillis()}"
@@ -184,6 +185,7 @@ private fun ModelsTab(
     providers: List<ProviderConfig>,
     selectedId: String,
     selected: ModelProfile?,
+    viewModel: SettingsViewModel,
     onSelect: (String) -> Unit,
     onAdd: () -> Unit,
     onDuplicate: (String) -> Unit,
@@ -200,6 +202,12 @@ private fun ModelsTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 一张卡完成「选服务商 → URL 预填 → 填 Key → 拉取真实模型」的主流程
+        ModelSetupCard(
+            providers = providers,
+            selected = selected,
+            viewModel = viewModel
+        )
         ModelsSection(
             profiles = profiles,
             providers = providers,
@@ -523,7 +531,8 @@ private fun ModelsSection(
     var resetTarget by remember { mutableStateOf<ModelProfile?>(null) }
     var deleteTarget by remember { mutableStateOf<ModelProfile?>(null) } // 修复：删除档案加确认（破坏性操作）
 
-    SectionCard("Models · 模型档案", Icons.Outlined.SmartToy, initiallyExpanded = true) {
+    // 主配置入口已上移到 ModelSetupCard；这里保留多档案管理 + 高级参数（默认收起）
+    SectionCard("Models · 模型档案（多档案 / 高级）", Icons.Outlined.SmartToy, initiallyExpanded = false) {
         profiles.forEach { p ->
             val prov = providers.firstOrNull { it.id == p.providerId }
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(

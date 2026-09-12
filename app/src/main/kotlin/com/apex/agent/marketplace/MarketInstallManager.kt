@@ -142,24 +142,139 @@ class MarketInstallManager @Inject constructor(
         }
     }
 
-    // ═══ Skill：GitHub 仓库安装（尝试常见 manifest 路径）═══
+    // ═══ Skill：GitHub 仓库安装（真实联网，多用形态兜底）═══
+
+    /**
+     * GitHub 仓库安装。
+     *
+     * 旧实现只试 `main` 分支下的 5 个候选路径，绝大多数第三方仓库打不到 ——
+     * 按钮点了永远是「仓库中未找到可安装的 manifest」，与市场期望不符（摆设）。
+     * 现在的策略：
+     *  1. 先查 GitHub API 拿到**真实默认分支**（有的仓库只有 master）；
+     *  2. manifest 候选路径扩到常见约定（含 `.apex/` 子目录）；
+     *  3. 找不到 `apex-skill-v1` manifest 时，退化为读取 `SKILL.md` →
+     *     转成 prompt 型技能安装（社区仓库最普遍的技能形态）。
+     */
     suspend fun installSkillFromGitHubRepo(owner: String, repo: String): Result<String> =
         withContext(Dispatchers.IO) {
-            val candidates = listOf(
-                "manifest.json", "skill.json", "apex-skill.json", "$repo.json", "skills/$repo.json"
+            val branches = listOfNotNull(resolveDefaultBranch(owner, repo), "main", "master").distinct()
+            val manifestPaths = listOf(
+                "manifest.json", "skill.json", "apex-skill.json", "apex_skill.json",
+                "$repo.json", "skills/$repo.json", ".apex/skill.json", "skill/manifest.json"
             )
-            var lastError = "仓库中未找到可安装的 manifest"
-            for (candidate in candidates) {
-                val url = "https://raw.githubusercontent.com/$owner/$repo/main/$candidate"
-                val content = tryDownload(url) ?: continue
-                // 必须是合法的 apex-skill-v1 manifest 才接受
-                if (looksLikeApexManifest(content)) {
-                    return@withContext installSkillFromJson(content)
+            val markdownPaths = listOf("SKILL.md", "skill.md", "README.md")
+
+            for (branch in branches) {
+                for (path in manifestPaths) {
+                    val content = tryDownload(
+                        "https://raw.githubusercontent.com/$owner/$repo/$branch/$path"
+                    ) ?: continue
+                    if (looksLikeApexManifest(content)) {
+                        return@withContext installSkillFromJson(content)
+                    }
                 }
-                lastError = "找到文件但不是有效的 apex-skill-v1 manifest"
+                for (path in markdownPaths) {
+                    val markdown = tryDownload(
+                        "https://raw.githubusercontent.com/$owner/$repo/$branch/$path"
+                    ) ?: continue
+                    if (markdown.isBlank()) continue
+                    val (name, description) = parseMarkdownHeading(markdown, fallbackName = repo)
+                    return@withContext installSkillFromJson(
+                        promptManifest(
+                            id = "gh-${owner.lowercase()}-${repo.lowercase()}",
+                            name = name,
+                            description = description,
+                            author = "github:$owner",
+                            markdown = markdown
+                        )
+                    )
+                }
             }
-            Result.failure(Exception(lastError))
+            Result.failure(
+                Exception("仓库 $owner/$repo 中未找到可安装内容（已试 ${branches.size} 个分支的 manifest 与 SKILL.md）")
+            )
         }
+
+    /**
+     * 从任意形式的 GitHub 输入安装：`owner/repo` / 完整 https 链接 / git@ SSH 链接。
+     */
+    suspend fun installSkillFromRepoInput(input: String): Result<String> {
+        val raw = input.trim().trimEnd('/')
+        if (raw.isBlank()) return Result.failure(Exception("请输入 owner/repo 或 GitHub 链接"))
+        val (owner, repo) = parseRepoSpec(raw)
+            ?: return Result.failure(Exception("无法解析仓库地址：$input"))
+        return installSkillFromGitHubRepo(owner, repo)
+    }
+
+    /** 解析仓库归属：支持 owner/repo、https://github.com/owner/repo[.git]、git@github.com:owner/repo.git。 */
+    private fun parseRepoSpec(input: String): Pair<String, String>? {
+        val cleaned = input
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("git@github.com:")
+            .removePrefix("github.com/")
+            .removeSuffix(".git")
+        val parts = cleaned.split('/').filter { it.isNotBlank() }
+        if (parts.size < 2) return null
+        val owner = parts[0]
+        val repo = parts[1]
+        if (!owner.matches(Regex("[A-Za-z0-9._-]+")) || !repo.matches(Regex("[A-Za-z0-9._-]+"))) return null
+        return owner to repo
+    }
+
+    /** 查询仓库真实默认分支；失败返回 null（由调用方回退到 main/master）。 */
+    private fun resolveDefaultBranch(owner: String, repo: String): String? = runCatching {
+        val request = Request.Builder()
+            .url("https://api.github.com/repos/$owner/$repo")
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "ApexAgent/1.0")
+            .apply { githubTokenManager.getToken()?.let { header("Authorization", "Bearer $it") } }
+            .build()
+        httpClient.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return@use null
+            json.parseToJsonElement(resp.body?.string() ?: return@use null)
+                .jsonObject["default_branch"]?.jsonPrimitive?.contentOrNull
+        }
+    }.getOrNull()
+
+    /** 从 markdown 里取首个一级标题当名字，紧跟的第一段非空文字当描述。 */
+    private fun parseMarkdownHeading(markdown: String, fallbackName: String): Pair<String, String> {
+        val lines = markdown.lineSequence().map { it.trim() }.toList()
+        val heading = lines.firstOrNull { it.startsWith("# ") }
+            ?.removePrefix("# ")?.trim()?.takeIf { it.isNotBlank() }
+            ?: fallbackName
+        val headingIdx = lines.indexOfFirst { it.startsWith("# ") }
+        val description = if (headingIdx >= 0) {
+            lines.drop(headingIdx + 1)
+                .firstOrNull { it.isNotBlank() && !it.startsWith("#") && !it.startsWith("---") }
+                ?.take(120)
+                .orEmpty()
+        } else {
+            lines.firstOrNull { it.isNotBlank() && !it.startsWith("---") }?.take(120).orEmpty()
+        }
+        return heading to description.ifBlank { "$fallbackName（GitHub 仓库转换）" }
+    }
+
+    /** 构造 prompt 型 apex-skill-v1 manifest（SKILL.md 全量注入）。 */
+    private fun promptManifest(
+        id: String,
+        name: String,
+        description: String,
+        author: String,
+        markdown: String
+    ): String = buildString {
+        append("{\n")
+        append("\"schema\":\"apex-skill-v1\",\n")
+        append("\"id\":\"${escapeJson(id)}\",\n")
+        append("\"name\":\"${escapeJson(name)}\",\n")
+        append("\"version\":\"1.0.0\",\n")
+        append("\"description\":\"${escapeJson(description)}\",\n")
+        append("\"author\":\"${escapeJson(author)}\",\n")
+        append("\"promptInjection\":\"${escapeJson(markdown)}\",\n")
+        append("\"tools\":[],\n")
+        append("\"configuration\":{\"autoSetup\":[]}\n")
+        append("}")
+    }
 
     // ═══ GitHub 仓库搜索（市场"集成"页）═══
     suspend fun searchGitHubSkills(query: String): Result<List<GitHubRepoHit>> =

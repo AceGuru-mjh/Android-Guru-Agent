@@ -98,6 +98,9 @@ class McpManager(
             val loser = synchronized(lock) { clients.put(name, client) }
             loser?.let { runCatching { it.shutdown() } }
             notifyChanged()
+        } else {
+            // STDIO 服务器在构造阶段就已 fork 出子进程；握手失败若不收尾就是进程泄漏
+            runCatching { client.shutdown() }
         }
         return initResult
     }

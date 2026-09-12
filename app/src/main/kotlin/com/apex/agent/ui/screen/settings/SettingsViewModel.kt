@@ -5,7 +5,9 @@ import com.apex.agent.core.llm.LlmClientFactory
 import com.apex.agent.core.llm.LlmConfig
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelRoleConfig
+import com.apex.agent.core.llm.ModelsCatalog
 import com.apex.agent.core.llm.ProviderConfig
+import com.apex.agent.core.llm.RemoteModelInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +45,31 @@ class SettingsViewModel @Inject constructor(
     fun upsertProvider(provider: ProviderConfig) = repo.upsertProvider(provider)
     fun deleteProvider(id: String) = repo.deleteProvider(id)
     fun getProvider(id: String) = repo.getProvider(id)
+
+    /** API Key 读取 / 写入 —— 写入即加密持久化（见 SettingsRepository 的 securePrefs）。 */
+    fun getProviderApiKey(providerId: String): String = repo.getProviderApiKey(providerId)
+    fun setProviderApiKey(providerId: String, apiKey: String) =
+        repo.setProviderApiKey(providerId, apiKey)
+
+    /**
+     * 从 Provider 的 Base URL 拉取**真实**模型列表（`GET /models`）。
+     *
+     * 取代设置页里那批写死的"推荐模型"：端点自己返回的才是能跑的。
+     */
+    suspend fun fetchModels(providerId: String): Result<List<RemoteModelInfo>> =
+        withContext(Dispatchers.IO) {
+            val resolved = repo.getProvider(providerId)
+                ?: return@withContext Result.failure(Exception("未找到服务商：$providerId"))
+            val baseUrl = resolved.baseUrl.trim()
+            if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                return@withContext Result.failure(Exception("Base URL 未填写或不合法，无法获取模型"))
+            }
+            ModelsCatalog.fetchModels(
+                baseUrl = baseUrl,
+                apiKey = repo.getProviderApiKey(resolved.id),
+                extraHeaders = resolved.defaultHeaders
+            )
+        }
 
     // ── 角色 / Agent ───────────────────────────────────────────
     fun updateRoles(block: ModelRoleConfig.() -> ModelRoleConfig) = repo.updateRoles(block)

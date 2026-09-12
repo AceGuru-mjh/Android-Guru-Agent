@@ -5,6 +5,7 @@ import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -103,35 +104,71 @@ class McpConnectTool(
     override val id = "mcp_connect"
     override val name = "Connect MCP Server"
     override val description = """
-        Connect to an MCP server. Once connected, its tools become available via mcp_call.
+        Connect to an MCP tool source. Once connected, its tools become available via mcp_call.
+
+        MCP is NOT always a server: the most common form in the wild is a LOCAL COMMAND
+        (stdio transport) that speaks JSON-RPC over stdin/stdout. Give `command` for that
+        form, or `url` for a remote endpoint.
 
         Examples:
         - {"name": "github", "url": "http://localhost:3000/mcp"}
         - {"name": "local_db", "url": "http://127.0.0.1:8080/mcp"}
+        - {"name": "memory", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"]}
     """.trimIndent()
 
     override val parametersSchema = """
         {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Server name identifier"},
-                "url": {"type": "string", "description": "MCP server URL"},
-                "transport": {"type": "string", "enum": ["http", "sse"], "description": "Transport type (default: http)"}
+                "name": {"type": "string", "description": "Tool source name identifier"},
+                "url": {"type": "string", "description": "Remote MCP endpoint (http/sse transport)"},
+                "transport": {"type": "string", "enum": ["http", "sse", "stdio"], "description": "Transport type; inferred when omitted"},
+                "command": {"type": "string", "description": "Local executable for stdio transport"},
+                "args": {"type": "array", "items": {"type": "string"}, "description": "Arguments for `command`"},
+                "env": {"type": "object", "description": "Environment variables for `command`"}
             },
-            "required": ["name", "url"]
+            "required": ["name"]
         }
     """.trimIndent()
 
     override suspend fun execute(arguments: String): String {
         val json = Json.parseToJsonElement(arguments).jsonObject
         val name = json["name"]?.jsonPrimitive?.content ?: return "Error: 'name' required"
-        val url = json["url"]?.jsonPrimitive?.content ?: return "Error: 'url' required"
-        val transport = json["transport"]?.jsonPrimitive?.content ?: "http"
+        val url = json["url"]?.jsonPrimitive?.content.orEmpty()
+        val command = json["command"]?.jsonPrimitive?.content.orEmpty()
+        val rawTransport = json["transport"]?.jsonPrimitive?.content.orEmpty()
+
+        val args = json["args"]?.jsonArray?.mapNotNull {
+            runCatching { it.jsonPrimitive.content }.getOrNull()
+        }.orEmpty()
+        val env = json["env"]?.jsonObject?.mapValues { (_, v) ->
+            runCatching { v.jsonPrimitive.content }.getOrDefault("")
+        }.orEmpty()
+
+        // 传输判定：显式 transport > command → stdio > url → http/sse。
+        // 这也是官方 MCP 配置的语义："有 command 就是本地进程，不需要 url"。
+        val transport = when {
+            rawTransport.equals("stdio", ignoreCase = true) -> McpTransport.STDIO
+            rawTransport.equals("sse", ignoreCase = true) -> McpTransport.SSE
+            rawTransport.equals("http", ignoreCase = true) -> McpTransport.HTTP
+            command.isNotBlank() -> McpTransport.STDIO
+            else -> McpTransport.HTTP
+        }
+
+        if (transport == McpTransport.STDIO && command.isBlank()) {
+            return "Error: stdio transport requires 'command'"
+        }
+        if (transport != McpTransport.STDIO && url.isBlank()) {
+            return "Error: 'url' required for ${transport.name} transport"
+        }
 
         val config = McpServerConfig(
             name = name,
             url = url,
-            transport = if (transport == "sse") McpTransport.SSE else McpTransport.HTTP
+            transport = transport,
+            command = command.takeIf { it.isNotBlank() },
+            args = args,
+            env = env
         )
 
         mcpManager.addServer(config)
@@ -140,8 +177,12 @@ class McpConnectTool(
         return result.fold(
             onSuccess = { caps ->
                 buildString {
-                    appendLine("✅ Connected to MCP server '$name'")
-                    appendLine("  URL: $url")
+                    appendLine("✅ Connected to MCP tool source '$name'")
+                    appendLine("  Transport: ${transport.name}")
+                    appendLine(
+                        if (transport == McpTransport.STDIO) "  Command: ${config.endpointSummary()}"
+                        else "  URL: $url"
+                    )
                     appendLine("  Capabilities:")
                     appendLine("    Tools: ${if (caps.tools) "✅" else "❌"}")
                     appendLine("    Resources: ${if (caps.resources) "✅" else "❌"}")

@@ -15,20 +15,22 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * MCP (Model Context Protocol) 客户端
  *
- * MCP允许Agent连接外部工具服务器，扩展能力边界。
- * 支持两种传输方式：
- * - HTTP/SSE: 通过HTTP POST请求通信（远程MCP服务器）
- * - STDIO: 通过子进程通信（本地MCP服务器，暂未实现）
+ * MCP让Agent连接外部工具源，扩展能力边界。
+ *
+ * **"外部工具源"不一定是服务器**：MCP 官方配置里绝大多数 server 是本地命令
+ * （`command` + `args` + `env`，如 `npx -y @modelcontextprotocol/server-memory`），
+ * 双方通过 stdin/stdout 的换行分隔 JSON-RPC 通信。本项目因此支持三种传输：
+ * - STDIO：本地子进程（见 [McpStdioTransport]）—— "MCP 不需要服务器形态"
+ * - HTTP / SSE：远端端点 POST JSON-RPC（见 [McpHttpTransport]）
+ *
+ * 三者共用同一套 [McpTransportHandle]，上层 [McpClient] 不关心对面是进程还是服务。
  *
  * 协议流程：
  * 1. initialize → 握手，交换能力信息
@@ -50,6 +52,44 @@ class McpClient(
     private var initialized = false
     @Volatile
     private var serverCapabilities: McpCapabilities? = null
+
+    /**
+     * 传输句柄：把"远端 HTTP 端点"与"本地子进程"统一成一条 send/close 管道。
+     *
+     * 惰性构建 —— STDIO 会真的 fork 一个进程，配置阶段（仅落盘）不该触发。
+     * 所有使用点都必须经 [transportHandle] 而不是直接读 [transport]，
+     * 否则一次无害查询（如 isTransportAlive）就会白白拉起进程。
+     */
+    private val transport: McpTransportHandle by lazy { createTransport() }
+
+    @Volatile
+    private var createdTransport = false
+
+    private fun transportHandle(): McpTransportHandle {
+        createdTransport = true
+        return transport
+    }
+
+    private fun createTransport(): McpTransportHandle = when (config.transport) {
+        McpTransport.STDIO -> {
+            val cmdLine = buildCommandLine()
+            if (cmdLine.isEmpty()) {
+                throw McpException("STDIO 传输需要填写命令（command + args），例如 npx -y @modelcontextprotocol/server-memory")
+            }
+            McpStdioTransport(command = cmdLine, env = config.env)
+        }
+        McpTransport.HTTP, McpTransport.SSE -> {
+            if (config.url.isBlank()) throw McpException("${config.transport} 传输需要填写 URL")
+            McpHttpTransport(config, httpClient)
+        }
+    }
+
+    /** `command` + `args` → 进程命令行（首元素为可执行文件）。 */
+    private fun buildCommandLine(): List<String> {
+        val executable = config.command?.trim().orEmpty()
+        if (executable.isBlank()) return emptyList()
+        return listOf(executable) + config.args.map { it.trim() }.filter { it.isNotBlank() }
+    }
 
     /**
      * 初始化MCP连接
@@ -232,16 +272,22 @@ class McpClient(
      */
     fun shutdown() {
         initialized = false
+        // STDIO 会真的杀掉子进程；HTTP 无状态，close 是空操作。
+        // 只有真正创建过传输才关闭 —— 否则会为了 close 而去 fork 一个进程。
+        if (createdTransport) runCatching { transport.close() }
     }
 
     fun isInitialized(): Boolean = initialized
     fun getCapabilities(): McpCapabilities? = serverCapabilities
 
+    /** STDIO 子进程是否仍存活（尚未创建，或 HTTP 传输，均视为存活）。 */
+    fun isTransportAlive(): Boolean = !createdTransport || transport.isHealthy()
+
     // ═══ 内部方法 ═══
 
     private suspend fun sendRequest(request: McpRequest): JsonObject? {
         val body = json.encodeToString(request)
-        val response = sendHttp(body) ?: return null
+        val response = transportHandle().send(request.id, body) ?: return null
 
         // Verify the JSON-RPC response id matches the request id. Without this check,
         // a stale / out-of-order / multiplexed response is silently applied to the
@@ -263,68 +309,17 @@ class McpClient(
         return response
     }
 
+    /**
+     * 通知（无响应）。尽力而为：通知失败不应让调用方炸掉，
+     * 但也不能用空 catch 把异常吞得无声无息 —— 这里显式取 result 并忽略值。
+     */
     private suspend fun sendNotification(method: String, params: JsonObject) {
         val notification = buildJsonObject {
             put("jsonrpc", "2.0")
             put("method", method)
             put("params", params)
-        }
-        val body = notification.toString()
-
-        when (config.transport) {
-            McpTransport.HTTP, McpTransport.SSE -> {
-                val httpRequest = Request.Builder()
-                    .url(config.url)
-                    .post(body.toRequestBody("application/json".toMediaType()))
-                    .build()
-                httpClient.newCall(httpRequest).execute().close()
-            }
-            McpTransport.STDIO -> { /* TODO: stdio transport */ }
-        }
-    }
-
-    private fun sendHttp(body: String): JsonObject? {
-        val builder = Request.Builder()
-            .url(config.url)
-            .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
-
-        // Attach the configured API key as a Bearer token. Without this header every
-        // request to an authenticated MCP server silently 401s, and initialize() then
-        // flips initialized=true with empty capabilities — the agent sees "connected,
-        // no tools" instead of an auth failure.
-        config.apiKey?.let { key ->
-            builder.addHeader("Authorization", "Bearer $key")
-        }
-
-        val httpRequest = builder.build()
-        // P2-6 修复：旧实现不检查 response.isSuccessful——404/500/HTML 错误页
-        // 都进入 JSON 解析、解析失败返回 null，上层折叠成"已连接、空工具"的
-        // 假成功（initialize 甚至置 initialized=true）。非 2xx 直接抛
-        // [McpException]，让调用方看到真实 HTTP 状态码与错误体；
-        // use{} 保证异常/短路路径也归还连接。
-        return httpClient.newCall(httpRequest).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errBody = response.body?.string()
-                val errSnippet = errBody?.take(200)?.trim().orEmpty()
-                    .ifEmpty { response.message }
-                throw McpException("HTTP ${response.code}: $errSnippet")
-            }
-            val responseBody = response.body?.string() ?: return@use null
-
-            try {
-                Json.parseToJsonElement(responseBody).jsonObject
-            } catch (e: Exception) {
-                // 二轮审计 B-3：HTTP 200 + 非 JSON body（网关 HTML 登录页/代理拦截页）
-                // 折叠成 null 会让 initialize() 走「已连接、空能力」假成功——与
-                // P2-6 修的 404 假成功同款病根。显式抛 McpException 携带 body
-                // 片段，让调用方看到真实原因。
-                throw McpException(
-                    "HTTP ${response.code} 返回非 JSON 响应（疑似网关/鉴权拦截页）: " +
-                        responseBody.take(120).replace('\n', ' ').trim()
-                )
-            }
-        }
+        }.toString()
+        runCatching { transportHandle().send(null, notification) }
     }
 
     companion object {
@@ -361,12 +356,43 @@ data class McpRequest(
 @Serializable
 data class McpServerConfig(
     val name: String,
-    val url: String,
+    val url: String = "",
     val transport: McpTransport = McpTransport.HTTP,
     val apiKey: String? = null,
-    val enabled: Boolean = true
-)
+    val enabled: Boolean = true,
 
+    // ── STDIO：本地命令形态（不是服务器！）─────────────────────────
+    /** 可执行文件，如 `npx` / `python` / `java` / 绝对路径下的二进制。 */
+    val command: String? = null,
+    /** 命令参数，如 `["-y", "@modelcontextprotocol/server-filesystem", "/sdcard"]`。 */
+    val args: List<String> = emptyList(),
+    /** 环境变量，如 `{"OPENAI_API_KEY": "..."}`。 */
+    val env: Map<String, String> = emptyMap(),
+
+    // ── 远端：自定义请求头（第三方网关常要求额外鉴权头）──────────────
+    val headers: Map<String, String> = emptyMap(),
+) {
+    /** 列表/日志用的一行摘要：stdio 显示命令，远端显示 URL。 */
+    fun endpointSummary(): String = when (transport) {
+        McpTransport.STDIO -> (listOfNotNull(command?.takeIf { it.isNotBlank() }) + args)
+            .joinToString(" ")
+            .trim()
+            .ifEmpty { UNCONFIGURED_COMMAND }
+        McpTransport.HTTP, McpTransport.SSE -> url.ifBlank { UNCONFIGURED_URL }
+    }
+}
+
+private const val UNCONFIGURED_COMMAND = "(未配置命令)"
+private const val UNCONFIGURED_URL = "(未配置 URL)"
+
+/**
+ * MCP 传输形态。
+ *
+ * - [HTTP]：对单个端点 POST 一条 JSON-RPC（Streamable HTTP 的无流式回退）；
+ * - [SSE]：同端点 POST，服务端可用 `text/event-stream` 分帧回（两种分帧都兼容）；
+ * - [STDIO]：**本地子进程**，双方通过 stdin/stdout 的换行分隔 JSON-RPC 通信。
+ *   MCP 官方配置里绝大多数 server 其实是这种形态 —— 并不需要一个"服务器"。
+ */
 @Serializable
 enum class McpTransport { HTTP, SSE, STDIO }
 

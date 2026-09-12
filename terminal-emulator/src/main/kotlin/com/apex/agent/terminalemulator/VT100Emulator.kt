@@ -35,8 +35,17 @@ package com.apex.agent.terminalemulator
  *   - DEC line drawing charset
  *
  * The interface [com.apex.agent.platform.terminal.screen.VirtualTerminal] stays unchanged;
- * this class is the concrete impl used by RealVirtualTerminal.
+ * 生产实现已升级为 [TerminalCore]（经 platform 层 RealVirtualTerminal 接线）。
+ *
+ * @deprecated 生产路径已改用 TerminalCore。本类保留两个已知缺陷且不再维护：
+ * ① resize 后不重建 altScreen —— 退出 alt 屏时数组维度失配（AIOOBE）；
+ * ② feed 每次 String(bytes, UTF_8) —— 跨读的多字节序列被截断产生乱码。
+ * 仅为历史参考保留，勿在新代码中使用。
  */
+@Deprecated(
+    "使用 TerminalCore / RealVirtualTerminal —— 此类存在 resize AIOOBE 与 UTF-8 截断缺陷，不再维护",
+    level = DeprecationLevel.WARNING
+)
 class VT100Emulator(
     initialRows: Int,
     initialCols: Int

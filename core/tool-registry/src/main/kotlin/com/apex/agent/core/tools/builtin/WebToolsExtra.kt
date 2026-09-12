@@ -50,6 +50,12 @@ class DownloadFileTool(
                 ?: url.substringAfterLast('/').substringBefore('?').ifEmpty { "download_${System.currentTimeMillis()}" }
             val directory = json["directory"]?.jsonPrimitive?.content
 
+            // P2-11 修复：filename 直接拼进 saveDir——含路径分隔符或 ".." 即可路径
+            // 穿越写到任意位置（如 "../../data/system/x"）。作为单段文件名校验，直接拒绝。
+            if (filename.isBlank() || '/' in filename || '\\' in filename || ".." in filename) {
+                return "Error: invalid filename '$filename' (path separators and '..' are not allowed)"
+            }
+
             val saveDir = when {
                 directory != null -> File(directory).apply { mkdirs() }
                 else -> downloadDir.apply { mkdirs() }
@@ -62,15 +68,39 @@ class DownloadFileTool(
                 .header("User-Agent", "ApexAgent/1.0")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return "Download failed: HTTP ${response.code}"
-            }
+            // P2-11 修复：use{} —— 异常/短路路径也归还连接（旧实现泄漏连接池）。
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return "Download failed: HTTP ${response.code}"
+                }
 
-            val body = response.body ?: return "Error: Empty response body"
+                val body = response.body ?: return "Error: Empty response body"
 
-            FileOutputStream(saveFile).use { output ->
-                body.byteStream().copyTo(output)
+                // P2-11 修复：500MB 上限。先按 Content-Length 预检，
+                // chunked（无 Content-Length）时拷贝循环里逐块强制。
+                if (body.contentLength() > MAX_DOWNLOAD_BYTES) {
+                    return "Download rejected: declared size exceeds ${MAX_DOWNLOAD_BYTES / MIB}MB limit"
+                }
+
+                try {
+                    var copied = 0L
+                    FileOutputStream(saveFile).use { output ->
+                        val input = body.byteStream()
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            copied += read
+                            if (copied > MAX_DOWNLOAD_BYTES) {
+                                throw SecurityException("download aborted: exceeds ${MAX_DOWNLOAD_BYTES / MIB}MB limit")
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                } catch (e: Exception) {
+                    saveFile.delete() // 超限/IO 中断：清理半成品文件
+                    throw e
+                }
             }
 
             val sizeKb = saveFile.length() / 1024
@@ -78,5 +108,11 @@ class DownloadFileTool(
         } catch (e: Exception) {
             "Download error: ${e.message}"
         }
+    }
+
+    private companion object {
+        /** P2-11：单文件下载上限（防无限流写满磁盘）。 */
+        const val MAX_DOWNLOAD_BYTES = 500L * 1024 * 1024
+        const val MIB = 1024L * 1024
     }
 }

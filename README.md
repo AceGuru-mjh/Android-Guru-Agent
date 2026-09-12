@@ -10,7 +10,7 @@
 **An autonomous AI agent that lives entirely on your Android device.**
 
 一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、6 种执行模式、
-102 个内置工具、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
+109 个内置工具（v3 新增超时/重试/限流/熔断/追踪/批量/组合动作八层执行硬化；P83 环境闭环补全）、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
@@ -49,7 +49,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **项目事实**
 
-<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-100-ff69b4" alt="102 Tools"/></a>
+<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-109-ff69b4" alt="109 Tools"/></a>
 <a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
 <a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-13-8A2BE2" alt="13 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-74_files-2EA44F" alt="74 Tests"/></a>
@@ -88,7 +88,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 - [🗜️ 上下文工程（P7 三级压缩）](#context-compression)
 - [🖥️ 终端运行时（Ubuntu + PRoot）](#terminal-runtime)
 - [🌐 浏览器智能体](#browser)
-- [🔧 工具全景（102 个）](#tools)
+- [🔧 工具全景（109 个）](#tools)
 - [⚡ 权限执行链](#privilege)
 
 </td>
@@ -475,12 +475,12 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 ---
 
 <a id="tools"></a>
-## 🔧 工具全景（102 个）
+## 🔧 工具全景（109 个）
 
 <details open>
 <summary><b>📦 点击展开 / 折叠完整工具清单（按模块分组）</b></summary>
 
-**core:tool-registry —— 57 个内置工具**
+**core:tool-registry —— 64 个内置工具**
 
 | 类别 | 工具 |
 |------|------|
@@ -495,6 +495,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | 🧩 技能 | `skill_search` `skill_install` `skill_create` `skill_list` `skill_uninstall` |
 | 🛰️ MCP | `mcp_connect` `mcp_list` `mcp_call` |
 | 🧱 结构化 v2（15） | `regex_extract` `regex_replace` `text_diff` `json_path` `xml_extract` `csv_query` `base_convert` `unit_convert` `duration_convert` `string_distance` `random_generate` `uuid_generate` `file_hash` `datetime` `cron_next`（全部纯 JVM / 离线 / 确定性） |
+| ⚡ 执行硬化 v3（7） | `wait`（≤300s 可取消等待）· `json_transform`（jq 风格七操作管线）· `version_compare`（SemVer 排序）· `tool_batch_run`（批量首错即停 + 步间引用）· `shortcut_define` / `shortcut_list` / `shortcut_run`（组合动作：定义→热注册、清单+挖掘建议、执行）——详见 [docs/tool-system-v3.md](docs/tool-system-v3.md) |
 
 **app 模块 —— 22 个**
 
@@ -832,6 +833,7 @@ Android-Guru-Agent/
 
 | 文档 | 内容 |
 |------|------|
+| [docs/tool-system-v3.md](docs/tool-system-v3.md) | **工具系统 v3**：执行硬化八层（超时/重试/限流/熔断/追踪/批量/组合动作/环境门控），MCP·LangGraph·Anthropic CU·Mobile-Agent-E 对标 |
 | [docs/TESTING.md](docs/TESTING.md) | **测试总指南**：理念/矩阵/替身规范/FAQ/74 文件清单 |
 | [docs/liquid-glass-system.md](docs/liquid-glass-system.md) | **Liquid Glass 玻璃组件系统**：架构/七档材质/组件 API/真实性验收矩阵 |
 | [docs/memory-and-workflow-research.md](docs/memory-and-workflow-research.md) | **记忆与工作流调研报告**：对标 MemGPT/Mem0/A-MEM/Zep/Voyager/Claude Code/OpenHands/SWE-agent |

@@ -51,6 +51,23 @@ import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.core.tools.ToolUsageTracker
+import com.apex.agent.core.tools.CompositeToolGate
+import com.apex.agent.core.tools.DefaultToolRunPolicyResolver
+import com.apex.agent.core.tools.ShortcutRegistry
+import com.apex.agent.core.tools.ToolCircuitBreaker
+import com.apex.agent.core.tools.ToolEnvironmentGate
+import com.apex.agent.core.tools.ToolEnvironmentState
+import com.apex.agent.core.tools.ToolExecutorBuilder
+import com.apex.agent.core.tools.ToolRateLimiter
+import com.apex.agent.core.tools.ToolRunPolicy
+import com.apex.agent.core.tools.ToolTraceRecorder
+import com.apex.agent.core.tools.builtin.JsonTransformTool
+import com.apex.agent.core.tools.builtin.ShortcutDefineTool
+import com.apex.agent.core.tools.builtin.ShortcutListTool
+import com.apex.agent.core.tools.builtin.ShortcutRunTool
+import com.apex.agent.core.tools.builtin.ToolBatchRunTool
+import com.apex.agent.core.tools.builtin.VersionCompareTool
+import com.apex.agent.core.tools.builtin.WaitTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -124,6 +141,59 @@ object ToolModule {
     @Singleton
     fun provideToolUsageTracker(): ToolUsageTracker = ToolUsageTracker()
 
+    // ═══ Tool System v3 单例：环境态 / 追踪 / 熔断 / 组合动作 ═══
+
+    /** 环境能力快照（EnvironmentStateUpdater 灌入；门控与 prompt 共用）。 */
+    @Provides
+    @Singleton
+    fun provideToolEnvironmentState(): ToolEnvironmentState = ToolEnvironmentState()
+
+    /** 结构化调用追踪（v3）：每工具调用一个 span，环形缓冲 + 监听器分发。 */
+    @Provides
+    @Singleton
+    fun provideToolTraceRecorder(): ToolTraceRecorder = ToolTraceRecorder(capacity = 300)
+
+    /** 工具熔断器（v3）：连续失败短路由，防止模型对已损坏工具的无效重试。 */
+    @Provides
+    @Singleton
+    fun provideToolCircuitBreaker(): ToolCircuitBreaker = ToolCircuitBreaker()
+
+    /** 组合动作注册表（v3）：shortcut_define 定义 → 热注册为一等工具。 */
+    @Provides
+    @Singleton
+    fun provideShortcutRegistry(): ShortcutRegistry = ShortcutRegistry()
+
+    /**
+     * v3 统一执行器装配：gate（环境前置 + 风险审批）→ schema 校验 →
+     * 限流 → 熔断 → 策略（超时/重试）→ 追踪，逐层可选、全部共享单例。
+     * registry 内部（技能步骤 / 批量步骤）与引擎主入口用同一装配函数，
+     * 避免两套执行器行为漂移。
+     */
+    private fun buildV3Executor(
+        registry: com.apex.agent.core.tools.ToolRegistry,
+        riskAwareToolGate: RiskAwareToolGate,
+        toolUsageTracker: ToolUsageTracker,
+        environmentState: ToolEnvironmentState,
+        traceRecorder: ToolTraceRecorder,
+        breaker: ToolCircuitBreaker
+    ): com.apex.agent.core.tools.ToolExecutor = ToolExecutorBuilder(registry)
+        .gate(CompositeToolGate(ToolEnvironmentGate(environmentState), riskAwareToolGate))
+        .usageTracker(toolUsageTracker)
+        .policyResolver(
+            DefaultToolRunPolicyResolver(
+                mapOf(
+                    // shell 命令有自己的命令级确认与用户交互窗口：长超时不重试。
+                    "shell_execute" to ToolRunPolicy(timeoutMs = 120_000L, maxRetries = 0),
+                    // 抓屏/敲链可能被系统限速：给一次重试余量。
+                    "screenshot" to ToolRunPolicy(timeoutMs = 30_000L, maxRetries = 1, baseRetryDelayMs = 500L)
+                )
+            )
+        )
+        .rateLimiter(ToolRateLimiter())
+        .breaker(breaker)
+        .tracer(traceRecorder)
+        .build()
+
     @Provides
     @Singleton
     fun provideToolRegistry(
@@ -164,7 +234,12 @@ object ToolModule {
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,
         riskAwareToolGate: RiskAwareToolGate,
-        toolUsageTracker: ToolUsageTracker
+        toolUsageTracker: ToolUsageTracker,
+        // v3 单例注入：环境态 / 追踪 / 熔断 / 组合动作。
+        environmentState: ToolEnvironmentState,
+        traceRecorder: ToolTraceRecorder,
+        circuitBreaker: ToolCircuitBreaker,
+        shortcutRegistry: ShortcutRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -385,10 +460,10 @@ object ToolModule {
         registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
         registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
 
-        // ═══ 12. MCP 服务器工具（此前缺口：McpManager 三工具已建成但从未
-        // 接进 ToolRegistry，MCP 连接建立后 mcp_call/mcp_list 形同虚设）═══
-        // 注册点放在 MCP 参数注入之后（mcpManager 由 McpModule 提供）。
-        // P83：去重 —— 原末尾存在重复注册块（同 id REPLACE 覆盖，冗余且误导计数）。
+        // ═══ MCP 服务器工具 ═══
+        // v3+P83 联合收敛：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
+        // 三次（第 12 节前后各一次 + 尾部重复块）——REPLACE 策略下静默互踩。
+        // 此处为唯一注册点（v3 去重 + P83 尾部重复块移除，同题同解）。
         registry.register(SafeAgentTool(McpCallTool(mcpManager)))
         registry.register(SafeAgentTool(McpListTool(mcpManager)))
         registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
@@ -401,26 +476,42 @@ object ToolModule {
         registry.register(SafeAgentTool(SkillListTool(skillRegistry)))
         registry.register(SafeAgentTool(SkillUninstallTool(skillRegistry)))
 
-        // ═══ 主执行器（v2：风险门 + schema 校验 + 使用统计）═══
-        // 所有工具调用统一过门：HIGH 风险首次弹窗（RiskAwareToolGate 复用
-        // ask_user_choice 对话框）；参数违规在工具执行前拦截；成败/耗时入账。
-        val mainExecutor: ToolExecutor = DefaultToolExecutor(
-            registry = registry,
-            gate = riskAwareToolGate,
-            usageTracker = toolUsageTracker
+        // ═══ 14. Tool System v3 新工具（纯 JVM，零新依赖）═══
+        // wait：Anthropic computer-use 语义的有界可取消等待（UI 稳定窗口）；
+        // json_transform：jq 风格七操作数据变换（工具间数据形状对齐）；
+        // version_compare：SemVer 排序（1.10.0 > 1.9.0，预发布阶梯）。
+        registry.register(SafeAgentTool(WaitTool()))
+        registry.register(SafeAgentTool(JsonTransformTool()))
+        registry.register(SafeAgentTool(VersionCompareTool()))
+
+        // ═══ 主执行器（v3：环境门+风险门 → 校验 → 限流 → 熔断 → 超时/重试 → 追踪）═══
+        // 所有工具调用统一过门：环境前置不满足/用户拒绝在执行前拦截；参数违规
+        // 同样前置拦截；成败/耗时/逐调用 span 全部入账。
+        val mainExecutor: ToolExecutor = buildV3Executor(
+            registry, riskAwareToolGate, toolUsageTracker,
+            environmentState, traceRecorder, circuitBreaker
         )
 
-        // composite/script 工具：随注册表构建时快照注册（无运行时条件）；新装技能后
-        // 重启 App 生效（SkillToolAdapter 的复合步骤同样过主执行器：风险门/校验/统计全覆盖）
+        // composite/script 工具：随注册表构建时快照注册；新装技能后重启 App 生效
+        // （SkillToolAdapter 的复合步骤同样过主执行器：门控/校验/统计全覆盖）
         val skillStepExecutor: ToolExecutor = mainExecutor
         skillRegistry.getActiveTools().forEach { def ->
             registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
         }
 
+        // ═══ 15. v3 批量执行 + 组合动作（依赖主执行器，循环依赖断点在此）═══
+        // tool_batch_run：模型一次性声明有序步骤（首错即停 + NOT_EXECUTED 标记 +
+        // {n} 步间输出引用）；shortcut_*：Mobile-Agent-E 自进化组合动作。
+        registry.register(SafeAgentTool(ToolBatchRunTool(mainExecutor)))
+        registry.register(SafeAgentTool(ShortcutDefineTool(shortcutRegistry, registry, mainExecutor)))
+        registry.register(SafeAgentTool(ShortcutListTool(shortcutRegistry, traceRecorder)))
+        registry.register(SafeAgentTool(ShortcutRunTool(shortcutRegistry, mainExecutor, registry)))
+
         return registry
-        // 总计：44 基础 + 15 v2 工具 + 3 MCP + 2 T73 + 1 T75 + 1 P83 环境闭环 +
-        // 4 T76 + 5 Skill 管理 + N 已启用技能 composite + 7 GitHub
-        // （无条件注册，未连接时工具返回明确错误引导）。
+        // 总计：44 基础 + 15 v2 + 3 MCP + 2 T73 + 1 T75 + 1 P83 环境闭环 +
+        // 4 T76 + 5 Skill 管理 + 3 v3 新工具（wait/json_transform/version_compare）+
+        // 4 v3 编排工具（tool_batch_run + shortcut_define/list/run）+
+        // N 已启用技能 composite + 7 GitHub（无条件注册，未连接时返回明确错误引导）。
         // P83 修正：edit_file 补注册（文件工具 7→8）；MCP 重复块移除（计数不变）。
     }
 
@@ -429,10 +520,12 @@ object ToolModule {
     fun provideToolExecutor(
         registry: ToolRegistry,
         riskAwareToolGate: RiskAwareToolGate,
-        toolUsageTracker: ToolUsageTracker
-    ): ToolExecutor = DefaultToolExecutor(
-        registry = registry,
-        gate = riskAwareToolGate,
-        usageTracker = toolUsageTracker
+        toolUsageTracker: ToolUsageTracker,
+        environmentState: ToolEnvironmentState,
+        traceRecorder: ToolTraceRecorder,
+        circuitBreaker: ToolCircuitBreaker
+    ): ToolExecutor = buildV3Executor(
+        registry, riskAwareToolGate, toolUsageTracker,
+        environmentState, traceRecorder, circuitBreaker
     )
 }

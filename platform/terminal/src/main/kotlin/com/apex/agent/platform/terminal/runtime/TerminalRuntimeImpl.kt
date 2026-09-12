@@ -111,7 +111,10 @@ class TerminalRuntimeImpl(
 
     private val eventLog: TerminalEventLog = TerminalEventLogImpl()
     private val eventBus: TerminalEventBus = TerminalEventBusImpl(eventLog, scope)
-    private val waitEngine = WaitEngineImpl(eventBus, scope)
+    // P1/P2 fix（审计 P1-3/P2-5）：注入 eventLog 作为订阅锚点来源 ——
+    // WaitEngine 的 await/awaitIdle 只匹配「调用时刻之后」的新事件（原 afterCursor=0
+    // 全量重放历史：IdleFor 永不满足+忙转；wait() 被陈旧事件假阳性命中）。
+    private val waitEngine = WaitEngineImpl(eventBus, scope, eventLog)
     internal val inputManager = InputManagerImpl(policy, native, eventLog, eventBus, scope)
     private val inputDetector = com.apex.agent.platform.terminal.state.InputWaitingDetector()
     // PR #51: process/timeout/cancellation controllers

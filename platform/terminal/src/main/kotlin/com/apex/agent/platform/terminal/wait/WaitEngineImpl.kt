@@ -3,6 +3,7 @@ package com.apex.agent.platform.terminal.wait
 import com.apex.agent.platform.terminal.events.CloseCause
 import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.events.TerminalEventBus
+import com.apex.agent.platform.terminal.events.TerminalEventLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,7 +33,13 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class WaitEngineImpl(
     private val bus: TerminalEventBus,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /**
+     * P1/P2 fix（审计 6-b P1-3/P2-5）：订阅锚点来源。注入时 await/awaitIdle 以
+     * 「调用时刻的最新 (cursor, eventId)」为锚点订阅，只匹配锚点之后的新事件；
+     * null（测试/兼容构造）时退回旧行为（afterCursor=0 全量重放）。
+     */
+    private val eventLog: TerminalEventLog? = null
 ) : TerminalWaitEngine {
 
     private data class Waiter(
@@ -61,6 +68,29 @@ class WaitEngineImpl(
 
     private fun lockFor(sessionId: Long): Mutex =
         locks.computeIfAbsent(sessionId) { Mutex() }
+
+    /** 订阅锚点：字节 cursor + per-session 单调 eventId。 */
+    private data class Anchor(val cursor: Long, val eventId: Long)
+
+    /**
+     * 取「此刻之前」的最新事件锚点。cursor 锚定带真实字节游标事件（OutputProduced /
+     * ProcessStarted 等）的重放；eventId 锚定 cursor=-1 事件（合成 ProcessExited /
+     * UserInterrupt / Error 等无字节游标、query 恒重放的历史事件 —— 只有按 id 才能判「陈旧」）。
+     */
+    private suspend fun anchorFor(sessionId: Long): Anchor {
+        val log = eventLog ?: return Anchor(0L, 0L)
+        val cursor = log.newestCursor(sessionId)
+        val newestId = log.tail(sessionId, 1).lastOrNull()?.id ?: 0L
+        return Anchor(cursor, newestId)
+    }
+
+    /**
+     * 锚点新鲜度判定：id > 锚点（经 EventLog 分配过 id 的新事件）恒新；
+     * id == 0（未经 EventLog 的裸事件，测试/诊断直发路径）无法判龄，视作新；
+     * SessionClosed 恒放行（终态语义优先 —— 历史里的 SessionClosed 同样意味着会话已关闭）。
+     */
+    private fun isFresh(e: TerminalEvent, anchor: Anchor): Boolean =
+        e.id == 0L || e.id > anchor.eventId || e is TerminalEvent.SessionClosed
 
     private fun matchEvent(condition: WaitCondition, event: TerminalEvent): MatchResult {
         val matched = when (condition) {
@@ -123,9 +153,13 @@ class WaitEngineImpl(
             return awaitIdle(sessionId, condition, timeoutMs)
         }
         val result = withTimeoutOrNull(timeoutMs) {
-            val ev = bus.subscribe(sessionId, afterCursor = 0L).first { e ->
-                val m = matchEvent(condition, e)
-                m.matched || e is TerminalEvent.SessionClosed
+            // P2 fix（审计 P2-5）：订阅锚定在「调用时刻之后」—— 原实现 afterCursor=0
+            // 全量重放历史，陈旧事件（含 cursor=-1 的合成 ProcessExited）直接假阳性
+            // 匹配返回（Agent 误判任务完成）。
+            val anchor = anchorFor(sessionId)
+            val ev = bus.subscribe(sessionId, afterCursor = anchor.cursor).first { e ->
+                isFresh(e, anchor) &&
+                    (matchEvent(condition, e).matched || e is TerminalEvent.SessionClosed)
             }
             val m = matchEvent(condition, ev)
             when {
@@ -145,17 +179,26 @@ class WaitEngineImpl(
     /** T81：IdleFor 定时器路径（静默期满 → Matched；输出打破静默 → 重置）。 */
     private suspend fun awaitIdle(sessionId: Long, condition: WaitCondition.IdleFor, timeoutMs: Long): WaitResult {
         val deadline = System.currentTimeMillis() + timeoutMs
+        // P1 fix（审计 P1-3）：循环外取一次锚点 —— 原实现每轮 afterCursor=0 全量重放
+        // 历史，有过任何输出的会话静默计时永不满足（忙转直到 Timeout）。
+        var anchor = anchorFor(sessionId)
         while (System.currentTimeMillis() < deadline) {
             val silence = withTimeoutOrNull(condition.ms) {
                 // 任何新输出/会话关闭都打破静默
-                bus.subscribe(sessionId, afterCursor = 0L).first { e ->
-                    (e is TerminalEvent.OutputProduced && e.byteCount > 0) || e is TerminalEvent.SessionClosed
+                bus.subscribe(sessionId, afterCursor = anchor.cursor).first { e ->
+                    isFresh(e, anchor) &&
+                        ((e is TerminalEvent.OutputProduced && e.byteCount > 0) || e is TerminalEvent.SessionClosed)
                 }
             }
             when {
                 silence == null -> return WaitResult.Matched(null)   // 静默期满 —— IdleFor 成立
                 silence is TerminalEvent.SessionClosed -> return WaitResult.SessionGone(silence.cause)
-                else -> { /* 输出打破静默 —— 循环继续，重置计时 */ }
+                else -> {
+                    // 输出打破静默 —— 推进锚点，防止下一轮重放同一事件再次「打破」
+                    if (silence.id > anchor.eventId) {
+                        anchor = Anchor(maxOf(anchor.cursor, silence.cursor), silence.id)
+                    }
+                }
             }
         }
         return WaitResult.Timeout(waitedMs = timeoutMs)

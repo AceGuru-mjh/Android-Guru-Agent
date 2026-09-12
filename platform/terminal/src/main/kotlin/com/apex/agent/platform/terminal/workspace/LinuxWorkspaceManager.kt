@@ -237,6 +237,63 @@ class LinuxWorkspaceManager(
         }
     }
 
+    /**
+     * P83 (T5)：扁平沙箱目录 → default workspace 的一次性内容迁移。
+     *
+     * 背景：ToolModule 的文件工具（read_file/write_file/…）历史上落在
+     * `<filesDir>/workspace`（扁平沙箱）——与 Linux 会话的 workspace
+     * （`<filesDir>/linux/workspaces/<id>`，bind 到 guest /workspace）互不可见：
+     * Agent 写的文件 Ubuntu 终端看不到，终端里的构建产物文件工具也读不到。
+     * 统一后文件工具指向 default workspace，此方法把旧沙箱的内容搬过去。
+     *
+     * 安全语义：
+     *  - 幂等：default 数据目录已有内容（含隐藏文件）→ 跳过，旧目录原样保留。
+     *  - 原子性尽量保序：逐条 rename（同 filesDir 子树，同卷）；rename 失败回退
+     *    copy+delete。任何一条失败即中止（部分迁移下次续跑 —— 目标非空即跳过）。
+     *  - 迁移成功后旧目录删除（此时必为空）；失败则保留旧目录供人工 salvage。
+     *
+     * @return 迁移详情（未发生迁移时给出原因）
+     */
+    fun migrateFlatSandboxIfNeeded(flatDir: File): String {
+        synchronized(lock) {
+            if (!flatDir.isDirectory) return "skip: flat sandbox '${flatDir.name}' 不存在"
+            val entries = flatDir.listFiles()?.toList() ?: emptyList()
+            if (entries.isEmpty()) {
+                // 空沙箱：直接移除，避免遗留空目录干扰
+                flatDir.delete()
+                return "removed empty flat sandbox '${flatDir.name}'"
+            }
+            migrateLegacyIfNeeded()  // 先完成 P71/T73 legacy 单目录迁移
+            val target = dataDir(DEFAULT_ID)
+            val targetEntries = target.listFiles()?.toList() ?: emptyList()
+            if (targetEntries.isNotEmpty()) {
+                return "skip: default workspace 已有内容（${targetEntries.size} 项），" +
+                    "旧沙箱 ${flatDir.absolutePath} 保留供人工合并"
+            }
+            if (!target.isDirectory && !target.mkdirs() && !target.isDirectory) {
+                return "skip: 无法创建 ${target.absolutePath}"
+            }
+            var moved = 0
+            var failed: String? = null
+            for (entry in entries) {
+                val dest = File(target, entry.name)
+                val ok = entry.renameTo(dest) || runCatching {
+                    if (entry.isDirectory) entry.copyRecursively(dest) else entry.copyTo(dest)
+                    entry.deleteRecursively()
+                    true
+                }.getOrDefault(false)
+                if (ok) moved++ else { failed = entry.name; break }
+            }
+            return if (failed == null) {
+                flatDir.delete()
+                "migrated $moved 项: ${flatDir.absolutePath} → ${target.absolutePath}"
+            } else {
+                "partial: 迁移 $moved 项后在 '$failed' 失败（default 已非空，后续将跳过；" +
+                    "请人工处理 ${flatDir.absolutePath}）"
+            }
+        }
+    }
+
     private fun dirSize(dir: File): Long {
         if (!dir.exists()) return 0
         return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }

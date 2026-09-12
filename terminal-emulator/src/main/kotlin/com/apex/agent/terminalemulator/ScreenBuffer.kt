@@ -144,6 +144,14 @@ class ScreenBuffer(
         scrollback.clear()
     }
 
+    /**
+     * Clear ONLY the scrollback history, leaving the visible screen intact
+     * (xterm "erase saved lines", CSI 3 J — the `clear` command relies on this).
+     */
+    fun clearScrollback() {
+        scrollback.clear()
+    }
+
     /** Render visible screen as plain text (rows joined by \n, trailing trim). */
     fun renderedText(): String {
         return (0 until rows).joinToString("\n") { r -> renderRowCells(cells[r]) }
@@ -167,11 +175,6 @@ class ScreenBuffer(
     }
 
     val scrollbackLineCount: Int get() = scrollback.size
-
-    /** T82: ED 3 — clear saved lines (scrollback) without touching the visible screen. */
-    fun clearScrollback() {
-        scrollback.clear()
-    }
 
     /**
      * T82: render the last [maxLines] scrollback rows as plain text, oldest first.

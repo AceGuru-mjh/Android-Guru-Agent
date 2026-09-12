@@ -50,6 +50,7 @@ class TerminalBackendsToolTest {
         override suspend fun close(sessionId: Long, force: Boolean): Result<TerminalRuntime.CloseResult> = Result.failure(UnsupportedOperationException())
         override fun screenStateFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.platform.terminal.screen.TerminalScreenState>? = null
         override fun semanticStateFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.platform.terminal.state.TerminalSemanticState>? = null
+        override fun styledScreenFlow(sessionId: Long): kotlinx.coroutines.flow.Flow<com.apex.agent.terminalemulator.TerminalRenderSnapshot?>? = null
         override suspend fun recover(): List<Long> = emptyList()
         override suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? = null
     }

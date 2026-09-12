@@ -94,6 +94,9 @@ class InputManagerImpl(
     }
 
     private val started = java.util.Collections.newSetFromMap(ConcurrentHashMap<Long, Boolean>())
+    /** TM4 (P83)：未映射按键一次性告警的去重集合。 */
+    private val warnedUnmappedKeys = java.util.Collections.newSetFromMap(ConcurrentHashMap<TerminalKey, Boolean>())
+
 
     private fun startWriter(sessionId: Long, writer: SessionWriter) {
         if (!started.add(sessionId)) return  // already started
@@ -334,6 +337,29 @@ class InputManagerImpl(
             TerminalKey.F10 -> csiTilde(21)
             TerminalKey.F11 -> csiTilde(23)
             TerminalKey.F12 -> csiTilde(24)
+            // TM4 (P83)：未映射键绝不能静默发 ENTER —— 否则可能替 Agent 确认
+            // 破坏性确认框（"Remove file? [y/N]"）。不发字节并按键告警一次。
+            else -> {
+                warnUnmappedKeyOnce(key)
+                byteArrayOf()
+            }
+        }
+    }
+
+    /**
+     * TM4 (P83)：未映射按键一次性告警 —— 每个未知 TerminalKey 只提示一次，
+     * 便于诊断而不过载 stderr。键映射表保持穷举 + else 双保险：
+     * 枚举新增值时第一时间可见，且绝不静默退化成 ENTER。
+     */
+    private fun warnUnmappedKeyOnce(key: TerminalKey) {
+        if (warnedUnmappedKeys.add(key)) {
+            // This module has no logging framework dependency; System.err is the
+            // lightest diagnostic channel (consistent with the existing diagnostic
+            // prints elsewhere in the IO layer).
+            System.err.println(
+                "[InputManagerImpl] WARN: unmapped TerminalKey '$key' — no bytes sent " +
+                    "(was previously silently ENTER, which could confirm destructive prompts)"
+            )
         }
     }
 

@@ -111,8 +111,12 @@ object ToolRegistrationGuide {
      * T75: workspace 管理（list/create/inspect/delete）。构造需要 LinuxWorkspaceManager
      * （app TerminalModule 提供），由 ToolModule 直接注册。
      */
-    fun workspaceTools(workspaces: com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager) = listOf(
-        TerminalWorkspacesTool(workspaces)
+    fun workspaceTools(
+        workspaces: com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager,
+        projectEnvironment: com.apex.agent.platform.terminal.environment.ProjectEnvironmentCoordinator
+    ) = listOf(
+        TerminalWorkspacesTool(workspaces),
+        com.apex.agent.platform.terminal.tools.v2.TerminalWorkspaceEnvironmentTool(projectEnvironment)
     )
 
     /** Construct all 6 legacy compat aliases (call once during Hilt init). */
@@ -139,6 +143,7 @@ object ToolRegistrationGuide {
         "terminal.backends" to "T73（后端能力发现：availability 三态）",
         "terminal.ubuntu.install" to "T73（Ubuntu rootfs 安装引导）",
         "terminal.workspaces" to "T75（workspace 管理：隔离文件区生命周期）",
+        "terminal.workspace.environment" to "P83（项目感知开发环境：analyze/ensure 工具链闭环）",
         "terminal_exec" to "§35 (compat → run+wait+observe)",
         "terminal_read" to "§35 (compat → observe RAW)",
         "terminal_send" to "§35 (compat → write)",

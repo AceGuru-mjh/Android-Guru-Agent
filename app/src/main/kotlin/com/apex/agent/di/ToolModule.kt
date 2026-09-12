@@ -35,6 +35,7 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalSnapshotTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalUbuntuInstallTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWaitTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWorkspacesTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalWorkspaceEnvironmentTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalWriteTool
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
@@ -220,7 +221,10 @@ object ToolModule {
         linuxCapabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
         environmentRepairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
         ubuntuLifecycle: com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator,
+        // P83 (T4): 项目感知环境闭环（terminal.workspace.environment 工具）
+        projectEnvironment: com.apex.agent.platform.terminal.environment.ProjectEnvironmentCoordinator,
         // T82：guest fs API + apexctl 桥 + 镜像/ensure 接线
+        // 注：rootfsTarget 已在上方 P83 参数区声明（同一类型），此处不重复。
         guestFilesystem: com.apex.agent.platform.terminal.fs.GuestFilesystem,
         guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
         ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
@@ -238,7 +242,20 @@ object ToolModule {
         shortcutRegistry: ShortcutRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
-        val workspaceDir = File(context.filesDir, "workspace").apply { mkdirs() }
+
+        // P83 (T5) Workspace 统一：文件工具的沙箱根从扁平 `<filesDir>/workspace` 迁移到
+        // LinuxWorkspaceManager 的 default workspace（`<filesDir>/linux/workspaces/default`，
+        // bind 到 Ubuntu 会话的 guest /workspace）。这样 Agent 的 read_file/write_file 与
+        // terminal 会话看到同一份文件，终结“双轨互不可见”。旧目录内容一次性搬入
+        //（default 非空则跳过，旧目录保留供人工 salvage）；解析失败时诚实降级到旧路径
+        //（工具仍可用，只是未统一）。
+        val flatLegacyDir = File(context.filesDir, "workspace")
+        val workspaceDir = runCatching {
+            workspaceManager.migrateFlatSandboxIfNeeded(flatLegacyDir)
+            workspaceManager
+                .resolve(com.apex.agent.platform.terminal.workspace.LinuxWorkspaceManager.DEFAULT_ID)
+                .getOrThrow()
+        }.getOrElse { File(context.filesDir, "workspace").apply { mkdirs() } }
         val downloadDir = File(context.getExternalFilesDir(null), "Download").apply { mkdirs() }
 
         val shellExec: suspend (String) -> String = { cmd ->
@@ -276,7 +293,10 @@ object ToolModule {
         registry.register(SafeAgentTool(AskUserTool()))
         // StreamingTerminalExecTool removed (§46 id collision); streaming = terminal.run + terminal.observe
 
-        // ═══ 2. 文件操作 (7) ═══
+        // ═══ 2. 文件操作 (7 + P83 补齐 edit_file) ═══
+        // P83 (T5)：basePath 统一指向 default Linux workspace（见上方 workspaceDir 说明）
+        // —— Agent 写入的文件对 linux-ubuntu 会话可见（guest /workspace），
+        //   终端构建产物同样可被 read_file/search_files 读到。
         registry.register(SafeAgentTool(FileReadTool(workspaceDir)))
         registry.register(SafeAgentTool(FileWriteTool(workspaceDir)))
         registry.register(SafeAgentTool(ListFilesTool(workspaceDir)))
@@ -284,6 +304,8 @@ object ToolModule {
         registry.register(SafeAgentTool(FileSearchTool(workspaceDir)))
         registry.register(SafeAgentTool(CopyMoveFileTool(workspaceDir)))
         registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
+        // P83：edit_file 已建成但从未注册（搜索-替换块编辑，原子失败语义）—— 补接线
+        registry.register(SafeAgentTool(FileEditTool(workspaceDir)))
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))
@@ -379,6 +401,8 @@ object ToolModule {
         )))
         // T75: workspace 管理（list/create/inspect/delete —— 隔离文件区生命周期）。
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWorkspacesTool(workspaceManager))))
+        // P83 (T4): 项目感知开发环境 —— analyze（只读）/ ensure（Ubuntu 就绪 + 按项目补装工具链）。
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalWorkspaceEnvironmentTool(projectEnvironment))))
         // T76: Ubuntu Linux Environment Productionization —— 4 个 Agent 工具
         //   terminal.linux.status    统一健康快照（6 维度 + bootstrap）
         //   terminal.linux.bootstrap  rootfs→sources→network→apt-update→base-packages→READY
@@ -436,10 +460,10 @@ object ToolModule {
         registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
         registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
 
-        // ═══ 11. MCP 服务器工具 ═══
-        // v3 修复：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
-        // 三次（第 12 节前后各一次 + 尾部重复块）——REPLACE 策略下静默互踩，
-        // 注册表版本号被无谓抬高。此处收敛为唯一注册点。
+        // ═══ MCP 服务器工具 ═══
+        // v3+P83 联合收敛：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
+        // 三次（第 12 节前后各一次 + 尾部重复块）——REPLACE 策略下静默互踩。
+        // 此处为唯一注册点（v3 去重 + P83 尾部重复块移除，同题同解）。
         registry.register(SafeAgentTool(McpCallTool(mcpManager)))
         registry.register(SafeAgentTool(McpListTool(mcpManager)))
         registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
@@ -484,10 +508,11 @@ object ToolModule {
         registry.register(SafeAgentTool(ShortcutRunTool(shortcutRegistry, mainExecutor, registry)))
 
         return registry
-        // 总计：44 基础 + 15 v2 + 3 MCP + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 +
-        // 3 v3 新工具（wait/json_transform/version_compare）+ 4 v3 编排工具
-        // （tool_batch_run + shortcut_define/list/run）+ N 已启用技能 composite + 7 GitHub
-        // （无条件注册，未连接时工具返回明确错误引导）
+        // 总计：44 基础 + 15 v2 + 3 MCP + 2 T73 + 1 T75 + 1 P83 环境闭环 +
+        // 4 T76 + 5 Skill 管理 + 3 v3 新工具（wait/json_transform/version_compare）+
+        // 4 v3 编排工具（tool_batch_run + shortcut_define/list/run）+
+        // N 已启用技能 composite + 7 GitHub（无条件注册，未连接时返回明确错误引导）。
+        // P83 修正：edit_file 补注册（文件工具 7→8）；MCP 重复块移除（计数不变）。
     }
 
     @Provides

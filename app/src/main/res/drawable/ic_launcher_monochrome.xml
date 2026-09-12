@@ -1,15 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Adaptive icon foreground — Viro invader glyph (7×7 pixel grid, brand mark).
-
-  Source: user-supplied 512×512 pixel-art mascot (lavender invader on white),
-  traced cell-exact to vectors: grid unit = 8dp, glyph 56×56dp centered at
-  (26,26) inside the 108×108dp canvas — fully inside the 66dp adaptive-icon
-  safe zone, so launchers never clip the feet/antenna of the mascot.
-
-  Grid (row: filled cells) — 1 unit = 8dp at offset (26,26):
-    r0: 0-6      r1: 1,3,5    r2: 0-6      r3: 0-6
-    r4: 2,4      r5: 1-5      r6: 0,2,4,6
+  Adaptive icon monochrome layer — invader glyph silhouette for
+  Android 13+ themed (tinted) icons. Pure white; the launcher tints it.
+  Same 108×108 geometry as the color foreground.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -17,7 +10,7 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#898DF1"
+        android:fillColor="#FFFFFF"
         android:pathData="M26,26 h56 v8 h-56 z
             M34,34 h8 v8 h-8 z M50,34 h8 v8 h-8 z M66,34 h8 v8 h-8 z
             M26,42 h56 v8 h-56 z

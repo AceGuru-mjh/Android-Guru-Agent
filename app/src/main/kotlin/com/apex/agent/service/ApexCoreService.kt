@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
 import com.apex.agent.MainActivity
 import com.apex.agent.R
@@ -44,13 +46,21 @@ class ApexCoreService : LifecycleService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
-        
+        // 秒闪退防御：Android 14+（targetSdk 34+）部分 OEM 对两参 startForeground
+        // 的 manifest 类型解析不一致，可能抛 MissingForegroundServiceTypeException ——
+        // API 34+ 显式声明 specialUse 类型；更低版本传 0（沿用 manifest 声明类型）。
+        val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        } else {
+            0
+        }
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, createNotification(), serviceType)
+
         // 启动Agent引擎后台循环
         scope.launch {
             // Agent后台任务（定时任务、事件监听等）
         }
-        
+
         return START_STICKY
     }
 

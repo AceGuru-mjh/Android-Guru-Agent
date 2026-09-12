@@ -31,6 +31,15 @@ android {
         jvmTarget = "17"
     }
 
+    buildTypes {
+        // 发布 APK 以 debug 密钥签名 —— 个人项目无正式 keystore 时保证产物可直接安装；
+        // 引入正式签名时替换为 signingConfigs 引用 + 环境变量注入。
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
         // P71: PRoot 以可执行二进制（libproot.so 等）随 APK 分发。AGP 默认

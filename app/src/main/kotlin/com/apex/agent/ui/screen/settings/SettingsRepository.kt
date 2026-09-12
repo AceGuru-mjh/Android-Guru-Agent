@@ -319,4 +319,10 @@ data class AgentSettings(
     val dynamicColor: Boolean = false,
     val fontScale: Float = 1.0f,              // 0.8..1.4
     val showTimestamps: Boolean = true,
+
+    // ── 新手引导 ──
+    // 首次启动展示 Onboarding（欢迎/能力/权限/模型配置四页）；
+    // 老版本升级用户也会看到一次（ignoreUnknownKeys 反序列化缺省 false），
+    // 属预期行为 —— 引导页本身也承担新功能布道。
+    val onboardingCompleted: Boolean = false,
 )

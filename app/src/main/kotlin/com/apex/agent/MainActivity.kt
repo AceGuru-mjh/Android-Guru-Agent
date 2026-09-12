@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.Density
 import androidx.core.content.ContextCompat
 import com.apex.agent.service.ApexCoreService
 import com.apex.agent.ui.ApexRoot
+import com.apex.agent.ui.screen.onboarding.OnboardingScreen
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import com.apex.agent.ui.theme.ApexTheme
 import com.apex.agent.ui.theme.LocalShowTimestamps
@@ -70,7 +71,19 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        ApexRoot()
+                        // 新手引导：首次启动（或升级后首次）先走四页 Onboarding，
+                        // 完成标记持久化在 SettingsRepository.onboardingCompleted。
+                        if (settings.onboardingCompleted) {
+                            ApexRoot()
+                        } else {
+                            OnboardingScreen(
+                                onFinished = {
+                                    settingsRepository.updateAgentSettings {
+                                        copy(onboardingCompleted = true)
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }

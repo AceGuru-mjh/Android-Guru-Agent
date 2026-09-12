@@ -1,5 +1,6 @@
 package com.apex.agent.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -114,6 +115,19 @@ fun ApexRoot() {
     // 上下文仪表盘数据源（单例作用域 VM，全局共享）
     val agentVm: AgentChatViewModel = hiltViewModel()
     val agentState by agentVm.uiState.collectAsStateWithLifecycle()
+
+    // ═══ UX-2：系统返回键导航链 ═══
+    // 非抽屉一级页（Settings/Terminal/Skill…）按返回 → 回 Agent 聊天主页；
+    // Agent 页不拦截（交系统默认行为）。currentDestination 为 rememberSaveable
+    // （P2-5 已修），route 经 DestinationSaver 往返，返回后旋转/重建不丢。
+    // 注意组合顺序：BackHandler 后组合者先消费（LIFO）——抽屉关闭器放在
+    // 目标回退之后组合，保证抽屉打开时优先只关抽屉，不再连带跳页。
+    BackHandler(enabled = currentDestination != DrawerDestination.Agent) {
+        currentDestination = DrawerDestination.Agent
+    }
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,

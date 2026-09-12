@@ -108,13 +108,18 @@ jobs:
 
       - name: Check tool ID uniqueness
         run: |
-          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ | sort | uniq -d)
+          # Tool System v2: also covers app/src/main (app-level tool classes —
+          # github/csmem/browser/ask_user — must not collide with core ids).
+          # The pattern matches literal id declarations only; dynamic ids
+          # (randomUUID/ID-constant references) are runtime values, not
+          # declarations, and are excluded by design.
+          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | sort | uniq -d)
           if [ -n "$IDS" ]; then
             echo "❌ Duplicate tool IDs found:"
             echo "$IDS"
             exit 1
           fi
-          TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ | wc -l)
+          TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | wc -l)
           echo "✅ $TOTAL unique tool IDs, no duplicates"
 
       - name: Check duplicate classes
@@ -284,6 +289,16 @@ jobs:
           echo "⚠️ Unexpected failure — last 30 lines:"
           tail -30 compile.log
           exit 1
+
+      - name: Run app unit tests
+        run: |
+          # app 模块 JVM 单测首次进入 CI：此前该任务从未在远端执行，
+          # 导致 BrowserTracerTest 缺 import / RetryPolicyTest 嵌套 runTest /
+          # SlashCommandParserTest 期望矛盾三类损坏长期隐形（本地 61/61 绿）。
+          ./gradlew :app:testDebugUnitTest \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
 
       - name: Install proot 5.4 (for T72 E2E + P71 smoke tests)
         # T72: UbuntuRootfsEndToEndIntegrationTest downloads the REAL Ubuntu

@@ -40,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -196,10 +198,21 @@ internal fun AgentBubble(
             modifier = Modifier
                 .widthIn(max = 340.dp)
                 .drawBehind {
-                    drawRoundRect(
+                    // 精修：描边逐角匹配气泡 shape (4,18,18,18)（原统一 14dp 圆角，顶部小角处描边悬空）
+                    drawPath(
+                        path = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    left = 0f, top = 0f, right = size.width, bottom = size.height,
+                                    topLeftCornerRadius = CornerRadius(4.dp.toPx()),
+                                    topRightCornerRadius = CornerRadius(18.dp.toPx()),
+                                    bottomRightCornerRadius = CornerRadius(18.dp.toPx()),
+                                    bottomLeftCornerRadius = CornerRadius(18.dp.toPx())
+                                )
+                            )
+                        },
                         color = outlineVariant,
-                        style = Stroke(width = 1.dp.toPx()),
-                        cornerRadius = CornerRadius(14.dp.toPx())
+                        style = Stroke(width = 1.dp.toPx())
                     )
                 }
         ) {
@@ -247,7 +260,7 @@ internal fun AgentBubble(
                     MarkdownText(markdown = message.text)
                 }
 
-                // 操作行：复制 / 整理到记忆（UI 占位，暂未接入 CS-Mem 后端）
+                // 操作行：复制 / 整理到记忆（已接入 CS-Mem 后端）
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -271,7 +284,7 @@ internal fun AgentBubble(
                     }
                     IconButton(
                         onClick = {
-                            Toast.makeText(context, "已整理到记忆", Toast.LENGTH_SHORT).show()
+                            // 修复：整理入记忆不再“发起即报成功”——结果反馈由 VM 异步链路决定（原失败也提示已整理）
                             onOrganize(message.text)
                         },
                         modifier = Modifier.size(32.dp)
@@ -305,10 +318,21 @@ internal fun StreamingResponseBubble(text: String) {
             modifier = Modifier
                 .widthIn(max = 340.dp)
                 .drawBehind {
-                    drawRoundRect(
+                    // 精修：描边逐角匹配气泡 shape (4,18,18,18)（原统一 14dp 圆角，顶部小角处描边悬空）
+                    drawPath(
+                        path = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    left = 0f, top = 0f, right = size.width, bottom = size.height,
+                                    topLeftCornerRadius = CornerRadius(4.dp.toPx()),
+                                    topRightCornerRadius = CornerRadius(18.dp.toPx()),
+                                    bottomRightCornerRadius = CornerRadius(18.dp.toPx()),
+                                    bottomLeftCornerRadius = CornerRadius(18.dp.toPx())
+                                )
+                            )
+                        },
                         color = outlineVariant,
-                        style = Stroke(width = 1.dp.toPx()),
-                        cornerRadius = CornerRadius(14.dp.toPx())
+                        style = Stroke(width = 1.dp.toPx())
                     )
                 }
         ) {

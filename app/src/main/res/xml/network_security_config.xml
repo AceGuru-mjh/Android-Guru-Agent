@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P1 fix（隐式依赖）：targetSdk >= 28 默认禁止明文 HTTP，而内置 Ollama / LM Studio / vLLM
+  预设（ModelProfile.builtInProviders）与 README 引导的局域网地址均为 http:// ——
+  无此配置时 OkHttp 直接抛 "Cleartext HTTP traffic to ... not permitted"，本地模型永远连不上。
+  云端 API（https）不受影响。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- 仅对本地/局域网明文端点放行，保持云端 https 严格校验 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <!-- Android 模拟器访问宿主机 -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- Genymotion 模拟器访问宿主机 -->
+        <domain includeSubdomains="false">10.0.3.2</domain>
+    </domain-config>
+</network-security-config>

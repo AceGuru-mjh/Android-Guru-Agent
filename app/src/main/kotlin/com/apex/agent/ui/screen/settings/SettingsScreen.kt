@@ -20,8 +20,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.core.llm.*
 import kotlinx.coroutines.launch
@@ -52,6 +55,7 @@ fun SettingsScreen(
     var showProviders by remember { mutableStateOf(false) }
     var showRoles by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<TestResult?>(null) }
+    var isTesting by remember { mutableStateOf(false) } // 修复：测试连接期间禁用按钮，防连点并发请求
     val scope = rememberCoroutineScope()
 
     // Agent 设置统一更新入口
@@ -70,14 +74,25 @@ fun SettingsScreen(
                     Button(
                         onClick = {
                             selected?.let {
-                                scope.launch { testResult = viewModel.testConnection(it.id) }
+                                scope.launch {
+                                    isTesting = true
+                                    try {
+                                        testResult = viewModel.testConnection(it.id)
+                                    } finally {
+                                        isTesting = false
+                                    }
+                                }
                             }
                         },
-                        enabled = selected != null
+                        enabled = selected != null && !isTesting
                     ) {
-                        Icon(Icons.Outlined.Science, null, Modifier.size(18.dp))
+                        if (isTesting) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Outlined.Science, null, Modifier.size(18.dp))
+                        }
                         Spacer(Modifier.width(6.dp))
-                        Text("Test")
+                        Text(if (isTesting) "测试中…" else "Test")
                     }
                 }
             )
@@ -340,7 +355,8 @@ private fun SliderRow(
             onValueChange = { local = it },
             valueRange = range,
             steps = steps,
-            onValueChangeFinished = { onValueChange(local.coerceIn(range)) }
+            onValueChangeFinished = { onValueChange(local.coerceIn(range)) },
+            modifier = Modifier.semantics { contentDescription = label } // 修复：TalkBack 播报滑块名称
         )
         DescriptionText(description)
     }
@@ -504,11 +520,12 @@ private fun ModelsSection(
     onManageRoles: () -> Unit,
 ) {
     var resetTarget by remember { mutableStateOf<ModelProfile?>(null) }
+    var deleteTarget by remember { mutableStateOf<ModelProfile?>(null) } // 修复：删除档案加确认（破坏性操作）
 
     SectionCard("Models · 模型档案", Icons.Outlined.SmartToy, initiallyExpanded = true) {
         profiles.forEach { p ->
             val prov = providers.firstOrNull { it.id == p.providerId }
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -527,7 +544,7 @@ private fun ModelsSection(
                         TextButton(onClick = { onSetDefault(p.id) }) { Text("设为默认") }
                         TextButton(onClick = { onDuplicate(p.id) }) { Text("复制") }
                         TextButton(onClick = { resetTarget = p }) { Text("重置参数") }
-                        TextButton(onClick = { onDelete(p.id) },
+                        TextButton(onClick = { deleteTarget = p },
                             enabled = profiles.size > 1) { Text("删除") }
                     }
                 }
@@ -576,6 +593,22 @@ private fun ModelsSection(
                 }) { Text("重置") }
             },
             dismissButton = { TextButton(onClick = { resetTarget = null }) { Text("取消") } }
+        )
+    }
+
+    // 修复：删除档案确认框（原为一点即删、不可恢复）
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除模型档案") },
+            text = { Text("确定删除「${target.name}」（${target.modelId}）？\n\n该操作不可恢复；默认档案不可删除。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(target.id)
+                    deleteTarget = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
         )
     }
 }
@@ -653,7 +686,7 @@ private fun ReasoningSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) 
             onUpdate(p.copy(thinkingBudget = it))
         }
         SwitchRow("Show Thinking", p.showThinking,
-            description = "在对话流中展示模型的思考过程") {
+            description = "在对话流中展示模型的思考过程（数据预埋，对话渲染层后续接入）") {
             onUpdate(p.copy(showThinking = it))
         }
     }
@@ -779,7 +812,7 @@ private fun NetworkSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
             onUpdate(p.copy(streaming = it))
         }
         SwitchRow("Keep Alive", p.keepAlive,
-            description = "连接复用，减少握手开销") {
+            description = "连接复用开关（数据预埋；客户端当前始终启用连接池）") {
             onUpdate(p.copy(keepAlive = it))
         }
     }
@@ -792,6 +825,18 @@ private fun PromptSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
             label = { Text("System Prompt Prefix（附加到系统提示前）") },
             modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
             maxLines = 6)
+        // 修复：下拉选中值随用户选择联动（原硬编码 "default"，选后仍显示 Default）
+        var presetChoice by remember(p.id) {
+            mutableStateOf(
+                when (p.systemPromptPrefix) {
+                    PROMPT_PRESET_ANDROID -> "android_expert"
+                    PROMPT_PRESET_CODING -> "coding"
+                    PROMPT_PRESET_AUTOMATION -> "automation"
+                    "" -> "default"
+                    else -> "default" // 手改前缀无法反推预设，回退 default
+                }
+            )
+        }
         DropdownRow("Prompt Preset",
             listOf(
                 "default" to "Default（清空）",
@@ -799,22 +844,28 @@ private fun PromptSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
                 "coding" to "Coding Agent",
                 "automation" to "Automation Agent",
             ),
-            "default",
+            presetChoice,
             description = "选择预设即填入上方前缀，可再手改"
         ) { preset ->
+            presetChoice = preset
             val template = when (preset) {
-                "android_expert" ->
-                    "You are an expert Android engineer. Prefer adb, gradle and Kotlin; verify with build output before claiming success."
-                "coding" ->
-                    "You are a senior coding agent. Write clean, production-ready code; explain key decisions briefly."
-                "automation" ->
-                    "You are a device automation agent. Plan minimal, reliable UI steps and verify after each action."
+                "android_expert" -> PROMPT_PRESET_ANDROID
+                "coding" -> PROMPT_PRESET_CODING
+                "automation" -> PROMPT_PRESET_AUTOMATION
                 else -> ""
             }
             onUpdate(p.copy(systemPromptPrefix = template))
         }
     }
 }
+
+// Prompt Preset 模板（供选中值反推复用）
+private const val PROMPT_PRESET_ANDROID =
+    "You are an expert Android engineer. Prefer adb, gradle and Kotlin; verify with build output before claiming success."
+private const val PROMPT_PRESET_CODING =
+    "You are a senior coding agent. Write clean, production-ready code; explain key decisions briefly."
+private const val PROMPT_PRESET_AUTOMATION =
+    "You are a device automation agent. Plan minimal, reliable UI steps and verify after each action."
 
 @Composable
 private fun AdvancedSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
@@ -988,6 +1039,7 @@ private fun ProvidersDialog(
     onDismiss: () -> Unit
 ) {
     var editing by remember { mutableStateOf<ProviderConfig?>(null) }
+    var deleteProvTarget by remember { mutableStateOf<ProviderConfig?>(null) } // 修复：删除 Provider 加确认（连带静默重指派其下档案）
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onDismiss) { Text("关闭") } },
@@ -999,13 +1051,26 @@ private fun ProvidersDialog(
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(prov.displayName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                                if (prov.isBuiltIn) AssistChip(onClick = {}, label = { Text("内置") })
+                                if (prov.isBuiltIn) {
+                                    // 修复：原 AssistChip(onClick={}) 渲染为可点击涟漪但无任何动作 —— 改为纯静态徽标
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Text(
+                                            "内置",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                             Text(prov.baseUrl, style = MaterialTheme.typography.bodySmall)
                             Text("Keys: ${prov.apiKeys.size}", style = MaterialTheme.typography.labelSmall)
                             Row {
                                 TextButton(onClick = { editing = prov }) { Text("编辑") }
-                                if (!prov.isBuiltIn) TextButton(onClick = { viewModel.deleteProvider(prov.id) }) { Text("删除") }
+                                if (!prov.isBuiltIn) TextButton(onClick = { deleteProvTarget = prov }) { Text("删除") }
                             }
                         }
                     }
@@ -1018,6 +1083,21 @@ private fun ProvidersDialog(
     )
     editing?.let { prov ->
         ProviderEditorDialog(prov, viewModel) { editing = null }
+    }
+
+    deleteProvTarget?.let { prov ->
+        AlertDialog(
+            onDismissRequest = { deleteProvTarget = null },
+            title = { Text("删除 Provider") },
+            text = { Text("删除「${prov.displayName}」？\n\n其下模型档案将被重指派为无 Provider，该操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteProvider(prov.id)
+                    deleteProvTarget = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteProvTarget = null }) { Text("取消") } }
+        )
     }
 }
 

@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Accessibility
@@ -43,6 +47,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -73,12 +79,19 @@ fun PermissionsScreen() {
     var notifGranted by remember { mutableStateOf(false) }
     var storageGranted by remember { mutableStateOf(false) }
 
-    // 在后台检测权限
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            hasRoot = PrivilegeDetector.detectRoot()
-            hasShizuku = PrivilegeDetector.detectShizuku()
-        }
+    // 混沌审查修复（CR #C2）：POST_NOTIFICATIONS 仅在清单声明、从未运行时请求 ——
+    // Android 13+ 全新安装默认拒绝，前台服务通知静默不可见，用户误以为服务已死。
+    // 授权成功后刷新状态；拒绝/永久拒绝时仍回退到系统设置页。
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notifGranted = granted || NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    // 在后台检测权限（ON_RESUME 也会重检：从系统设置页返回后刷新"未获得→已获得"）
+    suspend fun refreshPermissionStates() = withContext(Dispatchers.IO) {
+        hasRoot = PrivilegeDetector.detectRoot()
+        hasShizuku = PrivilegeDetector.detectShizuku()
         accessibilityGranted = context.isAccessibilityServiceEnabled()
         overlayGranted = Settings.canDrawOverlays(context)
         notifGranted = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -89,6 +102,16 @@ fun PermissionsScreen() {
         }
     }
 
+    // 修复：原仅 LaunchedEffect(Unit) 首次组合时检测一次 ——
+    // 用户跳到系统设置授权后返回本屏，状态仍显示"未获得"直到切屏重进
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        scope.launch { refreshPermissionStates() }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshPermissionStates()
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("权限管理") }) }
     ) { padding ->
@@ -96,6 +119,8 @@ fun PermissionsScreen() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // 修复：6 张卡片 ~600dp+ 在短屏/横屏下溢出不可滚 —— 补垂直滚动
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -152,7 +177,14 @@ fun PermissionsScreen() {
                 description = "发送前台服务通知、读取通知",
                 status = if (notifGranted) Status.Granted else Status.Denied,
                 actionLabel = if (notifGranted) "已授权" else "授权",
-                onClick = { context.openNotificationSettings() }
+                onClick = {
+                    // Android 13+：优先走标准运行时权限请求，而非直接跳系统设置页
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifGranted) {
+                        notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        context.openNotificationSettings()
+                    }
+                }
             )
             PermissionCard(
                 icon = Icons.Default.Folder,
@@ -309,9 +341,16 @@ private fun ShizukuPermissionCard(
                                 context.startActivity(intent)
                             } catch (e: Exception) {
                                 // Shizuku app 未安装 — 打开下载页
-                                val uri = Uri.parse("https://shizuku.rikka.app/")
-                                val intent = Intent(Intent.ACTION_VIEW, uri)
-                                context.startActivity(intent)
+                                // P2 fix：无浏览器应用的设备（TV/精简 ROM） startActivity
+                                // 抛 ActivityNotFoundException，需兜底，不能二次崩溃
+                                try {
+                                    val uri = Uri.parse("https://shizuku.rikka.app/")
+                                    val intent = Intent(Intent.ACTION_VIEW, uri)
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    // 无浏览器可用：静默降级，仅刷新状态
+                                }
                             }
                         }
                         !shizukuPermission.value -> {
@@ -363,7 +402,7 @@ private fun PermissionCard(
     }
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(12.dp) // 统一卡片半径（Skill/Memory/Market/聊天均 12dp，原 16 为孤例）
     ) {
         Row(
             modifier = Modifier

@@ -22,7 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -35,10 +35,10 @@ import com.foundry.preview.state.FoundryViewModel
 @Composable
 fun MainScreen(viewModel: FoundryViewModel) {
     val context = LocalContext.current
-    val selectedTab by viewModel.selectedTab.collectAsState()
-    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
-    val document by viewModel.document.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
+    val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+    val document by viewModel.document.collectAsStateWithLifecycle()
+    val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val openFileLauncher = rememberLauncherForActivityResult(

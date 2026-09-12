@@ -10,7 +10,7 @@
 **An autonomous AI agent that lives entirely on your Android device.**
 
 一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、6 种执行模式、
-83 个内置工具、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
+100 个内置工具、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
@@ -49,7 +49,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **项目事实**
 
-<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-83-ff69b4" alt="83 Tools"/></a>
+<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-100-ff69b4" alt="100 Tools"/></a>
 <a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
 <a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-13-8A2BE2" alt="13 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-74_files-2EA44F" alt="74 Tests"/></a>
@@ -88,7 +88,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 - [🗜️ 上下文工程（P7 三级压缩）](#context-compression)
 - [🖥️ 终端运行时（Ubuntu + PRoot）](#terminal-runtime)
 - [🌐 浏览器智能体](#browser)
-- [🔧 工具全景（83 个）](#tools)
+- [🔧 工具全景（100 个）](#tools)
 - [⚡ 权限执行链](#privilege)
 
 </td>
@@ -99,6 +99,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 - [💬 斜杠命令](#slash-commands)
 - [🔌 插件 SDK](#plugin-sdk)
 - [🎨 ComposeFoundry（伴侣工程）](#composefoundry)
+- [💎 Liquid Glass 玻璃组件系统](#liquid-glass)
 - [📱 应用界面](#ui-screens)
 - [🚀 快速开始](#quickstart)
 - [🧪 测试与质量保障](#testing)
@@ -145,7 +146,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 | 运行位置 | 📱 全程在设备上 | 💻 PC / 服务器 | 📱 设备上 | ☁️ 云端 |
 | 需要服务器/PC | ❌ 不需要 | ✅ 需要 | ❌ 不需要 | ✅（厂商云） |
 | LLM 可换性 | ✅ 任意 OpenAI 兼容端点 / 局域网 Ollama | 固定模型或自配 | 无 LLM | ❌ 固定 |
-| 执行能力 | 83 工具：shell / 文件 / UI 自动化 / 浏览器 / 终端 | 文件 + shell + web | 规则触发，无推理 | 仅对话 |
+| 执行能力 | 100 工具：shell / 文件 / 结构化查询 / UI 自动化 / 浏览器 / 终端 | 文件 + shell + web | 规则触发，无推理 | 仅对话 |
 | Linux 环境 | ✅ PRoot Ubuntu 24.04 沙箱 | ✅ 宿主 OS | ❌ | ❌ |
 | 跨会话记忆 | ✅ 认知记忆：陈述性（语义图）+ 程序性（FSM 宏旁路回放） | 仓库内文件（CLAUDE.md 等） | ❌ | 云端会话 |
 | 离线记忆 | ✅ Room 本地图数据库 | — | — | ❌ |
@@ -174,7 +175,7 @@ flowchart TB
     subgraph CORE["⚙️ core:* — 纯 JVM · 零 Android 依赖"]
         direction LR
         ENGINE["agent-engine<br/>六模式 ReAct 循环<br/>TaskOrchestrator<br/>P7 三级压缩"]
-        TOOLS["tool-registry<br/>42 内置工具 · 流式执行<br/>SkillRegistry · MCP 客户端"]
+        TOOLS["tool-registry<br/>57 内置工具 · schema 即校验<br/>SkillRegistry · MCP 客户端"]
         LLM["llm-adapter<br/>OpenAI 兼容 SSE<br/>多模型运行时 · 角色路由"]
         LOGC["logging<br/>结构化日志"]
     end
@@ -217,12 +218,12 @@ flowchart TB
 |------|:---:|------|
 | `:app` | Android App | Compose UI（抽屉导航 8 屏）、Hilt 装配、浏览器/GitHub 工具、悬浮球 |
 | `:core:agent-engine` | 纯 JVM | ReAct 引擎（Plan/Build 等六模式）、任务编排器、上下文压缩、会话记忆 |
-| `:core:tool-registry` | 纯 JVM | 42 个内置工具 + 工具执行器（流式）+ SkillRegistry + MCP 客户端 |
+| `:core:tool-registry` | 纯 JVM | 57 个内置工具（schema 即校验 + 风险门 + 使用统计）+ 工具执行器 + SkillRegistry + MCP 客户端 |
 | `:core:llm-adapter` | 纯 JVM | OpenAI 兼容流式客户端 + 多模型运行时（角色路由/能力校验/错误分类） |
 | `:core:logging` | 纯 JVM | 结构化日志（LogCategory/LogLevel/LogRecord） |
 | `:platform:privilege` | Android Lib | Root/Shizuku/普通三级权限链 + 无障碍服务 + 进程流工厂 |
 | `:platform:persistence` | Android Lib | 前台服务 + WorkManager 看门狗（被杀自动拉起） |
-| `:platform:terminal` | Android Lib | 终端运行时 2.0：rootfs 供给、PRoot 后端、原生 PTY、16 个工具 |
+| `:platform:terminal` | Android Lib | 终端运行时 2.0：rootfs 供给、PRoot 后端、原生 PTY、Ubuntu 生命周期编排、18 个工具 |
 | `:platform:cs-mem` | Android Lib | 认知记忆系统（本仓库的差异化核心，见下节） |
 | `:terminal-emulator` | Android Lib | 自研 VT100/ANSI 终端模拟器（vendored，ATR Phase 2） |
 | `:plugin-sdk:plugin-api` | Android Lib | AIDL `IApexPlugin` + PluginContract 常量 |
@@ -474,12 +475,12 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 ---
 
 <a id="tools"></a>
-## 🔧 工具全景（83 个）
+## 🔧 工具全景（100 个）
 
 <details open>
 <summary><b>📦 点击展开 / 折叠完整工具清单（按模块分组）</b></summary>
 
-**core:tool-registry —— 42 个内置工具**
+**core:tool-registry —— 57 个内置工具**
 
 | 类别 | 工具 |
 |------|------|
@@ -493,6 +494,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | 🧮 实用 | `calculate` `text_transform` `get_location` `notification_read` |
 | 🧩 技能 | `skill_search` `skill_install` `skill_create` `skill_list` `skill_uninstall` |
 | 🛰️ MCP | `mcp_connect` `mcp_list` `mcp_call` |
+| 🧱 结构化 v2（15） | `regex_extract` `regex_replace` `text_diff` `json_path` `xml_extract` `csv_query` `base_convert` `unit_convert` `duration_convert` `string_distance` `random_generate` `uuid_generate` `file_hash` `datetime` `cron_next`（全部纯 JVM / 离线 / 确定性） |
 
 **app 模块 —— 22 个**
 
@@ -501,7 +503,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | 🌐 浏览器（15） | `browser_navigate/click/input/scroll/select/screenshot/snapshot/toggle/show/download_list/file_upload/date_input/context_summary/network_log/debug_dump` |
 | 🐙 GitHub（7） | `github_get_user/list_repos/read_file/write_file/create_issue/list_issues/search_code`（配置 PAT 后注册） |
 
-**platform:terminal —— 16 个** `terminal.*`（见[终端运行时](#terminal-runtime)）
+**platform:terminal —— 18 个** `terminal.*`（见[终端运行时](#terminal-runtime)；T82 新增 `terminal.ubuntu.ensure` / `terminal.ubuntu.status` 一键生命周期编排）
 
 **platform:cs-mem —— 3 个记忆召回**
 
@@ -613,10 +615,27 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 
 ---
 
+<a id="liquid-glass"></a>
+## 💎 Liquid Glass 玻璃组件系统
+
+普通 Android UI + 精确使用的 Liquid Glass 组件，而非“整个 App 一坨透明塑料”：
+
+- **两个诚实材质档**：Backdrop 档经 [Haze](https://github.com/chrisbanes/haze) 以 `GraphicsLayer` 真实采样背后内容（API 32+ 走 GPU `RenderEffect` 模糊，低版本自动 scrim 降级）；Frosted 档仅主题色薄霜 + 边缘光 + 高光，不冒充 backdrop
+- **七档材质**：`Subtle / Control / Card / Navigation / Floating / Dialog / Strong`，tint、边缘、高光、噪声全部从 MaterialTheme 动态派生，Light / Dark / Dynamic Color 自适应
+- **已玻璃化**：抽屉导航项（悬浮于氛围背景之上）、聊天悬浮输入栏（采样消息流）、回到底部 FAB、工具卡 / 计划卡 / 任务状态卡、顶栏菜单钮、玻璃对话框（HazeDialog 跨窗口采样）
+- **明确不玻璃化**：终端渲染区（性能敏感）、页面背景、气泡正文
+- **未实现即声明**：Refraction（折射位移）明确标注 NOT IMPLEMENTED，拒绝“alpha + blur 冒充玻璃”
+
+组件 API 与验收细则见 [docs/liquid-glass-system.md](docs/liquid-glass-system.md)，抽屉内“玻璃实验室”屏可真机验证 backdrop / blur / 边缘 / 交互。
+
+<p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
+
+---
+
 <a id="ui-screens"></a>
 ## 📱 应用界面
 
-单 Activity Compose 应用，`ModalNavigationDrawer` 抽屉导航 8 屏：
+单 Activity Compose 应用，`ModalNavigationDrawer` 抽屉导航 9 屏：
 
 | 屏 | 内容 |
 |----|------|
@@ -627,6 +646,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | **记忆** | cs-mem 可视化：Episode 统计 / 宏技能数 / 近期情景 / 删除 |
 | **权限** | Root / Shizuku（三态卡片）/ 无障碍 / 悬浮窗 / 通知 / 存储 |
 | **运行日志** | 结构化运行日志浏览 |
+| **玻璃实验室** | Liquid Glass 内部验收页：可拖动玻璃片 / 档位阶梯 / 工具卡状态 / 诚实验收清单 |
 | **设置** | LLM 预设（OpenAI/DeepSeek/OpenRouter/Ollama/自定义）+ Base URL/Key/模型 + 温度 + 连接测试 + 通用设置 |
 
 另有赛博霓虹悬浮球（EasyFloat）快速唤起。
@@ -780,7 +800,7 @@ Android-Guru-Agent/
 | Kotlin 测试源码 | 74 个文件 / 19,769 行 |
 | C++（终端 PTY/JNI 桥） | 6 个文件 / 1,121 行 |
 | Gradle 模块 | 13 |
-| 内置工具 | 83 |
+| 内置工具 | 100 |
 | 测试代码 / 主源码比例 | ≈ 30% |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
@@ -813,6 +833,7 @@ Android-Guru-Agent/
 | 文档 | 内容 |
 |------|------|
 | [docs/TESTING.md](docs/TESTING.md) | **测试总指南**：理念/矩阵/替身规范/FAQ/74 文件清单 |
+| [docs/liquid-glass-system.md](docs/liquid-glass-system.md) | **Liquid Glass 玻璃组件系统**：架构/七档材质/组件 API/真实性验收矩阵 |
 | [docs/memory-and-workflow-research.md](docs/memory-and-workflow-research.md) | **记忆与工作流调研报告**：对标 MemGPT/Mem0/A-MEM/Zep/Voyager/Claude Code/OpenHands/SWE-agent |
 | [docs/terminal-api.md](docs/terminal-api.md) | 终端 API 契约 |
 | [docs/ubuntu-rootfs-t72.md](docs/ubuntu-rootfs-t72.md) | T72 Ubuntu rootfs 供给设计 |

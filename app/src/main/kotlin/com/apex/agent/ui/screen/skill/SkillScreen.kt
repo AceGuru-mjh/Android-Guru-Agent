@@ -177,6 +177,10 @@ fun SkillScreen(
     val skills by viewModel.skills.collectAsStateWithLifecycle()
     val message by viewModel.lastMessage.collectAsStateWithLifecycle()
 
+    // 修复跨屏 stale 开关：VM 为 Activity 级单例，在市场页切换的开关不会自动同步到本页 ——
+    // 每次进入本屏时强制刷新快照（原仅 init 刷新一次）
+    LaunchedEffect(Unit) { viewModel.refresh() }
+
     var showCreate by remember { mutableStateOf(false) }
     var pendingUninstall by remember { mutableStateOf<String?>(null) }
     var showToast by remember { mutableStateOf(false) }
@@ -286,7 +290,9 @@ fun SkillScreen(
 
             // ── 创建 Skill 对话框 ──
             if (showCreate) {
+                // 修复：同名 id（由 name 派生）静默覆盖旧 Skill —— 对话框内拦截 + 内联错误
                 CreateSkillDialog(
+                    existingIds = skills.map { it.manifest.id }.toSet(),
                     onDismiss = { showCreate = false },
                     onCreate = { name, desc, type, prompt ->
                         viewModel.createSkill(name, desc, type, prompt)
@@ -323,10 +329,11 @@ private fun readUriText(context: Context, uri: Uri): String? {
     }.getOrNull()
 }
 
-/** 创建 Skill 对话框：填写名称/描述/类型，Prompt 类型可附注入文本。 */
+/** 创建 Skill 对话框：填写名称/描述/类型，Prompt 类型可附注入文本。同名 id（由 name 派生）将被拦截。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateSkillDialog(
+    existingIds: Set<String>,
     onDismiss: () -> Unit,
     onCreate: (name: String, description: String, type: String, prompt: String) -> Unit
 ) {
@@ -335,6 +342,9 @@ private fun CreateSkillDialog(
     var prompt by remember { mutableStateOf("") }
     val types = listOf("composite" to "组合", "prompt" to "提示注入", "script" to "脚本")
     var selectedType by remember { mutableStateOf("composite") }
+    // id 派生规则与 VM createSkill 一致；同名即静默覆盖旧 Skill，改为拦截 + 内联错误
+    val prospectiveId = name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    val isDuplicate = name.isNotBlank() && prospectiveId in existingIds
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -345,6 +355,10 @@ private fun CreateSkillDialog(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("名称") },
+                    isError = isDuplicate,
+                    supportingText = if (isDuplicate) {
+                        { Text("同名 Skill 已存在（id 派生自名称，直接创建会覆盖旧技能）—— 请换名") }
+                    } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -388,7 +402,7 @@ private fun CreateSkillDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = name.isNotBlank(),
+                enabled = name.isNotBlank() && !isDuplicate,
                 onClick = { onCreate(name, description, selectedType, prompt) }
             ) { Text("创建") }
         },

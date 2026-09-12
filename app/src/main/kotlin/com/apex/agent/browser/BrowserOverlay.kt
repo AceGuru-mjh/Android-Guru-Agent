@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
@@ -28,8 +27,10 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
@@ -57,6 +58,17 @@ class BrowserOverlay @Inject constructor(
         appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // P1 fix（生命周期竞态，两轮混沌审查同题合并）：旧实现 onCompleteHandoff 每次回调都
+    // `mainHandler.post { CoroutineScope(Dispatchers.Main).launch { ... } }` —— 双重异步
+    // + 裸 scope 无异常处理器（completeHandoff 未捕获异常直接杀进程）+ 每次回调 new
+    // 孤儿作用域（连点“交还”挂起 N 个无主协程排队抢 stateMutex 永不取消）。改用单例
+    // 持有的常驻 mainScope：Main.immediate 已保证主线程 + 异常记录不崩溃。
+    private val mainScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, e ->
+            android.util.Log.w("BrowserOverlay", "handoff failed", e)
+        }
+    )
+
     @Volatile private var rootView: FrameLayout? = null
     @Volatile private var webViewHost: FrameLayout? = null
     @Volatile private var composeView: ComposeView? = null
@@ -67,13 +79,11 @@ class BrowserOverlay @Inject constructor(
     // 控制条/浮窗状态（Compose 观察）
     private var uiState by mutableStateOf(OverlayUiState())
     private var attachedWebView: WebView? = null
-
-    /** 是否已尝试注册回调（避免重复注册） */
-    @Volatile private var registered = false
+    /** 窗口当前 LayoutParams（折叠/展开切换可触摸性时 updateViewLayout 用） */
+    @Volatile private var windowParams: WindowManager.LayoutParams? = null
 
     init {
         engine.addUiCallback(this)
-        registered = true
     }
 
     // ───────── BrowserUiCallback ─────────
@@ -112,11 +122,14 @@ class BrowserOverlay @Inject constructor(
         }
 
         // WebView 承载容器
+        // 修复遮挡：控制条浮在 Compose 层顶部（statusBarsPadding+8dp 外距），网页原 MATCH_PARENT
+        // 从状态栏底下开始 —— 顶部 ~90dp 的页面导航/标题被控制条永久盖住。给 host 顶部留出
+        // 控制条等效高度（状态栏 + 72dp），网页内容整体下移到控制条之下。
         val host = FrameLayout(appContext).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
-            )
+            ).apply { topMargin = statusBarHeightPx() + dpPx(72) }
         }
 
         // Compose 控制条
@@ -124,6 +137,7 @@ class BrowserOverlay @Inject constructor(
         // 否则 ComposeView.onAttachedToWindow 找不到 owner 直接抛
         // IllegalStateException，被下方 catch 吞掉 → 浮窗静默永远无法显示
         //（人工接管 UI 即 WAITING_HUMAN 面板完全不可用）。
+        // 注：窗口不支持拖拽（固定 TOP|START）；控制条按钮完成收起/交还/关闭全部操作。
         val owner = OverlayLifecycleOwner()
         owner.performRestore()
         val compose = ComposeView(appContext).apply {
@@ -132,7 +146,7 @@ class BrowserOverlay @Inject constructor(
             setContent {
                 OverlayContent(
                     state = uiState,
-                    onCompleteHandoff = { mainHandler.post { CoroutineScope(Dispatchers.Main).launch { engine.completeHandoff() } } },
+                    onCompleteHandoff = { mainScope.launch { engine.completeHandoff() } },
                     onCollapseToggle = { mainHandler.post { toggleCollapse() } },
                     onClose = { mainHandler.post { doHide() } },
                 )
@@ -142,8 +156,7 @@ class BrowserOverlay @Inject constructor(
         root.addView(host)
         root.addView(compose)
 
-        // 拖拽：在根布局拦截控制条区域外的拖动——改为在 Compose 控制条内处理拖动，
-        // 这里只把根挂上去。拖拽通过 Compose 的 pointerInput 更新 window params。
+        // Compose 控制条（固定位置，无拖拽）：挂在 WebView 之上展示状态/收起/交还/关闭。
         rootView = root
         webViewHost = host
         composeView = compose
@@ -151,6 +164,7 @@ class BrowserOverlay @Inject constructor(
 
         try {
             windowManager.addView(root, params)
+            windowParams = params
             owner.onCreate()
             owner.onStart()
             owner.onResume()
@@ -161,6 +175,7 @@ class BrowserOverlay @Inject constructor(
             webViewHost = null
             composeView = null
             lifecycleOwner = null
+            windowParams = null
         }
     }
 
@@ -184,6 +199,8 @@ class BrowserOverlay @Inject constructor(
         webViewHost = null
         composeView = null
         lifecycleOwner = null
+        windowParams = null
+        uiState = uiState.copy(collapsed = false) // 重置折叠态（下次展示默认展开态）
     }
 
     /** 把引擎 active WebView 挂到浮窗容器（接管期间人类真实交互） */
@@ -213,6 +230,31 @@ class BrowserOverlay @Inject constructor(
     private fun toggleCollapse() {
         uiState = uiState.copy(collapsed = !uiState.collapsed)
         webViewHost?.visibility = if (uiState.collapsed) View.GONE else View.VISIBLE
+        applyWindowTouchability()
+    }
+
+    /**
+     * 修复「折叠态触摸墙」：窗口为全屏 MATCH_PARENT，FLAG_NOT_TOUCH_MODAL 只对窗口*外*
+     * 触摸透传——对全屏窗口形同虚设。折叠态（网页隐藏仅剩控制条）时窗口仍吞掉整屏触摸，
+     * 底层应用无法操作。折叠时追加 FLAG_NOT_TOUCHABLE 让触摸全部穿透；展开时移除恢复交互。
+     */
+    private fun applyWindowTouchability() {
+        val root = rootView ?: return
+        val params = windowParams ?: return
+        if (uiState.collapsed) {
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        runCatching { windowManager.updateViewLayout(root, params) }
+    }
+
+    private fun dpPx(dp: Int): Int =
+        (dp * appContext.resources.displayMetrics.density).toInt()
+
+    private fun statusBarHeightPx(): Int {
+        val id = appContext.resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) appContext.resources.getDimensionPixelSize(id) else dpPx(24)
     }
 
     private fun buildLayoutParams(): WindowManager.LayoutParams {

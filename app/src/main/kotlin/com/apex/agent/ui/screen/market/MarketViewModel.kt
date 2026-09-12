@@ -80,6 +80,8 @@ data class MarketUiState(
     val githubError: String? = null,
     // 全局
     val busy: Boolean = false,
+    /** 正在连接的 MCP 服务器名（null = 无）：连接中禁用对应行按钮，防双击并发重连 */
+    val mcpConnecting: String? = null,
     val lastMessage: String? = null
 )
 
@@ -261,10 +263,15 @@ class MarketViewModel @Inject constructor(
 
     fun connectMcp(name: String) {
         viewModelScope.launch {
-            mcpManager.connect(name).fold(
-                onSuccess = { message("MCP 已连接：$name") },
-                onFailure = { message("连接失败：${it.message}") }
-            )
+            _uiState.update { it.copy(mcpConnecting = name) }
+            try {
+                mcpManager.connect(name).fold(
+                    onSuccess = { message("MCP 已连接：$name") },
+                    onFailure = { message("连接失败：${it.message}") }
+                )
+            } finally {
+                _uiState.update { it.copy(mcpConnecting = null) }
+            }
             refresh()
         }
     }

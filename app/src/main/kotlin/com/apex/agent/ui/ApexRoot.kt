@@ -4,12 +4,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
@@ -45,8 +51,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.ui.component.ContextMeterBar
+import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
+import com.apex.agent.ui.screen.glass.GlassLabScreen
 import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
@@ -72,6 +80,8 @@ sealed class DrawerDestination(
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
+    // 玻璃实验室 —— 内部 Liquid Glass 验收页（Spec §20：背景变化/网格/高对比文字/移动元素）
+    data object GlassLab : DrawerDestination("glasslab", "玻璃实验室", Icons.Default.BlurOn)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,8 +109,13 @@ fun ApexRoot() {
         }
     ) {
         Scaffold(
+            // 修复：edge-to-edge 后 adjustResize 失效，键盘弹出会直接盖住输入栏 ——
+            // 将 IME insets 并入内容内边距，键盘弹出时整个内容区（含底部输入栏）上移。
+            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
             topBar = {
-                TopAppBar(
+                // 终端屏自带二级顶栏（含终端抽屉入口）——若此处再渲染根顶栏，会出现双顶栏双汉堡
+                if (currentDestination != DrawerDestination.Terminal) {
+                    TopAppBar(
                     title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -127,13 +142,14 @@ fun ApexRoot() {
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = "打开导航",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        // 顶栏菜单钮 → GlassIconButton —— Frosted 档：
+                        // 顶栏无内容可采样，诚实降级为主题薄霜 + 边缘光 + 高光
+                        GlassIconButton(
+                            icon = Icons.Default.Menu,
+                            contentDescription = "打开导航",
+                            onClick = { scope.launch { drawerState.open() } },
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -141,9 +157,10 @@ fun ApexRoot() {
                         navigationIconContentColor = MaterialTheme.colorScheme.primary
                     )
                 )
+                }
             }
         ) { padding ->
-            Column(modifier = Modifier.padding(padding)) {
+            Column(modifier = Modifier.padding(padding).imePadding()) {
                 // ═══ 顶部上下文仪表盘长条（全局）═══
                 ContextMeterBar(
                     usedTokens = agentState.contextUsedTokens,
@@ -158,13 +175,16 @@ fun ApexRoot() {
                             // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
                             onOpenSettings = { currentDestination = DrawerDestination.Settings }
                         )
-                        DrawerDestination.Terminal -> TerminalScreen()
+                        DrawerDestination.Terminal -> TerminalScreen(
+                            onOpenNavDrawer = { scope.launch { drawerState.open() } }
+                        )
                         DrawerDestination.Skill -> SkillScreen()
                         DrawerDestination.Market -> MarketScreen()
                         DrawerDestination.Memory -> MemoryScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
                         DrawerDestination.Log -> LogViewerScreen()
                         DrawerDestination.Settings -> SettingsScreen()
+                        DrawerDestination.GlassLab -> GlassLabScreen()
                     }
                 }
             }

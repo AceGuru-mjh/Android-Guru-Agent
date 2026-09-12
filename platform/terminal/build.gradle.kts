@@ -85,6 +85,16 @@ tasks.withType<Test>().configureEach {
     // 上实测需 20+ 分钟；20 分钟预算在缓存失效（首次或输入变更）后必超时。
     // 单条 proot 探测/L2 命令自身有界（30s/60s），无限挂起已在上游修复。
     timeout.set(Duration.ofMinutes(30))
+    // ─── CI 挂死根因修复（jstack 确证）：IO 线程池被泄漏泵耗尽 ───
+    // 大量测试类创建 Runtime/Session 后从不 close —— 每个泄漏会话的输出泵在
+    // Dispatchers.IO 上跑「nativeWaitForData 阻塞轮询」永不退出。默认 IO 池
+    // 64 线程，约 64 个泄漏泵后池满：InputManager 写协程等一切 IO 派发永久
+    // 排队，首个 IO 写测试（deferred.await）挂死至 30 分钟任务超时。
+    // 本地复现：单 JVM 全量 161 类 92s 挂死，jstack 59/64 IO 线程卡在
+    // FakeNativePty.nativeWaitForData 的 sleep 循环；io.parallelism=96 后
+    // 全量 1088 测试 84s 零挂死跑完 —— 双保险修复：
+    forkEvery = 16          // ① 每 16 类重启测试 JVM：泄漏线程随之消亡，单 JVM 泄漏上限 ~16类×4泵=64
+    systemProperty("kotlinx.coroutines.io.parallelism", "96")  // ② IO 池扩至 96，留出余量
     testLogging {
         events("passed", "skipped", "failed", "standardOut", "standardError")
         showStandardStreams = true

@@ -29,6 +29,11 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write   # tag 构建时创建 Release 并上传产物
+    defaults:
+      run:
+        # bashisms 依赖：Build 步骤的 ${VARIANT^} 首字母大写、Resolve variant 的 [[ ]]。
+        # runner 默认 sh(dash) 下 `${VARIANT^}` 报 bad substitution 直接失败 —— 显式 bash。
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4

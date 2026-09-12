@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -50,7 +51,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,7 +72,12 @@ import com.apex.agent.ui.component.SlashMenuProvider
 import com.apex.agent.ui.component.ViroPetHost
 import com.apex.agent.ui.component.ViroPetMood
 import com.apex.agent.ui.component.rememberSlashMenuProvider
+import com.apex.agent.ui.glass.GlassCard
+import com.apex.agent.ui.glass.GlassFloatingButton
+import com.apex.agent.ui.glass.GlassStyle
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,6 +98,10 @@ fun AgentChatScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scrollScope = rememberCoroutineScope()
+
+    // ═══ Liquid Glass：消息列表 = 采样源；悬浮输入栏 / FAB / 加载条 = 玻璃件 ═══
+    // Spec §5/§8/§10：输入栏与悬浮操作悬浮于内容之上，真实 backdrop 采样 + 模糊。
+    val glassState = remember { HazeState() }
 
     // ═══ "小大脑" + "小圆环"菜单状态收集 ═══
     val toolkit = viewModel.toolkitStore
@@ -284,15 +296,19 @@ fun AgentChatScreen(
             )
         }
 
-        // ═══ 消息列表（FAB 收纳进列表区域，不再压住输入栏）═══
+        // ═══ 消息列表 = 玻璃采样源；输入栏悬浮其上 —— 真实 backdrop 而非“背景色+blur”冒充 ═══
+        // composerInsetPx 动态测量玻璃输入栏高度，保证最后一条消息不被悬浮层遮挡。
+        var composerInsetPx by remember { mutableIntStateOf(0) }
+        val composerInsetDp = with(LocalDensity.current) { composerInsetPx.toDp() }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .hazeSource(glassState)
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
+            contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp + composerInsetDp)
         ) {
             itemsIndexed(uiState.messages, key = { _, m -> m.id }) { _, message ->
                 AgentMessageItem(
@@ -360,57 +376,68 @@ fun AgentChatScreen(
             }
         }
 
-            // ═══ 缺陷 4 修复：回到底部 FAB ═══
-            // 当用户向上滚动且 Agent 正在输出时，显示"回到底部"按钮
-            //（修复：原挂全屏底部 padding 80dp，输入栏高于 80dp 时 FAB 压在附件区/发送键上；
-            // 现收纳进列表区域，天然位于输入栏之上。限定顶层 AnimatedVisibility——
-            // 此处外层 Column 作用域在隐式接收链上，否则被解析为 ColumnScope 扩展）═══
-            androidx.compose.animation.AnimatedVisibility(
-                visible = userScrolledUp && uiState.isLoading,
+            // ═══ 玻璃悬浮层：FAB + 加载条 + 输入栏 —— 悬浮于消息源之上 ═══
+            // 覆盖式布局使输入栏与消息重叠 —— 这是 backdrop 采样的前提；
+            // 列表用动态 contentPadding 补偿，最后一条消息不会被遮挡。
+            Column(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = 16.dp, end = 16.dp)
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
             ) {
-                FilledIconButton(
-                    onClick = {
-                        userScrolledUp = false
-                        scrollScope.launch {
-                            if (totalListItems > 0) {
-                                listState.animateScrollToItem(totalListItems - 1)
-                            }
-                        }
-                    },
-                    modifier = Modifier.size(48.dp)
+                // ═══ 缺陷 4 修复：回到底部 FAB —— GlassFloatingButton 真实采样消息流 ═══
+                //（收纳于输入栏上方右缘；顶层 AnimatedVisibility 限定——
+                // 此处外层 Column 作用域在隐式接收链上，否则被解析为 ColumnScope 扩展）═══
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = userScrolledUp && uiState.isLoading,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(bottom = 10.dp, end = 16.dp)
                 ) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "回到底部")
+                    GlassFloatingButton(
+                        icon = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "回到底部",
+                        onClick = {
+                            userScrolledUp = false
+                            scrollScope.launch {
+                                if (totalListItems > 0) {
+                                    listState.animateScrollToItem(totalListItems - 1)
+                                }
+                            }
+                        },
+                        state = glassState,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
-            }
-        }
 
-        // ═══ 加载条 ═══
-        AnimatedVisibility(uiState.isLoading) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
+                // ═══ 加载条 ═══
+                AnimatedVisibility(uiState.isLoading) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
-        // ═══ Viro 桌宠：站于输入栏上方（独占 56dp 行槽位，不遮挡消息列表与功能控件）═══
-        // 情绪随 Agent 运行态切换（思考/执行工具/回复/等待输入/出错/完成），
-        // 新会话挥手打招呼、RunSummary 出现跳跃庆祝、点击可随机跳跃/挥手。
-        ViroPetHost(
-            mood = viroMood,
-            chatEmpty = uiState.messages.isEmpty(),
-            celebrationKey = (uiState.messages.lastOrNull() as? AgentUiMessage.RunSummary)?.id
-        )
+                // ═══ Viro 桌宠：站于输入栏上方（独占 56dp 行槽位，不遮挡消息列表与功能控件）═══
+                // 情绪随 Agent 运行态切换（思考/执行工具/回复/等待输入/出错/完成），
+                // 新会话挥手打招呼、RunSummary 出现跳跃庆祝、点击可随机跳跃/挥手。
+                ViroPetHost(
+                    mood = viroMood,
+                    chatEmpty = uiState.messages.isEmpty(),
+                    celebrationKey = (uiState.messages.lastOrNull() as? AgentUiMessage.RunSummary)?.id
+                )
 
-        // ═══ 输入栏（/ 斜杠 + GitHub + 旋转加号 + 输入框 + 发送）═══
-        Surface(
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp,
-            // 精修：底部输入面板顶部双角圆角（原矩形硬边 + 矩形阴影）
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-        ) {
+                // ═══ 玻璃输入栏（/ 斜杠 + GitHub + 旋转加号 + 输入框 + 发送）═══
+                // GlassStyle.Floating：悬浮主面 —— 比卡片更强的 blur/边缘/高光；
+                // 文本/光标/IME 行为零改动（AdaptiveInputField 原样保留）。
+                GlassCard(
+                    state = glassState,
+                    style = GlassStyle.Floating,
+                    // 精修延续：底部输入面板顶部双角圆角（原矩形硬边 + 矩形阴影）
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { composerInsetPx = it.height }
+                ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 // ═══ 附件预览条（发送前）═══
                 val attachments by viewModel.attachments.collectAsStateWithLifecycle()
@@ -585,6 +612,8 @@ fun AgentChatScreen(
                     }
                 }
             }
+            }
+        }
         }
     }
 

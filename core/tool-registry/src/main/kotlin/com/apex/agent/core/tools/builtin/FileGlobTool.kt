@@ -135,14 +135,49 @@ class FileGlobTool(
         }
     }
 
+    /**
+     * Glob → Regex 转换。
+     *
+     * P1-1 修复：旧实现是五连 replace（`**/`→`(.*/)?`、`**`→`.*`、`*`→`[^/]*`、
+     * `?`→`[^/]`、`.`→`\.`），顺序错误导致：
+     * - 最后一步把前几步引入的 `.`（如 `(.*/)?` / `.*`）也转义掉；
+     * - `*`→`[^/]*` 会命中前一步引入的 `*`，把展开结果再次破坏。
+     * 实测 `**/*.py` 生成 `(\.[^/]*/)[^/][^/]*\.py`，递归 glob 永远匹配不到任何文件。
+     *
+     * 修复：单遍扫描，模式 token 直接输出正则片段，字面字符用 [Regex.escape] 转义：
+     * - `**/` → `(?:.*/)?`（零个或多个目录前缀）
+     * - `**`  → `.*`
+     * - `*`   → `[^/]*`（单层通配，不跨目录）
+     * - `?`   → `[^/]`（单字符，不跨目录）
+     */
     private fun globToRegex(glob: String): Regex {
-        val regexStr = glob
-            .replace("**/", "(.*/)?")
-            .replace("**", ".*")
-            .replace("*", "[^/]*")
-            .replace("?", "[^/]")
-            .replace(".", "\\.")
-        return Regex(regexStr)
+        val sb = StringBuilder(glob.length + 16)
+        var i = 0
+        while (i < glob.length) {
+            when {
+                glob.startsWith("**/", i) -> {
+                    sb.append("(?:.*/)?")
+                    i += 3
+                }
+                glob.startsWith("**", i) -> {
+                    sb.append(".*")
+                    i += 2
+                }
+                glob[i] == '*' -> {
+                    sb.append("[^/]*")
+                    i++
+                }
+                glob[i] == '?' -> {
+                    sb.append("[^/]")
+                    i++
+                }
+                else -> {
+                    sb.append(Regex.escape(glob[i].toString()))
+                    i++
+                }
+            }
+        }
+        return Regex(sb.toString())
     }
 
     private fun formatSize(b: Long): String = when {

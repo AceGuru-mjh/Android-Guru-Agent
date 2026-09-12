@@ -4,6 +4,10 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.TimeUnit
 
 /**
@@ -75,20 +79,38 @@ object LlmClientFactory {
         }
 
         private fun delayBackoff(attempt: Int, retryAfterMs: Long) {
-            val sleepMs = if (retryAfterMs > 0) {
+            val baseMs = if (retryAfterMs > 0) {
                 retryAfterMs.coerceAtMost(config.maxRetryDelayMs)
             } else {
                 (config.retryDelayMs * (1L shl attempt)).coerceAtMost(config.maxRetryDelayMs)
             }
+            // P3-k 修复：加 ±20% 随机 jitter。多个客户端同时触发限流重试时，
+            // 固定退避会让它们在同一时刻集中重试（thundering herd），
+            // 反复撞限流窗口；抖动后错开重试时刻。
+            val jitter = 0.8 + ThreadLocalRandom.current().nextDouble(0.4)
+            val sleepMs = (baseMs * jitter).toLong().coerceAtMost(config.maxRetryDelayMs)
             // OkHttp 拦截器是同步执行的，只能用 Thread.sleep；
             // 重试次数与退避时间均受限，不会长期占用调度线程。
             Thread.sleep(sleepMs)
         }
 
+        /**
+         * P3-k 修复：补齐 HTTP-date 格式的 Retry-After 解析。
+         * 旧实现只解析秒数（"120"），HTTP-date 形式（"Wed, 21 Oct 2026 07:28:00 GMT"）
+         * 被当 -1 处理 → 退避无视服务端指示。按 RFC 7231 §7.1.3 解析 IMF-fixdate。
+         * 返回相对当前的毫秒数（已过去则返回 0，表示可立即重试）；无头/不可解析返回 -1。
+         */
         private fun parseRetryAfterMs(response: Response): Long {
             val header = response.header("Retry-After") ?: return -1L
             // 两种格式：秒数（"120"）或 HTTP-date（"Wed, 21 Oct 2026 07:28:00 GMT"）。
-            return header.toLongOrNull()?.let { it * 1000L } ?: -1L
+            header.toLongOrNull()?.let { return it * 1000L }
+            return runCatching {
+                // SimpleDateFormat 非线程安全，每次调用新建实例（重试路径频率低，开销可忽略）。
+                val format = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
+                format.timeZone = TimeZone.getTimeZone("GMT")
+                val date = format.parse(header) ?: return -1L
+                (date.time - System.currentTimeMillis()).coerceAtLeast(0L)
+            }.getOrDefault(-1L)
         }
     }
 }

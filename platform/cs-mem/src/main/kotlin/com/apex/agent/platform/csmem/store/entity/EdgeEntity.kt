@@ -34,7 +34,11 @@ import androidx.room.PrimaryKey
         Index(value = ["episode_id"]),
         Index(value = ["source_node_id"]),
         Index(value = ["target_node_id"]),
-        Index(value = ["type"])
+        Index(value = ["type"]),
+        // P1 fix（审计 6-b）：声明 v3 迁移创建的 (episode_id, edge_label) 唯一索引。
+        // 显式 name 与 MIGRATION_2_3/MIGRATION_3_4 的建索引语句逐字一致 —— 缺此声明时
+        // 升级库校验失败（多出未声明索引）、全新装机又缺该索引（upsert 幂等去重失效）。
+        Index(value = ["episode_id", "edge_label"], unique = true, name = "index_edges_episode_label")
     ]
 )
 data class EdgeEntity(

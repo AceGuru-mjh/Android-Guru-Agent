@@ -60,10 +60,7 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
     }
 
-    /**
-     * 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人
-     * （从本类抽出的单一职责协作类，逻辑逐行等价；scope 即 viewModelScope）。
-     */
+    /** 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人（抽出的单一职责协作类；scope 即 viewModelScope）。 */
     private val attachmentManager = AttachmentManager(
         context = context,
         preprocessor = preprocessor,
@@ -79,10 +76,7 @@ class AgentChatViewModel @Inject constructor(
     /** 任务状态卡数据源（TaskStatusCard 消费）。 */
     val taskState: StateFlow<com.apex.agent.core.engine.task.AgentTask?> get() = taskController.taskState
 
-    /**
-     * 崩溃恢复发现（D-3：VM init 确定性扫描，非后台任务）。
-     * IO 阻塞扫描放 IO dispatcher；结果供 RecoveryBanner 呈现。
-     */
+    /** 崩溃恢复发现（D-3：VM init 确定性扫描，IO 阻塞扫描放 IO dispatcher；结果供 RecoveryBanner 呈现）。 */
     private val _recoveryCandidates = MutableStateFlow<List<com.apex.agent.core.engine.task.AgentTask>>(emptyList())
     val recoveryCandidates: StateFlow<List<com.apex.agent.core.engine.task.AgentTask>> = _recoveryCandidates.asStateFlow()
 

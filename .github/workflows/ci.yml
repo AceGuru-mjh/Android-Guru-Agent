@@ -132,36 +132,130 @@ jobs:
             echo "✅ No duplicate class names"
           fi
 
-      - name: Check brace balance
+      - name: Check bracket balance (lexer-aware)
         run: |
-          FAIL=0
-          for f in $(find . -name "*.kt" -not -path "./.git/*" -not -path "./build/*"); do
-            OPENS=$(grep -o '{' "$f" | wc -l)
-            CLOSES=$(grep -o '}' "$f" | wc -l)
-            if [ "$OPENS" != "$CLOSES" ]; then
-              echo "❌ $f: $OPENS { vs $CLOSES }"
-              FAIL=1
-            fi
-          done
-          if [ $FAIL -eq 0 ]; then
-            echo "✅ All .kt files have balanced braces {}"
-          else
-            exit 1
-          fi
+          # 裸 grep 计数会把字符串里的括号("missing ')'')")与注释枚举("1)" "2)")
+          # 计入统计造成假阳性。此门禁用 Kotlin 词法状态机剥离注释/字符串/raw 串/
+          # 字符串模板/反引号标识符后,再统计 ( ) { } —— 语法性真失衡仍然必报。
+          cat > /tmp/kotlin_balance.py << 'KLEOF'
+def strip_kotlin(src):
+    out = []
+    # 栈元素: (外层模式, 外层模板花括号深度)
+    stack = []
+    mode = 'code'              # code | str | raw | tmpl
+    depth = 0                  # 当前 tmpl 模式的花括号嵌套深度
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        nxt = src[i + 1] if i + 1 < n else ''
+        if mode in ('code', 'tmpl'):
+            if c == '/' and nxt == '/':                      # 行注释
+                j = src.find('\n', i)
+                i = n if j == -1 else j
+            elif c == '/' and nxt == '*':                    # 块注释
+                j = src.find('*/', i + 2)
+                i = n if j == -1 else j + 2
+            elif c == '"':
+                j = i
+                while j < n and src[j] == '"':
+                    j += 1
+                run = j - i
+                stack.append((mode, depth))
+                if run >= 3:                                 # raw 串开(3 引号为界,多余为内容)
+                    mode = 'raw'
+                    i += 3
+                else:                                        # 普通串开
+                    mode = 'str'
+                    i += 1
+            elif c == '`':                                   # 反引号标识符(测试方法名可含撇号/引号)
+                j = src.find('`', i + 1)
+                i = n if j == -1 else j + 1
+            elif c == "'":                                   # 字符字面量
+                j = i + 1
+                while j < n and src[j] != "'":
+                    if src[j] == '\\':
+                        j += 1
+                    j += 1
+                i = j + 1
+            elif mode == 'tmpl' and c == '{':                # 模板内代码块/lambda 开
+                depth += 1
+                out.append(c)
+                i += 1
+            elif mode == 'tmpl' and c == '}':
+                if depth > 0:                                # lambda/块收尾 —— 真代码
+                    depth -= 1
+                    out.append(c)
+                else:                                        # 模板本身结束 -> 恢复外层
+                    mode, depth = stack.pop() if stack else ('code', 0)
+                i += 1
+            else:
+                if c in '(){}':
+                    out.append(c)
+                i += 1
+        elif mode == 'str':
+            if c == '\\':
+                i += 2
+            elif c == '"':                                   # 串结束 -> 恢复外层
+                mode, depth = stack.pop() if stack else ('code', 0)
+                i += 1
+            elif c == '$' and nxt == '{':                    # 串内模板开
+                stack.append(('str', 0))
+                mode = 'tmpl'
+                depth = 0
+                i += 2
+            elif c == '$':                                   # $ident 简单引用
+                i += 1
+                while i < n and (src[i].isalnum() or src[i] == '_'):
+                    i += 1
+            else:
+                i += 1
+        elif mode == 'raw':
+            if c == '"':
+                j = i
+                while j < n and src[j] == '"':
+                    j += 1
+                run = j - i
+                if run >= 3:                                 # 引号连跑 >=3 = 关界(含前置内容引号)
+                    i = j
+                    mode, depth = stack.pop() if stack else ('code', 0)
+                else:                                        # 内容引号
+                    i = j
+            elif c == '$' and nxt == '{':                    # raw 内模板开
+                stack.append(('raw', 0))
+                mode = 'tmpl'
+                depth = 0
+                i += 2
+            elif c == '$':
+                i += 1
+                while i < n and (src[i].isalnum() or src[i] == '_'):
+                    i += 1
+            else:
+                i += 1
+    return ''.join(out)
 
-      - name: Check paren balance
-        run: |
+KLEOF
+          # 入口：读入文件 → 词法剥离 → 计数（与本地验证脚本同构）
+          cat >> /tmp/kotlin_balance.py << 'KLEOF'
+
+import sys, pathlib
+def main():
+    f = sys.argv[1]
+    try:
+        s = strip_kotlin(pathlib.Path(f).read_text(encoding='utf-8'))
+    except Exception as e:
+        print(f"X {f}: read error {e}"); sys.exit(1)
+    po, pc = s.count('('), s.count(')')
+    bo, bc = s.count('{'), s.count('}')
+    if po != pc or bo != bc:
+        print(f"X {f}: {po} ( vs {pc} ) | {bo} {{ vs {bc} }}"); sys.exit(1)
+main()
+KLEOF
           FAIL=0
-          for f in $(find . -name "*.kt" -not -path "./.git/*" -not -path "./build/*"); do
-            OPENS=$(grep -o '(' "$f" | wc -l)
-            CLOSES=$(grep -o ')' "$f" | wc -l)
-            if [ "$OPENS" != "$CLOSES" ]; then
-              echo "❌ $f: $OPENS ( vs $CLOSES )"
-              FAIL=1
-            fi
+          for f in $(find . -name "*.kt" -not -path "./.git/*" -not -path "./build/*" -not -path "*/build/*"); do
+            RESULT=$(python3 /tmp/kotlin_balance.py "$f" 2>&1) || { echo "$RESULT"; FAIL=1; }
           done
           if [ $FAIL -eq 0 ]; then
-            echo "✅ All .kt files have balanced parens ()"
+            echo "✅ All .kt files have balanced parens () and braces {} (comments/strings stripped)"
           else
             exit 1
           fi

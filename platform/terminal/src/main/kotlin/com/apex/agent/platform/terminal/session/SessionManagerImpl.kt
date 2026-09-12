@@ -59,7 +59,22 @@ class SessionManagerImpl(
     private val virtualTerminalFactory: (Int, Int) -> VirtualTerminal,
     private val policy: TerminalPolicy,
     private val inputDetector: com.apex.agent.platform.terminal.state.InputWaitingDetector? = null,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * P-starvation fix：本 scope 承载 per-session 输出泵（阻塞式轮询循环，见
+     * [PtyOutputPumpImpl] 的 n==0 分支 —— nativeWaitForData 内为 Thread.sleep，
+     * 永不挂起恢复）与 exit watcher。默认改 Dispatchers.IO：
+     *   • 阻塞循环绝不能占 CPU 池（Dispatchers.Default 并行度 = 核数）——
+     *     2 核机器上两个未关闭会话的泄漏泵即占满 Default 全部 worker，
+     *     之后任何 Default 任务（如 InputManager 写协程、TimeoutController
+     *     定时器）永久得不到调度 —— platform:terminal 测试套在 CI 上
+     *     30 分钟超时挂死的根因（本地以 jstack + Default 探针复现确证）。
+     *   • 与 PtyOutputPumpImpl 自身的默认 scope（IO）及 TerminalRuntimeImpl
+     *     的 pumpScope（IO）对齐 —— 生产路径不受影响（Runtime 显式传
+     *     pumpScope），只有独立/测试构造路径从 Default 迁到 IO。
+     *   • IO 池 64 线程预算容纳测试套里未关闭会话的泄漏泵（Default 只有核数）。
+     * exit watcher 用 suspending delay() 轮询，在 IO 上同样安全。
+     */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : SessionManager {
 
     /** Per-session assembled state. */

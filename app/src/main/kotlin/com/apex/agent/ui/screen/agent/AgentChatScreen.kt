@@ -101,6 +101,8 @@ fun AgentChatScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
+    // ═══ UX-3：LLM 配置状态（未配置 && 空会话时在消息区顶部显示引导卡）═══
+    val llmConfigured by viewModel.llmConfigured.collectAsStateWithLifecycle()
     // 函数调用二级菜单候选工具（注册表快照，v2：含类别/风险元数据）。
     // 缺陷 6 修复：用 viewModel.toolCount 作 key，
     // 注册表变更后下次重组即重新读取，避免 remember{} 永久缓存导致新装 Skill/插件不出现。
@@ -305,6 +307,14 @@ fun AgentChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
+            // ═══ UX-3：未配置 API 引导卡（空会话 + 未配置模型时置顶显示；
+            // 配置完成或出现首条消息即自动消失；固定 key 供 LazyColumn 复用）═══
+            if (uiState.messages.isEmpty() && !llmConfigured) {
+                item(key = "setup-guide-card") {
+                    LlmSetupGuideCard(onOpenSettings = onOpenSettings)
+                }
+            }
+
             itemsIndexed(uiState.messages, key = { _, m -> m.id }) { _, message ->
                 AgentMessageItem(
                     message = message,

@@ -153,8 +153,7 @@ class AgentChatViewModel @Inject constructor(
     private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
 
-    /** 一次性 UI 反馈（Toast 级）：异步动作的真实结果由 Screen 收集展示（如整理入记忆成败）。
-     * UX-1：internal（非 private）——AgentMessageActions.kt 的删除/重生成扩展同包访问。 */
+    /** 一次性 UI 反馈（Toast 级）：异步动作真实结果由 Screen 收集展示。UX-1：internal（非 private）供 AgentMessageActions.kt 同包扩展访问。 */
     internal val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val uiFeedback: SharedFlow<String> = _uiFeedback.asSharedFlow()
 
@@ -1041,6 +1040,8 @@ class AgentChatViewModel @Inject constructor(
     /** 全部 Provider（用于模型列表展示 Provider 名）。 */
     val providers: StateFlow<List<ProviderConfig>> = settingsRepository.providers
 
+    /** UX-3：LLM 是否已配置（判定口径 = DynamicLlmClient 的真/NoOp 边界，见 AgentChatOnboarding.kt；空会话+未配置时聊天区显示引导卡）。 */
+    val llmConfigured: StateFlow<Boolean> = settingsRepository.llmConfiguredFlow(viewModelScope)
     /**
      * 切换当前模型：把该 Profile 设为默认 + 同步角色映射 + 引擎温度，
      * 运行中的 LLM client 由 DynamicLlmClient 自动重建（即时生效）。

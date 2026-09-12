@@ -139,7 +139,16 @@ class UbuntuRootfsEndToEndIntegrationTest {
                 // (production target) ignores it — setting it unconditionally is safe
                 pb.environment()["PROOT_NO_SECCOMP"] = "1"
                 System.getenv("LD_LIBRARY_PATH")?.let { pb.environment()["LD_LIBRARY_PATH"] = it }
-                pb.start().waitFor() == 0
+                val proc = pb.start()
+                // 有界等待（30s）：探测命令不退出 = ptrace 受限/seccomp 冲突等环境问题。
+                // 此前 waitFor() 无限期阻塞 —— 僵尸 proot 挂住 setUpClass 后整个
+                // test task 空转到 20 分钟超时（CI 症状：其后无任何测试事件）。
+                val exited = proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                if (!exited) {
+                    runCatching { proc.destroyForcibly() }
+                    return false
+                }
+                proc.exitValue() == 0
             } catch (e: Throwable) {
                 false
             }

@@ -81,7 +81,10 @@ dependencies {
 // when tests fail. Without this, Gradle captures stdout into the HTML report
 // only, not the console — making integration-test debugging impossible.
 tasks.withType<Test>().configureEach {
-    timeout.set(Duration.ofMinutes(20))
+    // 30 分钟：T72 E2E（真实 Ubuntu 下载/解包 + proot 真实 apt）在 2 核 CI runner
+    // 上实测需 20+ 分钟；20 分钟预算在缓存失效（首次或输入变更）后必超时。
+    // 单条 proot 探测/L2 命令自身有界（30s/60s），无限挂起已在上游修复。
+    timeout.set(Duration.ofMinutes(30))
     testLogging {
         events("passed", "skipped", "failed", "standardOut", "standardError")
         showStandardStreams = true

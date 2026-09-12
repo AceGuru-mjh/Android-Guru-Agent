@@ -73,13 +73,17 @@ class LinuxPRootBackendTest {
         binaryProvider: PRootBinaryProvider = FakeBinaryProvider(),
         rootfsProvider: RootfsProvider = FakeRootfsProvider(),
         workspaceRoot: File = File(tmp.root, "workspaces"),
-        homeRoot: File = File(tmp.root, "home")
+        homeRoot: File = File(tmp.root, "home"),
+        // T82 后默认 STANDARD（/proc /dev /sys 系统 bind）； argv 契约测试显式传 NONE
+        // 以保持「仅 home+workspace」的确定性断言 —— 系统 bind 另有专项测试。
+        systemBinds: SystemBindProfile = SystemBindProfile.STANDARD
     ) = LinuxPRootBackend(
         binaryProvider = binaryProvider,
         rootfsProvider = rootfsProvider,
         workspaces = LinuxWorkspaceManager(workspaceRoot),
         userHome = GuestUserHome(homeRoot),
         commandBuilder = PRootCommandBuilderImpl(),
+        systemBinds = systemBinds,
         hostEnv = null // JVM: 无 PRootHostEnvironment → 最小 env
     )
 
@@ -89,7 +93,9 @@ class LinuxPRootBackendTest {
     fun `argv is proot -r rootfs -0 kill-on-exit binds home+workspace -w guestCwd -E env -- bash -i`() = runBlocking {
         val wsRoot = File(tmp.root, "ws")
         val homeRoot = File(tmp.root, "home")
-        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot)
+        // T82 合并后修复：默认 systemBinds=STANDARD 会追加 /proc /dev /sys bind，
+        // 本契约测试只验证 T75 的 home+workspace 路由 —— 显式 NONE 隔离。
+        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot, systemBinds = SystemBindProfile.NONE)
         val spec = b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80, env = emptyMap())).getOrThrow()
 
         val argv = spec.argv
@@ -166,7 +172,8 @@ class LinuxPRootBackendTest {
     fun `workspaceId routes to per-workspace bind dir and metadata`() = runBlocking {
         val wsRoot = File(tmp.root, "ws")
         val homeRoot = File(tmp.root, "home")
-        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot)
+        // T82 合并后修复：同上 —— NONE 隔离使 zipWithNext 找 workspace bind 的断言稳定。
+        val b = backend(workspaceRoot = wsRoot, homeRoot = homeRoot, systemBinds = SystemBindProfile.NONE)
         val spec = b.prepare(
             SessionSpawnRequest(cwd = "", rows = 24, cols = 80, workspaceId = "task-42")
         ).getOrThrow()
@@ -380,5 +387,41 @@ class LinuxPRootBackendTest {
         val located = runBlocking { provider.locate().getOrThrow() }
         // JVM 测试（无设备 ABI 列表）→ 不做 ABI 门禁
         assertTrue(runBlocking { provider.verify(located) }.isSuccess)
+    }
+
+    // ─── T82: 系统级 bind（/proc /dev /sys，proot-distro 语义）───
+
+    @Test
+    fun `T82 STANDARD system binds append proc dev sys after home bind`() = runBlocking {
+        // 本测试跑在真实 JVM/Linux 文件系统上 —— /proc /dev /sys 恒存在，
+        // filterExisting 不会丢弃任何条目（诚实过滤语义另有边界验证方式）。
+        val b = backend(systemBinds = SystemBindProfile.STANDARD)
+        val spec = b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80, env = emptyMap())).getOrThrow()
+        val bindArgs = spec.argv.zipWithNext().filter { (a, _) -> a == "-b" }.map { it.second }
+        // 顺序契约：home 先（T75），系统 bind 中间（T82），workspace 最后（builder 追加）
+        assertEquals(
+            listOf(
+                "${File(tmp.root, "home").absolutePath}:/root",
+                "/proc:/proc",
+                "/dev:/dev",
+                "/sys:/sys",
+                "${File(File(tmp.root, "workspaces"), "default").absolutePath}:/workspace"
+            ),
+            bindArgs
+        )
+    }
+
+    @Test
+    fun `T82 NONE system binds keep legacy argv bare`() = runBlocking {
+        val b = backend(systemBinds = SystemBindProfile.NONE)
+        val spec = b.prepare(SessionSpawnRequest(cwd = "", rows = 24, cols = 80, env = emptyMap())).getOrThrow()
+        val bindArgs = spec.argv.zipWithNext().filter { (a, _) -> a == "-b" }.map { it.second }
+        assertEquals(
+            listOf(
+                "${File(tmp.root, "home").absolutePath}:/root",
+                "${File(File(tmp.root, "workspaces"), "default").absolutePath}:/workspace"
+            ),
+            bindArgs
+        )
     }
 }

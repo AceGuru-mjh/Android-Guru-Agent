@@ -89,7 +89,8 @@ fun AdaptiveInputField(
 ) {
     var isFullscreen by remember { mutableStateOf(false) }
 
-    // 根据内容自动计算行数：1-5 行正常，6-12 行展开
+    // 根据内容自动计算行数：内容行数 coerce 到 1-5 行（超出 5 行由 maxLines=5 内部滚动）。
+    // P3-j（6-c）：修正注释——实现为 coerceIn(1, 5)，与旧注释"6-12 行展开"不符（选改注释，最小风险）。
     val dynamicMaxLines = remember(value) {
         val lineCount = value.count { it == '\n' } + 1
         lineCount.coerceIn(1, 5)

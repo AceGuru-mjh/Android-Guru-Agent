@@ -21,7 +21,7 @@ import com.apex.agent.platform.csmem.store.entity.*
         FSMMacroEntity::class,
         MigrationMapEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class MemoryGraphDatabase : RoomDatabase() {
@@ -40,8 +40,11 @@ abstract class MemoryGraphDatabase : RoomDatabase() {
          */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                // P1 fix（审计 6-b）：列定义必须与 NodeEntity.appVersion（String?，可空无默认）
+                // 逐字匹配 —— 原 `TEXT NOT NULL DEFAULT ''` 使升级路径 Room checkIdentity
+                // 失败（DB 永远打不开）。可空无 DEFAULT，旧节点语义即 NULL（无版本标记）。
                 db.execSQL(
-                    "ALTER TABLE nodes ADD COLUMN app_version TEXT NOT NULL DEFAULT ''"
+                    "ALTER TABLE nodes ADD COLUMN app_version TEXT"
                 )
                 db.execSQL(
                     """
@@ -85,6 +88,37 @@ abstract class MemoryGraphDatabase : RoomDatabase() {
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // 同 (episode, label) 分组保留最小 id，删除其余重复行
+                db.execSQL(
+                    """
+                    DELETE FROM edges WHERE id NOT IN (
+                        SELECT MIN(id) FROM edges
+                        WHERE episode_id IS NOT NULL
+                        GROUP BY episode_id, edge_label
+                    ) AND episode_id IS NOT NULL
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS index_edges_episode_label " +
+                        "ON edges(episode_id, edge_label)"
+                )
+            }
+        }
+
+        /**
+         * v3 → v4 迁移：把 (episode_id, edge_label) 唯一索引补进真实 Schema。
+         *
+         * 背景（审计 P1-2）：v3 只在 MIGRATION_2_3 里建了该索引，[EdgeEntity] 未声明 →
+         * 升级路径 Room checkIdentity 失败（DB 打不开）；全新装机又不建该索引 →
+         * upsert 幂等去重失效、重复边无限累积。v4 起 Entity 声明（同名索引）与
+         * 迁移产物一致，且 v3 存量库经本迁移去重后补上索引。
+         *
+         * 兼容三种历史状态：
+         * - v2（旧升级失败被事务回滚，停在 v2）→ 2_3 已建同名索引，本迁移幂等 no-op；
+         * - v3 全新装机（无该索引，可能已积累重复边）→ 先按 (episode, label) 去重再建索引；
+         * - v3 经修复后 2_3 路径（已有索引）→ 去重与建索引均 no-op。
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
                     DELETE FROM edges WHERE id NOT IN (

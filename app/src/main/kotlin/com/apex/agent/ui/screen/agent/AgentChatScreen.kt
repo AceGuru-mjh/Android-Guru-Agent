@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -114,6 +115,8 @@ fun AgentChatScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
+    // ═══ UX-3：LLM 配置状态（未配置 && 空会话时在消息区顶部显示引导卡）═══
+    val llmConfigured by viewModel.llmConfigured.collectAsStateWithLifecycle()
     // 函数调用二级菜单候选工具（注册表快照，v2：含类别/风险元数据）。
     // 缺陷 6 修复：用 viewModel.toolCount 作 key，
     // 注册表变更后下次重组即重新读取，避免 remember{} 永久缓存导致新装 Skill/插件不出现。
@@ -168,21 +171,26 @@ fun AgentChatScreen(
         }
     }
 
-    // 追踪用户是否主动向上滑动（进入「阅读模式」）
+    // 追踪用户是否主动向上滚动（进入「阅读模式」）
+    // P2-1（6-c）反模式修复：原实现只在 isScrollInProgress 翻转瞬间采样一次
+    // firstVisibleItemIndex——手势从底部起步时采样值仍在列表尾端，userScrolledUp
+    // 永不置位，流式 auto-follow 与用户拖动互相打架。改为 snapshotFlow 监听
+    // firstVisibleItemIndex 的递减方向：本屏所有程序化滚动（auto-follow/FAB 回底）
+    // 只会使索引递增，索引递减 ⇔ 用户主动向列表上方滚动（拖动/惯性/滚轮）。
     var userScrolledUp by remember { mutableStateOf(false) }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
-            val firstVisibleIndex = listState.firstVisibleItemIndex
-            val totalItems = uiState.messages.size
-            if (firstVisibleIndex < totalItems - 2) {
-                userScrolledUp = true
-            }
+    LaunchedEffect(listState) {
+        var previousIndex = listState.firstVisibleItemIndex
+        snapshotFlow { listState.firstVisibleItemIndex }.collect { index ->
+            if (index < previousIndex) userScrolledUp = true
+            previousIndex = index
         }
     }
 
     // 修复：列表总项数统一计算（原漏计 Plan 确认 / Spec 确认 / ask_user 对话框三项，
-    // 出现时自动滚动定位到对话框上方；FAB 回底同样用此值）
+    // 出现时自动滚动定位到对话框上方；FAB 回底同样用此值）。
+    // P3-i（6-c）：UserInputDialog 已提升到屏级（不再占列表项），去掉 pendingUserInput
+    // 计数，修复 off-by-one（原自动滚动目标索引多 1，仅靠 clamp 兼底）。
     val totalListItems by remember {
         derivedStateOf {
             uiState.messages.size +
@@ -191,8 +199,7 @@ fun AgentChatScreen(
                 (if (uiState.currentToolCall != null) 1 else 0) +
                 (if (pendingQuestion != null) 1 else 0) +
                 (if (uiState.awaitingPlanConfirmation && uiState.plan != null) 1 else 0) +
-                (if (uiState.awaitingSpecConfirmation && uiState.spec != null) 1 else 0) +
-                (if (uiState.pendingUserInput != null) 1 else 0)
+                (if (uiState.awaitingSpecConfirmation && uiState.spec != null) 1 else 0)
         }
     }
 
@@ -211,6 +218,17 @@ fun AgentChatScreen(
                 listState.animateScrollToItem(totalListItems - 1)
             }
             userScrolledUp = false
+        }
+    }
+
+    // ═══ P2-2（6-c）：流式期间 auto-follow（节流档位）═══
+    // 主 auto-scroll 的键只含"列表结构变化"（totalListItems/isLoading），流式期间
+    // 气泡数固定、totalListItems 不变 → 长回复把"底部"推出视口无人跟随。
+    // 以（回复+思考）字符数 / 200 作节流档位（键不含文本本身 → 不会每 token
+    // 重启 effect）；档位推进且用户在底部附近 / 未进入阅读模式时即时跟随末项。
+    LaunchedEffect((uiState.currentResponse.length + uiState.currentThinking.length) / 200) {
+        if (uiState.isLoading && totalListItems > 0 && (isAtBottom || !userScrolledUp)) {
+            listState.scrollToItem(totalListItems - 1)
         }
     }
 
@@ -296,10 +314,16 @@ fun AgentChatScreen(
             )
         }
 
+        // ═══ 消息列表（FAB 收纳进列表区域，不再压住输入栏）═══
         // ═══ 消息列表 = 玻璃采样源；输入栏悬浮其上 —— 真实 backdrop 而非“背景色+blur”冒充 ═══
         // composerInsetPx 动态测量玻璃输入栏高度，保证最后一条消息不被悬浮层遮挡。
         var composerInsetPx by remember { mutableIntStateOf(0) }
         val composerInsetDp = with(LocalDensity.current) { composerInsetPx.toDp() }
+        // ═══ UX-4：列表项稳定 key 契约 ═══
+        // 消息项用 AgentUiMessage.id（UUID，copy() 保 id）；流式/确认卡等临时项
+        // 用固定字符串 key。新增列表项时必须显式提供 key，禁止回落 index ——
+        // index key 在删除/截断（UX-1 菜单）时会让气泡内部状态（菜单展开态、
+        // ThinkingBubble 折叠态）错位串项，且整列表无差别重组。
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             state = listState,
@@ -310,10 +334,20 @@ fun AgentChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp + composerInsetDp)
         ) {
+            // ═══ UX-3：未配置 API 引导卡（空会话 + 未配置模型时置顶显示；
+            // 配置完成或出现首条消息即自动消失；固定 key 供 LazyColumn 复用）═══
+            if (uiState.messages.isEmpty() && !llmConfigured) {
+                item(key = "setup-guide-card") {
+                    LlmSetupGuideCard(onOpenSettings = onOpenSettings)
+                }
+            }
+
             itemsIndexed(uiState.messages, key = { _, m -> m.id }) { _, message ->
                 AgentMessageItem(
                     message = message,
                     vm = viewModel,
+                    // UX-1：流式生成中禁用消息删除/重生成（菜单内对应条目置灰，复制仍可用）
+                    actionsEnabled = !uiState.isLoading,
                     onImageClick = { att ->
                         lightboxImage = att.thumbnailUri ?: att.localPath
                     },
@@ -323,24 +357,24 @@ fun AgentChatScreen(
                 )
             }
 
-            // 流式思考中
+            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）
             if (uiState.currentThinking.isNotEmpty()) {
-                item { ThinkingBubble(uiState.currentThinking) }
+                item(key = "streaming-thinking") { ThinkingBubble(uiState.currentThinking) }
             }
 
             // 流式回复中
             if (uiState.currentResponse.isNotEmpty()) {
-                item { StreamingResponseBubble(uiState.currentResponse) }
+                item(key = "streaming-response") { StreamingResponseBubble(uiState.currentResponse) }
             }
 
             // 当前工具调用
             uiState.currentToolCall?.let { toolCall ->
-                item { RunningToolCallCard(toolCall) }
+                item(key = "active-tool-call") { RunningToolCallCard(toolCall) }
             }
 
             // Plan 确认
             if (uiState.awaitingPlanConfirmation && uiState.plan != null) {
-                item {
+                item(key = "plan-confirmation") {
                     PlanConfirmationCard(
                         plan = uiState.plan!!,
                         onConfirm = { viewModel.confirmPlan(true) },
@@ -351,7 +385,7 @@ fun AgentChatScreen(
 
             // Spec 确认
             if (uiState.awaitingSpecConfirmation && uiState.spec != null) {
-                item {
+                item(key = "spec-confirmation") {
                     SpecConfirmationCard(
                         spec = uiState.spec!!,
                         onConfirm = { viewModel.submitSpecConfirmation(true) },
@@ -362,7 +396,7 @@ fun AgentChatScreen(
 
             // Agent 主动提问
             pendingQuestion?.let { question ->
-                item {
+                item(key = "agent-question") {
                     QuestionCard(
                         question = question,
                         onAnswer = { optionId, customText ->
@@ -549,7 +583,9 @@ fun AgentChatScreen(
                             value = inputText,
                             onValueChange = { viewModel.updateInputText(it) },
                             onSend = {
-                                if (inputText.isNotBlank() && !uiState.isLoading) {
+                                // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
+                                val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
+                                if ((inputText.isNotBlank() || hasUsableAttachment) && !uiState.isLoading) {
                                     viewModel.sendMessage(inputText.trim())
                                 }
                             },
@@ -596,12 +632,13 @@ fun AgentChatScreen(
                     } else {
                         FilledIconButton(
                             onClick = {
-                                if (inputText.isNotBlank()) {
+                                val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
+                                if (inputText.isNotBlank() || hasUsableAttachment) {
                                     viewModel.sendMessage(inputText.trim())
                                     // ★ viewModel.sendMessage 内部已调用 updateInputText("")
                                 }
                             },
-                            enabled = inputText.isNotBlank(),
+                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR },
                             interactionSource = sendInteraction,
                             modifier = Modifier
                                 .size(40.dp)

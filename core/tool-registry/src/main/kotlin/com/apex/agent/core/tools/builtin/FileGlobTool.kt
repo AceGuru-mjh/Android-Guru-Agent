@@ -135,14 +135,48 @@ class FileGlobTool(
         }
     }
 
+    /**
+     * Glob → Regex 转换。
+     *
+     * P1-1 修复：旧实现是五连 replace，顺序错误导致展开结果被后续替换二次破坏：
+     * `.` 的转义步骤会把前面步骤引入的元字符点也转义掉；`*` 的替换步骤又会
+     * 命中前面步骤引入的 `*`。实测"双星斜杠 + 星号.py"这类递归 glob 生成的
+     * 正则永远匹配不到任何文件（主打的递归文件搜索全部失效）。
+     *
+     * 修复：单遍扫描，模式 token 逐个输出正则片段，字面字符用 [Regex.escape] 转义：
+     * - 双星+斜杠 → 可选的"零个或多个目录前缀"分组（跨任意层目录）
+     * - 双星     → 跨目录通配（匹配包括路径分隔符在内的任意字符）
+     * - 单星     → `[^/]*`（单层通配，不跨目录）
+     * - 问号     → `[^/]`（单字符，不跨目录）
+     */
     private fun globToRegex(glob: String): Regex {
-        val regexStr = glob
-            .replace("**/", "(.*/)?")
-            .replace("**", ".*")
-            .replace("*", "[^/]*")
-            .replace("?", "[^/]")
-            .replace(".", "\\.")
-        return Regex(regexStr)
+        val sb = StringBuilder(glob.length + 16)
+        var i = 0
+        while (i < glob.length) {
+            when {
+                glob.startsWith("**/", i) -> {
+                    sb.append("(?:.*/)?")
+                    i += 3
+                }
+                glob.startsWith("**", i) -> {
+                    sb.append(".*")
+                    i += 2
+                }
+                glob[i] == '*' -> {
+                    sb.append("[^/]*")
+                    i++
+                }
+                glob[i] == '?' -> {
+                    sb.append("[^/]")
+                    i++
+                }
+                else -> {
+                    sb.append(Regex.escape(glob[i].toString()))
+                    i++
+                }
+            }
+        }
+        return Regex(sb.toString())
     }
 
     private fun formatSize(b: Long): String = when {

@@ -9,6 +9,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JsResult
 import android.webkit.PermissionRequest
@@ -700,6 +701,22 @@ class BrowserEngine @Inject constructor(
     ): ByteArray? = withContext(Dispatchers.Main) {
         val wv = activeTab()?.webView ?: return@withContext null
         onProgress?.invoke(50, "正在渲染视口截图…")
+        // P1-4（6-c）：后台（未 attach/layout）WebView 尚未布局时 width/height 均为 0，
+        // Bitmap.createBitmap(0,0) 必抛 IllegalArgumentException。先手动 measure/layout
+        // 撑起内容尺寸（宽 1080 基准 + 页面内容比推高度，4096 封顶）；仍失败则抛带
+        // 明确信息的异常（SafeAgentTool 兜底转错误串，而非晦涩的 native 崩溃）。
+        if (wv.width <= 0 || wv.height <= 0) {
+            val ratio = if (wv.contentHeight > 0) wv.contentHeight.toFloat() / wv.width.coerceAtLeast(1) else 1.5f
+            val safeHeight = Math.min(4096, (1080f * ratio).toInt()).coerceAtLeast(1)
+            wv.measure(
+                View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(safeHeight, View.MeasureSpec.AT_MOST)
+            )
+            wv.layout(0, 0, wv.measuredWidth, wv.measuredHeight)
+        }
+        check(wv.width > 0 && wv.height > 0) {
+            "无法截图：WebView 尺寸为 0（页面尚未完成布局，请先 browser_show 展开浮窗或稍后重试）"
+        }
         val bmp = Bitmap.createBitmap(wv.width, wv.height, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bmp)
         wv.draw(canvas)

@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +67,9 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.screen.agent.toolkit.ChatRule
 import com.apex.agent.ui.screen.agent.toolkit.OutputFormat
 import com.apex.agent.core.tools.ToolCategory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 工具菜单中展示用的工具引用（id + 显示名 + v2 元数据：类别/风险）。 */
 data class ToolRef(
@@ -420,13 +424,20 @@ private fun RuleManagerDialog(
     }
 
     // 导入 .md：系统文件选择器，读取文本后落地为一条新规则
+    // P2-7（6-c）：contentResolver 文件读取原在主线程（ANR 风险），照 SkillScreen
+    // 导入的模式下沉到 IO 线程；规则落地（onUpsert）回到协程主上下文执行。
+    val importScope = rememberCoroutineScope()
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-        }.getOrNull()?.takeIf { it.isNotBlank() }?.let { text ->
+        importScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                }.getOrNull()
+            }
+            if (text.isNullOrBlank()) return@launch
             val name = uri.lastPathSegment?.substringAfterLast('/') ?: "导入规则"
             onUpsert(
                 ChatRule(

@@ -7,6 +7,7 @@ import com.apex.agent.platform.csmem.model.SemanticNode
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -40,7 +41,14 @@ class MemoryWriterActor @Inject constructor(
     // 有界 256：限制邮箱上限，防止突发写入打爆内存。Actor 主循环以
     // for(event in channel) 持续 drain，send 满载时挂起发送端施加背压，不会死锁。
     private val eventChannel = Channel<WriteEvent>(capacity = 256)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // P2 fix（审计 6-b）：scope 加 CoroutineExceptionHandler 兜底 —— 主循环外的
+    // 任何未捕获异常不再击穿到线程默认 handler（App 崩溃路径）。
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            CoroutineExceptionHandler { _, e ->
+                Log.e(TAG, "MemoryWriterActor unhandled exception (suppressed)", e)
+            }
+    )
     private var actorJob: Job? = null
 
     companion object {
@@ -75,7 +83,13 @@ class MemoryWriterActor @Inject constructor(
             // 主循环：单消费者。receive 超时即「定时器到点」——批量刷新积累的事件。
             try {
                 while (isActive) {
-                    val event = withTimeoutOrNull(flushIntervalMs) { eventChannel.receive() }
+                    val event = try {
+                        withTimeoutOrNull(flushIntervalMs) { eventChannel.receive() }
+                    } catch (_: ClosedReceiveChannelException) {
+                        // P2 fix（审计 6-b）：stop() 关闭邮箱 → 优雅退出
+                        //（原实现 receive 抛出未捕获异常击穿协程域；finally 兜底 flush）。
+                        break
+                    }
                     when (event) {
                         null -> {
                             // 定时器到点：刷新已积累的事件
@@ -171,6 +185,9 @@ class MemoryWriterActor @Inject constructor(
                     executeSingle(event)
                     success = true
                 } catch (e: Exception) {
+                    // P3 fix（审计 6-b）：CancellationException 必须传播 —— 原实现把
+                    // 取消当普通失败吞掉后继续 delay 重试，取消语义失效。
+                    if (e is CancellationException) throw e
                     lastError = e
                     attempt++
                     if (attempt < MAX_RETRY) {

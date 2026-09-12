@@ -371,10 +371,23 @@ internal class ToolExecutionPipeline(
 
 /** 工具的 schema 缓存：渲染字符串 → 解析一次，进程内复用（幂等）。 */
 internal object ToolSchemaCache {
-    private val cache = java.util.concurrent.ConcurrentHashMap<AgentTool, ToolSchema?>()
+    /**
+     * P3-h 修复：ConcurrentHashMap 不允许 null 值——computeIfAbsent 的映射函数
+     * 返回 null 时不写缓存条目，schema 解析失败的工具**每次调用都重新 parse**
+     * 渲染串（大 schema 反复 JSON 解析纯属浪费）。用哨兵对象把"已缓存为解析
+     * 失败"也变成可缓存的值。
+     */
+    private object NoSchema
+
+    private val cache = java.util.concurrent.ConcurrentHashMap<AgentTool, Any>()
 
     fun forTool(tool: AgentTool): ToolSchema? =
-        cache.computeIfAbsent(tool) { ToolSchema.fromRendered(it.parametersSchema) }
+        when (val cached = cache.computeIfAbsent(tool) {
+            ToolSchema.fromRendered(it.parametersSchema) ?: NoSchema
+        }) {
+            NoSchema -> null
+            else -> cached as ToolSchema
+        }
 }
 
 class DefaultToolExecutor(

@@ -69,7 +69,13 @@ class FileWriteTool(
             val oldSize = if (existed) file.length() else 0L
 
             when (mode) {
-                "append" -> file.appendText(content + "\n")
+                "append" -> {
+                    // P3-j 修复：仅当内容非空且不以换行结尾时才补 "\n"。
+                    // 旧实现无条件追加换行——已带换行的内容被塞入空行，
+                    // 日志/CSV/JSONL 类文件逐步膨胀出空行。
+                    val separator = if (content.isNotEmpty() && !content.endsWith("\n")) "\n" else ""
+                    file.appendText(content + separator)
+                }
                 else -> file.writeText(content)
             }
 

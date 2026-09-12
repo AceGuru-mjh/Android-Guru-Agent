@@ -7,9 +7,12 @@ import com.apex.agent.platform.csmem.store.EpisodeSummary
 import com.apex.agent.platform.csmem.store.FSMMacro
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -18,6 +21,7 @@ import javax.inject.Inject
  *
  * 只读为主；删除 Episode 为破坏性操作，由 UI 二次确认后调用 [deleteEpisode]。
  */
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class MemoryViewModel @Inject constructor(
     private val store: MemoryGraphStore
@@ -48,7 +52,25 @@ class MemoryViewModel @Inject constructor(
     private val _lastMessage = MutableStateFlow<String?>(null)
     val lastMessage: StateFlow<String?> = _lastMessage.asStateFlow()
 
-    init { refresh() }
+    init {
+        refresh()
+        // P2-12（6-c）：搜索防抖——原 onSearch 每次击键即查 Room；改为 _searchQuery
+        // 经 debounce(250) + distinctUntilChanged 统一触发检索（UI 调用点不变）。
+        viewModelScope.launch {
+            _searchQuery
+                .debounce(250L)
+                .distinctUntilChanged()
+                .collect { query ->
+                    if (query.isBlank()) {
+                        _searchResults.value = emptyList()
+                    } else {
+                        _searchResults.value = runCatching {
+                            store.searchNodesByText(query, limit = 50)
+                        }.getOrDefault(emptyList())
+                    }
+                }
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {
@@ -71,16 +93,8 @@ class MemoryViewModel @Inject constructor(
     }
 
     fun onSearch(query: String) {
+        // P2-12（6-c）：只更新查询流；实际检索由 init 中的 debounced collector 触发。
         _searchQuery.value = query
-        if (query.isBlank()) {
-            _searchResults.value = emptyList()
-            return
-        }
-        viewModelScope.launch {
-            runCatching {
-                store.searchNodesByText(query, limit = 50)
-            }.getOrDefault(emptyList()).let { _searchResults.value = it }
-        }
     }
 
     fun clearSearch() {

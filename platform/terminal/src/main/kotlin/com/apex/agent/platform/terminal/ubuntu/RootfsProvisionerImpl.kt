@@ -143,7 +143,7 @@ class RootfsProvisionerImpl(
         // ── §26: storage preflight ──
         val available = File(layout.baseDir.value).let {
             var f = it
-            while (!f.exists() && f.parentFile != null) f = f.parentFile
+            while (!f.exists()) f = f.parentFile ?: break   // 向上找到第一个存在的祖先，根仍不存在则用原始路径
             if (f.exists()) f.usableSpace else it.usableSpace
         }
         val preflight = ProvisioningStoragePreflight(

@@ -6,8 +6,10 @@ import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolStreamEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 
 /**
  * A68.2 — Per-attempt listener callbacks from [ToolCallRunner].
@@ -101,6 +103,14 @@ class ToolCallRunner(
             } catch (e: TimeoutCancellationException) {
                 // Per-attempt timeout (or an enclosing timeout firing —
                 // bounded either way; see A68.1 semantics preserved here).
+                //
+                // P3-l 修复：TCE 也可能来自**外层**超时/取消——任务级 withTimeout
+                // 触发时，取消异常以 TimeoutCancellationException 形态穿透到本
+                // catch（kotlinx.coroutines #1634 已知语义）。若本协程已不再活跃
+                // （isActive=false），说明是任务级取消而非本工具超时：必须重抛
+                // 交给上层裁决，否则工具超时分支会误吞任务超时，且 retry 循环
+                // 会在已取消的协程里继续空转。仅当本协程仍活跃时才按工具超时处理。
+                if (!coroutineContext.isActive) throw e
                 timedOut = true
                 success = false
                 outputBuilder.append("Error: tool '${call.name}' timed out after ${toolTimeoutMs}ms")

@@ -270,7 +270,7 @@ class AppLogger(
         keyword: String = "",
         sessionId: Long? = null
     ): List<LogRecord> = synchronized(lock) {
-        val session = sessionId?.let { id -> sessions.firstOrNull { it.id == id } }
+        val session = sessionId?.let { id -> sessionsInternal.firstOrNull { it.id == id } }
         val kw = keyword.lowercase()
         records.asReversed().filter { r ->
             r.level.atLeast(minLevel) &&
@@ -305,7 +305,7 @@ class AppLogger(
             startId = seq.get()
         )
         activeSession = session
-        sessions.add(session)
+        sessionsInternal.add(session)
         session.id
     }
 
@@ -320,8 +320,14 @@ class AppLogger(
         }
     }
 
-    /** 所有历史会话段（只读视图，[lock] 保护）。 */
-    val sessions: MutableList<LogSession> = mutableListOf()
+    // P3-a 修复：旧实现公开可变 MutableList——外部调用方可绕过 [lock] 直接
+    // add/clear，违背本类"全部状态由 lock 保护"的线程安全契约；无锁读还可能
+    // 看到撕裂状态。改为私有可变 + 只读快照视图。
+    private val sessionsInternal: MutableList<LogSession> = mutableListOf()
+
+    /** 所有历史会话段（只读快照视图，[lock] 保护）。 */
+    val sessions: List<LogSession>
+        get() = synchronized(lock) { sessionsInternal.toList() }
 
     companion object {
         /**

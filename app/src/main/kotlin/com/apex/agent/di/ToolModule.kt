@@ -225,7 +225,7 @@ object ToolModule {
         guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
         ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
         rootfsBaseDir: java.io.File,
-        rootfsTarget: com.apex.agent.platform.terminal.ubuntu.RootfsTarget,
+        // 注：rootfsTarget 已在上方参数区声明（同一类型），合并去重。
         skillRegistry: SkillRegistry,
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,

@@ -61,70 +61,83 @@ fun ContextMeterBar(
         animationSpec = tween(durationMillis = 400),
         label = "meter_ratio"
     )
-    // 危险态（>80%）脉冲辉光，增强告警未来感
-    val pulse by rememberInfiniteTransition(label = "meter_pulse").animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "glow_alpha"
-    )
-    val glowAlpha = if (percent >= 80) pulse else 0.5f
+    // 危险态（>80%）脉冲辉光，增强告警未来感。
+    // P3-f（6-c）：infinite transition 移入危险态分支组合——正常/警告态下不再常驻
+    // 无限动画（原先每个空闲帧都在跑），仅 >=80% 时才启动脉冲。
+    val glowAlpha = if (percent >= 80) {
+        val pulse by rememberInfiniteTransition(label = "meter_pulse").animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.7f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+            label = "glow_alpha"
+        )
+        pulse
+    } else 0.5f
 
     Column(modifier = modifier.fillMaxWidth()) {
         // ═══ 顶部长条（点击弹仪表盘）═══
+        // P3-f（6-c）：可视长条仍为 10dp，但点击区域扩到 48dp 最小触摸目标
+        //（原 10dp 点击热区远低于 Material 无障碍标准）。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
-                .padding(horizontal = 12.dp, vertical = 1.dp)
-                .clickable { menuExpanded = true }
+                .heightIn(min = 48.dp)
+                .clickable { menuExpanded = true },
+            contentAlignment = Alignment.Center
         ) {
-            // 未使用段（暗灰半透明，占满）
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(5.dp)
-                    )
-            )
-            // 已用段（霓虹辉光 + 渐变实体 + 末端亮点，按真实比例）
-            if (animatedRatio > 0f) {
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .padding(horizontal = 12.dp, vertical = 1.dp)
+            ) {
+                // 未使用段（暗灰半透明，占满）
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(animatedRatio)
-                        .fillMaxHeight()
-                ) {
-                    // 辉光层：同色放大 + 原生 blur（零依赖霓虹弥散）
+                        .fillMaxSize()
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(5.dp)
+                        )
+                )
+                // 已用段（霓虹辉光 + 渐变实体 + 末端亮点，按真实比例）
+                if (animatedRatio > 0f) {
                     Box(
                         modifier = Modifier
-                            .matchParentSize()
-                            .blur(7.dp)
-                            .background(color = accent.copy(alpha = glowAlpha))
-                    )
-                    // 实体段：横向渐变（中心亮→边缘微暗）增加体积感
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        accent.copy(alpha = 0.85f),
-                                        accent,
-                                        accent.copy(alpha = 0.9f)
-                                    )
-                                ),
-                                shape = RoundedCornerShape(5.dp)
-                            )
-                    )
-                    // 末端高光点（能量流头部）
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(6.dp)
-                            .blur(2.dp)
-                            .background(color = Color.White.copy(alpha = 0.9f))
-                    )
+                            .fillMaxWidth(animatedRatio)
+                            .fillMaxHeight()
+                    ) {
+                        // 辉光层：同色放大 + 原生 blur（零依赖霓虹弥散）
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .blur(7.dp)
+                                .background(color = accent.copy(alpha = glowAlpha))
+                        )
+                        // 实体段：横向渐变（中心亮→边缘微暗）增加体积感
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(
+                                            accent.copy(alpha = 0.85f),
+                                            accent,
+                                            accent.copy(alpha = 0.9f)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(5.dp)
+                                )
+                        )
+                        // 末端高光点（能量流头部）
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .size(6.dp)
+                                .blur(2.dp)
+                                .background(color = Color.White.copy(alpha = 0.9f))
+                        )
+                    }
                 }
             }
         }

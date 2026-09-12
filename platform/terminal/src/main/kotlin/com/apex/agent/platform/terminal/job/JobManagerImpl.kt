@@ -175,6 +175,12 @@ class JobManagerImpl(
         foregroundJobIdBySession[sessionId] = jobId
         stateFlows[jobId] = MutableStateFlow(JobState.CREATED)
 
+        // P3 fix（审计 6-b）：J1 CREATED → RUNNING 先于命令写入 —— 命令可能在写入后
+        // 立即完成（短命令/快 echo），事件监听器在 CREATED 态收到 WaitingInput/
+        // ProcessExited 时 `job.state != RUNNING` 分支会丢弃合成退出信号，job 卡死在
+        // CREATED 直到超时。写入失败时照旧迁移 FAILED。
+        // （T82 merge 顺序：状态迁移先于 marker 包装与写入，两者语义正交。）
+        transition(jobId, JobState.RUNNING)
         // T82 — Shell Marker Protocol：包装命令（printf 的 \033/\007 八进制形式
         // 在 bash 与 mksh 皆可移植；行内只有可打印 ASCII，readline 不会破坏）。
         // 若 marker 到达（命令真实结束后），onShellMarker 以真实退出码推进终态 ——
@@ -189,8 +195,6 @@ class JobManagerImpl(
             transition(jobId, JobState.FAILED)
             return Result.failure(RuntimeException("TerminalError:WriteFailed"))
         }
-        // J1: CREATED → RUNNING
-        transition(jobId, JobState.RUNNING)
         val ev = TerminalEvent.ProcessStarted(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),
             cursor = startCursor, jobId = jobId, command = command, owner = owner,
@@ -283,6 +287,23 @@ class JobManagerImpl(
 
     override fun observeState(jobId: Long): Flow<JobState> =
         (stateFlows[jobId] ?: MutableStateFlow(JobState.UNKNOWN)).asStateFlow().map { it }
+
+    override fun drop(sessionId: Long) {
+        // 二轮审计 C-1（接口 KDoc 详见 JobManager.drop）：close() 路径调用——
+        // 清掉本会话全部 job 记录/状态流/前台标记。终态 job 的历史查询职责由
+        // EventLog（有界 500 条）承担；在途 collect observeState 的订阅者持有
+        // StateFlow 引用，移除 map 条目不影响其完成（终态已 emit）。
+        foregroundJobIdBySession.remove(sessionId)
+        val it = jobs.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (e.value.sessionId == sessionId) {
+                timeoutController?.cancelTimeout(e.key)
+                stateFlows.remove(e.key)
+                it.remove()
+            }
+        }
+    }
 
     private suspend fun transition(jobId: Long, to: JobState) {
         val flow = stateFlows[jobId] ?: return

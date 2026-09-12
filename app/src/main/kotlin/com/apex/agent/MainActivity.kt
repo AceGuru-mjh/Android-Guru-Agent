@@ -1,5 +1,6 @@
 package com.apex.agent
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,6 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.core.content.ContextCompat
+import com.apex.agent.service.ApexCoreService
 import com.apex.agent.ui.ApexRoot
 import com.apex.agent.ui.screen.onboarding.OnboardingScreen
 import com.apex.agent.ui.screen.settings.SettingsRepository
@@ -32,6 +35,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // P1-3（6-c）：ApexCoreService 此前仅 BootReceiver（BOOT/MY_PACKAGE_REPLACED）拉起，
+        // 全新安装直到重启前核心前台服务从未运行——BrowserOverlay/CyberNeonBall 的
+        // WAITING_HUMAN 接管浮窗永远不注册。在前台 Activity 创建时幂等启动（服务已在跑
+        // 时重复 startForegroundService 仅再次 onStartCommand，无害；前台 Activity 不受
+        // Android 12+ 后台 FGS 启动限制；Manifest 已声明 FOREGROUND_SERVICE(_SPECIAL_USE)
+        // + specialUse 类型 + PROPERTY_SPECIAL_USE_FGS_SUBTYPE，服务 onCreate 建 channel、
+        // onStartCommand 立即 startForeground，满足 5s 前台化窗口）。
+        // 二轮审计 A-6：companion 静态首启标记 —— 进程存活期只拉起一次，避免每次
+        // 旋转重建都触发 onStartCommand 的系统噪音（通知/日志）。进程重启或服务被
+        // 系统杀死后首次重建会再次拉起，语义不受影响。
+        if (!coreServiceStartedThisProcess) {
+            coreServiceStartedThisProcess = true
+            ContextCompat.startForegroundService(this, Intent(this, ApexCoreService::class.java))
+        }
         setContent {
             // 全局外观由设置中心驱动：主题模式 / 动态取色 / 字体缩放 / 时间戳开关
             val settings by remember { settingsRepository.agentSettings }.collectAsStateWithLifecycle()
@@ -71,5 +88,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        /** 二轮审计 A-6：进程存活期的 ApexCoreService 首启标记（见 onCreate 注释）。 */
+        @Volatile
+        private var coreServiceStartedThisProcess = false
     }
 }

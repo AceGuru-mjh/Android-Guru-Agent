@@ -59,7 +59,22 @@ class SessionManagerImpl(
     private val virtualTerminalFactory: (Int, Int) -> VirtualTerminal,
     private val policy: TerminalPolicy,
     private val inputDetector: com.apex.agent.platform.terminal.state.InputWaitingDetector? = null,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * P-starvation fix：本 scope 承载 per-session 输出泵（阻塞式轮询循环，见
+     * [PtyOutputPumpImpl] 的 n==0 分支 —— nativeWaitForData 内为 Thread.sleep，
+     * 永不挂起恢复）与 exit watcher。默认改 Dispatchers.IO：
+     *   • 阻塞循环绝不能占 CPU 池（Dispatchers.Default 并行度 = 核数）——
+     *     2 核机器上两个未关闭会话的泄漏泵即占满 Default 全部 worker，
+     *     之后任何 Default 任务（如 InputManager 写协程、TimeoutController
+     *     定时器）永久得不到调度 —— platform:terminal 测试套在 CI 上
+     *     30 分钟超时挂死的根因（本地以 jstack + Default 探针复现确证）。
+     *   • 与 PtyOutputPumpImpl 自身的默认 scope（IO）及 TerminalRuntimeImpl
+     *     的 pumpScope（IO）对齐 —— 生产路径不受影响（Runtime 显式传
+     *     pumpScope），只有独立/测试构造路径从 Default 迁到 IO。
+     *   • IO 池 64 线程预算容纳测试套里未关闭会话的泄漏泵（Default 只有核数）。
+     * exit watcher 用 suspending delay() 轮询，在 IO 上同样安全。
+     */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : SessionManager {
 
     /** Per-session assembled state. */
@@ -77,6 +92,15 @@ class SessionManagerImpl(
     private val idCounter = AtomicLong(0)
     private val stateFlows = ConcurrentHashMap<Long, MutableStateFlow<SessionState>>()
     private val mutex = Mutex()
+    /**
+     * P3 fix（审计 6-b）：per-session 迁移互斥 —— transition 的 check-then-set +
+     * StateChanged 事件发射原子化。原实现无锁：并发 stop()/close()/exit-watcher
+     * 同刻迁移同一会话时读旧值交错（丢事件/乱序：如 STOPPING 与 EXITED 竞争时
+     * 观测者看到 EXITED→STOPPING 的非法序列）。
+     * 锁序恒为 全局 mutex → 本锁（transition 不反向获取全局 mutex，无死锁环）；
+     * close() 持全局锁清理时一并移除条目（与 assemblies/stateFlows 同生命周期）。
+     */
+    private val transitionLocks = ConcurrentHashMap<Long, Mutex>()
 
     override suspend fun create(
         shell: String, cwd: String, rows: Int, cols: Int,
@@ -232,6 +256,9 @@ class SessionManagerImpl(
         waitEngine.drop(id)
         assemblies.remove(id)
         stateFlows.remove(id)
+        // P3 fix（审计 6-b）：迁移锁随会话清理（在途 transition 已拿到旧锁实例，
+        // 会安全完成且因 stateFlows 已移除而是 no-op）
+        transitionLocks.remove(id)
         // T81 (D-4)：释放 bus（正在 collect 的订阅者持有 SharedFlow 引用不受影响；
         // EventLog 不 drop —— 有界（500）且持久化/恢复路径还要读 tail）。
         if (eventBus is TerminalEventBusImpl) eventBus.drop(id)
@@ -276,18 +303,22 @@ class SessionManagerImpl(
 
     /** Internal: transition a session's state + emit StateChanged. */
     suspend fun transition(sessionId: Long, to: SessionState) {
-        val flow = stateFlows[sessionId] ?: return
-        val from = flow.value
-        if (from == to) return
-        flow.value = to
-        assemblies[sessionId]?.let { a ->
-            val ev = TerminalEvent.StateChanged(
-                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
-                kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
-                targetId = sessionId, from = from.name, to = to.name
-            )
-            val eid = eventLog.append(ev)
-            eventBus.emit(ev.copy(id = eid))
+        // P3 fix（审计 6-b）：per-session 互斥（见 transitionLocks 注释）。
+        val lock = transitionLocks.computeIfAbsent(sessionId) { Mutex() }
+        lock.withLock {
+            val flow = stateFlows[sessionId] ?: return
+            val from = flow.value
+            if (from == to) return
+            flow.value = to
+            assemblies[sessionId]?.let { a ->
+                val ev = TerminalEvent.StateChanged(
+                    id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                    kind = com.apex.agent.platform.terminal.events.StateKind.SESSION,
+                    targetId = sessionId, from = from.name, to = to.name
+                )
+                val eid = eventLog.append(ev)
+                eventBus.emit(ev.copy(id = eid))
+            }
         }
     }
 

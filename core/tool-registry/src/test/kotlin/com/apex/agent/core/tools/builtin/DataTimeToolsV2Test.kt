@@ -497,7 +497,8 @@ class DataTimeToolsV2Test {
     fun `duration_convert compare reports difference and ratio`() = runTest {
         val out = run(duration, jsonArgs("operation" to "compare", "value" to "1h", "value2" to "30m"))
         assertTrue(out.contains("difference: 30m"))
-        assertTrue(out.lines().any { it == "ratio: 2" })
+        // P3-i（formatDecimal 整数补 ".0" 语义）修复后，整数比值输出 "2.0" 而非 "2"
+        assertTrue(out.lines().any { it == "ratio: 2.0" })
     }
 
     @Test

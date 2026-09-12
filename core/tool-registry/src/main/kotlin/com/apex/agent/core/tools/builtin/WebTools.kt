@@ -1,13 +1,21 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.*
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Response
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * 网页内容获取工具（智能提取 + 分段）
@@ -79,7 +87,7 @@ class WebFetchTool(
                 reqBuilder.header(k, v.jsonPrimitive.content)
             }
 
-            val response = httpClient.newCall(reqBuilder.build()).execute()
+            val response = httpClient.newCall(reqBuilder.build()).awaitOk()
             val rawBody = response.body?.string() ?: ""
             val contentType = response.header("Content-Type") ?: ""
             val statusCode = response.code
@@ -94,6 +102,8 @@ class WebFetchTool(
                 "links" -> extractLinks(rawBody, maxChars)
                 else -> extractReadableText(rawBody, maxChars)
             }
+        } catch (e: CancellationException) {
+            throw e // 工具取消必须向上传播，不能折叠成错误文本
         } catch (e: Exception) {
             "❌ Fetch failed: ${e.message}"
         }
@@ -268,7 +278,7 @@ class WebSearchTool(
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; ApexAgent) AppleWebKit/537.36")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(request).awaitOk()
             val html = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
@@ -292,6 +302,8 @@ class WebSearchTool(
                 }
                 appendLine("Use web_fetch to read full content of any result.")
             }
+        } catch (e: CancellationException) {
+            throw e // 工具取消必须向上传播
         } catch (e: Exception) {
             "Search error: ${e.message}"
         }
@@ -424,7 +436,7 @@ class HttpRequestTool(
                 else -> return "Error: Unsupported method $method"
             }
 
-            val response = httpClient.newCall(requestBuilder.build()).execute()
+            val response = httpClient.newCall(requestBuilder.build()).awaitOk()
             val responseBody = response.body?.string() ?: ""
 
             buildString {
@@ -440,6 +452,8 @@ class HttpRequestTool(
                     appendLine("[... truncated]")
                 }
             }
+        } catch (e: CancellationException) {
+            throw e // 工具取消必须向上传播
         } catch (e: Exception) {
             "HTTP request error: ${e.message}"
         }
@@ -447,6 +461,36 @@ class HttpRequestTool(
 }
 
 // ═══ v2：WebTools HTML 清洗正则（预编译一次，替代旧实现每次调用现编 ~15 个）═══
+
+/**
+ * P2-13 修复：可取消的 OkHttp Call await 扩展（本文件三个 Web 工具共用）。
+ *
+ * 旧实现三处在 suspend 里直接 call.execute() 阻塞——工具超时/协程取消后
+ * OkHttp 调用无法中断，仍跑满 readTimeout（最长 120s）并占死调度线程。
+ * 现在 enqueue + suspendCancellableCoroutine：取消时同步 call.cancel()，
+ * 连接立即断开；结果到达时 continuation 已取消则直接回收响应体。
+ */
+private suspend fun Call.awaitOk(): Response = suspendCancellableCoroutine { cont ->
+    enqueue(object : Callback {
+        override fun onResponse(call: Call, response: Response) {
+            if (cont.isActive) {
+                cont.resume(response)
+            } else {
+                // 取消发生在响应到达之后：没人会消费这个响应，直接回收连接
+                response.close()
+            }
+        }
+
+        override fun onFailure(call: Call, e: IOException) {
+            if (cont.isActive) {
+                cont.resumeWithException(e)
+            }
+            // 已取消时的失败（通常是 call.cancel() 触发的 "Canceled"）是预期噪音，忽略
+        }
+    })
+    cont.invokeOnCancellation { runCatching { this@awaitOk.cancel() } }
+}
+
 private val RX_SCRIPT = Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE)
 private val RX_STYLE = Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE)
 private val RX_NAV = Regex("<nav[^>]*>[\\s\\S]*?</nav>", RegexOption.IGNORE_CASE)

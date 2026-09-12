@@ -3,6 +3,7 @@ package com.apex.agent.platform.privilege
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.os.Build
+import android.util.Base64
 import com.apex.agent.platform.privilege.accessibility.ApexAccessibilityService
 import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -286,10 +287,26 @@ class DefaultPrivilegeManager @Inject constructor(
             // 需要异步回调，这里简化
             return ScreenshotResult(false, null)
         }
-        
-        // 降级：通过shell screencap
-        val result = executeShell("screencap -p /data/local/tmp/screen.png && cat /data/local/tmp/screen.png")
-        return ScreenshotResult(result.success, result.output.toByteArray())
+
+        // P2 fix（审计 6-b）：PNG 二进制绝不经 String↔bytes 往返（任何 charset 解码都会
+        // 损坏字节流 —— 原 `cat png` 后 toByteArray() 产出必然损坏的“截图”）。
+        // 改走 base64 文本通道（toybox base64，-w 0 不换行），Android 侧 Base64.decode
+        // 还原；输出含非法 base64 字符时返回明确错误而非静默损坏数据。
+        val result = executeShell(
+            "screencap -p /data/local/tmp/screen.png && base64 -w 0 < /data/local/tmp/screen.png"
+        )
+        if (!result.success) {
+            return ScreenshotResult(false, null, error = "screencap failed: ${result.output.take(200)}")
+        }
+        val encoded = result.output.trim()
+        return try {
+            ScreenshotResult(true, Base64.decode(encoded, Base64.DEFAULT))
+        } catch (e: IllegalArgumentException) {
+            ScreenshotResult(
+                false, null,
+                error = "screenshot output is not valid base64 (len=${encoded.length}, head=${encoded.take(32)})"
+            )
+        }
     }
 
     override suspend fun refreshStatus() {

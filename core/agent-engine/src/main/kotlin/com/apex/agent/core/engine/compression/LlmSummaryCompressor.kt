@@ -47,7 +47,17 @@ class LlmSummaryCompressor(
 
         // 分割
         val systemEnd = if (history.isNotEmpty() && history[0] is LlmMessage.System) 1 else 0
-        val preserveStart = maxOf(systemEnd, history.size - preserveRecent)
+
+        // P1-2 修复（同步 SlidingWindowCompressor CR #D2 的回扩逻辑）：
+        // 保留窗首条不得是孤儿 ToolResult。ReAct 历史中 Assistant(tool_calls) 与
+        // ToolResult 成对出现，OpenAI 兼容端点要求 role:"tool" 消息必须紧跟携带
+        // 对应 tool_calls 的 assistant。切点落在两者之间时 assistant 被压进摘要、
+        // ToolResult 留在保留窗 → 下次请求 400，且被 memory.save() 持久化后会话报废。
+        // 修复：边界向前回扩，把与保留窗内 ToolResult 配对的 assistant 一并保留。
+        var preserveStart = maxOf(systemEnd, history.size - preserveRecent)
+        while (preserveStart > systemEnd && history[preserveStart] is LlmMessage.ToolResult) {
+            preserveStart--
+        }
 
         if (preserveStart <= systemEnd) {
             return CompressionReport(

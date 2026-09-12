@@ -82,10 +82,16 @@ class TerminalCreateTool(
         val cols = json["cols"]?.jsonPrimitive?.content?.toIntOrNull() ?: 80
         val backend = json["backend"]?.jsonPrimitive?.content ?: "local"
         val workspaceId = json["workspaceId"]?.jsonPrimitive?.contentOrNull
+        // P3 fix（审计 6-b）：实现 schema 已声明的 privilege 参数解析 ——
+        // 原实现硬编码 NORMAL，schema 里的 "NORMAL"|"SHIZUKU"|"ROOT" 形同虚设。
+        // 非法值回退 NORMAL（与 schema 默认一致），不抛错（工具层宽容解析约定）。
+        val privilege = json["privilege"]?.jsonPrimitive?.contentOrNull
+            ?.let { raw -> runCatching { PrivilegeLevel.valueOf(raw) }.getOrNull() }
+            ?: PrivilegeLevel.NORMAL
         val env = json["env"]?.jsonObject?.entries?.associate {
             it.key to (it.value as? JsonPrimitive ?: JsonPrimitive("")).content
         } ?: emptyMap()
-        val out = execute(Input(shell, cwd, rows, cols, env, PrivilegeLevel.NORMAL, backend, workspaceId))
+        val out = execute(Input(shell, cwd, rows, cols, env, privilege, backend, workspaceId))
         return buildJsonObject {
             put("sessionId", JsonPrimitive(out.sessionId)); put("pid", JsonPrimitive(out.pid))
             put("shell", JsonPrimitive(out.shell)); put("cwd", JsonPrimitive(out.cwd))

@@ -26,8 +26,10 @@ import com.apex.agent.core.llm.ProviderConfig
 object ModelProfileValidator {
 
     data class Result(val ok: Boolean, val errors: List<String>) {
+        // P3-b 修复：旧实现 `Result(block().isEmpty(), block())` 对 block 求值两次，
+        // 若 block 有副作用或开销（网络/IO 校验）会被执行两遍，且两次结果可能不一致。
         inline fun andAlso(block: () -> List<String>): Result =
-            if (!ok) this else Result(block().isEmpty(), block())
+            if (!ok) this else block().let { Result(it.isEmpty(), it) }
     }
 
     fun validate(profile: ModelProfile): Result {

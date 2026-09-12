@@ -53,12 +53,14 @@ class AgentChatViewModel @Inject constructor(
     // 同时保留 internal 可见性（供抽出的 AgentChatQuestionHandler.kt 扩展访问）。
     internal val _uiState = MutableStateFlow(AgentChatUiState())
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
-    init { viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } } }
+    init {
+        viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
+        // P2-8/P3（6-c）：reasoningEffort chip 初始跟随默认 Profile；contextMaxTokens 回填引擎真实值（原恒 1 → 仪表盘 0%/上限1）。
+        settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let { p -> _uiState.update { it.copy(reasoningEffort = p.reasoningEffort) } }
+        (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
+    }
 
-    /**
-     * 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人
-     * （从本类抽出的单一职责协作类，逻辑逐行等价；scope 即 viewModelScope）。
-     */
+    /** 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人（抽出的单一职责协作类；scope 即 viewModelScope）。 */
     private val attachmentManager = AttachmentManager(
         context = context,
         preprocessor = preprocessor,
@@ -74,10 +76,7 @@ class AgentChatViewModel @Inject constructor(
     /** 任务状态卡数据源（TaskStatusCard 消费）。 */
     val taskState: StateFlow<com.apex.agent.core.engine.task.AgentTask?> get() = taskController.taskState
 
-    /**
-     * 崩溃恢复发现（D-3：VM init 确定性扫描，非后台任务）。
-     * IO 阻塞扫描放 IO dispatcher；结果供 RecoveryBanner 呈现。
-     */
+    /** 崩溃恢复发现（D-3：VM init 确定性扫描，IO 阻塞扫描放 IO dispatcher；结果供 RecoveryBanner 呈现）。 */
     private val _recoveryCandidates = MutableStateFlow<List<com.apex.agent.core.engine.task.AgentTask>>(emptyList())
     val recoveryCandidates: StateFlow<List<com.apex.agent.core.engine.task.AgentTask>> = _recoveryCandidates.asStateFlow()
 
@@ -99,7 +98,7 @@ class AgentChatViewModel @Inject constructor(
     fun resumeTask() {
         taskController.resume()?.let { flow ->
             currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
-            currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
+            currentJob = viewModelScope.launch { collectEngineFlowSafely(flow) }
         }
     }
 
@@ -112,7 +111,7 @@ class AgentChatViewModel @Inject constructor(
     fun retryTask() {
         taskController.retry()?.let { flow ->
             currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
-            currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
+            currentJob = viewModelScope.launch { collectEngineFlowSafely(flow) }
         }
     }
 
@@ -121,7 +120,7 @@ class AgentChatViewModel @Inject constructor(
         taskController.resumeFromCrash(taskId)?.let { flow ->
             _recoveryCandidates.update { list -> list.filterNot { it.taskId == taskId } }
             currentJob?.cancel() // 混沌审查修复：与 sendMessage 对齐，覆盖前取消旧收集器，防双消费者交错写 _uiState
-            currentJob = viewModelScope.launch { flow.collect { handleEvent(it) } }
+            currentJob = viewModelScope.launch { collectEngineFlowSafely(flow) }
         }
     }
 
@@ -148,8 +147,8 @@ class AgentChatViewModel @Inject constructor(
     private val _requestGithubConnect = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val requestGithubConnect: SharedFlow<Unit> = _requestGithubConnect.asSharedFlow()
 
-    /** 一次性 UI 反馈（Toast 级）：异步动作的真实结果由 Screen 收集展示（如整理入记忆成败） */
-    private val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** 一次性 UI 反馈（Toast 级）：异步动作真实结果由 Screen 收集展示。UX-1：internal（非 private）供 AgentMessageActions.kt 同包扩展访问。 */
+    internal val _uiFeedback = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val uiFeedback: SharedFlow<String> = _uiFeedback.asSharedFlow()
 
     /**
@@ -191,14 +190,9 @@ class AgentChatViewModel @Inject constructor(
             .putString(KEY_CUSTOM_INSTRUCTION, trimmed)
             .apply()
         // CUSTOM 模式运行时立即生效；非 CUSTOM 模式在下次切换时携带。
+        // P1-1（6-c）：patchConfig 替代全新 AgentConfig+updateConfig（后者重置全部引擎设置）。
         if (_uiState.value.mode == AgentMode.CUSTOM) {
-            (agentEngine as? ApexAgentEngine)?.updateConfig(
-                AgentConfig(
-                    mode = AgentMode.CUSTOM,
-                    thinkingLevel = _uiState.value.thinkingLevel,
-                    customInstruction = trimmed
-                )
-            )
+            (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(customInstruction = trimmed) }
         }
     }
 
@@ -377,7 +371,10 @@ class AgentChatViewModel @Inject constructor(
      */
     fun sendMessage(text: String) {
         val trimmedText = text.trim()
-        if (trimmedText.isEmpty() && attachmentManager.attachments.value.isEmpty()) return
+        // 二轮审计 A-1：不计入 ERROR 占位附件——「空文本 + 全部附件读取失败」时
+        // 不应发出空消息（P2-9 的 enabled 判定与 drainAttachments 的过滤口径对齐）。
+        val hasUsableAttachment = attachmentManager.attachments.value.any { it.status != UploadStatus.ERROR }
+        if (trimmedText.isEmpty() && !hasUsableAttachment) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
@@ -570,7 +567,7 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    private fun handleEvent(event: AgentEvent) {
+    internal fun handleEvent(event: AgentEvent) {
         when (event) {
             // ═══ 思考 ═══
             is AgentEvent.ThinkingStart -> {
@@ -890,13 +887,13 @@ class AgentChatViewModel @Inject constructor(
 
     fun setMode(mode: AgentMode) {
         _uiState.update { it.copy(mode = mode) }
-        (agentEngine as? ApexAgentEngine)?.updateConfig(
-            AgentConfig(
+        // P1-1（6-c）：patchConfig 只改 mode/customInstruction，保留其余引擎配置（原 updateConfig 重置全部）。
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+            cfg.copy(
                 mode = mode,
-                thinkingLevel = _uiState.value.thinkingLevel,
-                customInstruction = if (mode == AgentMode.CUSTOM) _customInstruction.value else null
+                customInstruction = if (mode == AgentMode.CUSTOM) _customInstruction.value else cfg.customInstruction
             )
-        )
+        }
     }
 
     /** 用户确认/驳回了 Spec 模式的规格，恢复引擎执行。 */
@@ -907,9 +904,8 @@ class AgentChatViewModel @Inject constructor(
 
     fun setThinkingLevel(level: ThinkingLevel) {
         _uiState.update { it.copy(thinkingLevel = level) }
-        (agentEngine as? ApexAgentEngine)?.updateConfig(
-            AgentConfig(mode = _uiState.value.mode, thinkingLevel = level)
-        )
+        // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
     }
 
     fun confirmPlan(confirmed: Boolean) {
@@ -1016,11 +1012,11 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
+    /** P2-8（6-c）：原写 legacy 死键 llm_reasoning_effort（全工程无消费者）；改持久化到默认 ModelProfile（DynamicLlmClient 监听 profiles 即时重建生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) {
-        context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
-            .edit()
-            .putString("llm_reasoning_effort", effort.name)
-            .apply()
+        settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let {
+            settingsRepository.upsertProfile(it.copy(reasoningEffort = effort))
+        }
         _uiState.update { it.copy(reasoningEffort = effort) }
     }
 
@@ -1041,6 +1037,8 @@ class AgentChatViewModel @Inject constructor(
     /** 全部 Provider（用于模型列表展示 Provider 名）。 */
     val providers: StateFlow<List<ProviderConfig>> = settingsRepository.providers
 
+    /** UX-3：LLM 是否已配置（判定口径 = DynamicLlmClient 的真/NoOp 边界，见 AgentChatOnboarding.kt；空会话+未配置时聊天区显示引导卡）。 */
+    val llmConfigured: StateFlow<Boolean> = settingsRepository.llmConfiguredFlow(viewModelScope)
     /**
      * 切换当前模型：把该 Profile 设为默认 + 同步角色映射 + 引擎温度，
      * 运行中的 LLM client 由 DynamicLlmClient 自动重建（即时生效）。
@@ -1176,8 +1174,7 @@ class AgentChatViewModel @Inject constructor(
         activeBannerId = execute.banner.id
 
         currentJob = viewModelScope.launch {
-            taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt))
-                .collect { event -> handleEvent(event) }
+            collectEngineFlowSafely(taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt)))
         }.apply {
             invokeOnCompletion {
                 routeContextKind = null

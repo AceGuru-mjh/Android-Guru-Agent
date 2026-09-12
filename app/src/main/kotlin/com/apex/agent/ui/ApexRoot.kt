@@ -1,5 +1,6 @@
 package com.apex.agent.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -41,9 +41,10 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,16 +85,54 @@ sealed class DrawerDestination(
     data object GlassLab : DrawerDestination("glasslab", "玻璃实验室", Icons.Default.BlurOn)
 }
 
+/**
+ * P2-5（6-c）：[DrawerDestination] 的 rememberSaveable Saver——DrawerDestination
+ * 是 sealed class（非 enum，无 name/entries），以 route 字符串往返映射；
+ * 未知 route 兜底回 Agent。
+ */
+private val DestinationSaver = Saver<DrawerDestination, String>(
+    save = { it.route },
+    restore = { route ->
+        when (route) {
+            DrawerDestination.Terminal.route -> DrawerDestination.Terminal
+            DrawerDestination.Skill.route -> DrawerDestination.Skill
+            DrawerDestination.Market.route -> DrawerDestination.Market
+            DrawerDestination.Memory.route -> DrawerDestination.Memory
+            DrawerDestination.Permissions.route -> DrawerDestination.Permissions
+            DrawerDestination.Log.route -> DrawerDestination.Log
+            DrawerDestination.Settings.route -> DrawerDestination.Settings
+            else -> DrawerDestination.Agent
+        }
+    }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApexRoot() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    var currentDestination by remember { mutableStateOf<DrawerDestination>(DrawerDestination.Agent) }
+    // P2-5（6-c）：原 remember → 旋转/进程重建丢失当前页面（navigation-compose
+    // 依赖声明了却从未使用）。改 rememberSaveable（route 经 Saver 往返）。
+    var currentDestination by rememberSaveable(stateSaver = DestinationSaver) {
+        mutableStateOf(DrawerDestination.Agent)
+    }
 
     // 上下文仪表盘数据源（单例作用域 VM，全局共享）
     val agentVm: AgentChatViewModel = hiltViewModel()
     val agentState by agentVm.uiState.collectAsStateWithLifecycle()
+
+    // ═══ UX-2：系统返回键导航链 ═══
+    // 非抽屉一级页（Settings/Terminal/Skill…）按返回 → 回 Agent 聊天主页；
+    // Agent 页不拦截（交系统默认行为）。currentDestination 为 rememberSaveable
+    // （P2-5 已修），route 经 DestinationSaver 往返，返回后旋转/重建不丢。
+    // 注意组合顺序：BackHandler 后组合者先消费（LIFO）——抽屉关闭器放在
+    // 目标回退之后组合，保证抽屉打开时优先只关抽屉，不再连带跳页。
+    BackHandler(enabled = currentDestination != DrawerDestination.Agent) {
+        currentDestination = DrawerDestination.Agent
+    }
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -160,7 +199,10 @@ fun ApexRoot() {
                 }
             }
         ) { padding ->
-            Column(modifier = Modifier.padding(padding).imePadding()) {
+            // P2-4（6-c）：Scaffold 已用 contentWindowInsets = systemBars.union(ime)
+            // 把 IME insets 并入内容内边距，此处再 .imePadding() 会双重叠加（键盘弹出
+            // 时输入栏被抬得过高）。去掉冗余 .imePadding()，保留 contentWindowInsets 路径。
+            Column(modifier = Modifier.padding(padding)) {
                 // ═══ 顶部上下文仪表盘长条（全局）═══
                 ContextMeterBar(
                     usedTokens = agentState.contextUsedTokens,
@@ -183,7 +225,11 @@ fun ApexRoot() {
                         DrawerDestination.Memory -> MemoryScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
                         DrawerDestination.Log -> LogViewerScreen()
-                        DrawerDestination.Settings -> SettingsScreen()
+                        DrawerDestination.Settings -> SettingsScreen(
+                            // P2-6（6-c）：最小修复双顶栏返回链——SettingsScreen 自带
+                            // TopAppBar 的返回键原为空操作（默认 onBack={}）；接回 Agent 页。
+                            onBack = { currentDestination = DrawerDestination.Agent }
+                        )
                         DrawerDestination.GlassLab -> GlassLabScreen()
                     }
                 }

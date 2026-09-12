@@ -121,7 +121,15 @@ class UbuntuTerminalRuntimeWiringTest {
                 pb.environment().clear()
                 pb.environment()["PROOT_NO_SECCOMP"] = "1"
                 System.getenv("LD_LIBRARY_PATH")?.let { pb.environment()["LD_LIBRARY_PATH"] = it }
-                pb.start().waitFor() == 0
+                val proc = pb.start()
+                // 有界等待（30s）：同 UbuntuRootfsEndToEndIntegrationTest / ProotExecutorProotSmokeTest
+                // 的同一防御 —— ptrace 受限环境下的无界 waitFor 会挂住整个测试任务。
+                val exited = proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                if (!exited) {
+                    runCatching { proc.destroyForcibly() }
+                    return false
+                }
+                proc.exitValue() == 0
             } catch (e: Throwable) {
                 false
             }

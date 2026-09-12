@@ -1,5 +1,6 @@
 package com.apex.agent.platform.terminal.tools.v2
 
+import com.apex.agent.platform.terminal.events.TerminalEvent
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.wait.WaitCondition
@@ -79,6 +80,29 @@ class TerminalWaitTool(
             put("matched", JsonPrimitive(out.matched))
             put("result", JsonPrimitive(out.result))
             out.waitedMs.let { put("waitedMs", JsonPrimitive(it)) }
+            // 二轮审计 C-2：兑现 KDoc "Returns the matching event" 承诺——
+            // run+wait+observe 主链路中 wait 必须能告知命令成败（exitCode/signal），
+            // 否则 Agent 只能再 observe 轮询推断。结构化序列化关键事件字段。
+            when (val ev = (out.event as? com.apex.agent.platform.terminal.wait.WaitResult)?.let { wr ->
+                (wr as? com.apex.agent.platform.terminal.wait.WaitResult.Matched)?.event
+            }) {
+                is TerminalEvent.ProcessExited -> {
+                    put("eventType", JsonPrimitive("ProcessExited"))
+                    ev.jobId?.let { put("jobId", JsonPrimitive(it)) }
+                    ev.exitCode?.let { put("exitCode", JsonPrimitive(it)) }
+                    ev.signal?.let { put("signal", JsonPrimitive(it.name)) }
+                    put("exitCause", JsonPrimitive(ev.cause.name))
+                }
+                is TerminalEvent.ProcessStarted -> {
+                    put("eventType", JsonPrimitive("ProcessStarted"))
+                    put("jobId", JsonPrimitive(ev.jobId))
+                }
+                is TerminalEvent.SessionClosed -> {
+                    put("eventType", JsonPrimitive("SessionClosed"))
+                    put("cause", JsonPrimitive(ev.cause.name))
+                }
+                else -> Unit
+            }
         }.toString()
     }
 

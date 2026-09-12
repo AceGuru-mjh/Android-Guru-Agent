@@ -100,10 +100,13 @@ class RootfsProvisionerImpl(
         activeInstallJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
         return try {
             doInstall(target)
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (ce: kotlinx.coroutines.CancellationException) {
             _state.value = ProvisioningState.CANCELLED
             emit(ProvisioningState.CANCELLED, 0, "Cancelled")
-            ProvisioningResult.Cancelled(_state.value)
+            // P2 fix（审计 6-b）：CancellationException 必须重抛（保留上方状态发射与
+            // finally 清理）—— 原实现吞掉后调用方 Job 已被取消却看到 install()
+            // “正常返回 Cancelled”，结构化取消传播失效。
+            throw ce
         } catch (e: Throwable) {
             _state.value = ProvisioningState.FAILED
             val code = extractErrorCode(e)
@@ -140,7 +143,7 @@ class RootfsProvisionerImpl(
         // ── §26: storage preflight ──
         val available = File(layout.baseDir.value).let {
             var f = it
-            while (!f.exists() && f.parentFile != null) f = f.parentFile
+            while (!f.exists()) f = f.parentFile ?: break   // 向上找到第一个存在的祖先，根仍不存在则用原始路径
             if (f.exists()) f.usableSpace else it.usableSpace
         }
         val preflight = ProvisioningStoragePreflight(
@@ -558,7 +561,12 @@ class RootfsProvisionerImpl(
         } finally {
             runCatching { fileLock.close() }
             installLock.release()
-            _state.value = ProvisioningState.IDLE
+            // P3 fix（审计 6-b）：REMOVED 是终态 —— finally 无条件回 IDLE 会立即
+            // 覆盖它（观测者只能看到 IDLE，误判“从未安装过”）。仅在未到达 REMOVED
+            //（异常/提前退出）时才回 IDLE 供重试。
+            if (_state.value != ProvisioningState.REMOVED) {
+                _state.value = ProvisioningState.IDLE
+            }
         }
     }
 

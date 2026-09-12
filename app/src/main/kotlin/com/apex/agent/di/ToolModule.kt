@@ -155,7 +155,7 @@ object ToolModule {
         guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
         ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
         rootfsBaseDir: java.io.File,
-        // 注：rootfsTarget 已在上方参数区声明（同一类型），合并去重
+        // 注：rootfsTarget 已在上方参数区声明（同一类型），本地与远端 CI 红修复同款合并去重
         skillRegistry: SkillRegistry,
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,
@@ -348,16 +348,18 @@ object ToolModule {
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyReadTool(terminalRuntime))))
         registry.register(SafeAgentTool(TerminalToolAdapter(LegacyListTool(terminalRuntime))))
 
-        // ═══ 11. GitHub (7，条件注册) ═══
-        if (githubTokenManager.isConnected()) {
-            registry.register(SafeAgentTool(GithubGetUserTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubListReposTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubReadFileTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubWriteFileTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubCreateIssueTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
-            registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
-        }
+        // ═══ 11. GitHub (7，无条件注册) ═══
+        // P2-11（6-c）：原以 githubTokenManager.isConnected() 条件注册——Token 是
+        // 运行时状态而注册表是启动期快照，先连 Token 也需重启 App 才生效（死开关）。
+        // 无条件注册；未连接时 GithubApiService.authHeader() 抛
+        // "未连接 GitHub，请先配置 Token"，SafeAgentTool 兜底转错误串，Agent 可感知并引导用户连接。
+        registry.register(SafeAgentTool(GithubGetUserTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubListReposTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubReadFileTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubWriteFileTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubCreateIssueTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
 
         // ═══ 12. MCP 服务器工具（此前缺口：McpManager 三工具已建成但从未
         // 接进 ToolRegistry，MCP 连接建立后 mcp_call/mcp_list 形同虚设）═══
@@ -383,22 +385,16 @@ object ToolModule {
             usageTracker = toolUsageTracker
         )
 
-        // composite/script 工具：随注册表构建时快照注册；新装技能后重启 App 生效
-        // （SkillToolAdapter 的复合步骤同样过主执行器：风险门/校验/统计全覆盖）
+        // composite/script 工具：随注册表构建时快照注册（无运行时条件）；新装技能后
+        // 重启 App 生效（SkillToolAdapter 的复合步骤同样过主执行器：风险门/校验/统计全覆盖）
         val skillStepExecutor: ToolExecutor = mainExecutor
         skillRegistry.getActiveTools().forEach { def ->
             registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
         }
 
-        // ═══ 13. MCP 工具接线（此前缺口：McpCallTool/McpListTool/McpConnectTool
-        // 已定义但从未注册——Agent 只能通过市场页 UI 连接 MCP，对话内完全无法使用）═══
-        registry.register(SafeAgentTool(McpCallTool(mcpManager)))
-        registry.register(SafeAgentTool(McpListTool(mcpManager)))
-        registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
-
         return registry
         // 总计：44 基础 + 15 v2 工具 + 3 MCP + 2 T73 + 1 T75 + 4 T76 + 5 Skill 管理 +
-        // N 已启用技能 composite + 7 GitHub(条件)
+        // N 已启用技能 composite + 7 GitHub（无条件，未连接时工具返回明确错误）
     }
 
     @Provides

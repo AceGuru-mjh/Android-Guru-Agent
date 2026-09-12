@@ -120,7 +120,11 @@ fun AgentChatViewModel.regenerateResponse(id: String) {
     }
     // 截断：移除该 User 气泡及其后全部（retry→runEngine 会重新追加 User 气泡）
     _uiState.update { s -> s.copy(messages = s.messages.take(userIdx)) }
+    // 二轮审计 A-4：保留用户正在输入的草稿 —— retry() 内部会 updateInputText("")
+    // 清空输入框，从消息菜单重生成时不应连带清掉用户未发送的草稿。
+    val draft = inputText.value
     retry(user.text, user.attachments)
+    if (draft.isNotEmpty()) updateInputText(draft)
 }
 
 /**

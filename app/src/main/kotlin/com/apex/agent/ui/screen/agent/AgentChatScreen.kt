@@ -541,8 +541,9 @@ fun AgentChatScreen(
                             value = inputText,
                             onValueChange = { viewModel.updateInputText(it) },
                             onSend = {
-                                // P2-9（6-c）：附件-only 消息同样可发送（原仅文本非空才发）
-                                if ((inputText.isNotBlank() || attachments.isNotEmpty()) && !uiState.isLoading) {
+                                // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
+                                val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
+                                if ((inputText.isNotBlank() || hasUsableAttachment) && !uiState.isLoading) {
                                     viewModel.sendMessage(inputText.trim())
                                 }
                             },
@@ -589,12 +590,13 @@ fun AgentChatScreen(
                     } else {
                         FilledIconButton(
                             onClick = {
-                                if (inputText.isNotBlank() || attachments.isNotEmpty()) {
+                                val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
+                                if (inputText.isNotBlank() || hasUsableAttachment) {
                                     viewModel.sendMessage(inputText.trim())
                                     // ★ viewModel.sendMessage 内部已调用 updateInputText("")
                                 }
                             },
-                            enabled = inputText.isNotBlank() || attachments.isNotEmpty(),
+                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR },
                             interactionSource = sendInteraction,
                             modifier = Modifier
                                 .size(40.dp)

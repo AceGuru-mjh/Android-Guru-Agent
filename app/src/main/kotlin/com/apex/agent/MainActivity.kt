@@ -41,7 +41,13 @@ class MainActivity : ComponentActivity() {
         // Android 12+ 后台 FGS 启动限制；Manifest 已声明 FOREGROUND_SERVICE(_SPECIAL_USE)
         // + specialUse 类型 + PROPERTY_SPECIAL_USE_FGS_SUBTYPE，服务 onCreate 建 channel、
         // onStartCommand 立即 startForeground，满足 5s 前台化窗口）。
-        ContextCompat.startForegroundService(this, Intent(this, ApexCoreService::class.java))
+        // 二轮审计 A-6：companion 静态首启标记 —— 进程存活期只拉起一次，避免每次
+        // 旋转重建都触发 onStartCommand 的系统噪音（通知/日志）。进程重启或服务被
+        // 系统杀死后首次重建会再次拉起，语义不受影响。
+        if (!coreServiceStartedThisProcess) {
+            coreServiceStartedThisProcess = true
+            ContextCompat.startForegroundService(this, Intent(this, ApexCoreService::class.java))
+        }
         setContent {
             // 全局外观由设置中心驱动：主题模式 / 动态取色 / 字体缩放 / 时间戳开关
             val settings by remember { settingsRepository.agentSettings }.collectAsStateWithLifecycle()
@@ -69,5 +75,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        /** 二轮审计 A-6：进程存活期的 ApexCoreService 首启标记（见 onCreate 注释）。 */
+        @Volatile
+        private var coreServiceStartedThisProcess = false
     }
 }

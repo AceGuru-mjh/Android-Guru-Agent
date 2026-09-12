@@ -433,7 +433,15 @@ class TaskRuntime(
         val resumeNote = "[RESUME] 此前任务被用户暂停。当前进度：${
             if (task.steps.isNotEmpty()) "步骤 ${task.completedSteps}/${task.steps.size} 完成" else "进行中"
         }。从中断处继续，不要重复已完成的操作。"
-        return executeAsTask(UserInput.text(resumeNote), resumeOf = task, alreadyClaimed = true)
+        // 二轮审计 A-2：与 retry()/resumeFromCrash() 同款占位释放护栏——
+        // executeAsTask 在 scope.launch 前同步抛出（persist IO 失败/非法迁移）时
+        // 释放互斥位再重抛，否则此后所有 execute/resume/retry 永久被拒（锁死）。
+        return try {
+            executeAsTask(UserInput.text(resumeNote), resumeOf = task, alreadyClaimed = true)
+        } catch (e: Throwable) {
+            claiming.set(false)
+            throw e
+        }
     }
 
     /** 重试失败任务（retryCount 上限校验）。返回执行流；null = 不允许重试。 */

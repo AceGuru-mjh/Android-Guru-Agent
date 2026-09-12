@@ -472,6 +472,9 @@ class TerminalRuntimeImpl(
         val r = sessionManager.close(sessionId, force)
         if (r.isSuccess) {
             processController.unregister(sessionId)
+            // 二轮审计 C-1：会话关闭 → 清理 JobManager 的 job 记录/状态流/前台标记
+            //（原实现只增不减，常驻服务进程下无上限累积）。
+            jobManager.drop(sessionId)
             // T75: 会话关闭 → 释放 workspace 活跃绑定（delete 门禁解除）
             workspaceBinder?.unbind(sessionId)
             // T81 (D-4)：只收敛本 session 的超时定时器 —— 原实现调

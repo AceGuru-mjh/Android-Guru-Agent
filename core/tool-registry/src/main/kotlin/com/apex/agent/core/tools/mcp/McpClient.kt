@@ -315,7 +315,14 @@ class McpClient(
             try {
                 Json.parseToJsonElement(responseBody).jsonObject
             } catch (e: Exception) {
-                null
+                // 二轮审计 B-3：HTTP 200 + 非 JSON body（网关 HTML 登录页/代理拦截页）
+                // 折叠成 null 会让 initialize() 走「已连接、空能力」假成功——与
+                // P2-6 修的 404 假成功同款病根。显式抛 McpException 携带 body
+                // 片段，让调用方看到真实原因。
+                throw McpException(
+                    "HTTP ${response.code} 返回非 JSON 响应（疑似网关/鉴权拦截页）: " +
+                        responseBody.take(120).replace('\n', ' ').trim()
+                )
             }
         }
     }

@@ -377,7 +377,10 @@ class AgentChatViewModel @Inject constructor(
      */
     fun sendMessage(text: String) {
         val trimmedText = text.trim()
-        if (trimmedText.isEmpty() && attachmentManager.attachments.value.isEmpty()) return
+        // 二轮审计 A-1：不计入 ERROR 占位附件——「空文本 + 全部附件读取失败」时
+        // 不应发出空消息（P2-9 的 enabled 判定与 drainAttachments 的过滤口径对齐）。
+        val hasUsableAttachment = attachmentManager.attachments.value.any { it.status != UploadStatus.ERROR }
+        if (trimmedText.isEmpty() && !hasUsableAttachment) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()

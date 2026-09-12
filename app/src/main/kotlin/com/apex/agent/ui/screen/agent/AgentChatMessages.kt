@@ -178,7 +178,7 @@ internal fun UserBubble(
                     Box {
                         IconButton(
                             onClick = { menuExpanded = true },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
@@ -322,7 +322,7 @@ internal fun AgentBubble(
                     Box {
                         IconButton(
                             onClick = { menuExpanded = true },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
@@ -362,7 +362,7 @@ internal fun AgentBubble(
                             clipboard.setText(AnnotatedString(message.text))
                             Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
@@ -376,7 +376,7 @@ internal fun AgentBubble(
                             // 修复：整理入记忆不再“发起即报成功”——结果反馈由 VM 异步链路决定（原失败也提示已整理）
                             onOrganize(message.text)
                         },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Psychology,

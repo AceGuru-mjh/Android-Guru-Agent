@@ -19,6 +19,8 @@ import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -331,6 +333,13 @@ class ApexAgentEngine(
         } catch (e: TimeoutCancellationException) {
             // P2-4 修复：TimeoutCancellationException 是 CancellationException 的子类，
             // 必须先于父类 catch，否则 Plan/Spec 确认超时被误报为 Aborted（超时分支死代码）。
+            // 二轮审计 A-3：TCE 也可能来自外层 withTimeout（任务级/工具级取消穿透）——
+            // 协程已不活跃时必须重抛（保持取消语义），仅在自身活跃（本层确认超时）时
+            // 才折叠为 Error 事件，避免吞掉外层超时取消并误报。
+            if (!currentCoroutineContext().isActive) {
+                AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "外层超时取消穿透引擎，重抛 TCE")
+                throw e
+            }
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
             emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
         } catch (e: CancellationException) {

@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.flow
@@ -95,14 +96,20 @@ class WaitEngineImpl(
      *     仍可匹配（v1 契约：cancel 后 wait 同步 shell 退出）；
      *   - 防陈旧 ✓：审计 P2-2 场景 run(echo) 完成 → run(sleep) → wait() 不带
      *     jobId —— echo 的退出事件 id < sleep 的 start.id，被正确判陈旧。
-     * 保留窗（500 条）内找不到 ProcessStarted 时回退 (0,0)（全新会话/超长会话
-     * 的宽容回退 —— 与旧全量重放行为一致）。
+     * 保留窗（500 条）内找不到 ProcessStarted 时锚定窗内最老事件（长操作逐出
+     * start 后的保守回退，见函数内注释）。
      */
     private suspend fun operationAnchorFor(sessionId: Long): Anchor {
         val log = eventLog ?: return Anchor(0L, 0L)
         val recent = log.tail(sessionId, 500)
-        val lastStart = recent.lastOrNull { it is TerminalEvent.ProcessStarted } ?: return Anchor(0L, 0L)
-        return Anchor(lastStart.cursor, lastStart.id)
+        val lastStart = recent.lastOrNull { it is TerminalEvent.ProcessStarted }
+        if (lastStart != null) return Anchor(lastStart.cursor, lastStart.id)
+        // 二轮审计 B-2：>500 事件的长操作把 ProcessStarted 逐出保留窗时，
+        // 不回退 (0,0)（全量重放 → P2-2 假阳性条件性回归），改锚定保留窗内
+        // 最老事件——被逐出的历史事件不可能重放（query 只扫保留窗），锚定
+        // 窗口头等价于「允许整个保留窗内的事件」，仍严格优于旧行为。
+        val oldest = recent.firstOrNull() ?: return Anchor(0L, 0L)
+        return Anchor(0L, oldest.id)
     }
 
     /**
@@ -240,8 +247,14 @@ class WaitEngineImpl(
         // T81：SessionGone 后终止流 —— 原实现 `return@collect` 只结束当前元素的
         // lambda，不终止 collect（流在会话关闭后继续运行/继续匹配，与「取消即
         // 注销」契约不符）。用 takeWhile 在 SessionGone emit 后完成流。
-        bus.subscribe(sessionId, afterCursor = 0L)
+        //
+        // 二轮审计 B-1：与 await 路径同款锚点 —— 原 afterCursor=0 全量重放历史，
+        // 流式订阅者会把订阅前已发生的陈旧匹配当新事件假阳性发出（P2-5 修了
+        // await 漏了这里）。锚点在 flow 收集开始时惰性取样（首个订阅者时刻）。
+        val anchor = anchorFor(sessionId)
+        bus.subscribe(sessionId, afterCursor = anchor.cursor)
             .takeWhile { ev -> ev !is TerminalEvent.SessionClosed }
+            .filter { ev -> isFresh(ev, anchor) }
             .collect { ev ->
                 val m = matchEvent(condition, ev)
                 if (m.matched && m.event != null) emit(WaitResult.Matched(m.event))

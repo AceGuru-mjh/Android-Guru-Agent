@@ -60,4 +60,12 @@ interface JobManager {
      * Emits the new JobState on every transition (J1-J10).
      */
     fun observeState(jobId: Long): Flow<JobState>
+
+    /**
+     * 二轮审计 C-1：会话关闭时清理该会话的全部 job 记录与状态流。
+     * 原实现 jobs/stateFlows 只增不减——ApexCoreService 常驻后长生命周期
+     * 进程里，每个跑过终端任务的会话都永久滞留命令串与 StateFlow（无上限累积
+     * + get/list 的全表扫描退化）。幂等：不存在的会话是 no-op。
+     */
+    fun drop(sessionId: Long)
 }

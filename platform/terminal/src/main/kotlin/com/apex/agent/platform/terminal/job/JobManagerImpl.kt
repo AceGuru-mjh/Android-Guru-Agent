@@ -224,6 +224,23 @@ class JobManagerImpl(
     override fun observeState(jobId: Long): Flow<JobState> =
         (stateFlows[jobId] ?: MutableStateFlow(JobState.UNKNOWN)).asStateFlow().map { it }
 
+    override fun drop(sessionId: Long) {
+        // 二轮审计 C-1（接口 KDoc 详见 JobManager.drop）：close() 路径调用——
+        // 清掉本会话全部 job 记录/状态流/前台标记。终态 job 的历史查询职责由
+        // EventLog（有界 500 条）承担；在途 collect observeState 的订阅者持有
+        // StateFlow 引用，移除 map 条目不影响其完成（终态已 emit）。
+        foregroundJobIdBySession.remove(sessionId)
+        val it = jobs.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (e.value.sessionId == sessionId) {
+                timeoutController?.cancelTimeout(e.key)
+                stateFlows.remove(e.key)
+                it.remove()
+            }
+        }
+    }
+
     private suspend fun transition(jobId: Long, to: JobState) {
         val flow = stateFlows[jobId] ?: return
         val from = flow.value

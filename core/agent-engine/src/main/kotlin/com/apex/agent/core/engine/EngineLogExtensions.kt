@@ -3,6 +3,7 @@ package com.apex.agent.core.engine
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
+import java.util.Locale
 
 /**
  * 把引擎事件映射为结构化日志并写入日志中枢。
@@ -32,7 +33,9 @@ fun AppLogger.logEvent(event: AgentEvent) {
             else
                 error(LogCategory.TOOL, event.toolName, "失败 (${event.durationMs}ms): ${event.output.take(300)}", tags = arrayOf("tool:${event.toolName}", "call-error"))
         is AgentEvent.ToolProgress ->
-            debug(LogCategory.TOOL, "Engine", "进度 ${event.percent?.let { "%.0f%%".format(it * 100) } ?: ""} ${event.message ?: ""}", "progress")
+            // P3-e 修复：固定 Locale.ROOT——默认 Locale（如阿拉伯语系）会把 %.0f
+            // 格式化成阿拉伯-印度数字，日志文本不可机读。
+            debug(LogCategory.TOOL, "Engine", "进度 ${event.percent?.let { "%.0f%%".format(Locale.ROOT, it * 100) } ?: ""} ${event.message ?: ""}", "progress")
         is AgentEvent.ContextCompressed ->
             warn(LogCategory.ENGINE, "Compressor", "上下文压缩 ${event.beforeTokens}→${event.afterTokens} tokens, 策略=${event.strategy}, 移除=${event.messagesRemoved}", "compression")
         is AgentEvent.Error ->

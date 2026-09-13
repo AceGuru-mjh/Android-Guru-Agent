@@ -23,13 +23,27 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-/** 市场五个页签 */
+/** 市场五个页签（两个顶栏视图共享同一套子导航） */
 enum class MarketTab(val label: String) {
     PLUGINS("插件"),
     SKILLS("Skills"),
     MCP("MCP"),
     CONNECTORS("连接器"),
     INTEGRATIONS("集成")
+}
+
+/**
+ * 市场顶栏视图：
+ * - [BROWSE] 市场 —— 发现与安装入口（模板 / GitHub / URL / 魔搭 / 添加表单）；
+ * - [INSTALLED] 已安装管理 —— 管理已装/已加载内容（启停 / 卸载 / 连接）。
+ *
+ * 两个视图下均保留同一套 [MarketTab] 子导航（插件 / Skills / MCP / 连接器 / 集成），
+ * 切换视图不重置子页签 —— 用户在「Skills · 市场」看完安装源，切到
+ * 「已安装管理」还在 Skills 分类下，上下文不断裂。
+ */
+enum class MarketScope(val label: String) {
+    BROWSE("市场"),
+    INSTALLED("已安装管理")
 }
 
 // ═══ UI 行数据（避免界面直接依赖各注册表内部类型）═══
@@ -65,6 +79,7 @@ data class MarketPluginRow(
 )
 
 data class MarketUiState(
+    val scope: MarketScope = MarketScope.BROWSE,
     val selectedTab: MarketTab = MarketTab.PLUGINS,
     // Skills
     val skills: List<MarketSkillRow> = emptyList(),
@@ -191,6 +206,9 @@ class MarketViewModel @Inject constructor(
     }
 
     fun selectTab(tab: MarketTab) = _uiState.update { it.copy(selectedTab = tab) }
+
+    /** 切换顶栏视图（市场 ⇄ 已安装管理），保留当前子页签。 */
+    fun selectScope(scope: MarketScope) = _uiState.update { it.copy(scope = scope) }
 
     fun clearMessage() = _uiState.update { it.copy(lastMessage = null) }
 

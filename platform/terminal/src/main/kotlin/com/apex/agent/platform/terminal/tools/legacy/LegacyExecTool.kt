@@ -56,6 +56,7 @@ class LegacyExecTool(
     """.trimIndent()
 
     suspend fun execute(input: Input): Output {
+        val t0 = System.nanoTime()
         val runResult = runtime.run(
             sessionId = input.sessionId, command = input.command,
             owner = InputOwner.AGENT, background = false, timeoutMs = input.timeoutMs
@@ -79,7 +80,7 @@ class LegacyExecTool(
                 return Output(output = "", exitCode = -1, truncated = false, durationMs = wait.waitedMs, timedOut = true)
             }
             is com.apex.agent.platform.terminal.wait.WaitResult.SessionGone -> {
-                return Output(output = "", exitCode = -1, truncated = false, durationMs = 0, timedOut = false)
+                return Output(output = "", exitCode = -1, truncated = false, durationMs = (System.nanoTime() - t0) / 1_000_000, timedOut = false)
             }
         }
 
@@ -90,7 +91,9 @@ class LegacyExecTool(
             maxBytes = input.maxOutputBytes
         )
         val obs = obsResult.getOrElse { throw it }
-        return Output(output = obs.raw ?: "", exitCode = exitCode, truncated = obs.truncated, durationMs = 0, timedOut = false)
+        // 修复：成功路径此前恒报 durationMs=0 —— 现在如实测量端到端耗时
+        val durationMs = (System.nanoTime() - t0) / 1_000_000
+        return Output(output = obs.raw ?: "", exitCode = exitCode, truncated = obs.truncated, durationMs = durationMs, timedOut = false)
     }
 
     override suspend fun invoke(arguments: String): String {

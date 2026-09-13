@@ -98,6 +98,14 @@ object ToolRegistrationGuide {
     )
 
     /**
+     * 一次性结构化执行工具（terminal.exec —— ExecRequest/ExecEngine/CommandResult）。
+     * 构造需要 ExecEngine（CommandSpawner 通道由 app 层提供：root-su/shizuku/local-sh），
+     * 因此不进 newTools(rt)，由 ToolModule 直接注册（同时注入门禁与 cd 记忆钩子）。
+     */
+    fun execTool(engine: com.apex.agent.platform.terminal.exec.ExecEngine) =
+        com.apex.agent.platform.terminal.tools.v2.TerminalExecTool(engine)
+
+    /**
      * T73: 后端能力发现 + Ubuntu rootfs 安装引导 —— Agent 自主进入 Ubuntu 的两个入口。
      * 构造需要 RootfsProvisioner/RootfsTarget（app TerminalModule 提供），
      * 因此不进 newTools(rt)，由 ToolModule 直接注册。
@@ -141,6 +149,7 @@ object ToolRegistrationGuide {
         "terminal.snapshot" to "§34.8",
         "terminal.close" to "§34.9",
         "terminal.backends" to "T73（后端能力发现：availability 三态）",
+        "terminal.exec" to "exec 包（一次性结构化执行：stdout/stderr/exit_code/duration_ms/truncated + 限长 + ANSI）",
         "terminal.ubuntu.install" to "T73（Ubuntu rootfs 安装引导）",
         "terminal.workspaces" to "T75（workspace 管理：隔离文件区生命周期）",
         "terminal.workspace.environment" to "P83（项目感知开发环境：analyze/ensure 工具链闭环）",

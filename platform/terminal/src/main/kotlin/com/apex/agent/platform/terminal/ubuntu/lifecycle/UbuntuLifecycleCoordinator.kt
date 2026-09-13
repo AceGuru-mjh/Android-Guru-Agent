@@ -63,6 +63,13 @@ class UbuntuLifecycleCoordinator(
     private val probeFn: suspend () -> List<CapabilityEntry> = { emptyList() },
     /** 自动修复端口（生产：EnvironmentRepairService.autoRepair() 的适配；null=未接线）。 */
     private val repairFn: (suspend () -> RepairOutcome)? = null,
+    /**
+     * bootstrap 状态复位端口（生产：UbuntuBootstrapManager.reset() 的适配；null=未接线）。
+     * removeRootfs() 删除 rootfs 后必须同步复位 bootstrap.json —— 否则残留的
+     * READY 状态会让下一次 ensureReady 短路 ALREADY_READY，对新装的干净 rootfs
+     * 跳过 sources/apt-update/base-packages 引导。
+     */
+    private val bootstrapResetFn: (suspend () -> Unit)? = null,
     private val target: RootfsTarget,
     private val defaultTimeoutMs: Long = DEFAULT_ENSURE_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -181,6 +188,21 @@ class UbuntuLifecycleCoordinator(
     data class CancelOutcome(
         val cancelled: Boolean,
         val phase: Phase,
+        val message: String
+    )
+
+    /**
+     * removeRootfs() 结果（环境中心 / 存储管理的删除入口消费）。
+     *
+     * @param removed     是否真正删除（false = 拒绝：安装进行中 / 会话占用 / 锁忙）。
+     * @param phase       删除发起前的 phase（拒绝原因定位用）。
+     * @param cleanedDirs 实际删除的目录/文件路径（provisioner 透传）。
+     * @param message     人可读结果（含拒绝原因，UI 可直接展示）。
+     */
+    data class RemoveOutcome(
+        val removed: Boolean,
+        val phase: Phase,
+        val cleanedDirs: List<String> = emptyList(),
         val message: String
     )
 
@@ -448,6 +470,110 @@ class UbuntuLifecycleCoordinator(
                 phase,
                 "install not in progress (phase=$phase) — bootstrap cancellation is via coroutine cancel"
             )
+        }
+    }
+
+    /**
+     * 删除已安装的 Ubuntu rootfs（环境中心 / 存储管理入口）。
+     *
+     * 前置防御：
+     * - INSTALLING / BOOTSTRAPPING 进行中 → 拒绝（先 cancelInstall 或取消协程）；
+     * - provisioner 侧自带 in-use / install-lock / file-lock 三重保护（Busy 透传）。
+     *
+     * 成功路径：provisioner.remove()（清 versions/staging/archives/current-marker +
+     * metadata）→ bootstrap 状态复位（防重装后 ALREADY_READY 短路）→ refreshState()
+     * （phase 回落 NOT_INSTALLED）。
+     *
+     * 注意：guest 用户 home（filesDir/linux/home）与 workspace（filesDir/linux/workspaces）
+     * 与 rootfs 分离持久化，本操作**不删除用户数据**（与 GuestUserHome 的 T75 设计一致）。
+     */
+    suspend fun removeRootfs(): RemoveOutcome {
+        val phase = _state.value.phase
+        return when (phase) {
+            Phase.INSTALLING, Phase.BOOTSTRAPPING, Phase.RECOVERING -> RemoveOutcome(
+                removed = false,
+                phase = phase,
+                message = "环境处于 $phase 进行中 — 请先取消或等待完成后再删除"
+            )
+            Phase.NOT_INSTALLED -> RemoveOutcome(
+                removed = false,
+                phase = phase,
+                message = "Ubuntu 环境未安装，无需删除"
+            )
+            else -> {
+                val r = try {
+                    provisioner.remove()
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    return RemoveOutcome(false, phase, message = "remove crashed: ${e.message}")
+                }
+                when (r) {
+                    is ProvisioningResult.Removed -> {
+                        // bootstrap 状态复位：rootfs 已删，bootstrap.json 残留会让
+                        // 下一次 ensureReady 对干净 rootfs 短路 ALREADY_READY。
+                        try {
+                            bootstrapResetFn?.invoke()
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            // 复位失败不否定删除事实 —— bootstrap 内部 reconcile
+                            // 会对不一致状态自愈（幂等重跑 apt 引导）。
+                        }
+                        lastFailure = null
+                        refreshState()
+                        RemoveOutcome(
+                            removed = true,
+                            phase = phase,
+                            cleanedDirs = r.cleanedDirs,
+                            message = "已删除 Ubuntu 环境（${r.cleanedDirs.size} 个目录/文件已清理；用户数据 /root 与 workspace 保留）"
+                        )
+                    }
+                    is ProvisioningResult.Busy -> RemoveOutcome(
+                        removed = false,
+                        phase = phase,
+                        message = "环境被占用或操作进行中（${r.message}）— 关闭所有 Ubuntu 会话后重试"
+                    )
+                    else -> RemoveOutcome(
+                        removed = false,
+                        phase = phase,
+                        message = "删除未完成（${r::class.simpleName}）— 稍后重试或先执行修复"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 当前 rootfs 安装目录的磁盘占用（bytes；null = 未安装）。
+     * 环境中心 / 存储管理的用量展示入口 —— 遍历 provisioner.current() 指向的
+     * 版本目录（不含 archives 下载缓存；不含与 rootfs 分离的用户 home/workspace）。
+     * IO 遍历可能较慢，调用方应在后台调度器执行。
+     */
+    suspend fun rootfsSizeBytes(): Long? {
+        val descriptor = try {
+            provisioner.current()
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Exception) {
+            return null
+        } ?: return null
+        val location = descriptor.location?.value ?: return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val dir = java.io.File(location)
+            if (!dir.exists()) return@withContext null
+            var total = 0L
+            val stack = ArrayDeque<java.io.File>()
+            stack.addLast(dir)
+            while (stack.isNotEmpty()) {
+                val f = stack.removeLast()
+                if (f.isDirectory) {
+                    f.listFiles()?.forEach { stack.addLast(it) }
+                } else {
+                    total += f.length()
+                }
+            }
+            total
         }
     }
 

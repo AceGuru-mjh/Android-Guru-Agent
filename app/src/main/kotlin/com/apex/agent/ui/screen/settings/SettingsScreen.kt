@@ -266,13 +266,14 @@ private fun InterfaceTab(agent: AgentSettings, onAgent: (AgentSettings) -> Unit)
         AppearanceSection(agent, onAgent)
         ChatDisplaySection(agent, onAgent)
         NotesSection()
+        AboutSection()
     }
 }
 
 // ───────────────────────────── 复用控件 ─────────────────────────────
 
 @Composable
-private fun SectionCard(
+internal fun SectionCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     subtitle: String? = null,

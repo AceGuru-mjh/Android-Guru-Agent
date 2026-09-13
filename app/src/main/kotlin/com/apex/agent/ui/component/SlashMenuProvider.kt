@@ -175,7 +175,7 @@ class SlashMenuProvider @Inject constructor(
             title = "插件",
             icon = Icons.Default.Build,
             items = items,
-            hint = if (items.isEmpty()) "未发现已安装的插件" else null
+            hint = if (items.isEmpty()) "未发现已安装的插件" else "已加载插件仅验证连通 —— 工具执行桥接建设中"
         )
     }
 

@@ -160,6 +160,8 @@ fun ApexDrawerContent(
                     DrawerDestination.Terminal,
                     DrawerDestination.Market,
                     DrawerDestination.Memory,
+                    DrawerDestination.Tasks,
+                    DrawerDestination.Storage,
                     DrawerDestination.Permissions,
                     DrawerDestination.Log,
                     DrawerDestination.Settings,

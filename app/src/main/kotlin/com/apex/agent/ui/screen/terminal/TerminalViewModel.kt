@@ -321,10 +321,70 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
+    /** 环境中心：取消进行中的安装（下载字节保留，下次断点续传）。 */
+    fun cancelUbuntuInstall() {
+        viewModelScope.launch {
+            val r = ubuntuLifecycle.cancelInstall()
+            if (!r.cancelled) _notice.value = r.message
+        }
+    }
+
+    /** 环境中心：产品级修复（不触发大下载；detect → repair → verify）。 */
+    fun repairUbuntu() {
+        viewModelScope.launch {
+            val r = ubuntuLifecycle.repair()
+            _notice.value = if (r.verifiedHealthy) "修复完成：环境已恢复健康" else "修复未收敛：${r.detail ?: r.actions.joinToString().take(120)}"
+        }
+    }
+
+    /** 环境中心：删除 Ubuntu rootfs（用户 home/workspace 保留）。 */
+    fun removeUbuntu() {
+        viewModelScope.launch {
+            val r = ubuntuLifecycle.removeRootfs()
+            _notice.value = r.message
+            if (r.removed) refreshRootfsSize()
+        }
+    }
+
+    /** rootfs 磁盘占用（bytes；null = 未安装）—— 环境中心/存储管理展示。 */
+    private val _rootfsSize = MutableStateFlow<Long?>(null)
+    val rootfsSize: StateFlow<Long?> = _rootfsSize.asStateFlow()
+
+    init { refreshRootfsSize() }
+
+    fun refreshRootfsSize() {
+        viewModelScope.launch {
+            _rootfsSize.value = ubuntuLifecycle.rootfsSizeBytes()
+        }
+    }
+
+    /**
+     * Ubuntu 安装/引导聚合进度（install:percent/bytes + bootstrap:stage/message）。
+     * 冷流持续收集，状态进入 READY/NOT_INSTALLED 时清空展示。
+     */
+    private val _ubuntuProgress = MutableStateFlow<UbuntuLifecycleCoordinator.LifecycleProgress?>(null)
+    val ubuntuProgress: StateFlow<UbuntuLifecycleCoordinator.LifecycleProgress?> = _ubuntuProgress.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            ubuntuLifecycle.progressFlow().collect { p ->
+                _ubuntuProgress.value = p
+                // 安装完成后刷新占用（下载/解压会显著改变磁盘占用）
+                if (p.stage.startsWith("install:") &&
+                    p.stage.endsWith("READY") || p.stage.endsWith("REMOVED")
+                ) {
+                    refreshRootfsSize()
+                }
+            }
+        }
+    }
+
     // ═══ 终端设置 ═══
     data class TerminalSettings(
         val fontSize: Int = 13,
-        val monochrome: Boolean = false
+        val monochrome: Boolean = false,
+        /** 键盘辅助行（ESC/TAB/CTRL/箭头…）显隐 —— 小屏手机可隐藏换取显示区。 */
+        val showKeybar: Boolean = true
     )
 
     private val _settings = MutableStateFlow(loadSettings())
@@ -335,13 +395,15 @@ class TerminalViewModel @Inject constructor(
         prefs.edit()
             .putInt("term_font_size", next.fontSize)
             .putBoolean("term_monochrome", next.monochrome)
+            .putBoolean("term_show_keybar", next.showKeybar)
             .apply()
         _settings.value = next
     }
 
     private fun loadSettings() = TerminalSettings(
         fontSize = prefs.getInt("term_font_size", 13),
-        monochrome = prefs.getBoolean("term_monochrome", false)
+        monochrome = prefs.getBoolean("term_monochrome", false),
+        showKeybar = prefs.getBoolean("term_show_keybar", true)
     )
 
     // ═══ 黑名单 / 白名单命令 ═══

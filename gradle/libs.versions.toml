@@ -24,6 +24,11 @@ easyfloat = "2.0.4"
 # 选型 1.4.0：字节码级验证 90 个 Compose 引用全部存在于本项目 Compose 1.7.6；
 # compileSdk 35 对齐；Kotlin 2.1.0 元数据对 2.0.21 消费端一版向前兼容。
 haze = "1.4.0"
+# Vico —— 开源图表库（Maven Central，稳定线 1.13.1）：任务历史/记忆统计可视化。
+# 选型 1.13.1（稳定版，非 2.x beta）：依赖 Compose 1.5+（本项目 1.7.6 向后兼容），
+# Kotlin 1.9 编译产物对 2.0.21 消费端零影响；仅引 compose 核心（不引 m2/m3 主题模块，
+# 避免与本项目 Material3 主题冲突）。
+vico = "1.13.1"
 
 [libraries]
 # Compose
@@ -80,6 +85,9 @@ easyfloat = { group = "com.github.princekin-f", name = "EasyFloat", version.ref 
 
 # Liquid Glass 底层引擎（Maven Central，dev.chrisbanes.haze）—— ui/glass 包唯一底层依赖
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
+
+# Vico 开源图表库（Maven Central，稳定线 1.13.1）—— 任务历史/记忆统计可视化
+vico-compose = { group = "com.patrykandpatrick.vico", name = "compose", version.ref = "vico" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

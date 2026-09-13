@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.BlurOn
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
@@ -61,6 +63,8 @@ import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
 import com.apex.agent.ui.screen.memory.MemoryScreen
+import com.apex.agent.ui.screen.storage.StorageScreen
+import com.apex.agent.ui.screen.tasks.TaskHistoryScreen
 import com.apex.agent.ui.screen.terminal.TerminalScreen
 import kotlinx.coroutines.launch
 
@@ -78,6 +82,10 @@ sealed class DrawerDestination(
     // 抽屉里再放一个只读列表是重复入口（两者数据源同一份 SkillRegistry）。
     data object Market : DrawerDestination("market", "市场", Icons.Default.Storefront)
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
+    // 任务历史（T76 审计 §7：TaskRuntime.loadTaskHistory 首次接线 —— 步骤回放/统计）
+    data object Tasks : DrawerDestination("tasks", "任务", Icons.Default.Checklist)
+    // 存储与数据管理（附件/rootfs 占用/会话历史导出清空 —— 均为真实数据源）
+    data object Storage : DrawerDestination("storage", "存储", Icons.Default.FolderOpen)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
     data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
@@ -99,6 +107,8 @@ private val DestinationSaver = Saver<DrawerDestination, String>(
             "skill" -> DrawerDestination.Market
             DrawerDestination.Market.route -> DrawerDestination.Market
             DrawerDestination.Memory.route -> DrawerDestination.Memory
+            DrawerDestination.Tasks.route -> DrawerDestination.Tasks
+            DrawerDestination.Storage.route -> DrawerDestination.Storage
             DrawerDestination.Permissions.route -> DrawerDestination.Permissions
             DrawerDestination.Log.route -> DrawerDestination.Log
             DrawerDestination.Settings.route -> DrawerDestination.Settings
@@ -223,6 +233,8 @@ fun ApexRoot() {
                         )
                         DrawerDestination.Market -> MarketScreen()
                         DrawerDestination.Memory -> MemoryScreen()
+                        DrawerDestination.Tasks -> TaskHistoryScreen()
+                        DrawerDestination.Storage -> StorageScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
                         DrawerDestination.Log -> LogViewerScreen()
                         DrawerDestination.Settings -> SettingsScreen(

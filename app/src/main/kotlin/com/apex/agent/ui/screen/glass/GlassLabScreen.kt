@@ -211,6 +211,12 @@ private fun SectionHeader(title: String, hint: String) {
 @Composable
 private fun BackdropZone(state: HazeState) {
     var zoneSize by remember { mutableStateOf(IntSize.Zero) }
+    // 按压演示反馈：材质验收页的按钮职能是「按下去看玻璃变化」—— 触觉反馈让按压
+    // 有真实回响（原空 onClick 会让用户怀疑按钮失效）。
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val pressFeedback = {
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+    }
 
     SectionHeader(
         title = "Backdrop 真实采样",
@@ -252,19 +258,19 @@ private fun BackdropZone(state: HazeState) {
         ) {
             GlassButton(
                 text = "玻璃按钮",
-                onClick = { },
+                onClick = pressFeedback,
                 state = state
             )
             GlassIconButton(
                 icon = Icons.Default.BlurOn,
                 contentDescription = "采样验证图标按钮",
-                onClick = { },
+                onClick = pressFeedback,
                 state = state
             )
             GlassFloatingButton(
                 icon = Icons.Default.PlayArrow,
                 contentDescription = "采样验证悬浮球",
-                onClick = { },
+                onClick = pressFeedback,
                 state = state,
                 accent = MaterialTheme.colorScheme.primary
             )
@@ -462,6 +468,11 @@ private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
 
 @Composable
 private fun InteractionSection() {
+    // 同 BackdropZone：交互状态演示按钮接触觉反馈（原空 onClick 无回响）。
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val pressFeedback = {
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+    }
     SectionHeader(
         title = "交互状态",
         hint = "选中提亮 / 禁用降权 / 按压受光 —— 材质对状态即时响应"
@@ -475,20 +486,20 @@ private fun InteractionSection() {
                 icon = Icons.Default.SmartToy,
                 label = "选中项 · Selected",
                 selected = true,
-                onClick = { }
+                onClick = pressFeedback
             )
             GlassNavigationItem(
                 icon = Icons.Default.Terminal,
                 label = "常态项 · Normal",
                 selected = false,
-                onClick = { }
+                onClick = pressFeedback
             )
             GlassNavigationItem(
                 icon = Icons.Default.Build,
                 label = "禁用项 · Disabled",
                 selected = false,
                 enabled = false,
-                onClick = { }
+                onClick = pressFeedback
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -497,7 +508,7 @@ private fun InteractionSection() {
             ) {
                 GlassButton(
                     text = "玻璃按钮 · 按压我",
-                    onClick = { }
+                    onClick = pressFeedback
                 )
                 Text(
                     text = "聚焦态见下方输入控件 —— 焦点驱动材质亮度",

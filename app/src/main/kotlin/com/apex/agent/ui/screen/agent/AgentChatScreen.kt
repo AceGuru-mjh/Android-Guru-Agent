@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -235,7 +234,7 @@ fun AgentChatScreen(
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ═══ 顶部模式栏 ═══
+        // ═══ 顶部模式栏（v3：模式选择器 + 思考深度 + 新会话，窄屏不裁切）═══
         Surface(
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
@@ -246,29 +245,21 @@ fun AgentChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // ═══ 模式切换（6 种模式，横向滚动）═══
-                Row(
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    AgentMode.entries.forEach { mode ->
-                        FilterChip(
-                            selected = uiState.mode == mode,
-                            onClick = {
-                                viewModel.setMode(mode)
-                                // Custom 模式：弹出指令编辑对话框（可反复点击修改）
-                                if (mode == AgentMode.CUSTOM) {
-                                    showCustomInstructionDialog = true
-                                }
-                            },
-                            label = { Text(mode.displayName) }
-                        )
+                // ═══ 任务模式选择器（v3：胶囊 + 下拉菜单）═══
+                // 旧实现 6 个 FilterChip 横排在 weight(1f, fill=false) 的滚动行里，
+                // 窄屏只露出第一个「Build」—— 其余模式被裁在视口外且无任何提示，
+                // 用户表现为「只有 Build 一个模式，没法切换」。换成显式菜单后
+                // 全部 6 个模式在任何屏宽下都单次点击可达。
+                AgentModeSelector(
+                    current = uiState.mode,
+                    onSelect = { mode ->
+                        viewModel.setMode(mode)
+                        // Custom 模式：弹出指令编辑对话框（可反复点击修改）
+                        if (mode == AgentMode.CUSTOM) {
+                            showCustomInstructionDialog = true
+                        }
                     }
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
+                )
 
                 // 思考深度
                 ThinkingLevelSelector(
@@ -472,7 +463,9 @@ fun AgentChatScreen(
                         .fillMaxWidth()
                         .onSizeChanged { composerInsetPx = it.height }
                 ) {
-            Column(modifier = Modifier.padding(8.dp)) {
+            // 输入面板内边距收紧至 6dp：空态高度 ≈ 6+40+4+56+6 = 112dp（标准单行
+            // 输入框 56dp），不压内容 —— 与「输入框高度正常化」验收口径对齐。
+            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                 // ═══ 附件预览条（发送前）═══
                 val attachments by viewModel.attachments.collectAsStateWithLifecycle()
                 AttachmentPreviewBar(
@@ -579,7 +572,7 @@ fun AgentChatScreen(
                         onSelect = { viewModel.setReasoningEffort(it) }
                     )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
                     verticalAlignment = Alignment.Bottom,

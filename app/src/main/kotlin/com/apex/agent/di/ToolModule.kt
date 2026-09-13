@@ -258,13 +258,18 @@ object ToolModule {
         }.getOrElse { File(context.filesDir, "workspace").apply { mkdirs() } }
         val downloadDir = File(context.getExternalFilesDir(null), "Download").apply { mkdirs() }
 
+        // ★ 工作目录记忆：兑现 shell_execute "cd 后续命令保持同目录" 的承诺。
+        // 命令以纯 cd <dir> 结尾且执行成功 → 记录新目录，后续命令以它为起始目录。
+        val shellWorkDir = com.apex.agent.tools.ShellWorkDirTracker()
+
         val shellExec: suspend (String) -> String = { cmd ->
             if (!commandPermissionGate.ensureAllowed(cmd)) {
                 "Error: 用户拒绝执行命令。请不要重试相同命令，改用更安全或更低风险的方案，并告知用户原因。"
             } else {
                 try {
-                    val result = PrivilegeDetector.executeShell(cmd)
+                    val result = PrivilegeDetector.executeShell(cmd, workDir = shellWorkDir.currentDir())
                     if (result.success) {
+                        shellWorkDir.updateAfterSuccess(cmd)
                         result.output.ifBlank { "(completed)" }
                     } else {
                         val lower = result.output.lowercase()

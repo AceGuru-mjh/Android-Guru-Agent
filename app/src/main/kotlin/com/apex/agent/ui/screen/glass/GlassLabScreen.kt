@@ -11,6 +11,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +77,7 @@ import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.glass.GlassNavigationItem
 import com.apex.agent.ui.glass.GlassShapes
 import com.apex.agent.ui.glass.GlassStyle
+import com.apex.agent.ui.glass.GlassTier
 import com.apex.agent.ui.glass.GlassToolCard
 import com.apex.agent.ui.glass.GlassToolStatus
 import dev.chrisbanes.haze.HazeState
@@ -235,12 +237,17 @@ private fun BackdropZone(state: HazeState) {
             )
             .onSizeChanged { coordinates -> zoneSize = coordinates }
     ) {
-        // ── haze 源：渐变底 + 光斑 + 网格 + 文字，全部画进被采样层 ──
-        BackdropCanvas(
+        // ── haze 源：静态层（渐变底 / 网格 / 文字，尺寸或主题变化才重绘）
+        //    + 光斑层（每帧仅 2 个圆）。分层后动画帧绘制调用从 ~40 降到 2，
+        //    光斑以低透明度叠加在静态内容之上 —— 灯光漫射语义，采样层不变。 ──
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .hazeSource(state)
-        )
+        ) {
+            StaticBackdropCanvas(modifier = Modifier.fillMaxSize())
+            GlowCanvas(modifier = Modifier.fillMaxSize())
+        }
 
         // ── 可拖动玻璃片：与 haze 源同层叠加，位置随手势累积 ──
         DraggableGlassChip(
@@ -276,6 +283,44 @@ private fun BackdropZone(state: HazeState) {
             )
         }
 
+        // ── 右上角引擎徽标：运行时判定本设备模糊实现（真 blur 还是 scrim 兜底） ──
+        GlassBadge(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp),
+            state = state,
+            accent = if (Build.VERSION.SDK_INT >= 32) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.tertiary
+            }
+        ) {
+            Icon(
+                imageVector = if (Build.VERSION.SDK_INT >= 32) {
+                    Icons.Default.BlurOn
+                } else {
+                    Icons.Default.Warning
+                },
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = if (Build.VERSION.SDK_INT >= 32) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.tertiary
+                }
+            )
+            Text(
+                text = if (Build.VERSION.SDK_INT >= 32) {
+                    "RenderEffect GPU 模糊"
+                } else {
+                    "API ${Build.VERSION.SDK_INT} · scrim 兜底"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
         // ── 左上角状态徽标：最后绘制，保持在最上层 ──
         GlassBadge(
             modifier = Modifier
@@ -300,9 +345,12 @@ private fun BackdropZone(state: HazeState) {
     }
 }
 
-/** 采样背景 —— 渐变 / 光斑 / 网格 / 文字，全部为高对比可验证内容。 */
+/**
+ * 静态采样背景 —— 渐变 / 网格 / 文字，全部为高对比可验证内容。
+ * 无状态读取：仅在尺寸或主题变化时重绘，动画帧零成本。
+ */
 @Composable
-private fun BackdropCanvas(modifier: Modifier) {
+private fun StaticBackdropCanvas(modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
     val textMeasurer = rememberTextMeasurer()
 
@@ -316,28 +364,6 @@ private fun BackdropCanvas(modifier: Modifier) {
         textMeasurer.measure(text = GridRowText, style = rowStyle)
     }
 
-    // 漂移光斑 —— 实时采样的活体证明：背景在动，玻璃内容必须跟着动。
-    // 本页被明确豁免循环动画禁令，仅供采样验证。
-    val glow = rememberInfiniteTransition(label = "glass_lab_glow")
-    val phaseA by glow.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 11000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "glow_primary"
-    )
-    val phaseB by glow.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 8500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "glow_tertiary"
-    )
-
     Canvas(modifier = modifier) {
         // 1. 垂直渐变底 —— surfaceVariant 到 background
         drawRect(
@@ -348,27 +374,7 @@ private fun BackdropCanvas(modifier: Modifier) {
             )
         )
 
-        // 2. 双光斑漂移 —— 主色 / 三级色，慢速环游
-        val angleA = phaseA * 2f * PI.toFloat()
-        val angleB = phaseB * 2f * PI.toFloat() + 2.1f
-        drawCircle(
-            color = scheme.primary.copy(alpha = 0.18f),
-            radius = 140.dp.toPx(),
-            center = Offset(
-                x = size.width * (0.5f + 0.34f * sin(angleA)),
-                y = size.height * (0.42f + 0.28f * cos(angleA))
-            )
-        )
-        drawCircle(
-            color = scheme.tertiary.copy(alpha = 0.18f),
-            radius = 110.dp.toPx(),
-            center = Offset(
-                x = size.width * (0.5f + 0.36f * cos(angleB)),
-                y = size.height * (0.55f + 0.30f * sin(angleB))
-            )
-        )
-
-        // 3. 细网格 —— 24dp 单元格 / 1px 线：模糊真伪一照便知
+        // 2. 细网格 —— 24dp 单元格 / 1px 线：模糊真伪一照便知
         val cell = 24.dp.toPx()
         val gridColor = scheme.onSurfaceVariant.copy(alpha = 0.35f)
         var gx = cell
@@ -392,7 +398,7 @@ private fun BackdropCanvas(modifier: Modifier) {
             gy += cell
         }
 
-        // 4. 高对比等宽文字行 —— 交错缩进，行行压过网格
+        // 3. 高对比等宽文字行 —— 交错缩进，行行压过网格
         val step = 24.dp.toPx()
         var index = 0
         var ty = 14.dp.toPx()
@@ -408,7 +414,62 @@ private fun BackdropCanvas(modifier: Modifier) {
     }
 }
 
-/** 可拖动玻璃片 —— 拖动累积位移并钳制在验证区内。 */
+/**
+ * 漂移光斑层 —— 实时采样的活体证明：背景在动，玻璃内容必须跟着动。
+ * 本页被明确豁免循环动画禁令，仅供采样验证。
+ * 性能：每帧仅 2 个 drawCircle（静态内容已剥离至 [StaticBackdropCanvas]）。
+ */
+@Composable
+private fun GlowCanvas(modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val glow = rememberInfiniteTransition(label = "glass_lab_glow")
+    val phaseA by glow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 11000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "glow_primary"
+    )
+    val phaseB by glow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 8500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "glow_tertiary"
+    )
+
+    Canvas(modifier = modifier) {
+        // 双光斑漂移 —— 主色 / 三级色，慢速环游，低透明度叠加在静态层之上
+        val angleA = phaseA * 2f * PI.toFloat()
+        val angleB = phaseB * 2f * PI.toFloat() + 2.1f
+        drawCircle(
+            color = scheme.primary.copy(alpha = 0.18f),
+            radius = 140.dp.toPx(),
+            center = Offset(
+                x = size.width * (0.5f + 0.34f * sin(angleA)),
+                y = size.height * (0.42f + 0.28f * cos(angleA))
+            )
+        )
+        drawCircle(
+            color = scheme.tertiary.copy(alpha = 0.18f),
+            radius = 110.dp.toPx(),
+            center = Offset(
+                x = size.width * (0.5f + 0.36f * cos(angleB)),
+                y = size.height * (0.55f + 0.30f * sin(angleB))
+            )
+        )
+    }
+}
+
+/**
+ * 可拖动玻璃片 —— 拖动累积位移并钳制在验证区内；双击复位。
+ * 片内实时回显坐标（等宽字体）：拖动时坐标数字在变，玻璃下方的内容也在变
+ * —— 采样必须跟随位置实时更新，这是比光斑更强的逐帧验证信号。
+ */
 @Composable
 private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
     var chipOffset by remember { mutableStateOf(Offset.Zero) }
@@ -422,6 +483,10 @@ private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
                 )
             }
             .size(width = ChipWidth, height = ChipHeight)
+            .pointerInput(Unit) {
+                // 双击复位 —— 拖丢后一键回原点
+                detectTapGestures(onDoubleTap = { chipOffset = Offset.Zero })
+            }
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
@@ -452,12 +517,20 @@ private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = "拖动我 · Drag",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column {
+                Text(
+                    text = "拖动我 · 双击复位",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "x ${chipOffset.x.roundToInt()} · y ${chipOffset.y.roundToInt()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -524,11 +597,22 @@ private fun InteractionSection() {
 //  玻璃档位阶梯
 // ═══════════════════════════════════════════════════════════════
 
+/** 档位 → 业务落点对照（验收人可直接核对真实界面用法）。 */
+private val TierUsageNotes: Map<GlassTier, String> = mapOf(
+    GlassTier.Subtle to "玻璃徽标 / 状态 chip",
+    GlassTier.Control to "图标按钮 / 输入控件",
+    GlassTier.Card to "消息卡 / 工具卡 / 任务卡",
+    GlassTier.Navigation to "抽屉导航项",
+    GlassTier.Floating to "FAB / 聊天输入栏",
+    GlassTier.Dialog to "玻璃对话框面板",
+    GlassTier.Strong to "低频高聚焦场景（预留）"
+)
+
 @Composable
 private fun TierLadderSection() {
     SectionHeader(
         title = "玻璃档位阶梯",
-        hint = "七档材质强度递进 —— 全部为 Frosted 档铺在页面背景上，不冒充 backdrop"
+        hint = "七档材质强度递进 + 各档真实业务落点 —— 全部为 Frosted 档铺在页面背景上，不冒充 backdrop"
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         GlassTierRow(name = "Subtle", style = GlassStyle.Subtle)
@@ -541,13 +625,13 @@ private fun TierLadderSection() {
     }
 }
 
-/** 单个档位行 —— 左侧档名，右侧参数，等宽字体呈现材质配方。 */
+/** 单个档位行 —— 左侧档名 + 业务落点，右侧参数，等宽字体呈现材质配方。 */
 @Composable
 private fun GlassTierRow(name: String, style: GlassStyle) {
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp),
+            .height(52.dp),
         style = style
     ) {
         Row(
@@ -556,13 +640,20 @@ private fun GlassTierRow(name: String, style: GlassStyle) {
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.labelMedium,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = TierUsageNotes[style.tier] ?: "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = "blur ${style.blurRadius.value.toInt()}dp · tint ${style.tintAlpha} · scrim ${style.scrimAlpha}",
@@ -780,6 +871,18 @@ private fun ChecklistSection() {
             color = pass
         ),
         CheckItem(
+            name = "Noise",
+            status = "PASS",
+            note = "Haze noiseFactor 玻璃颗粒质感",
+            color = pass
+        ),
+        CheckItem(
+            name = "Dynamic theme",
+            status = "PASS",
+            note = "调色板组合期派生自 MaterialTheme，随 Light/Dark 切换",
+            color = pass
+        ),
+        CheckItem(
             name = "Refraction",
             status = "NOT IMPLEMENTED",
             note = "未实现折射位移 —— 拒绝冒充",
@@ -794,7 +897,7 @@ private fun ChecklistSection() {
         CheckItem(
             name = "Performance",
             status = "PASS",
-            note = "单共享源层，无逐帧 Bitmap 分配",
+            note = "静态层与光斑层分离：动画帧仅 2 绘制调用，无逐帧 Bitmap 分配",
             color = pass
         ),
         CheckItem(

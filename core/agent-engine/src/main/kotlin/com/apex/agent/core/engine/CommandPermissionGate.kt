@@ -29,6 +29,25 @@ class CommandPermissionGate(
     private fun normalize(command: String): String =
         command.trim().replace(whitespaceRun, " ")
 
+    // P-修复：`VAR=1 rm -rf /`、`"r"m -rf /`、`env rm ...` 等前缀混淆绕过。
+    // 匹配基准 = 全文子串（捕获嵌入的 pm uninstall / > /dev/ 等）∪
+    // 剥离赋值前缀与引号混淆后的首命令链。
+    private val envAssignmentPrefix = Regex("^[A-Za-z_][A-Za-z0-9_]*=(\\S*\\s+)*")
+    private val quoteChars = charArrayOf('"', '\'', '\\')
+
+    /** 剥离 `VAR=v` 前缀与 token 内引号/转义混淆（如 `"r"m` → `rm`）后的归一化命令。 */
+    private fun stripObfuscation(command: String): String {
+        var stripped = command
+        // 连续剥离多个赋值前缀（VAR=1 FOO=bar rm ...）
+        while (true) {
+            val next = envAssignmentPrefix.replaceFirst(stripped, "")
+            if (next == stripped) break
+            stripped = next
+        }
+        // 移除引号/转义字符（"r"m → rm；不影响子串级高危模式匹配）
+        return stripped.filter { it !in quoteChars }
+    }
+
     private val highRiskPatterns = listOf(
         "rm ",
         "rm -",
@@ -49,6 +68,7 @@ class CommandPermissionGate(
         "su ",
         "su -c",
         "chmod 777",
+        "chmod 0777",
         "chown",
         "mount",
         "umount",
@@ -107,8 +127,11 @@ class CommandPermissionGate(
 
     private fun isHighRisk(command: String): Boolean {
         val lower = command.lowercase()
+        // 双基准：① 原文子串（捕获嵌入链 pm uninstall / > /dev/ 等）
+        //          ② 剥离 VAR= 前缀 + 引号混淆后的文本（防 "r"m / VAR=1 rm 前缀逃逸）
+        val deobfuscated = stripObfuscation(lower)
         return highRiskPatterns.any { pattern ->
-            lower.contains(pattern.lowercase())
+            lower.contains(pattern) || deobfuscated.contains(pattern)
         }
     }
 

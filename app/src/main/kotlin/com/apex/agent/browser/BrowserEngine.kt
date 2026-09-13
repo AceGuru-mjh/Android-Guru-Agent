@@ -334,6 +334,56 @@ class BrowserEngine @Inject constructor(
     @Volatile var lastDialog: String? = null
         private set
 
+    /*
+     * ── chrome 人用界面层的增量接口（P2，全部纯增量、默认行为零变化）──
+     * 供 browser/chrome（浮窗完整浏览器 UI）读写引擎状态；
+     * Agent 自动化路径（BrowserAgentTools）不受任何影响。
+     */
+
+    /** 人/Agent 裁决 JS 弹窗后回写文本（保持「snapshot 注入 Agent 上下文」语义，
+     *  接管链式 WebChromeClient 后替代旧自动 confirm 内的 lastDialog 赋值）。 */
+    fun reportDialogForContext(text: String?) {
+        lastDialog = text
+    }
+
+    /** chrome 层下载入队后回写（保持 browser_download_list 工具可读）。 */
+    fun reportDownload(fileName: String, url: String, dmId: Long) {
+        lastDownload = DownloadRecord(fileName, url, dmId)
+    }
+
+    /** 标签结构只读快照（id, url, title），chrome 层 TabStrip/标签总览的数据源。 */
+    fun tabsSnapshot(): List<Triple<Int, String, String>> =
+        tabs.map { Triple(it.key, it.value.url, it.value.title) }
+
+    /** 浏览历史尾部（地址栏 HISTORY 联想数据源；URL-only）。 */
+    fun recentHistory(limit: Int): List<String> {
+        val list = history.toList()
+        return if (limit >= list.size) list else list.takeLast(limit)
+    }
+
+    /**
+     * 关闭全部标签（chrome 层「关闭全部」命令；逐个销毁与 closeTab 同路）。
+     * 引擎全部标签被关后回到无活动页（activeTabId=0），下次 navigate 自动建页。
+     */
+    fun closeAllTabs() {
+        tabs.keys.toList().forEach { closeTab(it) }
+    }
+
+    /**
+     * 主线程同步建页（chrome UI 命令路径直调；与 suspend [newTab] 行为一致）。
+     * 注意：与 newTab 相同，需在主线程调用。
+     */
+    fun newTabImmediate(url: String?): Int {
+        val id = newTabSync()
+        activeTabId = id
+        url?.let {
+            // 带 URL 建页 = 浏览器被使用（网页搜索/自动化），驱动霓虹球按需出现
+            markBrowserActiveFromHidden()
+            loadUrlInternal(it)
+        }
+        return id
+    }
+
     private fun newTabSync(): Int {
         val id = nextTabId++
         val wv = createWebView()
@@ -409,14 +459,7 @@ class BrowserEngine @Inject constructor(
     // ═════════ 标签页管理 ═════════
 
     suspend fun newTab(url: String? = null): Int = withContext(Dispatchers.Main) {
-        val id = newTabSync()
-        activeTabId = id
-        url?.let {
-            // 带 URL 建页 = 浏览器被使用（网页搜索/自动化），驱动霓虹球按需出现
-            markBrowserActiveFromHidden()
-            loadUrlInternal(it)
-        }
-        id
+        newTabImmediate(url)
     }
 
     fun activeTab(): Tab? = tabs[activeTabId]

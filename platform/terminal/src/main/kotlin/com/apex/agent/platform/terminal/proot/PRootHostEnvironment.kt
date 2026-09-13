@@ -21,6 +21,7 @@ import java.io.File
  *       PROOT_TMP_DIR   proot 自身临时目录
  *       PROOT_LOADER    guest loader（宿主侧 ptrace 注入用）
  *       PROOT_LOADER_32 32 位 guest loader（存在时）
+ *       PROOT_NO_SECCOMP 禁用 seccomp 加速（Ubuntu 24.04/glibc 2.39 兼容性）
  *       LD_LIBRARY_PATH staging 目录 + nativeLibraryDir（libtalloc.so.2 解析）
  *       PATH            Android 系统路径（proot 自身 exec /bin/sh 探针用）
  */
@@ -76,6 +77,13 @@ class PRootHostEnvironment(
         val env = mutableMapOf<String, String>(
             "PROOT_TMP_DIR" to prootTmpDir.absolutePath,
             "PROOT_LOADER" to loaderBinary.absolutePath,
+            // docs/ubuntu-rootfs-t72.md §4：proot 的 seccomp 加速与 Ubuntu 24.04
+            // (glibc 2.39) 冲突 → guest SIGBUS。仓库内所有真实跑过 Ubuntu 的测试
+            // （ProotExecutorProotSmokeTest / UbuntuRootfsEndToEndIntegrationTest /
+            // UbuntuTerminalRuntimeWiringTest）均显式设置此变量，唯独生产链路漏设。
+            // Termux 5.1.107 携带维护补丁（理论上不需要），但真机链路从未验证过 ——
+            // 防御性设置，代价仅是放弃 seccomp 加速（性能略降，兼容性换稳定性）。
+            "PROOT_NO_SECCOMP" to "1",
             "LD_LIBRARY_PATH" to "${stagingDir.absolutePath}:$nativeLibraryDir",
             // proot 自身（宿主侧）需要能 exec /bin/sh 做 rootfs 探针 —— Android PATH。
             "PATH" to "/system/bin:/system/xbin:/vendor/bin:/product/bin"

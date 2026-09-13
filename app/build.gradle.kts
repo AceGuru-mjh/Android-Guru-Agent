@@ -14,7 +14,22 @@ android {
     defaultConfig {
         applicationId = "com.apex.agent"
         minSdk = 26
-        targetSdk = 35
+        // ── 真机红线修复：targetSdk 必须 ≤ 28 ─────────────────────────────
+        // targetSdk ≥ 29 的 app 运行在 SELinux untrusted_app 域，Android 10 起
+        // 该域禁止 execute app_data_file（W^X 强制）：
+        //   - Ubuntu rootfs 解压在 filesDir（TerminalModule: filesDir/rootfs/ubuntu）
+        //   - PRoot guest 的 /bin/bash、/usr/bin/apt-get 等 execve → EACCES
+        //   - guest 动态库 mmap(PROT_EXEC) 同样被拒
+        // → Ubuntu 安装必然失败：下载/解压全成功，死在 RootfsHealthCheck 的
+        //   canExecute()（ROOTFS_INVALID "not executable"）或 bootstrap 的
+        //   apt-get（exec EACCES）。这是 T72-T82 真机链路一直 NOT VERIFIED
+        //   背后的架构级问题，也是"ubuntu 安装不了"的直接根因。
+        // Termux 至今钉 targetSdk 28 正是同因。本项目经 GitHub Releases
+        // 侧载分发，不受 Play targetSdk 政策约束；若未来上架 Play Store，
+        // 需改用 Shizuku/ADB shell 域执行 proot 或 rootfs-as-jniLibs 方案。
+        // 参考：developer.android.com/about/versions/10/privacy/changes
+        //       （"Execute permission for app home directory" 一节）
+        targetSdk = 28
         versionCode = 1
         versionName = "1.0.0"
     }

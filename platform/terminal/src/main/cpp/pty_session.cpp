@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -54,10 +55,39 @@ PtySession::PtySession(int id, const std::vector<std::string>& argv,
     if (pid_ == 0) {
         // ═══ 子进程 ═══
 
-        // 重置信号处理
+        // Termux 修法（termux.c）：fork 自 Java/ART 进程会继承被阻塞的信号掩码
+        //（ART 会屏蔽部分信号），子进程可能因此收不到 SIGTERM/SIGINT。
+        // 全量解除阻塞，确保进程组信号（超时击杀/Ctrl+C）可达。
+        {
+            sigset_t all;
+            sigfillset(&all);
+            sigprocmask(SIG_UNBLOCK, &all, nullptr);
+        }
+
+        // 重置信号处理（ART 可能安装了 handler）
         signal(SIGINT, SIG_DFL);
         signal(SIGTERM, SIG_DFL);
         signal(SIGQUIT, SIG_DFL);
+
+        // 关闭 0/1/2 之外的所有 fd（/proc/self/fd 枚举，Termux 同款）：
+        // app 打开的文件/socket、**其他会话的 PTY master fd** 都会被子进程继承 ——
+        // 泄漏其他会话的 master fd 会让对应 slave 永远读不到 EOF（会话僵而不死）。
+        // close_range 需内核 5.9+（minSdk 26 覆盖不到旧设备），故用 /proc/self/fd。
+        {
+            DIR* dir = opendir("/proc/self/fd");
+            if (dir != nullptr) {
+                const int dirFd = dirfd(dir);
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != nullptr) {
+                    // 目录项非数字（“.”/“..”）时 atoi 返回 0，天然安全（0 不 > 2）。
+                    const int fd = atoi(ent->d_name);
+                    if (fd > 2 && fd != dirFd) {
+                        ::close(fd);  // :: 前缀：避免被成员 close() 遮蔽
+                    }
+                }
+                closedir(dir);
+            }
+        }
 
         // 切换工作目录
         if (!workDir.empty()) {
@@ -109,11 +139,17 @@ PtySession::PtySession(int id, const std::vector<std::string>& argv,
         fcntl(masterFd, F_SETFL, flags | O_NONBLOCK);
     }
 
-    // 设置PTY属性：关闭回显（避免输出重复）
+    // 设置PTY属性：ECHO/ICRNL 决策保留（交互行为已按此打磨）；
+    // Termux 修法：清 IXON/IXOFF —— 防 Ctrl+S 软件流控把输出“锁死”
+    //（用户按到 Ctrl+S 后终端永久停滞的经典坑）；置 IUTF8 ——
+    // 行规程的行编辑/退格按 UTF-8 码点边界处理（CJK 输入不再半个字符地删）。
     struct termios tio{};
     if (tcgetattr(masterFd, &tio) == 0) {
         tio.c_lflag &= ~(ECHO | ECHONL);  // 关闭回显
-        tio.c_iflag &= ~(ICRNL);          // 不转换CR为NL
+        tio.c_iflag &= ~(ICRNL | IXON | IXOFF);  // 不转换CR为NL；关软件流控
+#ifdef IUTF8
+        tio.c_iflag |= IUTF8;
+#endif
         tcsetattr(masterFd, TCSANOW, &tio);
     }
 

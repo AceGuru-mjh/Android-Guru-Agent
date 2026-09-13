@@ -66,9 +66,47 @@ object TerminalModule {
     @Singleton
     fun provideNativePty(): NativePty = JniNativePty()
 
+    /**
+     * 终端策略接线（设置页黑白名单 → LINE 写入策略层）。
+     *
+     * TerminalViewModel 的设置页把用户黑白名单写入 "apex_terminal" prefs
+     * （键 cmd_blacklist / cmd_whitelist，值 = 命令头 token 的小写集合）。
+     * 此前该配置**从未被任何执行路径消费**（设置页是纯装饰）—— 这里通过
+     * [TerminalPolicyImpl] 的 dynamicPolicy 每次检查时实时读取 prefs 接入：
+     *
+     * - 用户名单为空 → 默认 [CommandPolicy]（DEFAULT_DENYLIST + ALLOW_ALL）
+     * - 有黑名单 → 黑名单 **并集** 内置默认危险命令（shutdown/reboot/mkfs/dd/
+     *   halt/poweroff 仍被拦截，用户自定义名单是叠加而非替换）
+     * - 有白名单（非空）→ ALLOWLIST_ONLY：仅白名单内的命令头允许；复杂命令
+     *   （管道/&&/sh -c 等）按 Spec §6 保守拒绝
+     *
+     * 用户在设置页增删条目后无需重启 —— dynamicPolicy 每次检查重新读 prefs。
+     */
     @Provides
     @Singleton
-    fun provideTerminalPolicy(): TerminalPolicy = TerminalPolicyImpl()
+    fun provideTerminalPolicy(@ApplicationContext context: Context): TerminalPolicy {
+        val prefs = context.getSharedPreferences("apex_terminal", Context.MODE_PRIVATE)
+        return TerminalPolicyImpl(
+            dynamicPolicy = {
+                val blacklist = prefs.getStringSet("cmd_blacklist", emptySet()).orEmpty()
+                val whitelist = prefs.getStringSet("cmd_whitelist", emptySet()).orEmpty()
+                if (blacklist.isEmpty() && whitelist.isEmpty()) {
+                    null // 未配置 → 构造期默认 CommandPolicy()
+                } else {
+                    com.apex.agent.platform.terminal.policy.CommandPolicy(
+                        mode = if (whitelist.isNotEmpty())
+                            com.apex.agent.platform.terminal.policy.CommandPolicyMode.ALLOWLIST_ONLY
+                        else
+                            com.apex.agent.platform.terminal.policy.CommandPolicyMode.ALLOW_ALL,
+                        allowlist = whitelist,
+                        // 并集默认危险命令：用户的黑名单叠加内置名单（更安全），
+                        // 用户没配置时这里不会到达（null 分支已回退默认）。
+                        denylist = com.apex.agent.platform.terminal.policy.DefaultCommandPolicy.DEFAULT_DENYLIST + blacklist
+                    )
+                }
+            }
+        )
+    }
 
     /** Persistence store for crash recovery (Spec §39). Stores session JSON in app files dir. */
     @Provides

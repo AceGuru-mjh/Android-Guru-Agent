@@ -102,6 +102,14 @@ class TerminalViewModel @Inject constructor(
     private var pollJob: Job? = null
     private var creating = false
 
+    /**
+     * 交互行缓冲（黑白名单交互拦截用）：镜像 shell readline 当前行文本。
+     * 仅跟踪「纯字符输入 + 回退删除」两种确定性变更；特殊键（方向/历史召回/
+     * Ctrl 组合）使行状态不可知时清空缓冲，下次回车不检查（宁可漏检不误拦）。
+     * 拦截 = 不写入回车，命令停留在 readline 未提交状态。
+     */
+    private val pendingLine = StringBuilder()
+
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
         viewModelScope.launch {
@@ -238,10 +246,31 @@ class TerminalViewModel @Inject constructor(
 
     // ═══════════════════════ 交互终端：输入 / resize ═══════════════════════
 
-    /** 写入用户文本（IME 提交 / 硬件键盘字符），RAW 直通 PTY。 */
+    /** 写入用户文本（IME 提交 / 硬件键盘字符），RAW 直通 PTY。
+     *
+     * 回车（IME 以 \r 文本下发，TerminalRenderer 已把 \n 归一为 \r）视为行提交：
+     * 命中黑白名单 → 拦截整个写入（含回车），命令不执行。
+     */
     fun sendInput(text: String) {
         val sid = _activeSessionId.value ?: return
         if (text.isEmpty()) return
+
+        val newlineIdx = text.indexOfFirst { it == '\r' || it == '\n' }
+        if (newlineIdx >= 0) {
+            val before = text.substring(0, newlineIdx)
+            val candidate = (pendingLine.toString() + before).trim()
+            if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
+                _notice.value = "⛔ 命令已被黑白名单拦截：${candidate.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
+                return // 不写入（含回车）—— readline 行保持未提交；缓冲保留继续同步追加
+            }
+            // 放行：行缓冲重置，回车后的剩余字符属于下一行缓冲
+            pendingLine.setLength(0)
+            val rest = text.substring(newlineIdx + 1)
+            if (rest.isNotEmpty()) pendingLine.append(rest)
+        } else {
+            pendingLine.append(text)
+        }
+
         viewModelScope.launch {
             terminalRuntime.write(sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW, text = text)
                 .onFailure { _notice.value = "输入失败：${it.message?.take(80)}" }
@@ -251,10 +280,25 @@ class TerminalViewModel @Inject constructor(
     /**
      * 发送特殊键：箭头按 DECCKM 编码（ESC O x / ESC [ x），其余经 TerminalKey
      *（InputManager 映射，模式无关）。粘贴按 bracketed-paste 包裹。
+     *
+     * ENTER = 行提交（黑白名单检查，拦截则不写入）；BACKSPACE = 行缓冲退格；
+     * 其余特殊键（方向/历史/TAB…）行状态不可知 → 清空行缓冲（下次回车不检查）。
      */
     fun sendKey(key: TerminalKey) {
         val sid = _activeSessionId.value ?: return
         viewModelScope.launch {
+            when (key) {
+                TerminalKey.ENTER -> {
+                    val candidate = pendingLine.toString().trim()
+                    if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
+                        _notice.value = "⛔ 命令已被黑白名单拦截：${candidate.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
+                        return@launch
+                    }
+                    pendingLine.setLength(0)
+                }
+                TerminalKey.BACKSPACE -> if (pendingLine.isNotEmpty()) pendingLine.setLength(pendingLine.length - 1)
+                else -> pendingLine.setLength(0)
+            }
             if (key == TerminalKey.ARROW_UP || key == TerminalKey.ARROW_DOWN ||
                 key == TerminalKey.ARROW_LEFT || key == TerminalKey.ARROW_RIGHT
             ) {
@@ -273,10 +317,14 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
-    /** Ctrl+字母（工具栏 CTRL 锁存 / 硬件 Ctrl 组合）。 */
+    /** Ctrl+字母（工具栏 CTRL 锁存 / 硬件 Ctrl 组合）。
+     *
+     * Ctrl+C / Ctrl+U 等会终止/清除 readline 当前行 → 行缓冲同步清空。
+     */
     fun sendControlChar(ch: Char) {
         val sid = _activeSessionId.value ?: return
         val bytes = KeySequenceEncoder.controlByte(ch) ?: return
+        pendingLine.setLength(0)
         viewModelScope.launch {
             terminalRuntime.write(
                 sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
@@ -285,10 +333,20 @@ class TerminalViewModel @Inject constructor(
         }
     }
 
-    /** 粘贴（bracketed-paste 感知）。 */
+    /** 粘贴（bracketed-paste 感知）。
+     *
+     * 首行命令命中黑白名单 → 拦截整次粘贴（bracketed-paste OFF 时粘贴即执行，
+     * 必须拦在写入前）；首行检查放行后行缓冲清空（多行粘贴行状态不可知）。
+     */
     fun pasteText(text: String) {
         val sid = _activeSessionId.value ?: return
         if (text.isEmpty()) return
+        val firstLine = text.lineSequence().firstOrNull()?.trim() ?: ""
+        if (firstLine.isNotBlank() && !isCommandAllowed(firstLine)) {
+            _notice.value = "⛔ 粘贴内容首行命中黑白名单：${firstLine.take(40)}（已拦截）"
+            return
+        }
+        pendingLine.setLength(0)
         viewModelScope.launch {
             val bytes = KeySequenceEncoder.encodePaste(
                 text, _renderState.value?.bracketedPaste ?: false
@@ -356,13 +414,21 @@ class TerminalViewModel @Inject constructor(
     fun addWhitelist(cmd: String) = editSet("cmd_whitelist", _whitelist) { add(normalize(cmd)) }
     fun removeWhitelist(cmd: String) = editSet("cmd_whitelist", _whitelist) { remove(normalize(cmd)) }
 
+    /**
+     * 交互输入的命令头检查（与 TerminalModule 动态策略同源的 prefs 数据，
+     * 但仅消费用户名单；交互路径的内置默认危险命令拦截由用户自行把条目
+     * 加入黑名单完成 —— 自己敲的命令接 Termux 哲学：不过滤）。
+     *
+     * 匹配 = 命令头 token 精确等值（与 CommandPolicy 的 token 语义一致，
+     * 消除旧 startsWith 前缀误拦：“rm” 不再误拦 “rmdir...” 的头 token）。
+     */
     fun isCommandAllowed(command: String): Boolean {
         val head = command.trim().substringBefore(' ').lowercase()
         if (head.isEmpty()) return true
-        if (_blacklist.value.any { head == it || command.lowercase().startsWith(it) }) return false
+        if (_blacklist.value.any { head == it }) return false
         val wl = _whitelist.value
         if (wl.isNotEmpty()) {
-            return wl.any { head == it || command.lowercase().startsWith(it) }
+            return head in wl
         }
         return true
     }

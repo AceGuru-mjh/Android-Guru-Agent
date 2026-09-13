@@ -16,9 +16,13 @@ import kotlinx.serialization.json.jsonPrimitive
  * 特性：
  * - 输出长度控制（max_lines / max_chars）
  * - 自动截断 + 提示如何获取更多
- * - 工作目录记忆（cd后后续命令保持在同一目录）
+ * - 工作目录记忆：命令以纯 `cd <dir>` 结尾且执行成功时，后续命令以新目录为
+ *   起始目录（静态解析最后一个 cd 段；`cd -` / 变量路径不做记忆）
  * - 超时保护
  * - 错误输出分离
+ *
+ * 权限通道（自动选最高可用）：Root(`su -c`) > Shizuku(ADB 级 uid=2000) >
+ * 普通shell(仅 app 沙箱)。命令真实执行，失败如实返回退出码与输出。
  */
 class ShellExecuteTool(
     private val executor: suspend (String) -> String

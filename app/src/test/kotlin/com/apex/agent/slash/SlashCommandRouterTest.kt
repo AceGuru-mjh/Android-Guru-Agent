@@ -53,13 +53,17 @@ class SlashCommandRouterTest {
     }
 
     @Test
-    fun `Plugin route has plugin emoji and generic prompt`() {
+    fun `Plugin route has plugin emoji and honest bridge status`() {
         val cmd = SlashCommand.Plugin(id = "pdf_reader")
         val route = SlashCommandRouter.route(cmd)
 
-        assertEquals("📦 调用插件: pdf_reader", route.systemMessage)
+        // 诚实化：工具桥（AIDL → ToolRegistry）未接线，路由词不得指向不存在的
+        // plugin 工具，也不得让模型虚构执行结果。
+        assertEquals("📦 插件: pdf_reader（Agent 工具桥接建设中）", route.systemMessage)
         assertFalse(route.requestGithubConnect)
         assertTrue(route.agentPrompt.contains("/plugin:pdf_reader"))
+        assertTrue(route.agentPrompt.contains("尚未接线"))
+        assertFalse(route.agentPrompt.contains("通过 plugin 工具执行"))
     }
 
     @Test

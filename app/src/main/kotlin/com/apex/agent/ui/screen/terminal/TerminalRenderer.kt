@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -148,6 +149,7 @@ fun TerminalGrid(
 ) {
     val density = LocalDensity.current
     val clipboard = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // ── 字体度量（monospace）：探测字符宽 + 1.25×行高 ──
     val baseStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp)
@@ -194,6 +196,23 @@ fun TerminalGrid(
     val focusRequester = remember { FocusRequester() }
     var imeBuffer by remember { mutableStateOf(TextFieldValue("")) }
     val scope = rememberCoroutineScope()
+
+    /**
+     * 拉起输入法：聚焦隐藏 IME 桥 + 显式 `show()`。
+     *
+     * 只调 `requestFocus()` 在部分设备/输入法上不会弹键盘（焦点到了但 IME 没被请求显示），
+     * 因此这里显式补一次 show()。失败不能炸 UI —— `runCatching` 兜住未挂载等时序异常。
+     */
+    fun showKeyboard() {
+        runCatching { focusRequester.requestFocus() }
+        keyboardController?.show()
+    }
+
+    // 会话就绪（首次拿到渲染快照）后自动聚焦 IME 桥：进入终端即可直接敲命令，
+    // 不必"先点一下碰运气"。仅聚焦一次，避免与用户主动隐藏键盘反复打架。
+    LaunchedEffect(render != null) {
+        if (render != null) runCatching { focusRequester.requestFocus() }
+    }
 
     // 指针 → 行列（滚动偏移 + 行内 cell 宽度步进 —— CJK 对齐）
     fun cellAt(offset: Offset): Pair<Int, Int>? {
@@ -280,6 +299,18 @@ fun TerminalGrid(
                 .fillMaxWidth()
                 .onSizeChanged { viewSize = it }
                 .onPreviewKeyEvent { handleHardwareKey(it) }
+                // 点击整个终端区域（含"终端未启动"占位）都拉起输入法 —— 旧实现只挂在
+                // LazyColumn 上，会话未启动 / 无输出时点哪都没反应。
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            if (selectionActive) {
+                                selectionAnchor = null; selectionHead = null
+                            }
+                            showKeyboard()
+                        }
+                    )
+                }
         ) {
             if (render == null || totalRows == 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -296,16 +327,7 @@ fun TerminalGrid(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (selectionActive) {
-                                        selectionAnchor = null; selectionHead = null
-                                    }
-                                    runCatching { focusRequester.requestFocus() }
-                                }
-                            )
-                        }
+                        // 点击聚焦已上移到外层 Box（覆盖"终端未启动"等无输出场景）
                         .pointerInput(Unit) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { offset ->
@@ -428,6 +450,7 @@ fun TerminalGrid(
             onCtrlToggle = { ctrlLatched = !ctrlLatched },
             onKey = onKey,
             onControl = onControl,
+            onShowKeyboard = ::showKeyboard,
             onPaste = {
                 clipboard.getText()?.text?.let { onPaste(it) }
             }
@@ -606,6 +629,7 @@ private fun KeyToolbar(
     onCtrlToggle: () -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
+    onShowKeyboard: () -> Unit,
     onPaste: () -> Unit
 ) {
     Row(
@@ -617,6 +641,8 @@ private fun KeyToolbar(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 显式拉起输入法：触屏上"点一下没反应"的兜底入口
+        ToolbarKey("⌨") { onShowKeyboard() }
         ToolbarKey("ESC") { onKey(TerminalKey.ESC) }
         ToolbarKey("TAB") { onKey(TerminalKey.TAB) }
         ToolbarKey(

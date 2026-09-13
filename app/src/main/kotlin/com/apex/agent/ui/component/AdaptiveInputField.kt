@@ -5,9 +5,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,18 +56,24 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 /**
- * 自适应输入框 + 手势快捷键系统。
+ * 自适应输入框。
  *
- * 创新点：
+ * 特性：
  * 1. 根据内容自动扩展行数（1 → 最大 5 行）；
  * 2. 长文本（>200 字符）时显示字符计数；
- * 3. 双击触发全屏编辑模式（适合编辑长 prompt / 代码片段）；
+ * 3. 全屏编辑按钮（常显，适合编辑长 prompt / 代码片段）；
  * 4. 全屏模式支持 IME action 完成。
  *
- * 推理依据：
- * - 当前 `maxLines = 5` 对复杂多轮指令（代码片段、多行 prompt）不够；
- * - 固定高度在小屏幕上浪费空间，自适应更高效；
- * - 双击全屏是 Telegram / 微信等成熟 IM 应用的标准体验。
+ * ## 修复：点击输入框不弹输入法
+ *
+ * 旧实现在 `OutlinedTextField` 上挂了 `.combinedClickable(onClick = {}, onDoubleClick = …)`：
+ * 点击手势会被 clickable **消费**，事件永远传不到内部的文本输入节点 —— 文本框拿不到
+ * 焦点，`InputConnection` 不建立，**输入法永远不弹出**，光标也无法定位。
+ * 一句话：为了一个双击手势，把文本输入最基本的能力弄没了。
+ *
+ * 现在彻底移除该 clickable，交回文本框原生点击处理（聚焦 + 弹键盘 + 定位光标）；
+ * "双击进全屏"改为常显的全屏按钮（文本框内双击本就是选中单词的标准手势，
+ * 抢占它会误伤选词）。
  *
  * @param value 输入文本
  * @param onValueChange 文本变化回调
@@ -77,7 +81,6 @@ import androidx.compose.ui.window.DialogProperties
  * @param placeholder 占位文本
  * @param focusRequester 焦点请求器（可选，外部用于自动聚焦）
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AdaptiveInputField(
     value: String,
@@ -112,19 +115,11 @@ fun AdaptiveInputField(
             value = value,
             onValueChange = onValueChange,
             interactionSource = interactionSource,
+            // 不再叠加 clickable —— 交回文本框原生点击处理（聚焦 / 弹输入法 / 定位光标）
             modifier = Modifier
                 .fillMaxWidth()
                 .background(fieldBackground, RoundedCornerShape(8.dp))
-                .focusRequester(focusRequester)
-                .combinedClickable(
-                    interactionSource = interactionSource,
-                    indication = null,
-                    onClick = {},
-                    onDoubleClick = {
-                        // 双击触发全屏编辑（无门槛：短文本双击也应可发现该手势）
-                        isFullscreen = true
-                    }
-                ),
+                .focusRequester(focusRequester),
             placeholder = placeholder,
             maxLines = dynamicMaxLines,
             minLines = 1,
@@ -162,23 +157,17 @@ fun AdaptiveInputField(
                             modifier = Modifier.padding(end = 4.dp)
                         )
                     }
-                    // 全屏编辑按钮（仅在多行内容时显示）
-                    AnimatedVisibility(
-                        visible = value.count { it == '\n' } > 1 || value.length > 100,
-                        enter = fadeIn(),
-                        exit = fadeOut()
+                    // 全屏编辑按钮（常显 —— 原「双击进全屏」手势已移除，见类 KDoc）
+                    IconButton(
+                        onClick = { isFullscreen = true },
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        IconButton(
-                            onClick = { isFullscreen = true },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Fullscreen,
-                                contentDescription = "全屏编辑",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Icon(
+                            Icons.Default.Fullscreen,
+                            contentDescription = "全屏编辑",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

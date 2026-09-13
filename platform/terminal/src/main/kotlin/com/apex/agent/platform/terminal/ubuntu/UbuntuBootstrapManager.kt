@@ -4,6 +4,7 @@ import com.apex.agent.platform.terminal.errors.LinuxEnvironmentError
 import com.apex.agent.platform.terminal.linux.RootfsDescriptor
 import com.apex.agent.platform.terminal.network.LinuxNetworkProbe
 import com.apex.agent.platform.terminal.pkg.LinuxPackageManager
+import com.apex.agent.platform.terminal.pkg.PackageInstallOptions
 import com.apex.agent.platform.terminal.pkg.PackageSpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -237,7 +238,13 @@ class UbuntuBootstrapManager(
         // ── 5. BASE_PACKAGES ──
         if (force || !evidence.containsKey(BootstrapState.BASE_PACKAGES.name)) {
             stageStart(BootstrapState.BASE_PACKAGES, "installing base packages: ${baseProfile.essential}")
-            val installResult = aptManager.install(baseProfile.essential.map { PackageSpec(it) })
+            // --no-install-recommends：essential 已显式列出 24 个包；默认带 recommends
+            // 时 python3/git 的推荐依赖会把下载量从 ~100MB 拉到 200-500MB，在慢网络
+            // （大陆 → 官方源）下几乎必然拖垮 bootstrap。推荐包留给 Agent/用户显式安装。
+            val installResult = aptManager.install(
+                baseProfile.essential.map { PackageSpec(it) },
+                PackageInstallOptions(noInstallRecommends = true)
+            )
             if (installResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
                 val reason = installResult.error?.message ?: installResult.result?.stderr?.take(500) ?: "base package install failed"
                 return stageFail(BootstrapState.BASE_PACKAGES, reason)

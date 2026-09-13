@@ -3,6 +3,11 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Ubuntu bootstrap 依赖 ConnectivityManager.getLinkProperties() 读取系统 DNS
+         注入 guest resolv.conf（TerminalModule.resolveAndroidDnsServers）。缺此权限时
+         runCatching 静默吞掉 SecurityException → DNS 注入为空 → 兜底公共解析器，
+         在大陆环境下 apt update 直接死于 DNS。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- P0 fix：CyberNeonBallManager.triggerVibration() 使用 Vibrator，未声明此权限时
          NEED_HUMAN 状态触发震动会抛 SecurityException（主线程未捕获 → 进程崩溃） -->
     <uses-permission android:name="android.permission.VIBRATE" />

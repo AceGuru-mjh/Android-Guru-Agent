@@ -100,9 +100,11 @@ data class CommandResult(
             channel: String,
             stderrSeparated: Boolean,
             envApplied: Boolean,
-            error: String
+            error: String,
+            /** 失败前的真实耗时（su/Shizuku 授权弹窗可能占据整段时间，不能恒报 0）。 */
+            durationMs: Long = 0
         ): CommandResult = CommandResult(
-            stdout = "", stderr = error, exitCode = null, durationMs = 0,
+            stdout = "", stderr = error, exitCode = null, durationMs = durationMs,
             truncated = false, timedOut = false, killed = false,
             stdoutBytesTotal = 0, stderrBytesTotal = 0,
             stdoutTruncated = false, stderrTruncated = false,

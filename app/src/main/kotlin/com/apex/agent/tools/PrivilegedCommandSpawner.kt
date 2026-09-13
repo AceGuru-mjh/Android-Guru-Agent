@@ -30,8 +30,20 @@ class PrivilegedCommandSpawner : CommandSpawner {
 
     private val localSh = ProcessBuilderSpawner(channel = "local-sh", shell = "/system/bin/sh")
 
-    /** 每次执行前探测（channel 字段用于结果上报由 delegate 决定）。 */
-    private fun delegate(): CommandSpawner {
+    /**
+     * 最近一次 [spawn] 实际选中的通道。
+     *
+     * 旧实现让 [channel] / [supportsEnv] 各自调一次探测 —— 一次 `terminal.exec`
+     * 至少要探测 3 次（引擎读 channel、读 supportsEnv、spawn 再选一次），而探测包含
+     * su 文件扫描 + `Shizuku.pingBinder()` 的 **binder IPC**：既浪费，又可能在两次探测
+     * 之间授权状态变化，导致「上报的通道 ≠ 实际执行的通道」这种不诚实结果。
+     * 现在探测只在 [spawn] 里做一次，并记住结果供上报使用。
+     */
+    @Volatile
+    private var active: CommandSpawner = localSh
+
+    /** 每次 spawn 前探测一次（su/Shizuku 授权可能随时变化）。 */
+    private fun resolve(): CommandSpawner {
         if (PrivilegeDetector.detectRoot()) return suSpawner
         if (ShizukuCommandExecutor.isAvailable() && ShizukuCommandExecutor.hasPermission()) {
             return shizukuSpawner
@@ -40,12 +52,16 @@ class PrivilegedCommandSpawner : CommandSpawner {
     }
 
     override val channel: String
-        get() = delegate().channel
+        get() = active.channel
 
     override val supportsEnv: Boolean
-        get() = delegate().supportsEnv
+        get() = active.supportsEnv
 
-    override fun spawn(request: SpawnRequest): SpawnedCommand = delegate().spawn(request)
+    override fun spawn(request: SpawnRequest): SpawnedCommand {
+        val target = resolve()
+        active = target
+        return target.spawn(request)
+    }
 
     // ── Root 通道：su -c（流分离：子进程继承 su 的两条 pipe）──
 

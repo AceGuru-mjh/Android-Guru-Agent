@@ -300,7 +300,11 @@ object ToolModule {
         // 与 shell_execute 共享同一门禁（commandPermissionGate）与同一 cd 工作目录记忆
         //（shellWorkDir）：Agent 换工具不换语义。通道选择 Root > Shizuku > app-shell
         //（PrivilegedCommandSpawner），pipe 形态分离采集两流 + 真实 waitpid 退出码。
-        registry.register(SafeAgentTool(TerminalExecTool(
+        //
+        // 必须经 TerminalToolAdapter：TerminalExecTool 实现的是 platform:terminal 的
+        // TerminalTool（模块边界不允许它依赖 core:tool-registry 的 AgentTool），
+        // 直接塞进 SafeAgentTool(AgentTool) 无法编译。
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalExecTool(
             engine = ExecEngine(PrivilegedCommandSpawner()),
             approvalGate = { cmd ->
                 if (commandPermissionGate.ensureAllowed(cmd)) null
@@ -308,8 +312,7 @@ object ToolModule {
             },
             defaultCwd = { shellWorkDir.currentDir() },
             onCommandSucceeded = { cmd, _ -> shellWorkDir.updateAfterSuccess(cmd) }
-        )))
-
+        ))))
 
         // ═══ Agent 主动提问工具 ═══
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))

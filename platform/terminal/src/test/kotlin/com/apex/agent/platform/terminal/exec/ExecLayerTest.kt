@@ -54,6 +54,35 @@ class ExecLayerTest {
         assertEquals("100%\n", r.text)
     }
 
+    @Test fun `trailing lone CR keeps the line content`() {
+        // 回归锁：旧实现把孤立 \r 当"丢弃本行内容"，`abc\r` 被吞成空串。
+        // 真实终端的回车只是把光标移回第 0 列，并不擦除字符。
+        val r = AnsiSanitizer.sanitize("abc\r", AnsiMode.STRIP)
+        assertEquals("abc", r.text)
+    }
+
+    @Test fun `short frame overwrites in place without erasing the tail`() {
+        // 回车的真实语义是覆盖写：短帧只覆盖自己的长度，长帧残留的尾部原样保留
+        val r = AnsiSanitizer.sanitize("abcdef\rxy", AnsiMode.STRIP)
+        assertEquals("xycdef", r.text)
+    }
+
+    @Test fun `EL to end of line removes progress residue`() {
+        // \r\033[K = 回行首 + 擦到行尾（apt/pip 的标准写法）——残影必须真正被擦掉
+        val r = AnsiSanitizer.sanitize("abcdef\r\u001B[Kxy", AnsiMode.STRIP)
+        assertEquals("xy", r.text)
+    }
+
+    @Test fun `EL mode 2 clears the whole line`() {
+        val r = AnsiSanitizer.sanitize("abcdef\r\u001B[2Kxy", AnsiMode.STRIP)
+        assertEquals("xy", r.text)
+    }
+
+    @Test fun `CR does not join two logical lines`() {
+        val r = AnsiSanitizer.sanitize("a\rb\nc", AnsiMode.STRIP)
+        assertEquals("b\nc", r.text)
+    }
+
     @Test fun `C0 control chars stripped except tab`() {
         val r = AnsiSanitizer.sanitize("a\u0007b\u0008c\td", AnsiMode.STRIP)
         assertEquals("abc\td", r.text)
@@ -304,6 +333,39 @@ class ExecLayerTest {
         assertEquals("out-part\nerr-part\n", r.stdout)
         assertEquals("", r.stderr)
         assertFalse(r.stderrSeparated)
+    }
+
+    @Test fun `unfinished drain is reported as truncated instead of silently partial`() = runBlocking<Unit> {
+        // 典型现场：命令把后台孙进程留在原地，孙进程继续持有 stdout —— 进程已退出
+        // （waitFor=true），但管道迟迟不 EOF。宽限内收尾失败时，拿到的是**不完整**
+        // 输出，必须如实进 truncated，绝不能返回"看起来完整"的结果。
+        val spawner = object : CommandSpawner {
+            override val channel = "slow-pipe-fake"
+            override val supportsEnv = false
+            override fun spawn(request: SpawnRequest): SpawnedCommand = object : SpawnedCommand {
+                override val stdout: java.io.InputStream =
+                    object : ByteArrayInputStream("partial".toByteArray()) {
+                        override fun read(b: ByteArray, off: Int, len: Int): Int {
+                            val n = super.read(b, off, len)
+                            if (n < 0) Thread.sleep(1_500) // 模拟孙进程继续持有管道，迟迟不 EOF
+                            return n
+                        }
+                    }
+                override val stderr: java.io.InputStream? = null
+                override fun waitFor(timeoutMs: Long) = true
+                override fun exitValue() = 0
+                override fun destroy() {}
+            }
+        }
+        val engine = ExecEngine(
+            spawner,
+            Dispatchers.IO,
+            ExecEngine.CaptureConfig(postKillDrainGraceMs = 300)
+        )
+        val r = engine.execute(ExecRequest(command = "x"))
+        assertEquals("partial", r.stdout)
+        assertTrue("未收尾的采集必须上报截断，而不是静默返回部分输出", r.stdoutTruncated)
+        assertTrue(r.truncated)
     }
 
     // ═══════════ 工具 ═══════════

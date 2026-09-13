@@ -79,7 +79,7 @@ class TerminalExecTool(
     """.trimIndent()
 
     override val parametersSchema: String = """
-        {"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"cwd":{"type":"string","description":"Working directory (default: remembered cd dir)"},"timeout_ms":{"type":"integer","default":30000,"description":"Kill after this many ms (1000..600000)"},"max_output_chars":{"type":"integer","default":12000},"max_error_chars":{"type":"integer","default":6000},"head_lines":{"type":"integer","default":60},"tail_lines":{"type":"integer","default":60},"ansi":{"type":"string","enum":["strip","keep"],"default":"strip"},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Extra env vars (local-sh channel only)"}},"required":["command"]}
+        {"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"cwd":{"type":"string","description":"Working directory (default: remembered cd dir)"},"timeout_ms":{"type":"integer","default":30000,"description":"Kill after this many ms (1000..600000)"},"max_output_chars":{"type":"integer","default":12000},"max_error_chars":{"type":"integer","default":6000},"head_lines":{"type":"integer","default":60},"tail_lines":{"type":"integer","default":60},"ansi":{"type":"string","enum":["strip","keep"],"default":"strip"},"env":{"type":"object","additionalProperties":{"type":"string"},"description":"Extra env vars; honored on local-sh/shizuku channels (env_applied=false means the channel could not pass them, e.g. su -c)"}},"required":["command"]}
     """.trimIndent()
 
     suspend fun execute(input: Input): Output {

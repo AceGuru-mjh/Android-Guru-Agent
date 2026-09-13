@@ -29,20 +29,14 @@ class OutputLimiter(
 
     fun limit(text: String): Limited {
         val total = text.length
-        if (total <= maxChars) {
-            // 短路径：只有行数超限才做行折叠
-            val lines = countLines(text)
-            if (lines <= headLines + tailLines) {
-                return Limited(text, truncated = false, totalChars = total, omittedLines = 0)
-            }
-        }
-
-        val lines = text.split('\n')
+        // 单次切分同时得到行数（旧实现先 countLines 再 split：两遍扫描 + 一次多余的全量遍历）
+        val split = text.split('\n')
         // split 产生尾随空串（文本以 \n 结尾时）—— 不计为真实行
-        val realLines = if (lines.isNotEmpty() && lines.last().isEmpty()) lines.dropLast(1) else lines
+        val realLines = if (split.isNotEmpty() && split.last().isEmpty()) split.dropLast(1) else split
         val lineCount = realLines.size
 
-        if (lineCount <= headLines + tailLines && total <= maxChars) {
+        // 短路径：字符与行数都在预算内 → 原样返回（保留尾随 \n，不做 join 重建）
+        if (total <= maxChars && lineCount <= headLines + tailLines) {
             return Limited(text, truncated = false, totalChars = total, omittedLines = 0)
         }
 
@@ -72,16 +66,5 @@ class OutputLimiter(
             append(tailPart)
         }
         return Limited(joined, truncated = true, totalChars = total, omittedLines = omitted)
-    }
-
-    private fun countLines(text: String): Int {
-        var count = 1
-        var seenAny = false
-        for (c in text) {
-            if (c == '\n') count++
-            seenAny = true
-        }
-        if (!seenAny) return 0
-        return if (text.isNotEmpty() && text.last() == '\n') count - 1 else count
     }
 }

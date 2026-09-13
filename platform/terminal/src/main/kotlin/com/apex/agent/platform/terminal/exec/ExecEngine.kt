@@ -60,11 +60,14 @@ class ExecEngine(
             spawner.spawn(SpawnRequest(request.command, request.cwd, request.env))
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
+            // 失败也要如实测量耗时：spawn 卡在权限弹窗/超时上时，"0ms" 会误导 Agent
+            val failedMs = (System.nanoTime() - startedAt) / 1_000_000
             return@withContext CommandResult.spawnFailure(
                 request = request,
                 channel = spawner.channel,
                 stderrSeparated = true,
                 envApplied = spawner.supportsEnv,
+                durationMs = failedMs,
                 error = "spawn failed (${spawner.channel}): ${e.message ?: e.javaClass.simpleName}"
             )
         }
@@ -89,16 +92,20 @@ class ExecEngine(
             // ── 等待退出或超时（runInterruptible：协程取消 → 线程中断 → finally 杀进程）──
             val waitTimeout = if (request.timeoutMs <= 0) Long.MAX_VALUE / 2 else request.timeoutMs
             exited = runInterruptible { spawned.waitFor(waitTimeout) }
-            if (!exited) {
+            if (exited) {
+                exitCode = runCatching { spawned.exitValue() }.getOrDefault(-1)
+            } else {
                 timedOut = true
                 spawned.destroy()
-                // 强杀后 pipes 关闭 → 排空协程自然收尾；限时宽限防个别驱动不关 pipe
-                withTimeoutOrNull(capture.postKillDrainGraceMs) { drainJobs.joinAll() }
                 exitCode = -1
-            } else {
-                exitCode = runCatching { spawned.exitValue() }.getOrDefault(-1)
-                // 正常退出也等排空（EOF 已到，join 立即返回）
-                withTimeoutOrNull(capture.postKillDrainGraceMs) { drainJobs.joinAll() }
+            }
+            // 排空收尾：正常退出时 EOF 已到（join 立即返回）；强杀后管道关闭也会很快结束。
+            // 宽限内仍未结束的典型场景是「命令把后台孙进程留在原地，孙进程继续持有 stdout」
+            // —— 此时拿到的是**不完整**输出，必须如实标记，绝不能假装完整。
+            val drained = withTimeoutOrNull(capture.postKillDrainGraceMs) { drainJobs.joinAll() } != null
+            if (!drained) {
+                stdoutCapture.markIncomplete()
+                stderrCapture.markIncomplete()
             }
         } finally {
             if (!exited) runCatching { spawned.destroy() }
@@ -194,6 +201,24 @@ class ExecEngine(
         private val tail = TailRing(tailCap)
         private var total: Long = 0
 
+        /**
+         * 采集未收尾（排空协程超期未结束）：读到的字节数小于进程真实输出。
+         * 与"中间被环形缓冲挤掉"的 gap 不同 —— 这是**尾巴缺失**，同样进 truncated 上报。
+         */
+        @Volatile
+        private var incomplete = false
+
+        fun markIncomplete() {
+            incomplete = true
+        }
+
+        /**
+         * 单写者（排空协程）；但超时路径的 `postKillDrainGraceMs` 宽限用尽时，排空线程
+         * 可能仍阻塞在 `read()` 里 —— 此时 [materialize] 会与写入并发访问
+         * `ByteArrayOutputStream`/`TailRing`（非线程安全）。加监视器锁，保证快照
+         * 永远读到一个自洽的状态，而不是撕裂的字节流。
+         */
+        @Synchronized
         fun write(src: ByteArray, off: Int, len: Int) {
             total += len
             if (head.size() < headCap) {
@@ -204,6 +229,7 @@ class ExecEngine(
             tail.write(src, off, len)
         }
 
+        @Synchronized
         fun materialize(): CapturedText {
             val headBytes = head.toByteArray()
             val tailBytes = tail.toByteArray()
@@ -228,7 +254,7 @@ class ExecEngine(
                     }
                 }
             }
-            val gap = total > headCap && (total - tailBytes.size) > headBytes.size
+            val gap = incomplete || (total > headCap && (total - tailBytes.size) > headBytes.size)
             return CapturedText(text, total, gap)
         }
     }

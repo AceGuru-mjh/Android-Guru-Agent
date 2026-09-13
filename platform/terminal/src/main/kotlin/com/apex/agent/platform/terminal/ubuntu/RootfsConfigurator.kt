@@ -224,10 +224,13 @@ class RootfsConfigurator(
         }
         warnings.add(
             "resolv.conf: no injected DNS and no host /etc/resolv.conf — " +
-                "falling back to public resolvers (8.8.8.8, 1.1.1.1); " +
+                "falling back to public resolvers (223.5.5.5, 119.29.29.29, 8.8.8.8, 1.1.1.1); " +
                 "production Android should inject system DNS at DI time"
         )
-        return listOf("8.8.8.8", "1.1.1.1")
+        // 顺序即优先级：glibc/ICU resolver 从首个开始试。223.5.5.5（AliDNS）与
+        // 119.29.29.29（DNSPod）均为 anycast，全球可达且在中国大陆质量稳定；
+        // 8.8.8.8/1.1.1.1 在大陆常被墙/污染 —— 放在末尾仅作全球兜底。
+        return listOf("223.5.5.5", "119.29.29.29", "8.8.8.8", "1.1.1.1")
     }
 
     private fun hasContent(f: File): Boolean = f.isFile && f.length() > 0

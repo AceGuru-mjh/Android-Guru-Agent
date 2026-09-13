@@ -735,8 +735,15 @@ class UbuntuAptPackageManager(
     )
 
     companion object {
-        /** apt 操作默认超时（apt update/install 在慢网络下可能数分钟）。 */
-        const val DEFAULT_APT_TIMEOUT_MS: Long = 180_000L
+        /**
+         * apt 操作默认超时。180s 在慢网络（尤其中国大陆 → ports.ubuntu.com 官方源）
+         * 下普遍不够：apt update 需拉取 InRelease + 索引 20-40MB，bootstrap 的
+         * base packages 安装更是 200MB+ 级下载 —— 180s 必超时（TIMEOUT → bootstrap
+         * FAILED@APT_UPDATE/BASE_PACKAGES）。提升到 10 分钟与 ensureReady 的
+         * 15 分钟总预算（UbuntuLifecycleCoordinator.DEFAULT_ENSURE_TIMEOUT_MS）对齐；
+         * 超时只惩罚挂死，正常慢速下载不会误杀。
+         */
+        const val DEFAULT_APT_TIMEOUT_MS: Long = 600_000L
         /** apt 操作的 guest cwd（/root —— 持久 home，可写）。 */
         const val GUEST_APT_CWD = "/root"
     }

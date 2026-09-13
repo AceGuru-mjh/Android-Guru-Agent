@@ -113,6 +113,7 @@ fun TerminalRenderer(
         render = render,
         fontSize = settings.fontSize,
         monochrome = settings.monochrome,
+        showKeybar = settings.showKeybar,
         onText = viewModel::sendInput,
         onKey = viewModel::sendKey,
         onControl = viewModel::sendControlChar,
@@ -140,6 +141,7 @@ fun TerminalGrid(
     render: TerminalRenderSnapshot?,
     fontSize: Int,
     monochrome: Boolean,
+    showKeybar: Boolean = true,
     onText: (String) -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
@@ -444,17 +446,19 @@ fun TerminalGrid(
             )
         }
 
-        // ── 特殊键工具栏（触屏必备；横向滚动）──
-        KeyToolbar(
-            ctrlActive = ctrlLatched,
-            onCtrlToggle = { ctrlLatched = !ctrlLatched },
-            onKey = onKey,
-            onControl = onControl,
-            onShowKeyboard = ::showKeyboard,
-            onPaste = {
-                clipboard.getText()?.text?.let { onPaste(it) }
-            }
-        )
+        // ── 特殊键工具栏（触屏必备；横向滚动；可在终端设置中隐藏换显示区）──
+        if (showKeybar) {
+            KeyToolbar(
+                ctrlActive = ctrlLatched,
+                onCtrlToggle = { ctrlLatched = !ctrlLatched },
+                onKey = onKey,
+                onControl = onControl,
+                onShowKeyboard = ::showKeyboard,
+                onPaste = {
+                    clipboard.getText()?.text?.let { onPaste(it) }
+                }
+            )
+        }
     }
 }
 

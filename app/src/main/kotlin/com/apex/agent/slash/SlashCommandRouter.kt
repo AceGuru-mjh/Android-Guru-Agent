@@ -118,10 +118,13 @@ object SlashCommandRouter {
             sourceName = command.id
         )
         is SlashCommand.Plugin -> SlashCommandRoute(
-            systemMessage = "📦 调用插件: ${command.id}",
+            // 诚实化：PluginManager.registerPluginTools 仍是 TODO（AIDL 接口未定型），
+            // ToolRegistry 中不存在 plugin 工具 —— 原文案会让模型寻找不存在的工具并
+            // 可能虚构执行结果。改为如实告知，禁止伪造。
+            systemMessage = "📦 插件: ${command.id}（Agent 工具桥接建设中）",
             agentPrompt = command.buildAgentPrompt(
-                verb = "请根据此指令执行对应操作，通过 plugin 工具执行",
-                toolHint = "plugin"
+                verb = "插件 ${command.id} 已加载并验证连通，但 Agent 侧插件工具桥（AIDL → ToolRegistry）尚未接线 —— 请如实告知用户当前版本暂不能执行插件工具，不要虚构执行结果",
+                toolHint = "插件运行时"
             ),
             routeKind = "plugin",
             sourceName = command.id

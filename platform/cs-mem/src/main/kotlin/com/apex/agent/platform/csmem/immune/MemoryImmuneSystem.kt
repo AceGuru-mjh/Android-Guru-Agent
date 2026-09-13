@@ -144,6 +144,12 @@ class MemoryImmuneSystem @Inject constructor(
     }
 
     /**
+     * 当前隔离名单规模（记忆页「隔离区」计数展示入口）。
+     * 返回被隔离的 UI 指纹条数（0 = 免疫系统未触发过隔离 —— 正常态）。
+     */
+    fun quarantinedCount(): Int = quarantineSet.size
+
+    /**
      * 清除隔离名单（App 更新后可重新评估）。
      */
     fun clearQuarantine() {

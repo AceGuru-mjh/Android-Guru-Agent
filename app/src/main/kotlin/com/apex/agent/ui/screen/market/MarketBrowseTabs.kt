@@ -50,7 +50,7 @@ internal fun BrowsePluginsTab(state: MarketUiState, viewModel: MarketViewModel) 
         emptyHint = "未发现已安装的 Apex 插件（安装包含 PLUGIN intent 服务的插件 APK 后自动出现）",
         header = {
             item {
-                MarketHeader("通过 PLUGIN intent 服务发现的 Apex 插件，加载后可用 /plugin:<包名> 调用。")
+                MarketHeader("通过 PLUGIN intent 服务发现的 Apex 插件。加载会验证插件 APK 与服务连通；Agent 工具桥接建设中（暂不能通过 /plugin: 执行工具）。")
             }
         }
     ) { plugin ->

@@ -469,6 +469,8 @@ object TerminalModule {
                     detail = rr.verification?.summary
                 )
             } },
+            // removeRootfs() 后复位 bootstrap.json —— 防重装时 ALREADY_READY 短路跳过引导。
+            bootstrapResetFn = { bootstrap.reset().getOrThrow() },
             target = target
         )
     }

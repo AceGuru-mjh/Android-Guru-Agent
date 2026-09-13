@@ -36,6 +36,8 @@ android {
 
     buildFeatures {
         compose = true
+        // 关于页：版本号（versionName/Code）经 BuildConfig 暴露给设置页
+        buildConfig = true
     }
 
     compileOptions {
@@ -142,6 +144,9 @@ dependencies {
     implementation(libs.easyfloat)
     // Liquid Glass UI System 底层引擎 —— 仅 ui/glass 包内部使用，业务层经 Glass 组件 API 访问
     implementation(libs.haze)
+    // Vico 开源图表库（稳定线 1.13.1）—— 任务历史页「近 7 日任务量」柱状图 +
+    // 记忆页类型分布；只引 compose 核心（主题色手动映射，不引 m2/m3 主题模块）
+    implementation(libs.vico.compose)
     // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
     implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
 

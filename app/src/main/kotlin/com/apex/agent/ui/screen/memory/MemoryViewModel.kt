@@ -20,11 +20,15 @@ import javax.inject.Inject
  * 记忆可视化页 ViewModel —— 提供 Episode / 宏 / 节点检索与管理。
  *
  * 只读为主；删除 Episode 为破坏性操作，由 UI 二次确认后调用 [deleteEpisode]。
+ * T76 审计补齐：梦境巩固（DreamRenderer.dreamNow）与免疫系统隔离区
+ * （MemoryImmuneSystem）能力此前无 UI 入口 —— 本 VM 接线。
  */
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class MemoryViewModel @Inject constructor(
-    private val store: MemoryGraphStore
+    private val store: MemoryGraphStore,
+    private val dreamRenderer: com.apex.agent.platform.csmem.dream.DreamRenderer,
+    private val immuneSystem: com.apex.agent.platform.csmem.immune.MemoryImmuneSystem
 ) : ViewModel() {
 
     data class MemoryStats(
@@ -119,4 +123,45 @@ class MemoryViewModel @Inject constructor(
     }
 
     fun clearMessage() { _lastMessage.value = null }
+
+    // ═══ 记忆健康：梦境巩固 + 免疫隔离区（T76 补齐入口）═══
+
+    /** 隔离区规模（被隔离的可疑 UI 指纹条数；0 = 正常态）。 */
+    private val _quarantinedCount = MutableStateFlow(0)
+    val quarantinedCount: StateFlow<Int> = _quarantinedCount.asStateFlow()
+
+    /** 梦境整理进行中。 */
+    private val _dreamRunning = MutableStateFlow(false)
+    val dreamRunning: StateFlow<Boolean> = _dreamRunning.asStateFlow()
+
+    init { refreshQuarantineCount() }
+
+    fun refreshQuarantineCount() {
+        _quarantinedCount.value = immuneSystem.quarantinedCount()
+    }
+
+    /** 立即梦境整理：能量衰减 + 修剪 + 宏优化（后台执行，完成后刷新全部数据）。 */
+    fun dreamNow() {
+        if (_dreamRunning.value) return
+        _dreamRunning.value = true
+        dreamRenderer.dreamNow { result ->
+            _dreamRunning.value = false
+            _lastMessage.value = if (result.errors.isNotEmpty()) {
+                "梦境整理完成（${result.errors.size} 项异常）：${result.errors.first().take(80)}"
+            } else {
+                "梦境整理完成：能量已衰减、修剪 ${result.prunedCount} 条、陈旧宏 ${result.staleMacroCount} 条"
+            }
+            refresh()
+        }
+    }
+
+    /** 清除免疫隔离名单（App 更新后可重新评估）。 */
+    fun clearQuarantine() {
+        runCatching { immuneSystem.clearQuarantine() }
+            .onSuccess {
+                _quarantinedCount.value = 0
+                _lastMessage.value = "隔离区已清空"
+            }
+            .onFailure { _lastMessage.value = "清除隔离区失败：${it.message}" }
+    }
 }

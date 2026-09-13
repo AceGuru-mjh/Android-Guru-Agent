@@ -95,11 +95,18 @@ fun TerminalScreen(
     val activeId by viewModel.activeSessionId.collectAsStateWithLifecycle()
     val semantic by viewModel.semanticState.collectAsStateWithLifecycle()
     val ubuntu by viewModel.ubuntuLifecycleState.collectAsStateWithLifecycle()
+    val ubuntuProgress by viewModel.ubuntuProgress.collectAsStateWithLifecycle()
+    val rootfsSize by viewModel.rootfsSize.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showNewSessionDialog by remember { mutableStateOf(false) }
+    var showEnvironmentCenter by remember { mutableStateOf(false) }
+    // 环境中心打开时刷新一次占用（安装/删除后状态驱动刷新，这里兑底）
+    LaunchedEffect(showEnvironmentCenter) {
+        if (showEnvironmentCenter) viewModel.refreshRootfsSize()
+    }
 
     // 反馈条自动消隐
     LaunchedEffect(notice) {
@@ -121,13 +128,6 @@ fun TerminalScreen(
                 onRemoveBlack = viewModel::removeBlacklist,
                 onAddWhite = viewModel::addWhitelist,
                 onRemoveWhite = viewModel::removeWhitelist,
-                useMirror = useMirror,
-                onToggleMirror = viewModel::setUseMirror,
-                depItems = viewModel.depItems,
-                install = install,
-                onInstallDep = viewModel::installDep,
-                onInstallAll = viewModel::installAll,
-                onInstallAndroid = viewModel::installAndroidOnly,
                 onClose = { scope.launch { drawerState.close() } }
             )
         }
@@ -143,9 +143,13 @@ fun TerminalScreen(
                         }
                     },
                     actions = {
-                        // 终端专属设置抽屉入口（原左汉堡职能，避免双汉堡歧义）
+                        // 环境中心：下载/管理 Ubuntu rootfs 与环境依赖（必含 Ubuntu）
+                        IconButton(onClick = { showEnvironmentCenter = true }) {
+                            Icon(Icons.Default.Download, contentDescription = "环境中心", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        // 终端专属设置抽屉（外观/键盘行/命令黑白名单）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Tune, contentDescription = "终端设置", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Settings, contentDescription = "终端设置", tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -176,11 +180,12 @@ fun TerminalScreen(
                     notice = notice
                 )
 
-                // ── Ubuntu 生命周期横幅（未就绪时）──
+                // ── Ubuntu 生命周期横幅（未就绪时；详情与操作入口在环境中心）──
                 UbuntuLifecycleBanner(
                     phase = ubuntu.phase.name,
                     installing = ubuntu.phase == UbuntuLifecycleCoordinator.Phase.INSTALLING,
-                    onInstall = viewModel::installUbuntu
+                    onInstall = viewModel::installUbuntu,
+                    onOpenCenter = { showEnvironmentCenter = true }
                 )
 
                 // ── 终端主体（grid + 输入 + 工具栏）──
@@ -226,6 +231,31 @@ fun TerminalScreen(
                     Text("Android shell")
                 }
             }
+        )
+    }
+
+    // ═══ 环境中心（顶栏下载图标入口）═══
+    if (showEnvironmentCenter) {
+        EnvironmentCenterSheet(
+            onDismiss = { showEnvironmentCenter = false },
+            ubuntu = ubuntu,
+            progress = ubuntuProgress,
+            rootfsSize = rootfsSize,
+            onInstallUbuntu = viewModel::installUbuntu,
+            onCancelUbuntuInstall = viewModel::cancelUbuntuInstall,
+            onRepairUbuntu = viewModel::repairUbuntu,
+            onRemoveUbuntu = viewModel::removeUbuntu,
+            onCreateUbuntuSession = {
+                showEnvironmentCenter = false
+                viewModel.createSession(TerminalViewModel.BACKEND_UBUNTU)
+            },
+            useMirror = useMirror,
+            onToggleMirror = viewModel::setUseMirror,
+            depItems = viewModel.depItems,
+            install = install,
+            onInstallDep = viewModel::installDep,
+            onInstallAll = viewModel::installAll,
+            onInstallAndroid = viewModel::installAndroidOnly
         )
     }
 }
@@ -407,7 +437,8 @@ private fun TerminalStatusBar(
 private fun UbuntuLifecycleBanner(
     phase: String,
     installing: Boolean,
-    onInstall: () -> Unit
+    onInstall: () -> Unit,
+    onOpenCenter: () -> Unit
 ) {
     when (phase) {
         "NOT_INSTALLED", "FAILED" -> {
@@ -436,6 +467,9 @@ private fun UbuntuLifecycleBanner(
                 TextButton(onClick = onInstall) {
                     Text(if (phase == "FAILED") "重试" else "安装")
                 }
+                TextButton(onClick = onOpenCenter) {
+                    Text("环境中心")
+                }
             }
         }
         "INSTALLING", "BOOTSTRAPPING", "RECOVERING", "ROOTFS_READY" -> {
@@ -463,7 +497,7 @@ private fun UbuntuLifecycleBanner(
     }
 }
 
-// ═══ 终端专属设置抽屉 ═══
+// ═══ 终端专属设置抽屉（环境下载能力已迁至环境中心，此处专注终端本身）═══
 
 @Composable
 private fun TerminalSettingsDrawer(
@@ -475,13 +509,6 @@ private fun TerminalSettingsDrawer(
     onRemoveBlack: (String) -> Unit,
     onAddWhite: (String) -> Unit,
     onRemoveWhite: (String) -> Unit,
-    useMirror: Boolean,
-    onToggleMirror: (Boolean) -> Unit,
-    depItems: List<TerminalViewModel.DepItem>,
-    install: TerminalViewModel.InstallState,
-    onInstallDep: (TerminalViewModel.DepItem) -> Unit,
-    onInstallAll: () -> Unit,
-    onInstallAndroid: () -> Unit,
     onClose: () -> Unit
 ) {
     ModalDrawerSheet(modifier = Modifier.width(340.dp)) {
@@ -494,14 +521,15 @@ private fun TerminalSettingsDrawer(
         ) {
             // 标题
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SurfaceBadge(Icons.Default.Terminal, MaterialTheme.colorScheme.primary)
+                SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
                 Text("终端设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
 
-            // ═══ 1. 终端设置 ═══
+            // ═══ 1. 终端外观与交互 ═══
             SettingsCard(Icons.Default.Settings, "终端外观") {
                 LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
                 ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
+                ToggleRow("键盘辅助行（ESC / CTRL / 方向键）", settings.showKeybar) { onSettings { copy(showKeybar = it) } }
             }
 
             // ═══ 2. 黑名单 / 白名单 ═══
@@ -529,60 +557,12 @@ private fun TerminalSettingsDrawer(
                 )
             }
 
-            // ═══ 3. 环境依赖下载中心 ═══
-            SettingsCard(Icons.Default.Download, "环境依赖下载中心") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("使用镜像源", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text("关闭则走官方源", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(
-                        checked = useMirror,
-                        onCheckedChange = onToggleMirror,
-                        colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                // 一键全装 / Android 一键装
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ActionButton("一键安装全部", install.runningId != null, Modifier.weight(1f)) { onInstallAll() }
-                    ActionButton("Android 依赖", install.runningId != null, Modifier.weight(1f)) { onInstallAndroid() }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text("可独立安装：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                depItems.forEach { item ->
-                    DepRow(
-                        item = item,
-                        // 修复并发：任一安装（含批量 __all__ / __android__）进行中时，所有行按钮均禁用，
-                        // 避免单行安装覆写 runningId 打断批量状态、两命令在同会话交错
-                        busy = install.runningId != null,
-                        installing = install.runningId == item.id,
-                        onInstall = { onInstallDep(item) }
-                    )
-                }
-                // 安装日志
-                if (install.log.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            install.log,
-                            modifier = Modifier.padding(10.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+            // ═══ 3. 入口提示（环境下载在环境中心）═══
+            Text(
+                "环境下载（Ubuntu / 依赖工具链）在顶栏下载图标的环境中心。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
                 Text("关闭")
@@ -591,38 +571,8 @@ private fun TerminalSettingsDrawer(
     }
 }
 
-@Composable
-private fun SettingsCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, content: @Composable () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SurfaceBadge(icon, MaterialTheme.colorScheme.primary)
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(10.dp))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SurfaceBadge(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: androidx.compose.ui.graphics.Color) {
-    Surface(shape = CircleShape, color = tint.copy(alpha = 0.15f), modifier = Modifier.size(34.dp)) {
-        Box(contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(18.dp), tint = tint) }
-    }
-}
-
-@Composable
-private fun ToggleRow(label: String, checked: Boolean, onToggle: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Switch(checked = checked, onCheckedChange = onToggle, colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary))
-    }
-}
+// LabeledNumber / CommandListEditor 仅终端设置抽屉使用；SettingsCard / SurfaceBadge /
+// ToggleRow / DepRow / ActionButton 已提升至 EnvironmentCenterSheet.kt（同包共享）。
 
 @Composable
 private fun LabeledNumber(label: String, value: Int, min: Int, max: Int, onSet: (Int) -> Unit) {
@@ -679,48 +629,3 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
         }
     }
 }
-
-@Composable
-private fun DepRow(item: TerminalViewModel.DepItem, busy: Boolean, installing: Boolean, onInstall: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest).padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(
-                if (item.group == TerminalViewModel.DepGroup.ANDROID) Icons.Default.Android else Icons.Default.CheckCircle,
-                null, Modifier.size(16.dp),
-                tint = if (item.group == TerminalViewModel.DepGroup.ANDROID) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
-            )
-            Text(item.name, style = MaterialTheme.typography.bodyMedium)
-        }
-        TextButton(enabled = !busy, onClick = onInstall) {
-            Text(if (installing) "安装中…" else "安装")
-        }
-    }
-}
-
-@Composable
-private fun ActionButton(label: String, loading: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = if (loading) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-        modifier = modifier.clip(RoundedCornerShape(12.dp)).then(Modifier.clickableSafe(enabled = !loading, onClick = onClick))
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-            Text(
-                if (loading) "$label…" else label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = if (loading) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
-            )
-        }
-    }
-}
-
-// 轻量 clickable 包装，复用已 import 的 androidx.compose.foundation.clickable
-@Composable
-private fun Modifier.clickableSafe(enabled: Boolean, onClick: () -> Unit): Modifier =
-    this.then(this.clickable(enabled = enabled, onClick = onClick))

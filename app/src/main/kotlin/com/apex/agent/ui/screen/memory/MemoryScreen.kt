@@ -15,14 +15,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
@@ -65,6 +69,8 @@ fun MemoryScreen(
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
     val message by viewModel.lastMessage.collectAsStateWithLifecycle()
+    val quarantinedCount by viewModel.quarantinedCount.collectAsStateWithLifecycle()
+    val dreamRunning by viewModel.dreamRunning.collectAsStateWithLifecycle()
 
     var showSearch by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EpisodeSummary?>(null) }
@@ -76,7 +82,7 @@ fun MemoryScreen(
 
     // P2-12（6-c）：VM 为 Activity 级单例，其他页面产生的记忆变更不会自动同步到本页 ——
     // 每次进入本屏强制刷新快照（原仅 VM init 刷新一次；照 SkillScreen 同款模式）。
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    LaunchedEffect(Unit) { viewModel.refresh(); viewModel.refreshQuarantineCount() }
 
     Scaffold(
         topBar = {
@@ -119,6 +125,14 @@ fun MemoryScreen(
                 StatCard("节点", "${stats.nodeCount}", Modifier.weight(1f))
                 StatCard("宏技能", "${stats.macroCount}", Modifier.weight(1f))
             }
+
+            // 记忆健康（梦境巩固 + 免疫隔离区 —— T76 补齐入口）
+            MemoryHealthCard(
+                quarantinedCount = quarantinedCount,
+                dreamRunning = dreamRunning,
+                onDreamNow = viewModel::dreamNow,
+                onClearQuarantine = viewModel::clearQuarantine
+            )
 
             // 搜索区
             if (showSearch) {
@@ -343,6 +357,83 @@ private fun MacroCard(macro: FSMMacro) {
             }
             Text("${macro.transitions.size} 步", style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+// ═══ 记忆健康卡：梦境巩固 + 免疫隔离区（T76 审计补齐入口）═══
+
+/**
+ * cs-mem 卖点的用户侧入口：
+ *  - 「梦境整理」→ DreamRenderer.dreamNow()（能量衰减/修剪/宏优化，周期任务亦可手动触发）
+ *  - 「免疫隔离区」→ MemoryImmuneSystem 可疑 UI 指纹计数/清除（0 = 未触发隔离，正常态）
+ */
+@Composable
+private fun MemoryHealthCard(
+    quarantinedCount: Int,
+    dreamRunning: Boolean,
+    onDreamNow: () -> Unit,
+    onClearQuarantine: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 梦境整理
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        Icons.Default.Bedtime, contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text("梦境整理", style = MaterialTheme.typography.labelMedium)
+                }
+                Text(
+                    if (dreamRunning) "整理中：衰减 / 修剪 / 宏优化…" else "能量衰减 + 修剪低价值记忆（周期自动，可手动）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(onClick = onDreamNow, enabled = !dreamRunning) {
+                if (dreamRunning) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("立即整理")
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 免疫隔离区
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(
+                        Icons.Default.HealthAndSafety, contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (quarantinedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text("免疫隔离区", style = MaterialTheme.typography.labelMedium)
+                }
+                Text(
+                    if (quarantinedCount > 0) "已隔离 $quarantinedCount 个可疑 UI 指纹（钓鱼/悬浮窗特征）"
+                    else "无可疑 UI 指纹被隔离（正常态）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (quarantinedCount > 0) {
+                OutlinedButton(onClick = onClearQuarantine) {
+                    Text("清除", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
     }
 }

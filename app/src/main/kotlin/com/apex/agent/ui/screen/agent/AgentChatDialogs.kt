@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -132,36 +133,34 @@ internal fun ThinkingLevelSelector(
 }
 
 /**
- * 模型原生思考强度选择条
+ * 模型原生思考强度选择（内嵌版）。
+ *
+ * v2 布局重构：原先独立占一整行（fillMaxWidth + 自带横滚），现在内嵌到
+ * 输入面板的「工具栏行」尾部（与 5 个功能按钮同一行，由父 Row 统一横向滚动），
+ * 为下方输入行腾出整行宽度 —— 修复窄屏设备上输入框被按钮挤压到不足 70dp、
+ * 占位文字逐字换行成竖排、输入框被撑成"多行大框"的问题。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ReasoningEffortRow(
+internal fun RowScope.ReasoningEffortChips(
     current: ReasoningEffort,
     onSelect: (ReasoningEffort) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(
-            text = "原生思考:",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.CenterVertically)
+    Text(
+        text = "原生思考:",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.align(Alignment.CenterVertically)
+    )
+    ReasoningEffort.entries.forEach { effort ->
+        FilterChip(
+            selected = effort == current,
+            onClick = { onSelect(effort) },
+            label = { Text(effort.displayName, style = MaterialTheme.typography.labelSmall) },
+            leadingIcon = if (effort == current) {
+                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+            } else null
         )
-        ReasoningEffort.entries.forEach { effort ->
-            FilterChip(
-                selected = effort == current,
-                onClick = { onSelect(effort) },
-                label = { Text(effort.displayName, style = MaterialTheme.typography.labelSmall) },
-                leadingIcon = if (effort == current) {
-                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                } else null
-            )
-        }
     }
 }
 

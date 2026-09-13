@@ -37,6 +37,18 @@ object ModelsCatalog {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
+     * 复用的基础客户端：共享连接池与分发器线程，避免每次拉取都 new 一个
+     * OkHttpClient（旧实现每调一次泄漏一套线程/连接资源）。
+     * 超时通过 [newBuilder] 派生 —— 派生 client 共享同一池，成本可忽略。
+     */
+    private val baseClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
      * 拉取模型列表。
      *
      * @param baseUrl 如 `https://api.openai.com/v1`（结尾斜杠会被规整）
@@ -55,7 +67,7 @@ object ModelsCatalog {
             if (endpoint.isBlank()) {
                 throw IllegalArgumentException("Base URL 为空或以非法字符开头（需 http:// 或 https://）")
             }
-            val client = OkHttpClient.Builder()
+            val client = baseClient.newBuilder()
                 .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
                 .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
                 .build()

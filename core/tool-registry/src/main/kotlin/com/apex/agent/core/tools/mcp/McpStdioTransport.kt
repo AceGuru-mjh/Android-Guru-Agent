@@ -100,7 +100,12 @@ interface McpTransportHandle {
     /**
      * 发送一条 JSON-RPC 报文。
      *
-     * @param id 请求 id；为 null 表示**通知**（`notifications/*`），不等待响应
+     * 注意：正文里不能出现斜杠+星号的注释起始序列，Kotlin 块注释是可嵌套的，
+     * 它会在 KDoc 内再开一层注释、吞掉本应闭合文档的星号+斜杠（本文件曾因此
+     * 把后半整个类吃进注释里、编译器报 Unresolved reference）。
+     *
+     * @param id 请求 id；为 null 表示**通知**（notifications 系事件，如
+     *   notifications/initialized），不等待响应
      * @param payload 序列化后的报文全文
      * @return 响应对象；通知返回 null
      */
@@ -134,6 +139,7 @@ class McpStdioTransport internal constructor(
         BufferedReader(InputStreamReader(handle.stdout, StandardCharsets.UTF_8))
 
     private val pending = ConcurrentHashMap<Int, String>()
+    private val pendingAt = ConcurrentHashMap<Int, Long>()
     private val monitor = Object()
 
     @Volatile
@@ -180,7 +186,11 @@ class McpStdioTransport internal constructor(
 
     override fun close() {
         closed = true
-        synchronized(monitor) { monitor.notifyAll() }
+        synchronized(monitor) {
+            pending.clear()
+            pendingAt.clear()
+            monitor.notifyAll()
+        }
         runCatching { writer.close() }
         runCatching { handle.destroy() }
         runCatching { pump.interrupt() }
@@ -210,6 +220,16 @@ class McpStdioTransport internal constructor(
             val id = extractId(line) ?: continue   // 通知 / 非 JSON 行：直接丢弃
             synchronized(monitor) {
                 pending[id] = line
+                pendingAt[id] = System.currentTimeMillis()
+                // 超时未被消费的迟到响应：一直留在 map 里就是慢性泄漏（每个
+                // 超时请求泄漏一条），攒到 32 条时清理掉明显过期的条目。
+                if (pending.size > 32) {
+                    val horizon = System.currentTimeMillis() - requestTimeoutMs * 4
+                    pending.entries.removeIf { (k, _) ->
+                        (pendingAt[k] ?: 0L) < horizon
+                    }
+                    pendingAt.entries.removeIf { it.value < horizon }
+                }
                 monitor.notifyAll()
             }
         }

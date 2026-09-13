@@ -371,6 +371,34 @@ class BrowserEngine @Inject constructor(
         // 交还瞬间自动补一次快照，结果由 Agent 下一次 snapshot 直接获得
     }
 
+    /**
+     * 结束浏览器会话：状态回落 [BrowserSessionState.HIDDEN]。
+     *
+     * 供「霓虹球长按关闭」等入口使用 —— 球只随浏览器被调用出现（见
+     * [CyberNeonBallManager]），用户长按球即代表"这次浏览完了"：状态回到
+     * HIDDEN 后球自动收起、BrowserOverlay（若在展开）自动收起。
+     * RECOVERING 期间不介入（渲染进程正在重建，下一次 navigate 会重新驱动）。
+     */
+    suspend fun releaseBrowser() = stateMutex.withLock {
+        if (currentState == BrowserSessionState.RECOVERING) return@withLock
+        setState(BrowserSessionState.HIDDEN)
+    }
+
+    /**
+     * 标记"浏览器已被使用"：HIDDEN → AGENT_DRIVING。
+     *
+     * 调用方须已在主线程。状态机此前只在人工接管握手时变更 —— 纯后台
+     * navigate（如网页搜索）永远停留在 HIDDEN，可视层无从感知。现在任何
+     * 导航/带 URL 建页都会把会话标记为 Agent 驾驶中，霓虹球据此**按需出现**
+     * （不再是 App 一启动就常驻）。已是 AGENT_DRIVING / WAITING_HUMAN /
+     * RECOVERING 时不动（保留人工接管锁与重建语义）。
+     */
+    private fun markBrowserActiveFromHidden() {
+        if (currentState == BrowserSessionState.HIDDEN) {
+            setState(BrowserSessionState.AGENT_DRIVING)
+        }
+    }
+
     /** 所有 AgentTool 执行前必须调用的守卫 */
     fun assertAgentControl() {
         if (currentState == BrowserSessionState.WAITING_HUMAN) {
@@ -383,7 +411,11 @@ class BrowserEngine @Inject constructor(
     suspend fun newTab(url: String? = null): Int = withContext(Dispatchers.Main) {
         val id = newTabSync()
         activeTabId = id
-        url?.let { loadUrlInternal(it) }
+        url?.let {
+            // 带 URL 建页 = 浏览器被使用（网页搜索/自动化），驱动霓虹球按需出现
+            markBrowserActiveFromHidden()
+            loadUrlInternal(it)
+        }
         id
     }
 
@@ -417,6 +449,9 @@ class BrowserEngine @Inject constructor(
         onProgress: ((percent: Int, phase: String) -> Unit)? = null,
     ): NavResult = withContext(Dispatchers.Main) {
         val u = if (url.startsWith("http")) url else "https://$url"
+        // 导航即"浏览器被使用"：HIDDEN → AGENT_DRIVING，霓虹球据此按需出现
+        // （不是 App 启动就常驻；用户长按球或 releaseBrowser 后回到 HIDDEN 即收起）
+        markBrowserActiveFromHidden()
         // P2 #15：长会话内存维护——导航次数超阈值时重建当前 WebView
         if (++navigationCount > MAX_NAVIGATIONS_BEFORE_REBUILD) {
             navigationCount = 0

@@ -38,11 +38,13 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.RemoteModelInfo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -64,6 +67,13 @@ import kotlinx.coroutines.launch
  * 1. **第一行选择模型服务商** → Base URL 自动填充官方预设（可手改，支持任意 OpenAI 兼容端点）；
  * 2. **API Key 由用户输入** → 经 EncryptedSharedPreferences（AES-256-GCM）加密存储，不明文落盘；
  * 3. **「获取模型」** 直接打 `GET {baseUrl}/models`，把端点上真实存在的模型列成清单让用户选。
+ *
+ * ## 持久化策略（性能优化）
+ * URL / Key 的落盘采用 **500ms 防抖**：旧实现每敲一个字符就同步一次 ——
+ * Provider 走「JSON 序列化 + 写盘」、Key 走 EncryptedSharedPreferences（每次写入
+ * 都要重加密整个文件），连续输入时主线程IO 洪峰明显。现在：
+ * - 输入只更新本地状态；停顿 500ms 才落盘；
+ * - 切换服务商 / 离开设置页 / 点「获取模型」时强制冲刷，绝不丢最后一次编辑。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,7 +98,47 @@ internal fun ModelSetupCard(
 
     val scope = rememberCoroutineScope()
 
-    // 切换服务商 / 首次进入：URL 与 Key 回填该服务商的当前值
+    // 最新值引用（DisposableEffect 冲刷时取离开屏幕那一刻的值，而非首次组合的旧值）
+    val latestProviderId by rememberUpdatedState(providerId)
+    val latestBaseUrl by rememberUpdatedState(baseUrl)
+    val latestApiKey by rememberUpdatedState(apiKey)
+    val latestProviders by rememberUpdatedState(providers)
+
+    /** 把当前编辑中的 URL/Key 冲刷进持久层（切服务商 / dispose / 拉模型前调用）。 */
+    fun flushEdits(targetProviderId: String = latestProviderId) {
+        if (targetProviderId.isBlank()) return
+        val persistedUrl = latestProviders.firstOrNull { it.id == targetProviderId }?.baseUrl.orEmpty()
+        if (latestBaseUrl.trim() != persistedUrl) {
+            viewModel.setProviderBaseUrl(targetProviderId, latestBaseUrl)
+        }
+        if (latestApiKey != viewModel.getProviderApiKey(targetProviderId)) {
+            viewModel.setProviderApiKey(targetProviderId, latestApiKey)
+        }
+    }
+
+    // 离开设置页时冲刷未落盘的编辑（防抖任务会随组合销毁被取消）
+    DisposableEffect(Unit) {
+        onDispose { flushEdits() }
+    }
+
+    // URL 防抖落盘：停顿 500ms 才写（避免每键一次 JSON 序列化 + 写盘）。
+    // 回写后的 Provider 流更新会触发重组，此时 baseUrl == provider.baseUrl → 提前返回，不会回环。
+    LaunchedEffect(baseUrl, providerId) {
+        if (baseUrl == provider?.baseUrl) return@LaunchedEffect
+        delay(500)
+        viewModel.setProviderBaseUrl(providerId, baseUrl)
+    }
+
+    // Key 防抖落盘：EncryptedSharedPreferences 每次写入都重加密整文件，
+    // 每键同步会掉帧；停顿 500ms + 离开页面冲刷保证不丢。
+    LaunchedEffect(apiKey, providerId) {
+        if (apiKey == viewModel.getProviderApiKey(providerId)) return@LaunchedEffect
+        delay(500)
+        viewModel.setProviderApiKey(providerId, apiKey)
+    }
+
+    // 切换服务商：回填新服务商的当前 URL/Key（旧服务商编辑中的值已在
+    // 下拉 onClick 里同步冲刷，不依赖防抖 —— 防抖任务会因 key 变化被取消）
     LaunchedEffect(providerId) {
         baseUrl = provider?.baseUrl.orEmpty()
         apiKey = viewModel.getProviderApiKey(providerId)
@@ -168,6 +218,9 @@ internal fun ModelSetupCard(
                                 }
                             },
                             onClick = {
+                                // 先冲刷旧服务商编辑中的值（防抖任务会随 providerId 变化被取消），
+                                // 再切档位 —— 否则 500ms 内切走的编辑会丢
+                                flushEdits(providerId)
                                 viewModel.upsertProfile(selected.copy(providerId = prov.id))
                                 baseUrl = prov.baseUrl
                                 apiKey = viewModel.getProviderApiKey(prov.id)
@@ -178,14 +231,10 @@ internal fun ModelSetupCard(
                 }
             }
 
-            // ── 第二行：Base URL（选服务商后自动预填，仍可手改）──
+            // ── 第二行：Base URL（选服务商后自动预填，仍可手改；防抖 500ms 落盘）──
             OutlinedTextField(
                 value = baseUrl,
-                onValueChange = { next ->
-                    baseUrl = next
-                    val target = providers.firstOrNull { it.id == providerId } ?: return@OutlinedTextField
-                    viewModel.upsertProvider(target.copy(baseUrl = next.trim()))
-                },
+                onValueChange = { baseUrl = it },
                 label = { Text("Base URL") },
                 leadingIcon = { Icon(Icons.Outlined.Link, null, Modifier.size(18.dp)) },
                 supportingText = {
@@ -199,13 +248,10 @@ internal fun ModelSetupCard(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // ── 第三行：API Key（用户输入，即写即加密）──
+            // ── 第三行：API Key（用户输入；防抖 500ms 加密落盘）──
             OutlinedTextField(
                 value = apiKey,
-                onValueChange = { next ->
-                    apiKey = next
-                    viewModel.setProviderApiKey(providerId, next)
-                },
+                onValueChange = { apiKey = it },
                 label = { Text("API Key") },
                 leadingIcon = { Icon(Icons.Outlined.Key, null, Modifier.size(18.dp)) },
                 trailingIcon = {
@@ -252,7 +298,9 @@ internal fun ModelSetupCard(
                         modelsLoading = true
                         modelsError = null
                         scope.launch {
-                            viewModel.fetchModels(providerId).fold(
+                            // 拉模型前先冲刷防抖中的 URL/Key，确保请求用的就是眼前编辑的值
+                            flushEdits()
+                            viewModel.fetchModels(providerId, baseUrlOverride = baseUrl).fold(
                                 onSuccess = { list ->
                                     discoveredModels = list
                                     showModelPicker = true

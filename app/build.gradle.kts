@@ -30,8 +30,8 @@ android {
         // 参考：developer.android.com/about/versions/10/privacy/changes
         //       （"Execute permission for app home directory" 一节）
         targetSdk = 28
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     buildFeatures {
@@ -46,6 +46,15 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    lint {
+        // ExpiredTargetSdkVersion 的豁免理由（targetSdk=28 是有意为之，见上方红线注释）：
+        // targetSdk ≥ 29 的 SELinux untrusted_app 域禁止 execute app_data_file（W^X），
+        // PRoot guest（Ubuntu rootfs）将完全不可执行 —— Termux 钉 28 同因。本项目经
+        // GitHub Releases 侧载分发，不受 Play targetSdk 政策约束；lintVitalRelease
+        // 对 release 构建是 fatal，此检查必须显式关闭（否则 tag 构建永远失败）。
+        disable += "ExpiredTargetSdkVersion"
     }
 
     buildTypes {

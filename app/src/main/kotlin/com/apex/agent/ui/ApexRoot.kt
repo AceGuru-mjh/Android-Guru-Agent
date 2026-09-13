@@ -60,7 +60,6 @@ import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.market.MarketScreen
 import com.apex.agent.ui.screen.permissions.PermissionsScreen
 import com.apex.agent.ui.screen.settings.SettingsScreen
-import com.apex.agent.ui.screen.skill.SkillScreen
 import com.apex.agent.ui.screen.memory.MemoryScreen
 import com.apex.agent.ui.screen.terminal.TerminalScreen
 import kotlinx.coroutines.launch
@@ -75,7 +74,8 @@ sealed class DrawerDestination(
 ) {
     data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
     data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
-    data object Skill : DrawerDestination("skill", "Skill", Icons.Default.AddComment)
+    // Skill 屏已移除 —— 技能的安装/启停统一由「市场 · Skills」页承担，
+    // 抽屉里再放一个只读列表是重复入口（两者数据源同一份 SkillRegistry）。
     data object Market : DrawerDestination("market", "市场", Icons.Default.Storefront)
     data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
     data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
@@ -95,7 +95,8 @@ private val DestinationSaver = Saver<DrawerDestination, String>(
     restore = { route ->
         when (route) {
             DrawerDestination.Terminal.route -> DrawerDestination.Terminal
-            DrawerDestination.Skill.route -> DrawerDestination.Skill
+            // "skill" route 保留兜底：老用户重建时若停留在原 Skill 页，落到市场
+            "skill" -> DrawerDestination.Market
             DrawerDestination.Market.route -> DrawerDestination.Market
             DrawerDestination.Memory.route -> DrawerDestination.Memory
             DrawerDestination.Permissions.route -> DrawerDestination.Permissions
@@ -220,7 +221,6 @@ fun ApexRoot() {
                         DrawerDestination.Terminal -> TerminalScreen(
                             onOpenNavDrawer = { scope.launch { drawerState.open() } }
                         )
-                        DrawerDestination.Skill -> SkillScreen()
                         DrawerDestination.Market -> MarketScreen()
                         DrawerDestination.Memory -> MemoryScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()

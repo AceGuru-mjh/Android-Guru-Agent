@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
+import com.apex.agent.core.tools.mcp.McpConfigImport
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -39,12 +40,19 @@ data class MarketSkillRow(
     val description: String,
     val installed: Boolean,
     val enabled: Boolean,
-    val source: String = ""   // local / modelscope / github
+    val source: String = "",   // local / modelscope / github
+    /**
+     * true = App 内置模板：能力已在二进制里（工具原生注册），不存在"下载/安装"这一步。
+     * UI 显示为「内置」标记而不是「安装」按钮 —— 旧实现给它一个安装按钮，
+     * 点了只是往本地写一份 JSON，观感是装了，实际什么外部内容都没拉取。
+     */
+    val builtin: Boolean = false
 )
 
 data class MarketMcpRow(
     val name: String,
-    val url: String,
+    /** 端点摘要：远端显示 URL，STDIO 显示完整命令行。 */
+    val endpoint: String,
     val transport: McpTransport,
     val enabled: Boolean,
     val connected: Boolean
@@ -151,11 +159,20 @@ class MarketViewModel @Inject constructor(
                 )
             }
             val templates = skillMenuProvider.getBuiltinTemplates().map {
-                MarketSkillRow(it.id, it.label, it.description, installed = false, enabled = false)
+                MarketSkillRow(
+                    id = it.id, name = it.label, description = it.description,
+                    installed = false, enabled = false, source = "builtin", builtin = true
+                )
             }
             val connected = mcpManager.getConnectedServers().toSet()
             val mcps = mcpManager.getConfigs().map {
-                MarketMcpRow(it.name, it.url, it.transport, it.enabled, it.name in connected)
+                MarketMcpRow(
+                    name = it.name,
+                    endpoint = it.endpointSummary(),
+                    transport = it.transport,
+                    enabled = it.enabled,
+                    connected = it.name in connected
+                )
             }
             val connectors = connectorRegistry.getAll()
             val loaded = pluginManager.loadedPlugins.value.keys
@@ -230,22 +247,62 @@ class MarketViewModel @Inject constructor(
 
     // ═══ MCP ═══
 
-    fun addMcpServer(name: String, url: String, transport: McpTransport, apiKey: String?) {
+    /**
+     * 添加 MCP 工具源。
+     *
+     * 注意 STDIO 不是"服务器 URL"：它是本地命令（command + args + env），
+     * 添加成功后 connect 会真正把这个进程拉起来做 JSON-RPC 握手。
+     */
+    fun addMcpServer(config: McpServerConfig) {
         viewModelScope.launch {
-            val config = McpServerConfig(
-                name = name.trim(),
-                url = url.trim(),
-                transport = transport,
-                apiKey = apiKey?.trim()?.ifBlank { null }
-            )
-            mcpManager.addServer(config).fold(
+            val name = config.name.trim()
+            mcpManager.addServer(config.copy(name = name)).fold(
                 onSuccess = {
-                    message("已添加 MCP 服务器：${config.name}（连接后工具注入对话）")
-                    mcpManager.connect(config.name)   // 添加后立即尝试连接
+                    message("已添加 MCP 工具源：$name（连接后其工具注入对话）")
+                    mcpManager.connect(name)   // 添加后立即尝试连接
                     refresh()
                 },
                 onFailure = { message("添加失败：${it.message}") }
             )
+        }
+    }
+
+    /**
+     * 导入社区通用 MCP 配置 JSON（`{"mcpServers": {...}}`）。
+     *
+     * 支持 `command/args/env`（STDIO 本地命令）与 `type=streamable_http|sse` + `url`
+     * 两种形态；解析不通过的条目会**逐条报出原因**，不会静默丢配置。
+     */
+    fun importMcpConfig(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val parsed = McpConfigImport.parse(text)
+            if (parsed.configs.isEmpty()) {
+                message(
+                    "未导入任何条目：" + parsed.errors.joinToString("；") { "${it.serverName}：${it.reason}" }
+                        .ifBlank { "配置为空" }
+                )
+                return@launch
+            }
+            val added = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for (config in parsed.configs) {
+                val exists = mcpManager.getConfigs().any { it.name == config.name }
+                val unique = if (exists) config.copy(name = "${config.name}-${System.currentTimeMillis()}") else config
+                mcpManager.addServer(unique).fold(
+                    onSuccess = { added += unique.name },
+                    onFailure = { failed += "${unique.name}（${it.message}）" }
+                )
+            }
+            val summary = buildString {
+                append("已导入 ${added.size} 个 MCP 工具源")
+                if (failed.isNotEmpty()) append("，失败 ${failed.size}：${failed.joinToString("；")}")
+                if (parsed.errors.isNotEmpty()) {
+                    append("；跳过 ${parsed.errors.size}：")
+                    append(parsed.errors.joinToString("；") { "${it.serverName}：${it.reason}" })
+                }
+            }
+            message(summary)
+            withContext(Dispatchers.Main) { refresh() }
         }
     }
 
@@ -407,18 +464,19 @@ class MarketViewModel @Inject constructor(
         }
     }
 
-    fun installGithubRepo(fullName: String) {
+    fun installGithubRepo(fullName: String) = installFromRepoInput(fullName)
+
+    /**
+     * 真实联网安装：接受 `owner/repo`、GitHub 链接、git@ 链接任一种写法。
+     * 走 raw.githubusercontent.com 取 manifest / SKILL.md —— 不再"点一下就假装装好了"。
+     */
+    fun installFromRepoInput(input: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(busy = true) }
-            val parts = fullName.split("/")
-            if (parts.size < 2) {
-                message("无效仓库：$fullName")
-            } else {
-                installManager.installSkillFromGitHubRepo(parts[0], parts[1]).fold(
-                    onSuccess = { message(it) },
-                    onFailure = { message("安装失败：${it.message}") }
-                )
-            }
+            installManager.installSkillFromRepoInput(input).fold(
+                onSuccess = { message(it) },
+                onFailure = { message("安装失败：${it.message}") }
+            )
             _uiState.update { it.copy(busy = false) }
             refresh()
         }

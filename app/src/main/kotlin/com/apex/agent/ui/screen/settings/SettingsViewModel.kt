@@ -5,7 +5,9 @@ import com.apex.agent.core.llm.LlmClientFactory
 import com.apex.agent.core.llm.LlmConfig
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelRoleConfig
+import com.apex.agent.core.llm.ModelsCatalog
 import com.apex.agent.core.llm.ProviderConfig
+import com.apex.agent.core.llm.RemoteModelInfo
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +45,52 @@ class SettingsViewModel @Inject constructor(
     fun upsertProvider(provider: ProviderConfig) = repo.upsertProvider(provider)
     fun deleteProvider(id: String) = repo.deleteProvider(id)
     fun getProvider(id: String) = repo.getProvider(id)
+
+    /**
+     * 仅更新某 Provider 的 Base URL（其余字段保持不变）。
+     *
+     * 供 ModelSetupCard 的防抖落盘 / 冲刷路径使用 —— 调用方只有 URL 这个编辑位，
+     * 不应为了改一个字段而自行拼整份 ProviderConfig（容易把过期的 apiKeys
+     * 等字段写回去）。
+     */
+    fun setProviderBaseUrl(providerId: String, baseUrl: String) {
+        val existing = repo.getProvider(providerId) ?: return
+        val trimmed = baseUrl.trim()
+        if (existing.baseUrl == trimmed) return
+        repo.upsertProvider(existing.copy(baseUrl = trimmed))
+    }
+
+    /** API Key 读取 / 写入 —— 写入即加密持久化（见 SettingsRepository 的 securePrefs）。 */
+    fun getProviderApiKey(providerId: String): String = repo.getProviderApiKey(providerId)
+    fun setProviderApiKey(providerId: String, apiKey: String) =
+        repo.setProviderApiKey(providerId, apiKey)
+
+    /**
+     * 从 Provider 的 Base URL 拉取**真实**模型列表（`GET /models`）。
+     *
+     * 取代设置页里那批写死的"推荐模型"：端点自己返回的才是能跑的。
+     *
+     * @param baseUrlOverride 调用方编辑中、尚未落盘的 Base URL（ModelSetupCard
+     *   防抖窗口内点「获取模型」时传入，确保拉取的就是用户眼前看到的端点）；
+     *   null 时使用已持久化的 Provider.baseUrl。
+     */
+    suspend fun fetchModels(
+        providerId: String,
+        baseUrlOverride: String? = null
+    ): Result<List<RemoteModelInfo>> =
+        withContext(Dispatchers.IO) {
+            val resolved = repo.getProvider(providerId)
+                ?: return@withContext Result.failure(Exception("未找到服务商：$providerId"))
+            val baseUrl = (baseUrlOverride ?: resolved.baseUrl).trim()
+            if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                return@withContext Result.failure(Exception("Base URL 未填写或不合法，无法获取模型"))
+            }
+            ModelsCatalog.fetchModels(
+                baseUrl = baseUrl,
+                apiKey = repo.getProviderApiKey(resolved.id),
+                extraHeaders = resolved.defaultHeaders
+            )
+        }
 
     // ── 角色 / Agent ───────────────────────────────────────────
     fun updateRoles(block: ModelRoleConfig.() -> ModelRoleConfig) = repo.updateRoles(block)

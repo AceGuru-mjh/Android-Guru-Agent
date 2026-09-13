@@ -26,7 +26,8 @@ class ApexCoreService : LifecycleService() {
     @Inject
     lateinit var browserOverlay: BrowserOverlay
 
-    // 赛博霓虹球常驻枢纽（订阅状态 + 点击 toggle 显式握手）
+    // 赛博霓虹球（状态驱动按需出现：见 CyberNeonBallManager —— 只在浏览器被
+    // navigate/newTab 等真实使用后出现，不再随服务启动常驻；长按球可结束会话收起）
     @Inject
     lateinit var cyberNeonBall: CyberNeonBallManager
 
@@ -41,8 +42,10 @@ class ApexCoreService : LifecycleService() {
         createNotificationChannel()
         // 引用以触发 Hilt 提供（browserOverlay 通过 init 注册回调）
         browserOverlay.hashCode()
-        // 拉起霓虹球（无 SYSTEM_ALERT_WINDOW 权限时内部静默失败，不影响引擎）
-        cyberNeonBall.show()
+        // 霓虹球不再无条件 show：其生命周期由 BrowserEngine 状态驱动 ——
+        // Agent 真正 navigate（网页搜索/自动化浏览）时经 onStateChanged 出现，
+        // 会话结束（HIDDEN）时自动收起。此处仅需保证单例已创建并订阅引擎。
+        cyberNeonBall.hashCode()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

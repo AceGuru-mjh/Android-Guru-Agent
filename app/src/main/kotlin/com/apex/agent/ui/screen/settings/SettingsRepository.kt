@@ -2,6 +2,8 @@ package com.apex.agent.ui.screen.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.apex.agent.core.llm.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +40,29 @@ class SettingsRepository @Inject constructor(
         prettyPrint = false
     }
 
+    /**
+     * API Key 的加密存储（AES-256-GCM + AES-256-SIV，由 Android Keystore 主密钥保护）。
+     *
+     * 背景：旧实现把 Provider 的 `apiKeys` 连同其它字段一起明文 JSON 落盘在
+     * `apex_settings` 里 —— 只要设备被 root 或做一次 adb backup，Key 就裸奔。
+     * 现在 Key **只**存在于此处，内存中保留一份副本供 [LlmConfig] 构建使用。
+     */
+    private val securePrefs: SharedPreferences by lazy {
+        try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context, PREF_SECURE, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // 极少数设备 Keystore 初始化失败：退化为普通 SP，宁可不加密也绝不让配置丢失
+            context.getSharedPreferences(PREF_SECURE_FALLBACK, Context.MODE_PRIVATE)
+        }
+    }
+
     private val _profiles = MutableStateFlow(emptyList<ModelProfile>())
     val profiles: StateFlow<List<ModelProfile>> = _profiles.asStateFlow()
 
@@ -55,7 +80,9 @@ class SettingsRepository @Inject constructor(
         // 避免字段初始化顺序导致迁移结果被覆盖。
         var provs = readProviders() ?: ModelProfileDefaults.builtInProviders
         var profs = (readProfiles(provs) ?: ModelProfileDefaults.defaultProfiles(provs)).toMutableList()
+        provs = migrateAndHydrateApiKeys(provs)
         migrateLegacyConfig(profs, provs) { newProvs -> provs = newProvs }
+        provs = migrateAndHydrateApiKeys(provs)
         _providers.value = provs
         _profiles.value = profs
         _roles.value = readRoles(profs) ?: ModelProfileDefaults.defaultRoles(profs)
@@ -78,6 +105,57 @@ class SettingsRepository @Inject constructor(
     }
 
     fun defaultProvider(): ProviderConfig? = getProvider(defaultProfile().providerId)
+
+    // ── API Key：加密存储 ───────────────────────────────────────
+    /** 读取某个 Provider 的 API Key（密文；无则返回空串而非 null，便于直接判空）。 */
+    fun getProviderApiKey(providerId: String): String {
+        if (providerId.isBlank()) return ""
+        return securePrefs.getString(KEY_PROVIDER_KEY + providerId, null)
+            ?: prefs.getString(KEY_PROVIDER_KEY + providerId, null).orEmpty()
+    }
+
+    /**
+     * 写入某个 Provider 的 API Key —— 用户手输的唯一入口。
+     *
+     * 同时把内存副本的 `apiKeys` 同步更新，保证 [defaultLlmConfig] /
+     * ModelRuntime 在**不重启 App**的前提下立刻用上新 Key。
+     */
+    fun setProviderApiKey(providerId: String, apiKey: String) {
+        if (providerId.isBlank()) return
+        val trimmed = apiKey.trim()
+        securePrefs.edit().putString(KEY_PROVIDER_KEY + providerId, trimmed).apply()
+        // 清理历史遗留的明文副本
+        if (prefs.contains(KEY_PROVIDER_KEY + providerId)) {
+            prefs.edit().remove(KEY_PROVIDER_KEY + providerId).apply()
+        }
+        val idx = _providers.value.indexOfFirst { it.id == providerId }
+        if (idx >= 0) {
+            val list = _providers.value.toMutableList()
+            list[idx] = list[idx].copy(
+                apiKeys = if (trimmed.isBlank()) emptyList() else listOf(trimmed)
+            )
+            _providers.value = list
+        }
+    }
+
+    /**
+     * 明文 Key → 加密存储迁移 + 启动时回填。
+     *
+     * - Provider 列表里若还带着明文 `apiKeys`（旧版本落盘），写入加密区；
+     * - 随后无论 Key 来自加密区还是已迁移，都回填到内存副本（供请求使用）；
+     * - 返回的列表不含明文 Key —— 真正落盘时还会由 [providersForPersist] 二次剥离。
+     */
+    private fun migrateAndHydrateApiKeys(providers: List<ProviderConfig>): List<ProviderConfig> =
+        providers.map { prov ->
+            prov.apiKeys.firstOrNull { it.isNotBlank() }?.let { plain ->
+                securePrefs.edit().putString(KEY_PROVIDER_KEY + prov.id, plain).apply()
+                if (prefs.contains(KEY_PROVIDER_KEY + prov.id)) {
+                    prefs.edit().remove(KEY_PROVIDER_KEY + prov.id).apply()
+                }
+            }
+            val stored = getProviderApiKey(prov.id).trim()
+            prov.copy(apiKeys = if (stored.isBlank()) emptyList() else listOf(stored))
+        }
 
     /** 由「默认模型 Profile + 其 Provider」派生运行时 [LlmConfig]，供引擎 / 测试连接使用。 */
     fun defaultLlmConfig(): LlmConfig {
@@ -134,9 +212,15 @@ class SettingsRepository @Inject constructor(
 
     // ── Provider 增改 ──────────────────────────────────────────
     fun upsertProvider(provider: ProviderConfig) {
+        // Key 一旦出现在 incoming 里就立即入加密区，绝不随 Provider 一起明文落盘
+        provider.apiKeys.firstOrNull { it.isNotBlank() }?.let { setProviderApiKey(provider.id, it) }
+        val key = getProviderApiKey(provider.id)
+        val sanitized = provider.copy(
+            apiKeys = if (key.isBlank()) emptyList() else listOf(key)
+        )
         val list = _providers.value.toMutableList()
-        val idx = list.indexOfFirst { it.id == provider.id }
-        if (idx >= 0) list[idx] = provider else list.add(provider)
+        val idx = list.indexOfFirst { it.id == sanitized.id }
+        if (idx >= 0) list[idx] = sanitized else list.add(sanitized)
         _providers.value = list
         persistProviders()
     }
@@ -149,6 +233,9 @@ class SettingsRepository @Inject constructor(
             if (it.providerId == id) it.copy(providerId = "") else it
         }
         _providers.value = _providers.value.filter { it.id != id }
+        // 连同存储的 Key 一起清掉（不含 Key 的残留密文就是密钥泄漏面）
+        securePrefs.edit().remove(KEY_PROVIDER_KEY + id).apply()
+        prefs.edit().remove(KEY_PROVIDER_KEY + id).apply()
         persistProviders()
         persistProfiles()
     }
@@ -169,8 +256,12 @@ class SettingsRepository @Inject constructor(
     private fun persistProfiles() =
         prefs.edit().putString(KEY_PROFILES, json.encodeToString(_profiles.value)).apply()
 
+    /** Provider 的落盘副本：剥离全部 API Key（Key 只在加密区，见 [securePrefs]）。 */
+    private fun providersForPersist(): List<ProviderConfig> =
+        _providers.value.map { it.copy(apiKeys = emptyList()) }
+
     private fun persistProviders() =
-        prefs.edit().putString(KEY_PROVIDERS, json.encodeToString(_providers.value)).apply()
+        prefs.edit().putString(KEY_PROVIDERS, json.encodeToString(providersForPersist())).apply()
 
     private fun persistRoles() =
         prefs.edit().putString(KEY_ROLES, json.encodeToString(_roles.value)).apply()
@@ -259,6 +350,13 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ROLES = "model_roles_v2"
         private const val KEY_AGENT = "agent_settings_v2"
         private const val KEY_LEGACY_MIGRATED = "legacy_migrated_v2"
+
+        /** 加密 Preference 文件名 */
+        private const val PREF_SECURE = "apex_secure_settings"
+        /** Keystore 不可用时的退化文件名 */
+        private const val PREF_SECURE_FALLBACK = "apex_secure_settings_fallback"
+        /** API Key 前缀键名（拼接 providerId） */
+        private const val KEY_PROVIDER_KEY = "provider_api_key_"
     }
 }
 

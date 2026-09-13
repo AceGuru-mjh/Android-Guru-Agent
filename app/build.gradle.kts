@@ -49,8 +49,16 @@ android {
     buildTypes {
         // 发布 APK 以 debug 密钥签名 —— 个人项目无正式 keystore 时保证产物可直接安装；
         // 引入正式签名时替换为 signingConfigs 引用 + 环境变量注入。
+        //
+        // 【不使用代码混淆】本 APK 明确不做 R8/ProGuard 混淆与资源缩减：
+        //  - 持久化大量依赖 kotlinx.serialization 的字段名（ModelProfile / ProviderConfig /
+        //    McpServerConfig / Skill manifest），混淆会静默写坏历史数据；
+        //  - AIDL 插件跨进程桥、JNI/native 层依赖符号可见性，混淆后难定位问题；
+        //  - isShrinkResources=false 保证 assets（如 MCP bridge 脚本）不被误剔除。
+        // 若未来启用，必须先补 keep 规则并完成数据迁移验证。
         release {
             isMinifyEnabled = false
+            isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
         }
     }

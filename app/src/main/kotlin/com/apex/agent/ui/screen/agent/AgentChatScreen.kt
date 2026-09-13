@@ -495,16 +495,18 @@ fun AgentChatScreen(
                     onDisableAllRules = { rules.filter { it.enabled }.forEach { r -> toolkit.setRuleEnabled(r.id, false) } }
                 )
 
-                // 模型原生思考强度 chip
-                ReasoningEffortRow(
-                    current = uiState.reasoningEffort,
-                    onSelect = { viewModel.setReasoningEffort(it) }
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
+                // ═══ 工具栏行：功能按钮 + 原生思考档位同一行（统一横向滚动）═══
+                // 修复"输入框太高"：旧布局把 5 个 40dp 按钮 + 发送键与输入框挤同一
+                // Row，窄屏（360dp 档）输入框仅剩 ~70dp —— 占位文字逐字换行成竖
+                // 排、多行撑出近半屏高的"大框"。现在按钮与思考 chips 合并为一行
+                // 可横滚工具栏，输入框独占下一行全部剩余宽度，默认 56dp 单行高度
+                //（长内容仍自动扩行 + 双击全屏编辑）。
                 Row(
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                 ) {
                     // ═══ 迷你小圆环：工具菜单（搜索/时间/函数/结构化输出/规则）═══
                     ToolkitRingButton(
@@ -522,8 +524,7 @@ fun AgentChatScreen(
                         onSetCustomSchema = { toolkit.setCustomSchema(it) },
                         onUpsertRule = { toolkit.upsertRule(it) },
                         onDeleteRule = { toolkit.deleteRule(it) },
-                        onToggleRule = { id, enabled -> toolkit.setRuleEnabled(id, enabled) },
-                        modifier = Modifier.padding(bottom = 4.dp) // 对齐修复：与其他 40dp 圆形图标钮统一底垫 4dp
+                        onToggleRule = { id, enabled -> toolkit.setRuleEnabled(id, enabled) }
                     )
 
                     // ═══ / 斜杠指令按钮 ═══
@@ -542,14 +543,12 @@ fun AgentChatScreen(
                                 inputText.trimEnd() + " " + command
                             }
                             viewModel.updateInputText(merged)
-                        },
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        }
                     )
 
                     // ═══ GitHub 连接状态按钮 ═══
                     GithubIconButton(
-                        tokenManager = viewModel.githubTokenManager,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        tokenManager = viewModel.githubTokenManager
                     )
 
                     // ═══ + 旋转附件按钮 ═══
@@ -559,8 +558,7 @@ fun AgentChatScreen(
                         },
                         onImageSelected = { uri ->
                             viewModel.attachImage(uri)
-                        },
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        }
                     )
 
                     // ═══ 小大脑：模型切换 + 参数调节 + 配置跳转 ═══
@@ -572,10 +570,21 @@ fun AgentChatScreen(
                         },
                         onSelectProfile = { viewModel.selectProfile(it) },
                         onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
-                        onConfigure = onOpenSettings,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        onConfigure = onOpenSettings
                     )
 
+                    // ═══ 模型原生思考强度 chips（内嵌同行，超宽由本行横滚承接）═══
+                    ReasoningEffortChips(
+                        current = uiState.reasoningEffort,
+                        onSelect = { viewModel.setReasoningEffort(it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
                     //（斜杠实时联想收纳进输入框 Box：菜单锚定在文本框下方而非整行左缘）
                     Box(modifier = Modifier.weight(1f)) {

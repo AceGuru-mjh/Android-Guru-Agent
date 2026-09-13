@@ -25,6 +25,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SnackbarHost
@@ -174,6 +175,7 @@ private fun PluginsTab(state: MarketUiState, viewModel: MarketViewModel) {
 private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     var showImportDialog by remember { mutableStateOf(false) }
     var showUrlDialog by remember { mutableStateOf(false) }
+    var showRepoDialog by remember { mutableStateOf(false) }
     var pendingUninstall by remember { mutableStateOf<MarketSkillRow?>(null) }
 
     val rows = state.skills + state.skillTemplates
@@ -186,25 +188,36 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ExtendedFloatingActionButton(
-                onClick = { showImportDialog = true },
+                onClick = { showRepoDialog = true },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("导入 JSON", style = MaterialTheme.typography.labelMedium)
+                Text("GitHub 获取", style = MaterialTheme.typography.labelMedium)
             }
             ExtendedFloatingActionButton(
                 onClick = { showUrlDialog = true },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("URL 导入", style = MaterialTheme.typography.labelMedium)
+                Text("URL 安装", style = MaterialTheme.typography.labelMedium)
             }
+        }
+        OutlinedButton(
+            onClick = { showImportDialog = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            Text("粘贴 manifest JSON", style = MaterialTheme.typography.labelMedium)
         }
 
         MarketList(
             items = rows,
-            emptyHint = "暂无技能（上方可导入，或从「集成」页安装魔搭技能）",
+            emptyHint = "暂无技能 —— 用上方按钮从 GitHub 仓库 / URL 真实拉取安装",
             header = {
                 item {
-                    MarketHeader("启用后技能指令注入对话；安装的模板可用 /skill:<id> 调用。运行期安装的 composite 工具需重启 App 注册。")
+                    MarketHeader(
+                        "内置 = App 自带能力（工具已原生注册，无安装步骤，用 /skill:<id> 直接调用）；" +
+                            "其余技能需从 GitHub 或 URL 联网拉取，安装后方可启停。"
+                    )
                 }
             },
             key = { it.id }
@@ -214,8 +227,10 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                 subtitle = skill.id,
                 description = skill.description,
                 trailing = {
-                    if (skill.installed) {
-                        Row(
+                    when {
+                        // 内置模板：只给标记，不给假的安装按钮
+                        skill.builtin -> MarketStatusChip(text = "内置", positive = false)
+                        skill.installed -> Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -224,7 +239,6 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                                 onCheckedChange = { viewModel.toggleSkill(skill.id, it) }
                             )
                             IconButton(onClick = { pendingUninstall = skill }) {
-                                // 修复：原用 emoji 文本当图标，无障碍不可读且与 Skill/Memory 页 Delete 图标不一致
                                 Icon(
                                     Icons.Default.Delete,
                                     contentDescription = "卸载技能",
@@ -232,8 +246,7 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                                 )
                             }
                         }
-                    } else {
-                        TextButton(onClick = { viewModel.installSkillTemplate(skill.id) }) {
+                        else -> TextButton(onClick = { viewModel.installSkillTemplate(skill.id) }) {
                             Text("安装")
                         }
                     }
@@ -253,12 +266,22 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     }
     if (showUrlDialog) {
         ImportFromUrlDialog(
-            title = "从 URL 导入 Skill",
-            hint = "https://example.com/skill.json",
+            title = "从 URL 安装 Skill",
+            hint = "manifest JSON 直链，如 https://raw.githubusercontent.com/o/r/main/manifest.json",
             onDismiss = { showUrlDialog = false },
             onConfirm = { url ->
                 viewModel.importSkillFromUrl(url)
                 showUrlDialog = false
+            }
+        )
+    }
+    if (showRepoDialog) {
+        GitHubRepoInstallDialog(
+            busy = state.busy,
+            onDismiss = { showRepoDialog = false },
+            onConfirm = { input ->
+                viewModel.installFromRepoInput(input)
+                showRepoDialog = false
             }
         )
     }
@@ -285,32 +308,51 @@ private fun SkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
 @Composable
 private fun McpTab(state: MarketUiState, viewModel: MarketViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<MarketMcpRow?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ExtendedFloatingActionButton(
-            onClick = { showAddDialog = true },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("添加 MCP 服务器")
+            ExtendedFloatingActionButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("添加工具源", style = MaterialTheme.typography.labelMedium)
+            }
+            ExtendedFloatingActionButton(
+                onClick = { showImportDialog = true },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("导入配置", style = MaterialTheme.typography.labelMedium)
+            }
         }
 
         MarketList(
             items = state.mcps,
-            emptyHint = "未配置 MCP 服务器（点上方按钮添加，HTTP/SSE/STDIO 均可）",
+            emptyHint = "未配置 MCP 工具源（点上方按钮添加：远端 HTTP/SSE 或本地命令 STDIO 均可）",
             header = {
                 item {
-                    MarketHeader("已启用的服务器出现在 / 菜单（/mcp:<名称>）；连接后其工具注入 Agent 对话。禁用 = 从菜单隐藏并断开。")
+                    MarketHeader(
+                        "MCP 不一定是服务器：STDIO 型就是一条本地命令（如 npx -y @modelcontextprotocol/server-memory），" +
+                            "由 App 拉起子进程通过 stdin/stdout 通信。已启用的工具源出现在 / 菜单（/mcp:<名称>）。"
+                    )
                 }
             },
             key = { it.name }
         ) { server ->
             MarketCard(
                 title = server.name,
-                subtitle = server.url,
-                description = "传输：" + server.transport.name,
+                subtitle = server.endpoint,
+                description = "传输：" + server.transport.name + when (server.transport) {
+                    McpTransport.STDIO -> "（本地命令）"
+                    McpTransport.SSE -> "（远端 SSE）"
+                    McpTransport.HTTP -> "（远端 HTTP）"
+                },
                 trailing = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -352,9 +394,18 @@ private fun McpTab(state: MarketUiState, viewModel: MarketViewModel) {
     if (showAddDialog) {
         AddMcpDialog(
             onDismiss = { showAddDialog = false },
-            onAdd = { name, url, transport, apiKey ->
-                viewModel.addMcpServer(name, url, transport, apiKey)
+            onAdd = { config ->
+                viewModel.addMcpServer(config)
                 showAddDialog = false
+            }
+        )
+    }
+    if (showImportDialog) {
+        ImportMcpConfigDialog(
+            onDismiss = { showImportDialog = false },
+            onImport = { json ->
+                viewModel.importMcpConfig(json)
+                showImportDialog = false
             }
         )
     }

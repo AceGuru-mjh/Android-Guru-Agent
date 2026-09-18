@@ -197,6 +197,8 @@ fun TerminalGrid(
     // ── IME 隐藏桥 + 焦点 ──
     val focusRequester = remember { FocusRequester() }
     var imeBuffer by remember { mutableStateOf(TextFieldValue("")) }
+    /** 是否正处于 IME 组合态（拼音/日语/联想候选未上屏）。 */
+    var composing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     /**
@@ -421,26 +423,52 @@ fun TerminalGrid(
                 }
             }
 
-            // ── 隐藏 IME 桥（增量 diff → RAW；组合期间等待提交；删除 → Backspace）──
+            // ── 隐藏 IME 桥（组合态整段下发；非组合按公共前缀增量 diff）──
             BasicTextField(
                 value = imeBuffer,
                 onValueChange = { new ->
+                    /** 下发一段文本到 PTY（CTRL 锁存时单字母转控制码）。 */
+                    fun deliver(chunk: String) {
+                        // 换行归一：终端的"提交"是 \r（Enter 键语义），不是 \n
+                        val text = chunk.replace('\n', '\r')
+                        if (text.isEmpty()) return
+                        if (ctrlLatched && text.length == 1 && text[0].isLetter()) {
+                            onControl(text[0])
+                            ctrlLatched = false
+                        } else {
+                            onText(text)
+                        }
+                    }
+
                     if (new.composition != null) {
+                        // ① 组合中（拼音/候选未上屏）：组合文本**未确定**，不能写进 PTY，
+                        //    仅跟踪在缓冲里 —— 否则会把 li/ni/hao 这些中间态也发给 shell。
+                        composing = true
                         imeBuffer = new
                         return@BasicTextField
                     }
-                    val old = imeBuffer.text
-                    if (new.text.length < old.length) {
-                        repeat(old.length - new.text.length) { onKey(TerminalKey.BACKSPACE) }
-                    } else if (new.text.length > old.length && new.text.startsWith(old)) {
-                        val inserted = new.text.substring(old.length)
-                        if (ctrlLatched && inserted.length == 1 && inserted[0].isLetter()) {
-                            onControl(inserted[0])
-                            ctrlLatched = false
-                        } else {
-                            onText(inserted.replace('\n', '\r'))
-                        }
+
+                    if (composing) {
+                        // ② 组合结束（候选上屏）：组合期间一个字节都没下发过，
+                        //    因此 **整段 new.text 都是新内容**，必须整体下发。
+                        //
+                        //    ⚠ 旧实现在这里仍走增量 diff："li"(2) → "里"(1) 被判成
+                        //    「长度变短 = 删除」→ 只发退格，**上屏的汉字永远进不了终端**
+                        //    （中文用户表现为"字符根本打不进去"）。
+                        composing = false
+                        deliver(new.text)
+                        imeBuffer = TextFieldValue("", TextRange(0))
+                        return@BasicTextField
                     }
+
+                    // ③ 非组合：按公共前缀做增量 diff
+                    //    - 尾部变短 → 退格（覆盖 IME 在隐藏框里的删除动作）；
+                    //    - 前缀被改写（自动纠正/候选替换）→ 退格 + 重发，不再要求 startsWith
+                    //      （旧实现要求 new.startsWith(old)，一旦不等就静默丢弃整次输入）。
+                    val old = imeBuffer.text
+                    val common = old.commonPrefixWith(new.text).length
+                    repeat((old.length - common).coerceAtLeast(0)) { onKey(TerminalKey.BACKSPACE) }
+                    if (new.text.length > common) deliver(new.text.substring(common))
                     imeBuffer = TextFieldValue("", TextRange(0))
                 },
                 textStyle = baseStyle.copy(color = Color.Transparent),
@@ -653,6 +681,9 @@ private fun KeyToolbar(
     ) {
         // 显式拉起输入法：触屏上"点一下没反应"的兜底入口
         ToolbarKey("⌨") { onShowKeyboard() }
+        // 退格：隐藏 IME 桥的缓冲恒为空，输入法拿不到"可删除的 surrounding text"，
+        // 触屏上必须给一个确定可用的删除键（否则打错字只能靠 Ctrl+U 整行重来）。
+        ToolbarKey("⌫") { onKey(TerminalKey.BACKSPACE) }
         ToolbarKey("ESC") { onKey(TerminalKey.ESC) }
         ToolbarKey("TAB") { onKey(TerminalKey.TAB) }
         ToolbarKey(
@@ -672,6 +703,7 @@ private fun KeyToolbar(
         ToolbarKey("^D") { onControl('d') }
         ToolbarKey("^Z") { onControl('z') }
         ToolbarKey("^L") { onControl('l') }
+        ToolbarKey("^U") { onControl('u') }   // 清空当前行（readline 惯例）
         ToolbarKey("粘贴") { onPaste() }
     }
 }

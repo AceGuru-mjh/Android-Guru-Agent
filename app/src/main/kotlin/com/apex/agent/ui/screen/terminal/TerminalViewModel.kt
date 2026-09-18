@@ -252,7 +252,13 @@ class TerminalViewModel @Inject constructor(
      * 命中黑白名单 → 拦截整个写入（含回车），命令不执行。
      */
     fun sendInput(text: String) {
-        val sid = _activeSessionId.value ?: return
+        // 旧实现是无提示的 `?: return`：会话没了的情况下用户敲半天没反应还以为键盘坏了，
+        // 状态条也不给任何线索。这里给出明确反馈。
+        val sid = _activeSessionId.value
+        if (sid == null) {
+            _notice.value = "没有活跃会话，输入未送达（请新建会话）"
+            return
+        }
         if (text.isEmpty()) return
 
         val newlineIdx = text.indexOfFirst { it == '\r' || it == '\n' }

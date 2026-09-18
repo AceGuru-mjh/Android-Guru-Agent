@@ -104,22 +104,25 @@ jobs:
           # ${VARIANT^} = bash 首字母大写(debug→Debug, release→Release);花括号内禁止空格
           # T83：release 双产物 —— 先 universal（含全3 ABI rootfs，兼容旧设备/模拟器），
           # 再 arm64 纯净包（-PapexAbi 收窄 app 级 abiFilters，~50MB，绝大多数现代手机）。
-          # 注意：android.injected.abi 会被模块显式 abiFilters 压过（实测无效），
-          # 故用自定义 apexAbi 属性；abiFilters 是真实任务输入 → 重打包自然触发。
+          # 注意 1：android.injected.abi 会被模块显式 abiFilters 压过（实测无效），
+          #   故用自定义 apexAbi 属性；abiFilters 是真实任务输入 → 重打包自然触发。
+          # 注意 2（实测踩坑）：中间产物必须停放在任务输出目录之外（apk/ 层）——
+          #   Gradle 重跑 packageRelease 时会把输出目录里的非本轮产物当 stale
+          #   output 清理掉（留在 release/ 里的 universal 包会被第二次构建删除）。
           if [ "$VARIANT" = "release" ]; then
             ./gradlew ":app:assembleRelease" \
               --no-daemon \
               -Pkotlin.incremental=false \
               --stacktrace
             mv app/build/outputs/apk/release/app-release.apk \
-               app/build/outputs/apk/release/app-universal-release.apk
+               app/build/outputs/apk/app-universal-release.apk
             ./gradlew ":app:assembleRelease" \
               -PapexAbi=arm64-v8a \
               --no-daemon \
               -Pkotlin.incremental=false \
               --stacktrace
             mv app/build/outputs/apk/release/app-release.apk \
-               app/build/outputs/apk/release/app-arm64-release.apk
+               app/build/outputs/apk/app-arm64-release.apk
           else
             ./gradlew ":app:assemble${VARIANT^}" \
               --no-daemon \
@@ -138,9 +141,10 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ "$VARIANT" = "release" ]; then
             # T83 双产物：arm64 纯净包（内置 rootfs 仅含 arm64，~50MB）+ universal（全 3 ABI，~117MB）
-            mv "$APK_DIR/app-arm64-release.apk" \
+            #（中间产物停在 apk/ 层 —— 见 Build 步骤的踩坑注释）
+            mv "$APK_DIR/../app-arm64-release.apk" \
                "$APK_DIR/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
-            mv "$APK_DIR/app-universal-release.apk" \
+            mv "$APK_DIR/../app-universal-release.apk" \
                "$APK_DIR/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"
             ARM64_APK="$APK_DIR/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
             UNI_APK="$APK_DIR/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"

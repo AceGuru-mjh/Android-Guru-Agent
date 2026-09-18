@@ -141,7 +141,9 @@ class TerminalUbuntuLifecycleToolTest {
     }
 
     @Test
-    fun `03 ensure FAILED carries failedStage and retryable`() = runBlocking {
+    fun `03 ensure bootstrap FAILED degrades to READY with bootstrapDegraded (T83)`() = runBlocking {
+        // T83 内置交付：rootfs 离线解包已就绪，bootstrap 失败降级 READY（环境可用），
+        // bootstrapDegraded/bootstrapError 诚实外露 —— 不再是终态 FAILED。
         val env = ToolEnv(
             bootstrapOutcome = UbuntuLifecycleCoordinator.BootstrapOutcome.FAILED,
             bootstrapFailedStage = "APT_UPDATE",
@@ -149,10 +151,10 @@ class TerminalUbuntuLifecycleToolTest {
         )
         val tool = TerminalUbuntuEnsureTool(env.coordinator)
         val out = Json.parseToJsonElement(tool.invoke("{}")).jsonObject
-        assertEquals("FAILED", out["status"]!!.jsonPrimitive.content)
-        assertEquals("BOOTSTRAP", out["failedStage"]!!.jsonPrimitive.content)
-        assertTrue(out["retryable"]!!.jsonPrimitive.content.toBoolean())
-        assertTrue(out["error"]!!.jsonPrimitive.content.contains("network unreachable"))
+        assertEquals("READY", out["status"]!!.jsonPrimitive.content)
+        assertEquals("true", out["bootstrapDegraded"]!!.jsonPrimitive.content)
+        assertTrue(out["bootstrapError"]!!.jsonPrimitive.content.contains("network unreachable"))
+        assertTrue(out["message"]!!.jsonPrimitive.content.contains("apt 引导未完成"))
     }
 
     @Test

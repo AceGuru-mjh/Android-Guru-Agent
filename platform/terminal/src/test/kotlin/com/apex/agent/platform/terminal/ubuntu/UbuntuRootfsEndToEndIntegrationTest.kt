@@ -25,13 +25,14 @@ import java.net.URL
 import java.nio.file.Files
 
 /**
- * T72: REAL Ubuntu RootFS End-to-End integration test.
+ * T72/T83: REAL Ubuntu RootFS End-to-End integration test.
  *
  * 这是 T72 的衔接验证（范围第 13 条）—— 证明的不是"两个 subsystem 各自
  * 测试通过"，而是整条链在真实输入上闭环：
  *
- *   Ubuntu archive (cdimage.ubuntu.com, REAL download, REAL SHA-256)
- *     → RootfsProvisionerImpl (download → verify → extract → configure → health)
+ *   REAL Ubuntu archive（夹具下载自 cdimage，REAL SHA-256）
+ *     → 暂存为伪 nativeLibraryDir/libubuntu-rootfs.so（T83 内置交付形态）
+ *     → BundledRootfsSource → RootfsProvisionerImpl (local copy → verify → extract → configure → health)
  *     → READY rootfs (stage evidence + health summary in metadata)
  *     → ProvisionedRootfsProvider → LinuxPRootBackend.prepare() → SpawnSpec
  *     → proot (REAL process) → Ubuntu userspace (/bin/bash, /usr/bin/apt)
@@ -56,7 +57,10 @@ import java.nio.file.Files
 class UbuntuRootfsEndToEndIntegrationTest {
 
     companion object {
-        private val source = OfficialUbuntuRootfsSource()
+        // T83：运行时源已内置化（APK jniLibs 伪 .so）。E2E 保持“真实档案”价值：
+        // 下载官方 ubuntu-base 作为夹具 → 暂存为伪 nativeLibraryDir 里的
+        // libubuntu-rootfs.so → 经 BundledRootfsSource 走与生产完全同构的解包链。
+        private lateinit var source: BundledRootfsSource
         private lateinit var layout: RootfsInstallLayout
         private lateinit var provisioner: RootfsProvisionerImpl
         @Volatile private var installed: Boolean = false
@@ -69,12 +73,18 @@ class UbuntuRootfsEndToEndIntegrationTest {
         @JvmStatic
         @BeforeClass
         fun setUpClass() {
-            // ── network preflight（Level 1 的 assume）──
+            // ── network preflight（夹具下载的 assume）──
             assumeTrue("cdimage.ubuntu.com unreachable — network preflight", networkReachable())
 
-            // ── one REAL install for the whole class ──
-            val base = Files.createTempDirectory("t72-e2e-").toFile()
+            // ── one REAL staged bundle + one REAL install for the whole class ──
+            val base = Files.createTempDirectory("t83-e2e-").toFile()
             layout = RootfsInstallLayout.under(AbsolutePath(base.absolutePath))
+            val nativeLibDir = java.io.File(base, "nativeLib").apply { mkdirs() }
+            val fixture = downloadFixtureArchive()
+            assumeTrue("fixture download/verify failed — cannot exercise the bundled chain", fixture != null)
+            fixture!!.copyTo(java.io.File(nativeLibDir, BundledRootfsSource.BUNDLE_LIB_NAME), overwrite = true)
+            fixture.delete()
+            source = BundledRootfsSource(nativeLibraryDir = nativeLibDir.absolutePath)
             provisioner = RootfsProvisionerImpl(
                 source = source,
                 validator = null,
@@ -97,6 +107,31 @@ class UbuntuRootfsEndToEndIntegrationTest {
             if (bin != null && prootWorks(bin)) {
                 prootBinary = bin
             }
+        }
+
+        /**
+         * 夹具获取：下载真实 ubuntu-base 24.04.4 amd64 并校验固定 SHA-256。
+         * 下载只是测试夹具的获取手段（生产链路已是内置离线解包，零网络）。
+         */
+        private fun downloadFixtureArchive(): java.io.File? = try {
+            val url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-amd64.tar.gz"
+            val expectedSha = "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58"
+            val tmp = java.io.File.createTempFile("t83-e2e-archive", ".tar.gz")
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30_000
+                readTimeout = 300_000
+                instanceFollowRedirects = true
+            }
+            conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+            val actual = RootfsDownloader.sha256OfFile(tmp)
+            if (actual != expectedSha) {
+                tmp.delete()
+                null
+            } else {
+                tmp
+            }
+        } catch (e: Throwable) {
+            null
         }
 
         private fun networkReachable(): Boolean = try {
@@ -158,7 +193,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
     // ─── Level 1: RootFS Productionization (network only) ───
 
     @Test
-    fun `L1 real download sha256 extract configure health produces READY`() {
+    fun `L1 bundled local copy sha256 extract configure health produces READY`() {
         assumeTrue("install failed: $installError", installed)
         val result = runBlocking { provisioner.current() }
         assertNotNull("READY rootfs exists", result)

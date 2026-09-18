@@ -33,7 +33,7 @@ class TerminalBackendsTool(
     override val description: String = """
         Discover available terminal execution backends and their real availability.
         Returns each backend's id (use as terminal.create's "backend" parameter), runtime type,
-        and state: READY (usable now) / NEEDS_ROOTFS (call terminal.ubuntu.install first) /
+        and state: READY (usable now) / NEEDS_ROOTFS (bundled archive not yet extracted — call terminal.ubuntu.install, offline ~30s) /
         FAILED (with reason). Check this before creating a linux-ubuntu session.
     """.trimIndent()
 

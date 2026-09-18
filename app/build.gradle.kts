@@ -32,6 +32,16 @@ android {
         targetSdk = 28
         versionCode = 3
         versionName = "1.1.1"
+
+        ndk {
+            // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so
+            // 按 ABI 自动过滤，APK 从 ~117MB 降到 ~50MB。缺省（无属性）= 全 ABI
+            // universal（含 armeabi-v7a / x86_64，兼容旧设备与模拟器）。
+            // 注意：android.injected.abi 会被各模块显式 abiFilters 压过，不可用于此。
+            if (project.hasProperty("apexAbi")) {
+                abiFilters += project.property("apexAbi").toString().split(",").map { it.trim() }
+            }
+        }
     }
 
     buildFeatures {
@@ -80,7 +90,14 @@ android {
         //不解压 .so 到磁盘（extractNativeLibs=false 语义），nativeLibraryDir 下将
         //不存在 proot 文件 —— 必须 legacy 打包（解压到 nativeLibraryDir）才能 exec。
         // Termux/UserLAnd 的标准做法。
-        jniLibs { useLegacyPackaging = true }
+        jniLibs {
+            useLegacyPackaging = true
+            // T83: 内置 Ubuntu rootfs 以伪 .so（tarball）随 jniLibs 分发 —— 非 ELF
+            // 对象，release 的 stripReleaseNativeLibs（llvm-strip）会拒绝并使构建失败；
+            // keepDebugSymbols 即"跳过 strip"清单，档案逐字节原样进 APK
+            //（完整性由三层 SHA-256 链保证，见 BundledRootfsSource.kt）。
+            keepDebugSymbols += "**/libubuntu-rootfs.so"
+        }
     }
 }
 

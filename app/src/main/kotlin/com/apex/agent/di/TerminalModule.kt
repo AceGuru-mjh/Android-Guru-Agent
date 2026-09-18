@@ -18,7 +18,7 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.persistence.SessionMetadataStore
 import com.apex.agent.platform.terminal.runtime.TerminalRuntimeImpl
 import com.apex.agent.platform.terminal.tools.*
-import com.apex.agent.platform.terminal.ubuntu.OfficialUbuntuRootfsSource
+import com.apex.agent.platform.terminal.ubuntu.BundledRootfsSource
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.platform.terminal.ubuntu.ProvisionedRootfsProvider
 import com.apex.agent.platform.terminal.ubuntu.RootfsConfigurator
@@ -133,8 +133,9 @@ object TerminalModule {
         )
 
     /**
-     * 设备架构 → rootfs 目标。注意诚实性：Ubuntu Base 24.04 只发布 arm64/amd64 ——
-     * ARM32 设备返回 ARM32，OfficialUbuntuRootfsSource.resolve 会如实失败
+     * 设备架构 → rootfs 目标。注意诚实性：Ubuntu Base 24.04 官方只发布
+     * arm64/amd64/armhf —— 三者均已内置打包（BundledRootfsSource 注册表）；
+     * 其余架构（x86/riscv64）返回真实值，BundledRootfsSource.resolve 会如实失败
      * （UNSUPPORTED_ARCHITECTURE），绝不静默装一个跑不起来的 rootfs。
      */
     @Provides
@@ -146,12 +147,18 @@ object TerminalModule {
         return RootfsTarget(distribution = "ubuntu", version = "24.04", architecture = arch)
     }
 
-    /** T72 生产 provisioner：真实下载 + SHA-256 + 原子解压 + 配置 + 健康检查 + 阶段证据。
+    /** T83 生产 provisioner（内置交付转向）：APK 内置档案本地拷贝 + SHA-256 复验 +
+     *  原子解压 + 配置 + 健康检查 + 阶段证据 —— 下游与 T72 下载时代完全同构
+     *  （downloader/extractor 源无关；见 BundledRootfsSource KDoc 的三层校验链）。
      *
      *  T82（Termux 基线 §3.5/§3.6/§9.2）：DNS 注入（Android LinkProperties —— 此前
      *  DI 未传，public-DNS fallback 在 DNS 受限网络直接失败）；locale.gen（zh_CN/
      *  en_US —— locales 包 postinst 自动生成）；timezone（Android 当前时区写入
-     *  /etc/timezone，tzdata postinst 生效）。 */
+     *  /etc/timezone，tzdata postinst 生效）。
+     *
+     *  档案来源：APK jniLibs 伪 .so（libubuntu-rootfs.so，安装时解出到
+     *  nativeLibraryDir；构建期由 scripts/fetch_rootfs.sh 拉取并双重校验 ——
+     *  运行时下载安装流程已随产品决策移除，基础环境零网络）。 */
     @Provides
     @Singleton
     fun provideRootfsProvisioner(
@@ -162,7 +169,9 @@ object TerminalModule {
             AbsolutePath(File(context.filesDir, "rootfs/ubuntu").absolutePath)
         )
         return RootfsProvisionerImpl(
-            source = OfficialUbuntuRootfsSource(),
+            source = BundledRootfsSource(
+                nativeLibraryDir = context.applicationInfo.nativeLibraryDir ?: ""
+            ),
             validator = null,                       // 布局校验由 health inspector 承担（T72）
             layout = layout,
             metadataStore = RootfsMetadataStore(File(layout.metadataFile.value)),

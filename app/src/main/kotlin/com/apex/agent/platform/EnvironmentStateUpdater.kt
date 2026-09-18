@@ -7,6 +7,7 @@ import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.tools.ToolEnvironmentState
 import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.accessibility.ApexAccessibilityService
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,10 @@ import javax.inject.Singleton
  *   TYPE_VIEW_FOCUSED 且事件源可编辑（EditText 焦点）→ 置 true 并带
  *   45 秒 TTL。事件驱动信号天然会过期（用户可能随时收起键盘），
  *   TTL 到期回退 unknown（fail-open），绝不误报 false。
+ * - **ubuntu_ready**（T83）：收集 [UbuntuLifecycleCoordinator.stateFlow] ——
+ *   内置 Ubuntu 环境解包/引导到 READY（含离线降级）即置 true，模型在
+ *   每轮环境摘要中看到 `ubuntu=on`，据此选择 linux-ubuntu 会话而非
+ *   本地 Android shell。此前该旗标仅有定义无生产接线（死遥测）。
  *
  * 未知态语义见 [ToolEnvironmentState]：门控对未知放行 —— 桥没跑起来
  * （老进程升级、服务未启用）时工具行为与 v1 完全一致，零回归。
@@ -36,7 +41,8 @@ import javax.inject.Singleton
 @Singleton
 class EnvironmentStateUpdater @Inject constructor(
     private val privilegeManager: PrivilegeManager,
-    private val environmentState: ToolEnvironmentState
+    private val environmentState: ToolEnvironmentState,
+    private val ubuntuLifecycle: UbuntuLifecycleCoordinator
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -89,6 +95,14 @@ class EnvironmentStateUpdater @Inject constructor(
                             ?.removeEventListener(keyboardListener)
                     }
                 }
+            }
+        }
+
+        // T83：内置 Ubuntu 环境真值 —— 解包/引导 READY（含离线降级）即 ubuntu=on。
+        // 无 TTL（rootfs 不会自发消失；removeRootfs 后 phase 离开 READY 自动回 false）。
+        scope.launch {
+            ubuntuLifecycle.stateFlow.collect { state ->
+                environmentState.set(ToolEnvironmentState.Flags.UBUNTU_READY, state.phase == UbuntuLifecycleCoordinator.Phase.READY)
             }
         }
 

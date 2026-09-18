@@ -227,7 +227,7 @@ class TerminalRuntimeImpl(
             is BackendAvailability.NeedsRootfs -> return Result.failure(
                 RuntimeException(
                     "TerminalError:RootfsNotReady — backend '${backend.id}' 需要 Ubuntu rootfs" +
-                        "（state=${av.state}）。先用 terminal.ubuntu.install 引导安装，再重试 create。"
+                        "（state=${av.state}）。先用 terminal.ubuntu.install 离线解包内置 rootfs，再重试 create。"
                 )
             )
             is BackendAvailability.Failed -> return Result.failure(
@@ -286,7 +286,7 @@ class TerminalRuntimeImpl(
                 is BackendAvailability.NeedsRootfs -> TerminalRuntime.BackendStatus(
                     id = b.id, runtimeType = b.runtimeType.name,
                     available = false, state = "NEEDS_ROOTFS:${av.state}",
-                    detail = "Ubuntu rootfs 未就绪 —— 调用 terminal.ubuntu.install 安装后重试"
+                    detail = "Ubuntu rootfs 未就绪 —— 调用 terminal.ubuntu.install 解包内置档案后重试（离线，约 30 秒）"
                 )
                 is BackendAvailability.Failed -> TerminalRuntime.BackendStatus(
                     id = b.id, runtimeType = b.runtimeType.name,

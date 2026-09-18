@@ -47,7 +47,7 @@ class ToolEnvironmentState {
         /** Shizuku binder is connected and privileged. */
         const val SHIZUKU_AVAILABLE = "shizuku_available"
 
-        /** PRoot Ubuntu rootfs is provisioned and bootstrapped. */
+        /** Bundled PRoot Ubuntu rootfs is provisioned (offline extraction complete; apt bootstrap may be degraded but usable). */
         const val UBUNTU_READY = "ubuntu_ready"
 
         /** Terminal runtime has at least one live session. */
@@ -230,7 +230,7 @@ class ToolEnvironmentGate(
                 "offline tools (files, data, terminal)."
 
         ToolEnvironmentState.Flags.UBUNTU_READY ->
-            "Run terminal.ubuntu.ensure first to provision the Ubuntu environment."
+            "Run terminal.ubuntu.ensure first to extract the bundled Ubuntu environment (offline, ~30s)."
 
         ToolEnvironmentState.Flags.TERMINAL_SESSION_OPEN ->
             "Create a terminal session with terminal.create first."

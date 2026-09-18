@@ -313,7 +313,7 @@ class UbuntuLifecycleCoordinatorTest {
     }
 
     @Test
-    fun `10 bootstrap FAILED maps to Failed stage BOOTSTRAP`() = runBlocking {
+    fun `10 bootstrap FAILED degrades to READY with bootstrapNote (T83 offline-first)`() = runBlocking {
         val env = Env()
         env.bootstrap.behavior = {
             UbuntuLifecycleCoordinator.BootstrapStageResult(
@@ -322,11 +322,53 @@ class UbuntuLifecycleCoordinatorTest {
             )
         }
         val r = env.coordinator.ensureReady()
-        assertTrue(r is UbuntuLifecycleCoordinator.EnsureResult.Failed)
-        r as UbuntuLifecycleCoordinator.EnsureResult.Failed
-        assertEquals(UbuntuLifecycleCoordinator.Stage.BOOTSTRAP, r.stage)
-        assertTrue(r.message.contains("apt lock held"))
-        assertEquals("APT_UPDATE", r.bootstrapState)
+        // T83 内置交付：rootfs 离线解包已就绪，bootstrap 是需网络的增强而非门槛 ——
+        // 失败降级为 READY（bootstrapNote 携带原因），会话照常可创建。
+        val ready = r as UbuntuLifecycleCoordinator.EnsureResult.Ready
+        assertTrue(ready.bootstrapDegraded)
+        assertTrue(ready.bootstrapError!!.contains("apt lock held"))
+        assertEquals(UbuntuLifecycleCoordinator.Phase.READY, env.coordinator.stateFlow.value.phase)
+        assertEquals(
+            "apt lock held（failedStage=APT_UPDATE）",
+            env.coordinator.stateFlow.value.bootstrapNote
+        )
+        // 降级 READY 后快速路径仍成立：同进程再次 ensure 不重试 bootstrap
+        val again = env.coordinator.ensureReady()
+        assertTrue(again is UbuntuLifecycleCoordinator.EnsureResult.AlreadyReady)
+    }
+
+    @Test
+    fun `10b bootstrap crashed also degrades (rootfs healthy, port failure is not an env failure)`() = runBlocking {
+        val env = Env()
+        env.bootstrap.behavior = { throw RuntimeException("port wiring exploded") }
+        val r = env.coordinator.ensureReady()
+        val ready = r as UbuntuLifecycleCoordinator.EnsureResult.Ready
+        assertTrue(ready.bootstrapDegraded)
+        assertTrue(ready.bootstrapError!!.contains("port wiring exploded"))
+        assertEquals(UbuntuLifecycleCoordinator.Phase.READY, env.coordinator.stateFlow.value.phase)
+    }
+
+    @Test
+    fun `10c bootstrap success clears the degraded note on re-ensure with force`() = runBlocking {
+        val env = Env()
+        env.bootstrap.behavior = {
+            UbuntuLifecycleCoordinator.BootstrapStageResult(
+                UbuntuLifecycleCoordinator.BootstrapOutcome.FAILED,
+                "NETWORK", failedStage = "NETWORK", error = "offline"
+            )
+        }
+        env.coordinator.ensureReady()
+        assertEquals("offline（failedStage=NETWORK）", env.coordinator.stateFlow.value.bootstrapNote)
+        // 网络恢复：force 重跑 → bootstrap 成功 → 注记清除
+        env.bootstrap.behavior = {
+            UbuntuLifecycleCoordinator.BootstrapStageResult(
+                UbuntuLifecycleCoordinator.BootstrapOutcome.READY, "READY"
+            )
+        }
+        val r = env.coordinator.ensureReady(force = true)
+        val ready = r as UbuntuLifecycleCoordinator.EnsureResult.Ready
+        assertFalse(ready.bootstrapDegraded)
+        assertEquals(null, env.coordinator.stateFlow.value.bootstrapNote)
     }
 
     @Test

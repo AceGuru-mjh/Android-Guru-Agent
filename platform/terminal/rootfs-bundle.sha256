@@ -1,0 +1,11 @@
+# T83: 内置 Ubuntu rootfs 档案指纹清单（jniLibs 伪 .so 交付）。
+# 单一真值 ×2：本清单（bash/CI 用，格式与 proot-binaries.sha256 一致）与
+# BundledRootfsSource.kt 注册表（运行时用）—— BundledRootfsSourceTest 交叉校验防漂移。
+#
+# 数据来源（2026-02 实测，官方附 SHA256SUMS.gpg 签名）：
+#   https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS
+# 拉取与暂存：scripts/fetch_rootfs.sh（构建期执行；这些大档案不入库）。
+# point 升级（24.04.5+）= 显式人工变更：本清单 + Kotlin 注册表 + 脚本 + 测试同步更新。
+04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2  src/main/jniLibs/arm64-v8a/libubuntu-rootfs.so
+c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58  src/main/jniLibs/x86_64/libubuntu-rootfs.so
+991520b47f6586f38a78505cf016e300b6191bb8ff86a0723481ec23a37ab7f4  src/main/jniLibs/armeabi-v7a/libubuntu-rootfs.so

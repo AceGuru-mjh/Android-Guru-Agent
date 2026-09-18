@@ -23,7 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -57,12 +57,13 @@ import androidx.compose.ui.unit.sp
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 
 /**
- * 环境中心（终端页顶栏「下载」图标入口）。
+ * 环境中心（终端页顶栏图标入口）。
  *
  * 三个层次的真实环境能力：
- *  1. **Ubuntu 24.04 LTS rootfs** —— 完整安装链（下载 SHA256 校验 → 解压 → 引导），
- *     状态驱动按钮（安装/取消/修复/删除），能力（bash/apt/python…）快览，磁盘占用展示；
- *  2. **Android 本地 Shell** —— 内置环境（mksh/toybox），零下载即用；
+ *  1. **Ubuntu 24.04 LTS rootfs（APK 内置）** —— 离线解包链（本地拷贝 + SHA-256
+ *     复验 → 解压 → 引导），状态驱动按钮（解包/取消/修复/删除），能力
+ *     （bash/apt/python…）快览，磁盘占用展示；
+ *  2. **Android 本地 Shell** —— 内置环境（mksh/toybox），零解包即用；
  *  3. **环境依赖包**（Ubuntu 内）—— JDK/Git/Gradle/SDK/NDK…，apt 命令真实路由
  *     到 Ubuntu 会话执行（镜像源可切换）。
  *
@@ -107,11 +108,11 @@ internal fun EnvironmentCenterSheet(
         ) {
             // ── 标题 ──
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SurfaceBadge(Icons.Default.Download, MaterialTheme.colorScheme.primary)
+                SurfaceBadge(Icons.Default.Layers, MaterialTheme.colorScheme.primary)
                 Column {
                     Text("环境中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "按需下载运行环境 —— 安装与删除均可逆，用户数据（/root、workspace）保留",
+                        "环境随 APK 内置 —— 首次使用离线解包（约 30 秒）；解包与删除均可逆，用户数据（/root、workspace）保留",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -201,8 +202,9 @@ internal fun EnvironmentCenterSheet(
             title = { Text("删除 Ubuntu 环境？") },
             text = {
                 Text(
-                    "将删除 rootfs（数百 MB）与下载缓存。用户数据（guest /root 与 workspace）保留；" +
-                        "再次安装可随时恢复。正在运行的 Ubuntu 会话需先全部关闭。"
+                    "将删除解包后的 rootfs（数百 MB）与解包缓存，释放存储。内置安装包随 APK 保留，" +
+                        "可随时重新离线解包；用户数据（guest /root 与 workspace）保留。" +
+                        "正在运行的 Ubuntu 会话需先全部关闭。"
                 )
             },
             confirmButton = {
@@ -236,9 +238,10 @@ private fun UbuntuEnvironmentCard(
         phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING ||
         phase == UbuntuLifecycleCoordinator.Phase.RECOVERING
 
-    SettingsCard(Icons.Default.Terminal, "Ubuntu 24.04 LTS") {
+    SettingsCard(Icons.Default.Terminal, "Ubuntu 24.04 LTS（内置）") {
         Text(
-            "完整 Linux 开发环境（apt / bash / python / 构建工具链），PRoot 免 root 运行。官方 rootfs SHA256 校验、断点续传。",
+            "完整 Linux 开发环境（apt / bash / python / 构建工具链），PRoot 免 root 运行。" +
+                "官方 rootfs 随 APK 内置（构建期 SHA256 校验），首次使用离线解包；apt 引导需网络，离线时自动降级可用。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -308,8 +311,9 @@ private fun UbuntuEnvironmentCard(
             )
         }
 
-        // 失败详情
+        // 失败详情 + T83 降级注记（apt 引导未完成但环境可用）
         val lastError = ubuntu.lastError
+        val bootstrapNote = ubuntu.bootstrapNote
         if (phase == UbuntuLifecycleCoordinator.Phase.FAILED && lastError != null) {
             Spacer(Modifier.height(6.dp))
             Text(
@@ -318,18 +322,26 @@ private fun UbuntuEnvironmentCard(
                 color = MaterialTheme.colorScheme.error,
                 maxLines = 3
             )
+        } else if (phase == UbuntuLifecycleCoordinator.Phase.READY && bootstrapNote != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "apt 引导未完成（${bootstrapNote.take(100)}）—— 环境可用，apt 操作将在使用时真实报错；网络恢复后可修复。",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFE0A63C),
+                maxLines = 3
+            )
         }
 
         // 操作按钮（状态驱动）
         Spacer(Modifier.height(10.dp))
         when (phase) {
             UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> {
-                ActionButton("下载并安装（约数百 MB）", loading = false) { onInstall() }
+                ActionButton("解包内置环境（离线，约 30 秒）", loading = false) { onInstall() }
             }
             UbuntuLifecycleCoordinator.Phase.INSTALLING -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("rootfs 下载/解压中…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("rootfs 解包/校验中…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(onClick = onCancel) { Text("取消", color = MaterialTheme.colorScheme.error) }
                 }
@@ -388,8 +400,8 @@ private fun StatusBadge(text: String, color: Color) {
 }
 
 private fun phaseLabel(phase: UbuntuLifecycleCoordinator.Phase): String = when (phase) {
-    UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未安装"
-    UbuntuLifecycleCoordinator.Phase.INSTALLING -> "下载/解压中"
+    UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未解包"
+    UbuntuLifecycleCoordinator.Phase.INSTALLING -> "解包/校验中"
     UbuntuLifecycleCoordinator.Phase.ROOTFS_READY -> "待初始化"
     UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING -> "初始化中"
     UbuntuLifecycleCoordinator.Phase.READY -> "已就绪"

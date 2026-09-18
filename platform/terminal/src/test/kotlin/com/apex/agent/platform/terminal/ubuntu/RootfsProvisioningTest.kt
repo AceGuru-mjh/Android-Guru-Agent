@@ -176,44 +176,8 @@ class RootfsProvisioningTest {
     }
 
     // ─── §6: RootfsArtifactSource tests ───
-
-    @Test fun `OfficialUbuntuRootfsSource resolves 24-04 arm64 with real checksum`() = runBlocking {
-        val src = OfficialUbuntuRootfsSource()
-        val art = src.resolve(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM64)).getOrThrow()
-        assertEquals("ubuntu", art.distribution)
-        assertEquals("24.04.4", art.version)
-        assertEquals(CpuArchitecture.ARM64, art.architecture)
-        // T72: REAL checksum from the official SHA256SUMS — not a placeholder
-        assertEquals("04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2", art.sha256)
-        assertTrue(art.isVerifiable)
-        assertTrue("real size", (art.expectedSize ?: 0) > 20_000_000)
-        assertTrue("real URL with point release", art.archiveUrl!!.contains("24.04.4"))
-    }
-
-    @Test fun `OfficialUbuntuRootfsSource resolves 24-04 x86_64 with real checksum`() = runBlocking {
-        val src = OfficialUbuntuRootfsSource()
-        val art = src.resolve(RootfsTarget("ubuntu", "24.04", CpuArchitecture.X86_64)).getOrThrow()
-        assertEquals("c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58", art.sha256)
-    }
-
-    @Test fun `OfficialUbuntuRootfsSource refuses unsupported architecture`() = runBlocking {
-        val src = OfficialUbuntuRootfsSource()
-        val result = src.resolve(RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM32))
-        assertTrue(result.isFailure)
-        assertTrue(result.exceptionOrNull()!!.message!!.contains("UNSUPPORTED_ARCHITECTURE"))
-    }
-
-    @Test fun `OfficialUbuntuRootfsSource refuses unsupported version`() = runBlocking {
-        val src = OfficialUbuntuRootfsSource()
-        val result = src.resolve(RootfsTarget("ubuntu", "99.04", CpuArchitecture.ARM64))
-        assertTrue(result.isFailure)
-    }
-
-    @Test fun `OfficialUbuntuRootfsSource refuses non-ubuntu distribution`() = runBlocking {
-        val src = OfficialUbuntuRootfsSource()
-        val result = src.resolve(RootfsTarget("debian", "24.04", CpuArchitecture.ARM64))
-        assertTrue(result.isFailure)
-    }
+    //（T83：源契约测试迁至 BundledRootfsSourceTest —— 运行时源已从官方镜像下载
+    //  转向 APK 内置档案；FakeRootfsSource 供本类 provisioner 全链测试继续使用。）
 
     // ─── §7: Android ABI detection ───
 

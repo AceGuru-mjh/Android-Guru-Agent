@@ -49,11 +49,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.LaunchedEffect
 
 /**
  * 自适应输入框。
@@ -74,6 +76,14 @@ import androidx.compose.ui.window.DialogProperties
  * 现在彻底移除该 clickable，交回文本框原生点击处理（聚焦 + 弹键盘 + 定位光标）；
  * "双击进全屏"改为常显的全屏按钮（文本框内双击本就是选中单词的标准手势，
  * 抢占它会误伤选词）。
+ *
+ * ## 修复：部分设备点击后键盘不弹（P0，与主线程卡死并列的键盘两大根因之二）
+ *
+ * 终端页 [com.apex.agent.ui.screen.terminal.TerminalRenderer] 已验证：**只靠获得焦点
+ * 在部分设备/输入法上不会拉起 IME**（焦点到位但 IME 未被请求显示），必须显式
+ * `keyboardController.show()`。聊天页此前完全没有这层兑底。现在：焦点从无到有
+ * （用户点击 / 程序请求）即显式 show() —— 不挂 pointerInput/clickable，避免重蹈
+ * 上方 KDoc 记载的「手势吃掉点击」旧 bug。
  *
  * @param value 输入文本
  * @param onValueChange 文本变化回调
@@ -101,6 +111,14 @@ fun AdaptiveInputField(
 
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+
+    // ── P0 键盘兑底：焦点到位 ≠ IME 显示（部分设备/输入法），显式补一次 show()。──
+    // 触发条件严格限定 false→true（避免隐藏键盘后又被动弹出）；失败静默
+    //（controller 未挂载等时序异常不应炸 UI）。与 TerminalRenderer.showKeyboard 同款。
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(isFocused) {
+        if (isFocused) keyboardController?.show()
+    }
     val fieldBackground by animateColorAsState(
         targetValue = if (isFocused)
             MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)

@@ -108,6 +108,10 @@ class PtyOutputPumpImpl(
                         } else {
                             native.nativeWaitForData(nativeSessionId, POLL_TIMEOUT_MS)
                         }
+                        // P0（性能节流的兑底）：无数据窗口补一次屏幕刷新 —— VT 喂入
+                        // 后被 33ms 节流跳过的最后一段 styled 快照在此补算，输出停止
+                        // 后屏幕不会停在旧帧（observation 内部脏标记为空时是零成本 no-op）。
+                        onOutput?.invoke()
                     }
                     else -> {
                         val bytes = buf.copyOf(n)

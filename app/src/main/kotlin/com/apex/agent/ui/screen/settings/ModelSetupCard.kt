@@ -51,8 +51,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.core.llm.ModelProfileDefaults
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.RemoteModelInfo
 import kotlinx.coroutines.delay
@@ -97,6 +100,18 @@ internal fun ModelSetupCard(
     var showModelPicker by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
+
+    // ═══ 诚实化（用户质疑"test 模型 / deepseekflash 名字不完整"的根因）═══
+    // 列表内容 = 端点 /models 响应的逐字透传：若 Base URL 指向第三方中转站，
+    // 中转站返回什么 id（test / deepseekflash…）就展示什么 —— 不是 App 造假。
+    // 但旧 UI 把弹窗冠名为「DeepSeek 的可用模型」，掩盖了真实请求端点。
+    // 现在比对【当前 Base URL vs 内置官方预设】→ 偏离即显式警告 + 一键恢复官方端点；
+    // 弹窗标题也带上实际请求的 host，让用户看清模型列表到底是谁返回的。
+    val officialBaseUrl = remember(providerId) {
+        ModelProfileDefaults.builtInProviders.firstOrNull { it.id == providerId }?.baseUrl.orEmpty()
+    }
+    val urlDeviated = officialBaseUrl.isNotBlank() &&
+        baseUrl.trim().trimEnd('/').equals(officialBaseUrl.trimEnd('/'), ignoreCase = true).not()
 
     // 最新值引用（DisposableEffect 冲刷时取离开屏幕那一刻的值，而非首次组合的旧值）
     val latestProviderId by rememberUpdatedState(providerId)
@@ -238,15 +253,43 @@ internal fun ModelSetupCard(
                 label = { Text("Base URL") },
                 leadingIcon = { Icon(Icons.Outlined.Link, null, Modifier.size(18.dp)) },
                 supportingText = {
-                    Text(
-                        if (baseUrl.isBlank()) "自定义端点请在此填写，例：https://api.xxx.com/v1"
-                        else "请求发往 ${baseUrl.trimEnd('/')}/chat/completions",
-                        style = MaterialTheme.typography.labelSmall
-                    )
+                    Column {
+                        Text(
+                            if (baseUrl.isBlank()) "自定义端点请在此填写，例：https://api.xxx.com/v1"
+                            else "请求发往 ${baseUrl.trimEnd('/')}/chat/completions",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        if (urlDeviated) {
+                            Text(
+                                "⚠ 当前 Base URL 偏离「${provider?.displayName}」官方预设" +
+                                    "（官方：$officialBaseUrl）。拉到的模型清单由该端点返回，" +
+                                    "出现的 model id（含 test / 命名不完整项）均来自它，非官方列表。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // 偏离官方预设：一键恢复（弹窗列表里那些"test"多来自中转站，恢复官方端点后即消失）
+            if (urlDeviated) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = {
+                        baseUrl = officialBaseUrl
+                        viewModel.setProviderBaseUrl(providerId, officialBaseUrl)
+                    }) {
+                        Icon(Icons.Outlined.Refresh, null, Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("恢复官方端点 $officialBaseUrl", fontSize = 12.sp)
+                    }
+                }
+            }
 
             // ── 第三行：API Key（用户输入；防抖 500ms 加密落盘）──
             OutlinedTextField(
@@ -341,6 +384,8 @@ internal fun ModelSetupCard(
     if (showModelPicker) {
         AvailableModelsDialog(
             providerName = provider?.displayName ?: "当前端点",
+            requestUrl = baseUrl.trim().trimEnd('/') + "/models",
+            urlDeviated = urlDeviated,
             models = discoveredModels,
             currentModelId = selected?.modelId.orEmpty(),
             onDismiss = { showModelPicker = false },
@@ -357,10 +402,17 @@ internal fun ModelSetupCard(
  *
  * 数据来自 `GET {baseUrl}/models` —— 不再使用写死的推荐列表。支持关键字筛选，
  * 空列表时给出明确原因（端点未开放 `/models` 或 Key 无权访问）。
+ *
+ * 诚实化：标题带【实际请求的端点 host】，副行展示完整请求 URL —— 用户反馈
+ * "选了 DeepSeek 却拉出 test / deepseekflash 这类模型名"，根因是其 Base URL
+ * 指向第三方中转站（清单=端点响应逐字透传）。冠名 + URL 同屏后，"这份清单
+ * 到底是谁返回的"一目了然；[urlDeviated] 再叠加偏离官方预设警告。
  */
 @Composable
 private fun AvailableModelsDialog(
     providerName: String,
+    requestUrl: String,
+    urlDeviated: Boolean,
     models: List<RemoteModelInfo>,
     currentModelId: String,
     onDismiss: () -> Unit,
@@ -371,10 +423,31 @@ private fun AvailableModelsDialog(
         if (query.isBlank()) models
         else models.filter { it.id.contains(query.trim(), ignoreCase = true) }
     }
+    val requestHost = remember(requestUrl) {
+        runCatching { java.net.URI(requestUrl).host ?: requestUrl }.getOrDefault(requestUrl)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("$providerName 的可用模型（${models.size}）") },
+        title = {
+            Column {
+                Text("$providerName · $requestHost 的可用模型（${models.size}）")
+                Text(
+                    "GET $requestUrl",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (urlDeviated) {
+                    Text(
+                        "⚠ 端点偏离官方预设 —— 清单由该中转/自定义端点返回，非官方模型表",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
         text = {
             Column {
                 OutlinedTextField(
@@ -406,12 +479,18 @@ private fun AvailableModelsDialog(
                                     RadioButton(selected = model.id == currentModelId, onClick = null)
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(model.id, maxLines = 1)
+                                        Text(
+                                            model.id,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                         if (model.ownedBy.isNotBlank()) {
                                             Text(
                                                 model.ownedBy,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.outline
+                                                color = MaterialTheme.colorScheme.outline,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }

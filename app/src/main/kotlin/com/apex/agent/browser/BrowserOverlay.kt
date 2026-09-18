@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebView
@@ -65,6 +66,14 @@ import kotlinx.coroutines.launch
  * Agent 自动化工具被锁；HIDDEN/AGENT_DRIVING 状态浮窗自动收起（霓虹球仍在，
  * 点球即再次进入接管）。WebView 容器的 topMargin 由 chrome 头部实际高度回调驱动，
  * 页面内容永不遮挡地址栏。
+ *
+ * ## P0 修复：浮窗不再抢占键盘焦点
+ *
+ * 旧窗口 flags 缺 `FLAG_NOT_FOCUSABLE`：全屏 overlay 一出就抢走应用窗口焦点，
+ * 下方应用的 EditText 被 IMM 判定 “窗口未聚焦”而拒绝弹键盘（经典
+ * ignoring showSoftInput 报错）。现在窗口默认不可聚焦（纯触摸层），
+ * 首次在浮窗内按下时才切为可聚焦（页面输入框/地址栏需要 IME），隐藏时复位。
+ * 触摸分发不受可聚焦性影响（WebView 滚动/点击照常），只有键盘输入需要它。
  */
 @Singleton
 class BrowserOverlay @Inject constructor(
@@ -90,6 +99,8 @@ class BrowserOverlay @Inject constructor(
     // 每次展示周期新建：LifecycleRegistry 一旦 ON_DESTROY 无法重置
     @Volatile private var lifecycleOwner: OverlayLifecycleOwner? = null
     @Volatile private var windowParams: WindowManager.LayoutParams? = null
+    /** 当前窗口是否已因浮窗内触摸而切为可聚焦（IME 需要窗口焦点）。 */
+    @Volatile private var windowFocusable = false
 
     @Volatile private var attachedWebView: WebView? = null
 
@@ -131,7 +142,8 @@ class BrowserOverlay @Inject constructor(
             return
         }
         val params = buildLayoutParams()
-        val root = FrameLayout(appContext).apply {
+        val root = TouchActivatingFrameLayout(appContext).apply {
+            onFirstTouch = { makeWindowFocusable() }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -140,14 +152,18 @@ class BrowserOverlay @Inject constructor(
 
         // WebView 承载容器：topMargin 由 chrome 头部高度回调实时驱动（初始估计值，
         // 首帧 onGloballyPositioned 回调后即校正），页面内容永不遮挡地址栏。
-        val host = FrameLayout(appContext).apply {
+        // 同款触摸激活：页面内输入框需要窗口焦点才能拉起 IME。
+        val host = TouchActivatingFrameLayout(appContext).apply {
+            onFirstTouch = { makeWindowFocusable() }
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ).apply { topMargin = statusBarHeightPx() + dpPx(64) }
         }
 
-        // Compose 完整浏览器 chrome（自带暗色 MaterialTheme，宿主无需包装）
+        // Compose 完整浏览器 chrome（自带暗色 MaterialTheme，宿主无需包装）。
+        // 触摸激活由外层 root（TouchActivatingFrameLayout.dispatchTouchEvent）统一承担：
+        // 父容器分发先于子 View，浮窗内任何按下（chrome/WebView）都会触发，无需包裹。
         val owner = OverlayLifecycleOwner()
         owner.performRestore()
         val compose = ComposeView(appContext).apply {
@@ -213,6 +229,7 @@ class BrowserOverlay @Inject constructor(
         composeView = null
         lifecycleOwner = null
         windowParams = null
+        windowFocusable = false
         chromeHeaderPx = 0
     }
 
@@ -314,8 +331,11 @@ class BrowserOverlay @Inject constructor(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             type,
-            // 浮窗内可交互，浮窗外触摸透传（不抢外部事件）
+            // 浮窗内可交互，浮窗外触摸透传（不抢外部事件）；
+            // P0：默认不可聚焦 —— 不抢下方应用窗口的键盘焦点（IME 才能正常弹出），
+            // 首次在浮窗内按下时由 [makeWindowFocusable] 临时移除 NOT_FOCUSABLE。
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                    or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                     or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
@@ -325,6 +345,35 @@ class BrowserOverlay @Inject constructor(
             y = 0
             // 地址栏编辑时软键盘随窗口 resize（overlay 窗口默认不调整，输入框会被键盘挡住）
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
+    }
+
+    /**
+     * 把浮窗切为可聚焦（页面/地址栏需要 IME 时）。仅首次触摸触发一次，
+     * 失败静默（窗口已移除等时序）；隐藏时随窗口销毁自动复位。
+     */
+    private fun makeWindowFocusable() {
+        if (windowFocusable) return
+        val params = windowParams ?: return
+        val root = rootView ?: return
+        windowFocusable = true
+        params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        try {
+            windowManager.updateViewLayout(root, params)
+        } catch (_: Exception) {
+            // ignore：窗口可能正在被移除
+        }
+    }
+
+    // ───────── 触摸激活容器（首次按下 → 窗口变可聚焦）─────────
+
+    /** dispatchTouchEvent 级拦截：父容器分发先于子 View（ComposeView 为 final 不可继承，
+     * 且 root 已覆盖全部子层级，chrome/WebView 无需各自包裹）。 */
+    private class TouchActivatingFrameLayout(context: Context) : FrameLayout(context) {
+        var onFirstTouch: (() -> Unit)? = null
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.action == MotionEvent.ACTION_DOWN) onFirstTouch?.invoke()
+            return super.dispatchTouchEvent(ev)
         }
     }
 }

@@ -121,3 +121,7 @@ commit_msg.txt
 *.swp
 *.swo
 *~
+
+# T83: bundled Ubuntu rootfs staged at build time (87MB total, never committed;
+# fetched + verified by scripts/fetch_rootfs.sh against rootfs-bundle.sha256)
+platform/terminal/src/main/jniLibs/*/libubuntu-rootfs.so

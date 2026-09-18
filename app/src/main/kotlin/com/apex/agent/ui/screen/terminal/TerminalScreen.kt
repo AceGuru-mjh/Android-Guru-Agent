@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
@@ -143,9 +143,9 @@ fun TerminalScreen(
                         }
                     },
                     actions = {
-                        // 环境中心：下载/管理 Ubuntu rootfs 与环境依赖（必含 Ubuntu）
+                        // 环境中心：内置 Ubuntu rootfs 解包/管理与环境依赖（离线交付，无下载）
                         IconButton(onClick = { showEnvironmentCenter = true }) {
-                            Icon(Icons.Default.Download, contentDescription = "环境中心", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Layers, contentDescription = "环境中心", tint = MaterialTheme.colorScheme.primary)
                         }
                         // 终端专属设置抽屉（外观/键盘行/命令黑白名单）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -205,7 +205,7 @@ fun TerminalScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Ubuntu 会话提供完整 Linux 开发环境（apt / bash / 工具链）；" +
-                            "首次使用需下载 rootfs（约数百 MB，进度在横幅显示）。",
+                            "rootfs 随 APK 内置，首次使用离线解包（约 30 秒，进度在横幅显示）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -234,7 +234,7 @@ fun TerminalScreen(
         )
     }
 
-    // ═══ 环境中心（顶栏下载图标入口）═══
+    // ═══ 环境中心（顶栏图标入口）═══
     if (showEnvironmentCenter) {
         EnvironmentCenterSheet(
             onDismiss = { showEnvironmentCenter = false },
@@ -453,19 +453,19 @@ private fun UbuntuLifecycleBanner(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (phase == "FAILED") "Ubuntu 环境异常" else "Ubuntu 开发环境未安装",
+                        if (phase == "FAILED") "Ubuntu 环境异常" else "Ubuntu 开发环境未解包",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        if (phase == "FAILED") "上次安装/引导失败，可重试（流量较大）"
-                        else "完整的 Linux 环境：apt / bash / 构建工具链（约数百 MB）",
+                        if (phase == "FAILED") "上次解包/引导失败，可重试"
+                        else "完整的 Linux 环境：apt / bash / 构建工具链（内置离线解包，约 30 秒）",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 TextButton(onClick = onInstall) {
-                    Text(if (phase == "FAILED") "重试" else "安装")
+                    Text(if (phase == "FAILED") "重试" else "解包")
                 }
                 TextButton(onClick = onOpenCenter) {
                     Text("环境中心")
@@ -484,8 +484,8 @@ private fun UbuntuLifecycleBanner(
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                 Text(
                     when (phase) {
-                        "INSTALLING" -> "Ubuntu rootfs 下载/解压中…（可后台等待）"
-                        "BOOTSTRAPPING" -> "Ubuntu 初始化：apt 源 / 网络 / 基础包…"
+                        "INSTALLING" -> "Ubuntu rootfs 离线解包中…（约 30 秒，可后台等待）"
+                        "BOOTSTRAPPING" -> "Ubuntu 初始化：apt 源 / 网络 / 基础包…（离线时自动降级可用）"
                         else -> "Ubuntu 环境收敛中…"
                     },
                     fontSize = 11.sp,
@@ -497,7 +497,7 @@ private fun UbuntuLifecycleBanner(
     }
 }
 
-// ═══ 终端专属设置抽屉（环境下载能力已迁至环境中心，此处专注终端本身）═══
+// ═══ 终端专属设置抽屉（环境能力已迁至环境中心，此处专注终端本身）═══
 
 @Composable
 private fun TerminalSettingsDrawer(
@@ -557,9 +557,9 @@ private fun TerminalSettingsDrawer(
                 )
             }
 
-            // ═══ 3. 入口提示（环境下载在环境中心）═══
+            // ═══ 3. 入口提示（环境解包在环境中心）═══
             Text(
-                "环境下载（Ubuntu / 依赖工具链）在顶栏下载图标的环境中心。",
+                "环境解包与管理（内置 Ubuntu / 依赖工具链）在顶栏图层图标的环境中心。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

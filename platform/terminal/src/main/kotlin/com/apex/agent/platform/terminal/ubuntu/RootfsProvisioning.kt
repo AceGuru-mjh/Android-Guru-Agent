@@ -12,15 +12,17 @@ import kotlinx.coroutines.flow.Flow
  * PR #69: Ubuntu RootFS Provisioning Layer.
  *
  * Provides a reliable, observable, crash-recoverable lifecycle for an Ubuntu
- * (or future Debian/Alpine/custom) ARM64 rootfs:
+ * (or future Debian/Alpine/custom) rootfs:
  *
- *   detect → resolve → download → verify checksum → extract → validate →
- *   configure → atomic-activate → READY
+ *   detect → resolve → fetch(bundled local copy) → verify checksum → extract →
+ *   validate → configure → atomic-activate → READY
+ *
+ * T83: “fetch” 阶段对 BUNDLED 源是本地拷贝（APK 内置档案，零网络）；
+ * 对未来 CUSTOM_HTTP 源仍是网络下载 —— 下游（downloader/extractor）源无关。
  *
  * Boundaries (Spec §4):
  *   - Does NOT modify TerminalCore / VT / TerminalSession / PTY.
  *   - Does NOT implement apt/dpkg/language-installers (later PRs).
- *   - Does NOT bundle a rootfs in the APK.
  *   - Does NOT hardcode download URLs / SHAs into PRoot or Session code.
  *
  * Spec: PR #69 sections 1-33.
@@ -43,16 +45,16 @@ data class RootfsArtifact(
     val metadataVersion: Int = 1
 ) {
     /** T72: verifiable = 64 hex chars AND not the all-zeros placeholder. */
-    val isVerifiable: Boolean get() = OfficialUbuntuRootfsSource.isValidSha256(sha256)
+    val isVerifiable: Boolean get() = BundledRootfsSource.isValidSha256(sha256)
 }
 
 enum class ArchiveFormat { TAR_GZ, TAR_XZ, TAR_ZSTD, TAR, SQUASHFS, UNKNOWN }
 enum class RootfsSourceKind { OFFICIAL_MIRROR, CUSTOM_HTTP, BUNDLED, LOCAL_CACHE, CUSTOM }
 
 // ─── Section 6: RootfsArtifactSource — abstracts WHERE artifacts come from ───
-// P69 implements OfficialUbuntuRootfsSource (resolves Ubuntu 24.04 ARM64 from
-// the official mirror). Future: DebianRootfsSource, AlpineRootfsSource,
-// BundledRootfsSource (from APK assets), CustomRootfsSource (user URL).
+// T83 implements BundledRootfsSource (Ubuntu 24.04 rootfs bundled into the APK
+// as a jniLibs pseudo-.so — offline delivery, see that class's KDoc).
+// Future: DebianRootfsSource, AlpineRootfsSource, CustomRootfsSource (user URL).
 // Adding a source NEVER touches the provisioner.
 interface RootfsArtifactSource {
     val sourceKind: RootfsSourceKind

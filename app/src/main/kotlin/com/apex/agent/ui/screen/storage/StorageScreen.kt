@@ -150,14 +150,14 @@ fun StorageScreen(
             // ═══ 2. Ubuntu 环境 ═══
             StorageCard(
                 icon = Icons.Default.Terminal,
-                title = "Ubuntu 环境（rootfs）",
+                title = "Ubuntu 环境（rootfs，内置）",
                 tint = MaterialTheme.colorScheme.tertiary
             ) {
                 val installed = state.rootfsPhase != UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED
                 StorageMetricRow(
                     "状态",
                     when (state.rootfsPhase) {
-                        UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未安装"
+                        UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未解包"
                         UbuntuLifecycleCoordinator.Phase.READY -> "已就绪"
                         UbuntuLifecycleCoordinator.Phase.FAILED -> "异常"
                         else -> state.rootfsPhase.name
@@ -178,7 +178,7 @@ fun StorageScreen(
                     Text("删除 Ubuntu 环境（保留用户数据）", color = MaterialTheme.colorScheme.error)
                 }
                 Text(
-                    "删除 rootfs 与下载缓存；guest /root 用户数据与 workspace 保留，重装即恢复。完整管理（安装/修复）在终端页环境中心。",
+                    "删除解包后的 rootfs 与解包缓存；guest /root 用户数据与 workspace 保留，重新离线解包即恢复。完整管理（解包/修复）在终端页环境中心。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -262,7 +262,7 @@ fun StorageScreen(
     if (confirmAction != null) {
         val (title, text) = when (confirmAction) {
             "attachments" -> "清空附件？" to "将删除全部 ${state.attachmentsCount} 个附件文件（${formatBytes(state.attachmentsSize)}）。此操作不可撤销。"
-            "rootfs" -> "删除 Ubuntu 环境？" to "将删除 rootfs（${state.rootfsSize?.let { formatBytes(it) } ?: "数百 MB"}）与下载缓存；用户数据（/root、workspace）保留。"
+            "rootfs" -> "删除 Ubuntu 环境？" to "将删除解包后的 rootfs（${state.rootfsSize?.let { formatBytes(it) } ?: "数百 MB"}）与解包缓存；内置安装包随 APK 保留，可随时重新离线解包；用户数据（/root、workspace）保留。"
             else -> "清空会话历史？" to "将删除全部 ${state.conversationCount} 条消息，Agent 上下文从零开始。建议先导出备份。"
         }
         AlertDialog(

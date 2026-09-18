@@ -12,21 +12,23 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Agent tool: terminal.ubuntu.install — T73（Ubuntu rootfs 安装引导）
+ * Agent tool: terminal.ubuntu.install — T73（Ubuntu rootfs 解包引导；T83 内置交付）
  *
  * LinuxPRootBackend 注释指定的 P73 交付物："rootfs 下载引导属于 P73"。
- * T72 提供了生产级 provisioner（真实下载 + SHA-256 + 原子解压 + 健康检查），
- * 但 Agent 一直没有触发入口 —— 本工具补上这一环。
+ * T72 提供了生产级 provisioner（SHA-256 + 原子解压 + 健康检查），
+ * 但 Agent 一直没有触发入口 —— 本工具补上这一环。T83 产品转向后，档案
+ * 随 APK 内置（jniLibs 伪 .so），本阶段从"网络下载"变为"本地解包"（离线，
+ * ~30 秒）；工具 id 保留不变（Agent 兼容）。
  *
  * 行为（幂等、可重复调用）：
- *   1. rootfs 已 READY → 立即返回 ALREADY_READY（不重复下载）
- *   2. 其他安装在进行中（provisioner 单飞锁 Busy）→ 等待到 timeoutMs，返回 IN_PROGRESS
- *   3. 正常触发 install：真实下载（~30MB，断点续传）→ SHA-256 校验 → 解压 →
- *      配置（resolv.conf/hosts/apt 源/CA/locale）→ 健康检查 → READY
+ *   1. rootfs 已 READY → 立即返回 ALREADY_READY（不重复解包）
+ *   2. 其他解包在进行中（provisioner 单飞锁 Busy）→ 等待到 timeoutMs，返回 IN_PROGRESS
+ *   3. 正常触发 install：内置档案本地拷贝 → SHA-256 复验 → 解压 →
+ *      配置（resolv.conf/hosts/apt 源/CA/locale）→ 健康检查 → READY（零网络）
  *   4. timeoutMs 内未完成 → IN_PROGRESS + 当前进度状态（Agent 可再次调用继续等待，
- *      已下载字节不丢失 —— Range 断点续传）
+ *      已拷字节不丢失 —— .part 续拷）
  *
- * 失败诚实上报（代码 + 消息 + 所处阶段）：网络失败/校验不匹配/磁盘不足等。
+ * 失败诚实上报（代码 + 消息 + 所处阶段）：档案缺失/校验不匹配/磁盘不足等。
  *
  * JSON Schema (input):
  *   { force?: bool=false, timeoutMs?: int=600000 }
@@ -44,12 +46,14 @@ class TerminalUbuntuInstallTool(
     override val id: String = "terminal.ubuntu.install"
     override val name: String = id
     override val description: String = """
-        Install (or wait for) the Ubuntu 24.04 rootfs required by the linux-ubuntu terminal
-        backend. Idempotent: returns ALREADY_READY if installed. Real download (~30MB, resumable)
-        + SHA-256 verification + extraction + base configuration + health check. If the call
-        times out while still installing, it returns IN_PROGRESS — call again to keep waiting
-        (progress is never lost). On success the linux-ubuntu backend becomes READY
-        (verify with terminal.backends).
+        Provision (or wait for) the BUNDLED Ubuntu 24.04 rootfs required by the linux-ubuntu
+        terminal backend. The archive ships inside the APK — this is an OFFLINE local
+        extraction (~30s), not a network download. Idempotent: returns ALREADY_READY if
+        already provisioned. SHA-256 verification + extraction + base configuration +
+        health check. If the call times out while still extracting, it returns IN_PROGRESS —
+        call again to keep waiting (progress is never lost). On success the linux-ubuntu
+        backend becomes READY (verify with terminal.backends; the environment summary
+        will show ubuntu=on).
     """.trimIndent()
 
     override val parametersSchema: String = """

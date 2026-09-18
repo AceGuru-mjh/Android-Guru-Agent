@@ -271,7 +271,7 @@ private fun CapabilitiesPage() {
         Capability(
             Icons.Default.Terminal,
             "Ubuntu 终端",
-            "手机上跑真实的 Linux 环境：apt 装包、bash 脚本、完整文件系统"
+            "手机上跑真实的 Linux 环境：apt 装包、bash 脚本、完整文件系统（rootfs 随 APK 内置，离线即用）"
         ),
         Capability(
             Icons.Default.Storefront,
@@ -507,7 +507,7 @@ private fun ReadyPage() {
                 Text(
                     "1 · 抽屉菜单打开「设置」配置模型\n" +
                         "2 · 回到 Agent 对话页发第一条消息\n" +
-                        "3 · 试试「终端」页一键安装 Ubuntu\n" +
+                        "3 · 试试「终端」页离线解包内置 Ubuntu\n" +
                         "4 · 让 Agent 帮你装包、跑脚本、改文件",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,

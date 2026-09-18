@@ -62,6 +62,13 @@ jobs:
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10
 
+      - name: Stage bundled Ubuntu rootfs (T83 内置交付)
+        run: |
+          # T83：Ubuntu rootfs 随 APK 内置（应用内下载安装已移除，基础环境离线可用）。
+          # 构建期拉取官方 ubuntu-base → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
+          # 失败即阻断构建 —— 绝不打包指纹不符的 rootfs。
+          scripts/fetch_rootfs.sh
+
       - name: Prewarm dependencies (retry on JitPack flakiness)
         run: |
           attempts=5
@@ -95,40 +102,83 @@ jobs:
           VARIANT=${{ steps.variant.outputs.type }}
           echo "🚀 Building $VARIANT APK..."
           # ${VARIANT^} = bash 首字母大写(debug→Debug, release→Release);花括号内禁止空格
-          ./gradlew ":app:assemble${VARIANT^}" \
-            --no-daemon \
-            -Pkotlin.incremental=false \
-            --stacktrace
+          # T83：release 双产物 —— 先 universal（含全3 ABI rootfs，兼容旧设备/模拟器），
+          # 再 arm64 纯净包（-PapexAbi 收窄 app 级 abiFilters，~50MB，绝大多数现代手机）。
+          # 注意：android.injected.abi 会被模块显式 abiFilters 压过（实测无效），
+          # 故用自定义 apexAbi 属性；abiFilters 是真实任务输入 → 重打包自然触发。
+          if [ "$VARIANT" = "release" ]; then
+            ./gradlew ":app:assembleRelease" \
+              --no-daemon \
+              -Pkotlin.incremental=false \
+              --stacktrace
+            mv app/build/outputs/apk/release/app-release.apk \
+               app/build/outputs/apk/release/app-universal-release.apk
+            ./gradlew ":app:assembleRelease" \
+              -PapexAbi=arm64-v8a \
+              --no-daemon \
+              -Pkotlin.incremental=false \
+              --stacktrace
+            mv app/build/outputs/apk/release/app-release.apk \
+               app/build/outputs/apk/release/app-arm64-release.apk
+          else
+            ./gradlew ":app:assemble${VARIANT^}" \
+              --no-daemon \
+              -Pkotlin.incremental=false \
+              --stacktrace
+          fi
 
       - name: Collect artifact (rename with version + sha)
         id: artifact
         run: |
           VARIANT=${{ steps.variant.outputs.type }}
           APK_DIR="app/build/outputs/apk/$VARIANT"
-          APK=$(ls "$APK_DIR"/*.apk | head -1)
-          if [ -z "$APK" ]; then
-            echo "❌ No APK produced in $APK_DIR"
-            exit 1
-          fi
           SHA8=$(echo "${{ github.sha }}" | cut -c1-8)
           VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          DEST="ApexAgent-v${VERSION}-${VARIANT}-${SHA8}.apk"
-          mv "$APK" "$APK_DIR/$DEST"
-          echo "path=$APK_DIR/$DEST" >> "$GITHUB_OUTPUT"
-          echo "name=$DEST" >> "$GITHUB_OUTPUT"
-          SIZE_MB=$(du -m "$APK_DIR/$DEST" | cut -f1)
-          echo "📦 $DEST — ${SIZE_MB} MB"
           echo "### 📦 APK 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 文件: \`$DEST\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 大小: **${SIZE_MB} MB**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- 变体: $VARIANT（release 以 debug 密钥签名，可直接安装）" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$VARIANT" = "release" ]; then
+            # T83 双产物：arm64 纯净包（内置 rootfs 仅含 arm64，~50MB）+ universal（全 3 ABI，~117MB）
+            mv "$APK_DIR/app-arm64-release.apk" \
+               "$APK_DIR/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
+            mv "$APK_DIR/app-universal-release.apk" \
+               "$APK_DIR/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"
+            ARM64_APK="$APK_DIR/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
+            UNI_APK="$APK_DIR/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"
+            ARM64_MB=$(du -m "$ARM64_APK" | cut -f1)
+            UNI_MB=$(du -m "$UNI_APK" | cut -f1)
+            echo "📦 $(basename "$ARM64_APK") — ${ARM64_MB} MB（arm64-v8a，现代手机首选）"
+            echo "📦 $(basename "$UNI_APK") — ${UNI_MB} MB（全 ABI：含 armeabi-v7a / x86_64）"
+            echo "path=$ARM64_APK" >> "$GITHUB_OUTPUT"
+            echo "path_universal=$UNI_APK" >> "$GITHUB_OUTPUT"
+            echo "name=$(basename "$ARM64_APK")" >> "$GITHUB_OUTPUT"
+            echo "- 文件: \`$(basename "$ARM64_APK")\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 大小: **${ARM64_MB} MB**（arm64-v8a；内置 Ubuntu rootfs 仅含 arm64）" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 另出 universal: \`$(basename "$UNI_APK")\` — ${UNI_MB} MB（含全部 3 ABI）" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 变体: release（debug 密钥签名，可直接安装）" >> "$GITHUB_STEP_SUMMARY"
+          else
+            APK=$(ls "$APK_DIR"/*.apk | head -1)
+            if [ -z "$APK" ]; then
+              echo "❌ No APK produced in $APK_DIR"
+              exit 1
+            fi
+            DEST="ApexAgent-v${VERSION}-${VARIANT}-${SHA8}.apk"
+            mv "$APK" "$APK_DIR/$DEST"
+            echo "path=$APK_DIR/$DEST" >> "$GITHUB_OUTPUT"
+            echo "name=$DEST" >> "$GITHUB_OUTPUT"
+            SIZE_MB=$(du -m "$APK_DIR/$DEST" | cut -f1)
+            echo "📦 $DEST — ${SIZE_MB} MB"
+            echo "- 文件: \`$DEST\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 大小: **${SIZE_MB} MB**" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 变体: $VARIANT（release 以 debug 密钥签名，可直接安装）" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: apex-agent-apk
-          path: ${{ steps.artifact.outputs.path }}
+          path: |
+            ${{ steps.artifact.outputs.path }}
+            ${{ steps.artifact.outputs.path_universal }}
           if-no-files-found: error
           retention-days: 30
 
@@ -136,12 +186,20 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.artifact.outputs.path }}
+          files: |
+            ${{ steps.artifact.outputs.path }}
+            ${{ steps.artifact.outputs.path_universal }}
           generate_release_notes: true
           body: |
             ## Apex Agent ${{ github.ref_name }}
 
-            自动构建产物 —— 见附件 APK。
+            自动构建产物 —— 见附件 APK（两个变体，选适合你设备的）：
+
+            - **arm64-v8a**（首选，现代手机）：内置 Ubuntu rootfs 仅含 arm64，体积更小
+            - **universal**（全 ABI）：含 arm64 / armeabi-v7a / x86_64 三份 rootfs，旧设备与模拟器适用
+
+            > T83：Ubuntu 24.04 环境已改为 APK 内置交付 —— 首次使用离线解包（约 30 秒，零网络），
+            > 不再需要应用内下载安装。apt 装包仍需网络。
 
             - 变体: release（debug 密钥签名，可直接安装）
             - 提交: ${{ github.sha }}

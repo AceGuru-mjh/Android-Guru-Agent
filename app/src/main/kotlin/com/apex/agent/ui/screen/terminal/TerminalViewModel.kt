@@ -375,12 +375,12 @@ class TerminalViewModel @Inject constructor(
 
     // ═══════════════════════ Ubuntu 生命周期入口 ═══════════════════════
 
-    /** 一键安装 Ubuntu（横幅按钮）—— ensureReady 全链：下载 → 解压 → bootstrap。 */
+    /** 一键解包 Ubuntu（横幅按钮）—— ensureReady 全链：离线解包 → 配置 → bootstrap（可降级）。 */
     fun installUbuntu() {
         viewModelScope.launch {
             val r = ubuntuLifecycle.ensureReady()
             if (r is UbuntuLifecycleCoordinator.EnsureResult.Failed) {
-                _notice.value = "Ubuntu 安装失败：${r.message.take(160)}"
+                _notice.value = "Ubuntu 解包失败：${r.message.take(160)}"
             }
         }
     }

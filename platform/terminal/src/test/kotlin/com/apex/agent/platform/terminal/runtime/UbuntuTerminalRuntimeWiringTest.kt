@@ -9,10 +9,11 @@ import com.apex.agent.platform.terminal.proot.PRootBinaryProvider
 import com.apex.agent.platform.terminal.proot.PRootCommand
 import com.apex.agent.platform.terminal.proot.PRootVersion
 import com.apex.agent.platform.terminal.proot.ProotExecutor
-import com.apex.agent.platform.terminal.ubuntu.OfficialUbuntuRootfsSource
+import com.apex.agent.platform.terminal.ubuntu.BundledRootfsSource
 import com.apex.agent.platform.terminal.ubuntu.ProvisionedRootfsProvider
 import com.apex.agent.platform.terminal.ubuntu.ProvisioningResult
 import com.apex.agent.platform.terminal.ubuntu.RootfsConfigurator
+import com.apex.agent.platform.terminal.ubuntu.RootfsDownloader
 import com.apex.agent.platform.terminal.ubuntu.RootfsHealthInspector
 import com.apex.agent.platform.terminal.ubuntu.RootfsInstallLayout
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisionerImpl
@@ -69,8 +70,15 @@ class UbuntuTerminalRuntimeWiringTest {
 
             val base = Files.createTempDirectory("t73-wiring-").toFile()
             layout = RootfsInstallLayout.under(AbsolutePath(base.absolutePath))
+            // T83：真实档案作夹具 → 伪 nativeLibraryDir 暂存 → BundledRootfsSource
+            //（与生产内置交付同构；下载仅为夹具获取手段）
+            val nativeLibDir = File(base, "nativeLib").apply { mkdirs() }
+            val fixture = downloadFixtureArchive()
+            assumeTrue("fixture download/verify failed", fixture != null)
+            fixture!!.copyTo(File(nativeLibDir, BundledRootfsSource.BUNDLE_LIB_NAME), overwrite = true)
+            fixture.delete()
             provisioner = RootfsProvisionerImpl(
-                source = OfficialUbuntuRootfsSource(),
+                source = BundledRootfsSource(nativeLibraryDir = nativeLibDir.absolutePath),
                 validator = null,
                 layout = layout,
                 configurator = RootfsConfigurator(),
@@ -111,6 +119,28 @@ class UbuntuTerminalRuntimeWiringTest {
             code in 200..299
         } catch (e: Throwable) {
             false
+        }
+
+        /**
+         * T83 夹具获取：下载真实 ubuntu-base 24.04.4 amd64 并校验固定 SHA-256
+         * （下载只是测试夹具的获取手段 —— 生产链路已是 APK 内置离线解包，零网络）。
+         */
+        private fun downloadFixtureArchive(): File? = try {
+            val url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-amd64.tar.gz"
+            val expectedSha = "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58"
+            val tmp = File.createTempFile("t83-wiring-archive", ".tar.gz")
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30_000
+                readTimeout = 300_000
+                instanceFollowRedirects = true
+            }
+            conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+            if (RootfsDownloader.sha256OfFile(tmp) == expectedSha) tmp else {
+                tmp.delete()
+                null
+            }
+        } catch (e: Throwable) {
+            null
         }
 
         private fun prootWorks(bin: File): Boolean {

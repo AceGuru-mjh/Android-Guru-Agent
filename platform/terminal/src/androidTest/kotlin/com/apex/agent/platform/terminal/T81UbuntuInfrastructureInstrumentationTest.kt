@@ -21,7 +21,7 @@ import com.apex.agent.platform.terminal.runtime.ExecutionBackendRegistry
 import com.apex.agent.platform.terminal.runtime.LocalShellBackend
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.runtime.TerminalRuntimeImpl
-import com.apex.agent.platform.terminal.ubuntu.OfficialUbuntuRootfsSource
+import com.apex.agent.platform.terminal.ubuntu.BundledRootfsSource
 import com.apex.agent.platform.terminal.ubuntu.ProvisionedRootfsProvider
 import com.apex.agent.platform.terminal.ubuntu.ProvisioningResult
 import com.apex.agent.platform.terminal.ubuntu.RootfsConfigurator
@@ -91,7 +91,7 @@ class T81UbuntuInfrastructureInstrumentationTest {
                 workspaces, userHome, hostEnv, environment
             )
             provisioner = RootfsProvisionerImpl(
-                source = OfficialUbuntuRootfsSource(),
+                source = BundledRootfsSource(nativeLibraryDir = ctx.applicationInfo.nativeLibraryDir ?: ""),
                 validator = null,
                 layout = layout,
                 configurator = RootfsConfigurator(dnsServers = { emptyList() }),

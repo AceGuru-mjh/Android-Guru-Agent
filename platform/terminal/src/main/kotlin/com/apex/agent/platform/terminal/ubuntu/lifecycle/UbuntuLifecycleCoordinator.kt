@@ -31,12 +31,16 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 把两阶段初始化合成一个产品级入口：
  *
  * ```text
- * NOT_INSTALLED → INSTALLING(rootfs) → ROOTFS_READY → BOOTSTRAPPING(apt) → READY
+ * NOT_INSTALLED → INSTALLING(rootfs 解包) → ROOTFS_READY → BOOTSTRAPPING(apt) → READY
  *                                      ↘ FAILED(stage, retryable)  ↙ RECOVERING(reconcile/repair)
  * ```
  *
- * - [ensureReady]：幂等单飞编排 install → bootstrap → capability 快照；
- * - [warmUp]：App 启动恢复（reconcile + 状态派生，**绝不下载**）；
+ * T83 内置交付语义：rootfs 解包（离线）即得可用环境；bootstrap（apt 源 +
+ * apt update + 基础包，需网络）是**增强而非门槛** —— 失败降级为 READY
+ * （[LifecycleState.bootstrapNote] 携带原因，UI/Agent 可见），会话照常创建。
+ *
+ * - [ensureReady]：幂等单飞编排 install → bootstrap（可降级）→ capability 快照；
+ * - [warmUp]：App 启动恢复（reconcile + 状态派生，**绝不解包**）；
  * - [refreshState]：从底层实时派生（不复制 rootfs/bootstrap 状态语义）；
  * - [stateFlow]/[progressFlow]：UI/Agent 可订阅；
  * - [repair]：透传 EnvironmentRepairService（单轮 detect→repair→verify）。
@@ -79,11 +83,11 @@ class UbuntuLifecycleCoordinator(
 
     /**
      * 编排层 phase（两阶段机器的合成视图）：
-     * - [NOT_INSTALLED]：rootfs 未安装（底层 current() == null）；
-     * - [INSTALLING]：rootfs 安装进行中（下载/校验/解压/激活）；
+     * - [NOT_INSTALLED]：rootfs 未解包（底层 current() == null）；
+     * - [INSTALLING]：rootfs 解包进行中（本地拷贝/校验/解压/激活）；
      * - [ROOTFS_READY]：rootfs 就绪，bootstrap 未完成（未开始/中断）；
      * - [BOOTSTRAPPING]：bootstrap 进行中（sources/network/apt-update/base-packages）；
-     * - [READY]：rootfs + bootstrap 双就绪，附 capability 快照；
+     * - [READY]：环境可用（bootstrap 成功，或 T83 降级 —— 见 [LifecycleState.bootstrapNote]）；
      * - [RECOVERING]：crash/损坏恢复中（reconcile/repair）；
      * - [FAILED]：最近一次 ensure 失败（[LifecycleState.failedStage] 定位）。
      */
@@ -103,7 +107,13 @@ class UbuntuLifecycleCoordinator(
         val retryable: Boolean,
         val lastReadyAt: Long?,
         /** READY 时的 capability 快照（派生缓存，非 READY 时为 null）。 */
-        val capabilities: List<CapabilityEntry>?
+        val capabilities: List<CapabilityEntry>?,
+        /**
+         * T83 降级注记：rootfs 已就绪但 apt 引导未完成（离线/镜像故障等）。
+         * 非null 时环境仍可用（bash/文件系统/已装工具），apt 相关操作会在使用时
+         * 真实报错 —— 诚实降级而非伪造失败。null = bootstrap 完整或非 READY。
+         */
+        val bootstrapNote: String? = null
     ) {
         val ready: Boolean get() = phase == Phase.READY
     }
@@ -150,7 +160,10 @@ class UbuntuLifecycleCoordinator(
             val fromPhase: Phase,
             /** probe 阶段降级（环境 READY 但 capability 快照不可用）。 */
             val probeDegraded: Boolean,
-            val probeError: String?
+            val probeError: String?,
+            /** T83：bootstrap 降级（环境 READY 但 apt 引导未完成 —— 离线等）。 */
+            val bootstrapDegraded: Boolean = false,
+            val bootstrapError: String? = null
         ) : EnsureResult
 
         data class AlreadyReady(val capabilities: List<CapabilityEntry>) : EnsureResult
@@ -239,7 +252,7 @@ class UbuntuLifecycleCoordinator(
      *
      * - 单飞：并发调用只跑一次编排（Mutex），其余等待并共享结果；
      * - 幂等：底层已 READY → [EnsureResult.AlreadyReady]（不触碰底层）；
-     * - 超时 → [EnsureResult.InProgress]：进度不丢（下载断点续传 + bootstrap
+     * - 超时 → [EnsureResult.InProgress]：进度不丢（解包 .part 续拷 + bootstrap
      *   evidence 续跑），再次调用续跑；
      * - [force]=true：绕过 READY 短路（版本迁移/修复用）。
      */
@@ -295,15 +308,24 @@ class UbuntuLifecycleCoordinator(
         }
 
         // ── Stage 2: bootstrap（sources → network → apt update → base packages）──
+        // T83 内置交付语义：rootfs 解包已就绪（离线可得），bootstrap 是需网络的
+        // **增强而非门槛** —— 失败降级为 READY（bootstrapNote 携带原因），环境照常可用；
+        // 网络恢复后 force=true 或 restart 后的 ensureReady 会重试引导。
         setPhase(Phase.BOOTSTRAPPING)
+        var bootstrapDegraded = false
+        var bootstrapError: String? = null
         val br = try {
             bootstrapFn(force, defaultTimeoutMs)
         } catch (ce: CancellationException) {
             throw ce
         } catch (e: Exception) {
-            return markFailed(Stage.BOOTSTRAP, "bootstrap crashed: ${e.message}", retryable = true)
+            // 端口异常与 FAILED 同语义降级：rootfs 健康（install 已验），
+            // 引导链路问题不阻断环境可用 —— 诚实记录原因。
+            bootstrapDegraded = true
+            bootstrapError = "bootstrap crashed: ${e.message}"
+            null
         }
-        when (br.outcome) {
+        if (br != null) when (br.outcome) {
             BootstrapOutcome.READY, BootstrapOutcome.ALREADY_READY -> Unit
             BootstrapOutcome.IN_PROGRESS -> {
                 return EnsureResult.InProgress(
@@ -312,11 +334,8 @@ class UbuntuLifecycleCoordinator(
                 )
             }
             BootstrapOutcome.FAILED -> {
-                return markFailed(
-                    Stage.BOOTSTRAP,
-                    "${br.error ?: "bootstrap failed"}（failedStage=${br.failedStage}）",
-                    retryable = true
-                )
+                bootstrapDegraded = true
+                bootstrapError = "${br.error ?: "bootstrap failed"}（failedStage=${br.failedStage}）"
             }
             BootstrapOutcome.CANCELLED, BootstrapOutcome.BUSY -> {
                 // 非终态 —— 上报进行中语义（诚实，不伪造失败）。
@@ -344,13 +363,15 @@ class UbuntuLifecycleCoordinator(
 
         lastReadyAt = clock()
         lastFailure = null
-        setPhase(Phase.READY, capabilities = caps)
+        setPhase(Phase.READY, capabilities = caps, bootstrapNote = bootstrapError)
         return EnsureResult.Ready(
             durationMs = (clock() - startedAt).coerceAtLeast(0L),
             capabilities = caps,
             fromPhase = fromPhase,
             probeDegraded = probeDegraded,
-            probeError = probeError
+            probeError = probeError,
+            bootstrapDegraded = bootstrapDegraded,
+            bootstrapError = bootstrapError
         )
     }
 
@@ -416,7 +437,14 @@ class UbuntuLifecycleCoordinator(
             lastError = failure?.second,
             retryable = failure != null,
             lastReadyAt = lastReadyAt,
-            capabilities = if (phase == Phase.READY) _state.value.capabilities else null
+            capabilities = if (phase == Phase.READY) _state.value.capabilities else null,
+            // T83：降级注记随 READY 保留（底层 bootstrap 仍非 READY 时）；
+            // 底层引导成功/phase 非 READY 时清除 —— 单一事实源在底层状态机。
+            bootstrapNote = if (phase == Phase.READY && bootState != "READY") {
+                _state.value.bootstrapNote
+            } else {
+                null
+            }
         )
         _state.value = state
         return state
@@ -443,8 +471,8 @@ class UbuntuLifecycleCoordinator(
     }
 
     /**
-     * 取消当前进行中的 rootfs 安装（install 阶段专用真取消 —— 下载字节保留，
-     * 下次断点续传）。bootstrap 阶段的取消语义 = 取消调用协程（BootstrapManager
+     * 取消当前进行中的 rootfs 解包（install 阶段专用真取消 —— 已拷字节保留，
+     * 下次续拷）。bootstrap 阶段的取消语义 = 取消调用协程（BootstrapManager
      * 内部处理 CancellationException）—— 此处如实报告不支持。
      */
     suspend fun cancelInstall(): CancelOutcome {
@@ -460,7 +488,7 @@ class UbuntuLifecycleCoordinator(
                 }
                 if (r.isSuccess) {
                     refreshState()
-                    CancelOutcome(true, Phase.INSTALLING, "install cancelled — downloaded bytes preserved for resume")
+                    CancelOutcome(true, Phase.INSTALLING, "install cancelled — partial bundle bytes preserved for resume")
                 } else {
                     CancelOutcome(false, phase, "cancel rejected: ${r.exceptionOrNull()?.message}")
                 }
@@ -637,11 +665,16 @@ class UbuntuLifecycleCoordinator(
 
     // ─────────────────────────── 内部 ───────────────────────────
 
-    private fun setPhase(phase: Phase, capabilities: List<CapabilityEntry>? = null) {
+    private fun setPhase(
+        phase: Phase,
+        capabilities: List<CapabilityEntry>? = null,
+        bootstrapNote: String? = _state.value.bootstrapNote.takeIf { phase == Phase.READY }
+    ) {
         val cur = _state.value
         _state.value = cur.copy(
             phase = phase,
             capabilities = if (phase == Phase.READY) capabilities ?: cur.capabilities else null,
+            bootstrapNote = if (phase == Phase.READY) bootstrapNote else null,
             rootfsState = try {
                 provisioner.state().name
             } catch (e: Exception) {
@@ -673,7 +706,8 @@ class UbuntuLifecycleCoordinator(
             failedStage = stage.name,
             lastError = message,
             retryable = retryable,
-            capabilities = null
+            capabilities = null,
+            bootstrapNote = null
         )
         return EnsureResult.Failed(
             stage = stage,

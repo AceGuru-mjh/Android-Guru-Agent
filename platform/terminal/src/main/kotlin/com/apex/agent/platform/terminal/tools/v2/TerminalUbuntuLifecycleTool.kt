@@ -22,7 +22,7 @@ import kotlinx.serialization.json.put
  * capability 探测又是独立调用 —— Agent 的多轮决策都在重复编排逻辑。
  *
  * ensure 把这条链收敛为一次幂等调用：
- *   ensureReady = install(幂等/断点续传) → bootstrap(幂等/续跑) → capability 快照
+ *   ensureReady = install(幂等/离线解包) → bootstrap(幂等/续跑，失败降级) → capability 快照
  *
  * 输出契约（Agent 可机器决策）：
  * ```json
@@ -43,13 +43,16 @@ class TerminalUbuntuEnsureTool(
     override val id: String = "terminal.ubuntu.ensure"
     override val name: String = id
     override val description: String = """
-        One-shot product entry: bring the Ubuntu Linux environment to READY —
-        idempotently installs the rootfs (real download ~30MB, resumable, SHA-256
-        verified), bootstraps it (sources.list + apt update + base packages:
-        ca-certificates/curl/git/python3/...), and captures a capability snapshot.
-        Replaces the 3-step dance (install → bootstrap → capabilities) with a single
-        call. IN_PROGRESS on timeout: call again to keep waiting — progress is never
-        lost. After READY, create sessions with terminal.create(backend="linux-ubuntu").
+        One-shot product entry: bring the BUNDLED Ubuntu Linux environment to READY —
+        idempotently provisions the rootfs (OFFLINE local extraction of the APK-bundled
+        archive, ~30s, SHA-256 verified), bootstraps it (sources.list + apt update +
+        base packages: ca-certificates/curl/git/python3/...; needs network), and captures
+        a capability snapshot. Bootstrap failure (e.g. offline) DEGRADES to READY with a
+        bootstrapNote — the environment is still usable, apt operations will fail honestly
+        until retried with force=true when network returns. Replaces the 3-step dance
+        (install → bootstrap → capabilities) with a single call. IN_PROGRESS on timeout:
+        call again to keep waiting — progress is never lost. After READY, create sessions
+        with terminal.create(backend="linux-ubuntu").
     """.trimIndent()
 
     override val parametersSchema: String = """
@@ -74,8 +77,13 @@ class TerminalUbuntuEnsureTool(
                     put("durationMs", result.durationMs)
                     put("probeDegraded", result.probeDegraded)
                     if (result.probeError != null) put("probeError", result.probeError)
+                    // T83：离线降级诚实外露 —— 环境可用但 apt 引导未完成。
+                    if (result.bootstrapDegraded) {
+                        put("bootstrapDegraded", true)
+                        put("bootstrapError", result.bootstrapError)
+                    }
                     put("capabilities", result.capabilities.toJsonArray())
-                    put("message", "Ubuntu 环境就绪（rootfs + bootstrap${if (result.probeDegraded) "；capability 快照降级" else ""}）— 可用 terminal.create(backend=\"linux-ubuntu\") 创建会话")
+                    put("message", "Ubuntu 环境就绪（rootfs + bootstrap${if (result.probeDegraded) "；capability 快照降级" else ""}${if (result.bootstrapDegraded) "；apt 引导未完成（离线降级，可用）" else ""}）— 可用 terminal.create(backend=\"linux-ubuntu\") 创建会话")
                 }
                 is UbuntuLifecycleCoordinator.EnsureResult.AlreadyReady -> {
                     put("capabilities", result.capabilities.toJsonArray())

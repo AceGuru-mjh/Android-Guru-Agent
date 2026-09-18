@@ -154,16 +154,17 @@ class TerminalUbuntuInstallToolTest {
 
     @Test
     fun `unsupported architecture reported honestly`() = runBlocking {
-        // ARM32 设备：OfficialUbuntuRootfsSource 无 armhf artifact → resolve 失败。
+        // 未内置的架构（如 x86 / riscv64）→ resolve 如实失败。
         // 工具透传 FAILED + UNSUPPORTED_ARCHITECTURE（不静默装不兼容 rootfs）。
+        // （T83：arm64/x86_64/armhf 均已内置；armhf 不再是 unsupported 用例。）
         val p = FakeProvisioner(
             ProvisioningResult.Failed(
-                ProvisioningError(ProvisioningErrorCode.UNSUPPORTED_ARCHITECTURE, "no ubuntu-base 24.04 artifact for ARM32"),
+                ProvisioningError(ProvisioningErrorCode.UNSUPPORTED_ARCHITECTURE, "no bundled ubuntu-base 24.04 artifact for X86"),
                 ProvisioningState.RESOLVING
             ),
             stateAfter = ProvisioningState.FAILED
         )
-        val tool = TerminalUbuntuInstallTool(p, RootfsTarget("ubuntu", "24.04", CpuArchitecture.ARM32))
+        val tool = TerminalUbuntuInstallTool(p, RootfsTarget("ubuntu", "24.04", CpuArchitecture.X86))
         val json = tool.invoke("{}")
         assertEquals("FAILED", statusOf(json))
         assertTrue(json.contains("UNSUPPORTED_ARCHITECTURE"))

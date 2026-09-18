@@ -30,8 +30,8 @@ android {
         // 参考：developer.android.com/about/versions/10/privacy/changes
         //       （"Execute permission for app home directory" 一节）
         targetSdk = 28
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
     }
 
     buildFeatures {

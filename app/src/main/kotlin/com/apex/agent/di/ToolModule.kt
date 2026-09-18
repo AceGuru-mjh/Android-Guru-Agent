@@ -23,6 +23,9 @@ import com.apex.agent.platform.terminal.tools.legacy.LegacyListTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalBackendsTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCloseTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
+import com.apex.agent.platform.terminal.tools.v2.TerminalExecTool
+import com.apex.agent.platform.terminal.exec.ExecEngine
+import com.apex.agent.tools.PrivilegedCommandSpawner
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxBootstrapTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxNetworkTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxPackagesTool
@@ -292,6 +295,24 @@ object ToolModule {
 
         // ═══ 1. Shell (1) ═══
         registry.register(SafeAgentTool(ShellExecuteTool(shellExec)))
+
+        // ═══ 1b. terminal.exec —— 一次性结构化命令执行（stdout/stderr/exit_code/duration_ms/truncated）═══
+        // 与 shell_execute 共享同一门禁（commandPermissionGate）与同一 cd 工作目录记忆
+        //（shellWorkDir）：Agent 换工具不换语义。通道选择 Root > Shizuku > app-shell
+        //（PrivilegedCommandSpawner），pipe 形态分离采集两流 + 真实 waitpid 退出码。
+        //
+        // 必须经 TerminalToolAdapter：TerminalExecTool 实现的是 platform:terminal 的
+        // TerminalTool（模块边界不允许它依赖 core:tool-registry 的 AgentTool），
+        // 直接塞进 SafeAgentTool(AgentTool) 无法编译。
+        registry.register(SafeAgentTool(TerminalToolAdapter(TerminalExecTool(
+            engine = ExecEngine(PrivilegedCommandSpawner()),
+            approvalGate = { cmd ->
+                if (commandPermissionGate.ensureAllowed(cmd)) null
+                else "用户拒绝执行该命令。不要重试相同命令；改用更安全或更低风险的方案，并告知用户原因。"
+            },
+            defaultCwd = { shellWorkDir.currentDir() },
+            onCommandSucceeded = { cmd, _ -> shellWorkDir.updateAfterSuccess(cmd) }
+        ))))
 
         // ═══ Agent 主动提问工具 ═══
         registry.register(SafeAgentTool(AskUserChoiceTool(userQuestionGateway)))

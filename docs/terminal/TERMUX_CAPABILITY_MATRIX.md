@@ -168,6 +168,8 @@ Termux bootstrap ships a curated minimal set; ours ships a larger Ubuntu Base + 
 | 12.5 | Crash recovery honesty (no fake RUNNING) | ❌ n/a | ✅ T81 §16 | — |
 | 12.6 | Health/diagnosis orchestration | ❌ | ✅ 6+1-dim health + single-round repair + lifecycle coordinator (T82 r1) | — |
 | 12.7 | Public SDK API (P60 frozen contract) | n/a | 💀 `api/TerminalApi.kt` has **zero implementations** — documented as if shipped | 🏗️ T82: `TerminalSdk` adapter implements Terminal/TerminalSession/JobHandle over TerminalRuntime |
+| 12.8 | One-shot **structured** exec for the Agent (Termux:API Run Command / OperIt bridge 形态: pipe 通道 stdout/stderr 分离 + 真实退出码) | 🟡 (Run Command intent 返回 exit code,输出合并交文件) | 🏗️ **exec 包 + `terminal.exec` 工具**: `{stdout, stderr, exit_code, duration_ms, truncated}` snake_case 契约; 双层防线(采集 head64K+tail64K 环形 + 限长 head/tail 行预算); ANSI 剥离(或 keep)+进度条 `\r` 折叠; 超时强杀如实(timed_out/killed); spawn 失败=126 不伪装; 通道 root-su/shizuku/local-sh 诚实上报; 与 shell_execute 共享门禁+cd 记忆 | 本 PR |
+| 12.9 | 输出海量时不淹没 Agent | ❌ (人类看屏幕) | 🏗️ 12.8 的双层防线 + `*_bytes_total`/`*_truncated` 统计（Agent 据此收窄命令重取） | 本 PR |
 
 ## 13. SDK / Library Boundary (the "Termux is a library" dimension)
 

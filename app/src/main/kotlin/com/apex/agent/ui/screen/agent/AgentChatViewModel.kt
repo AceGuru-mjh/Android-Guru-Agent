@@ -267,52 +267,16 @@ class AgentChatViewModel @Inject constructor(
     private fun nextStepSeq(): Long = ++stepSeqCounter
 
     // ═══ 回复/思考流式缓冲（33ms 节流刷新）═══
-    // ResponseChunk/ThinkingChunk 每 token 直接 _uiState.update { copy(currentResponse += text) }
-    // 是 O(n²) 字符串拷贝 + 每秒上百次重组。改为 StringBuilder 累积，由一个 33ms
-    // (≈2 帧) 的 flush Job 统一刷入 UI 状态（与下方工具输出节流同款模式）。
-    // Complete/ThinkingComplete/ToolCallStart/abort/Error 时做最终 flush。
-    private val responseBuffer = StringBuilder()
-    private val thinkingBuffer = StringBuilder()
-    private var streamFlushJob: Job? = null
-
-    /** 把流式缓冲一次性刷入 UI 状态（两缓冲都为空时是 no-op）。 */
-    private fun flushStreamBuffers() {
-        val responseSnapshot = if (responseBuffer.isEmpty()) "" else {
-            val s = responseBuffer.toString()
-            responseBuffer.setLength(0)
-            s
-        }
-        val thinkingSnapshot = if (thinkingBuffer.isEmpty()) "" else {
-            val s = thinkingBuffer.toString()
-            thinkingBuffer.setLength(0)
-            s
-        }
-        if (responseSnapshot.isEmpty() && thinkingSnapshot.isEmpty()) return
+    // 详见 [StreamingFlushBuffers]（为守住 God-file 行数预算抽出的独立文件）：
+    // chunk 入缓冲、33ms flush Job 统一刷入 UI 状态；Complete/ThinkingComplete/
+    // ToolCallStart/abort/Error 时由调用方做最终 flush。
+    private val streamBuffers = StreamingFlushBuffers(viewModelScope) { responseDelta, thinkingDelta ->
         _uiState.update { state ->
             state.copy(
-                currentResponse = state.currentResponse + responseSnapshot,
-                currentThinking = state.currentThinking + thinkingSnapshot
+                currentResponse = state.currentResponse + responseDelta,
+                currentThinking = state.currentThinking + thinkingDelta
             )
         }
-    }
-
-    /** 确保存在一个 33ms 后到期的 flush Job（期间到达的 chunk 复用同一 Job）。 */
-    private fun ensureStreamFlushJob() {
-        if (streamFlushJob == null) {
-            streamFlushJob = viewModelScope.launch {
-                delay(STREAM_FLUSH_INTERVAL_MS)
-                flushStreamBuffers()
-                streamFlushJob = null
-            }
-        }
-    }
-
-    /** 取消流式 flush Job 并清空两个流式缓冲（新会话/新消息/中止时防串轮残留）。 */
-    private fun resetStreamBuffers() {
-        streamFlushJob?.cancel()
-        streamFlushJob = null
-        responseBuffer.clear()
-        thinkingBuffer.clear()
     }
 
     /**
@@ -488,7 +452,7 @@ class AgentChatViewModel @Inject constructor(
      */
     private suspend fun runEngine(text: String, persistedAttachments: List<MessageAttachment>) {
         // 新一轮流式开始：清空上一轮可能残留的流式缓冲（防跨轮串字）；retry 路径同样受益。
-        resetStreamBuffers()
+        streamBuffers.reset()
         _uiState.update { state ->
             state.copy(
                 messages = state.messages + AgentUiMessage.User(
@@ -567,21 +531,33 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    internal fun handleEvent(event: AgentEvent) {
+    /**
+     * 处理引擎事件并同步 UI 状态。
+     *
+     * P0 修复（主界面卡死）：本函数运行在 viewModelScope（Main.immediate）收集链上，
+     * 旧实现里两处重活直接压在主线程：
+     *  - [AgentEvent.ToolCallComplete]：对可能数百 KB 的终端/read_file 输出跑 ANSI 正则；
+     *  - [AgentEvent.Complete]：historyCount() 触发对话史全量 JSON 解析 +
+     *    currentTokenCount() 全历史逐字符估算 —— 历史一长每次收尾都在主线程忙
+     *    数百毫秒到秒级，触摸与 IME 请求排队无法处理（体感“卡死/点输入框没反应”）。
+     *
+     * 因此改为 suspend：仅这两处重计算 withContext(Dispatchers.Default) 下沉，
+     * 事件顺序仍由 collect 串行保证；轻量事件（chunk 追加等）保持在主线程零切换。
+     */
+    internal suspend fun handleEvent(event: AgentEvent) {
         when (event) {
             // ═══ 思考 ═══
             is AgentEvent.ThinkingStart -> {
                 // 新一轮思考：清掉上一轮可能残留的缓冲（防串轮）。
-                thinkingBuffer.clear()
+                streamBuffers.clearThinking()
                 _uiState.update { it.copy(currentThinking = "") }
             }
             is AgentEvent.ThinkingChunk -> {
-                thinkingBuffer.append(event.text)
-                ensureStreamFlushJob()
+                streamBuffers.appendThinking(event.text)
             }
             is AgentEvent.ThinkingComplete -> {
                 // 最终 flush：把仍在缓冲中的思考文本刷入 UI 后再收尾。
-                flushStreamBuffers()
+                streamBuffers.flush()
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought),
@@ -628,7 +604,7 @@ class AgentChatViewModel @Inject constructor(
             // ═══ 工具调用（流式）═══
             is AgentEvent.ToolCallStart -> {
                 // 流式回复/思考暂停：先刷出缓冲，保证已有文本先于工具卡落盘。
-                flushStreamBuffers()
+                streamBuffers.flush()
                 // 重置缓冲区 + 节流状态，记录当前活跃工具 callId 用于 chunk 路由。
                 activeToolCallId = event.callId
                 toolOutputBuffer.clear()
@@ -726,21 +702,28 @@ class AgentChatViewModel @Inject constructor(
                 activeToolCallId = null
                 toolOutputBuffer.clear()
 
+                // P0（卡死修复）：完整输出可能数百 KB，ANSI 正则清洗下沉 Default，
+                // 主线程只接收结果。collect 串行 → 事件顺序不变。
+                val (cleanOutput, cleanFullOutput) = withContext(Dispatchers.Default) {
+                    stripAnsi(event.output) to stripAnsi(event.fullOutput.ifBlank { event.output })
+                }
                 val (kind, server) = classifyTool(event.toolName, event.arguments, routeContextKind,
                     metadata = toolRegistry.metadataOf(event.toolName))
                 val skill = if (kind == ToolKind.SKILL) routeContextName else null
 
                 // 最终过程流：丢弃"活输出"步骤（其快照与完整输出重复），仅保留
                 // START / PROGRESS 等结构性步骤 + 收尾步；输出统一去 ANSI 转义序列。
-                val cleanOutput = stripAnsi(event.output)
-                val cleanFullOutput = stripAnsi(event.fullOutput.ifBlank { event.output })
+                // 收尾步文本只保留尾部摘要（与活输出步 MAX_LIVE_TOOL_OUTPUT_CHARS 同款口径）——
+                // 完整输出已由 message.output/fullOutput 承载，步内再塞全量会把
+                // 数百 KB 文本重复渲染进时间线（主线程字符串拼接 + 布局洪峰）。
+                val stepOutputDigest = cleanOutput.takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
                 val finalSteps = ((currentToolCallSteps ?: emptyList())
                     .filter { it.id != liveOutputStepId } + ToolStep(
                     phase = if (event.success) StepPhase.COMPLETE else StepPhase.ERROR,
                     text = if (event.success)
-                        "完成（${event.durationMs}ms）：${cleanOutput}"
+                        "完成（${event.durationMs}ms）：${stepOutputDigest}"
                     else
-                        "失败（${event.durationMs}ms）：${cleanOutput}",
+                        "失败（${event.durationMs}ms）：${stepOutputDigest}",
                     seq = nextStepSeq()
                 )).takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
                 liveOutputStepId = null
@@ -772,7 +755,7 @@ class AgentChatViewModel @Inject constructor(
             // 随后引擎流式发射修正后的最终回复（ResponseChunk → ResponseComplete）。
             is AgentEvent.ReflectionReview -> {
                 // 草稿流式结束即评审：先做最终 flush，确保缓冲中的草稿文本完整落为消息。
-                flushStreamBuffers()
+                streamBuffers.flush()
                 _uiState.update { state ->
                     val draft = state.currentResponse
                     state.copy(
@@ -786,12 +769,11 @@ class AgentChatViewModel @Inject constructor(
 
             // ═══ 流式回复 ═══
             is AgentEvent.ResponseChunk -> {
-                responseBuffer.append(event.text)
-                ensureStreamFlushJob()
+                streamBuffers.appendResponse(event.text)
             }
             is AgentEvent.ResponseComplete -> {
                 // 最终 flush：把仍在缓冲中的回复文本刷入 UI 后再落为完整消息。
-                flushStreamBuffers()
+                streamBuffers.flush()
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + AgentUiMessage.Agent(event.fullText),
@@ -803,7 +785,7 @@ class AgentChatViewModel @Inject constructor(
 
             // ═══ Plan 模式：步骤开始（流水线分隔卡，长任务进度可视化）═══
             is AgentEvent.StepStart -> {
-                flushStreamBuffers()
+                streamBuffers.flush()
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + AgentUiMessage.StepMarker(
@@ -831,7 +813,7 @@ class AgentChatViewModel @Inject constructor(
             // ═══ 错误/完成 ═══
             is AgentEvent.Error -> {
                 // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂。
-                flushStreamBuffers()
+                streamBuffers.flush()
                 finishActiveBanner()
                 _uiState.update { state ->
                     val partial = state.currentResponse
@@ -855,8 +837,18 @@ class AgentChatViewModel @Inject constructor(
             is AgentEvent.Complete -> {
                 // 本轮任务收尾：展示运行总结卡（旧实现直接丢弃了 Complete 事件的信息）。
                 finishActiveBanner()
-                _uiState.update {
+                // P0（卡死修复）：historyCount()=全量 JSON 解析、currentTokenCount()=全历史
+                // 逐字符估算 —— 历史越长收尾越重（数百 ms～秒级），必须离开主线程。
+                // 仪表盘字段与消息列表解耦：总结卡先落，仪表稍后追平（毫秒级延迟无感）。
+                val metrics = withContext(Dispatchers.Default) {
                     val engine = agentEngine as? ApexAgentEngine
+                    Triple(
+                        engine?.historyCount(),
+                        engine?.currentTokenCount(),
+                        engine?.maxContextTokens()
+                    )
+                }
+                _uiState.update {
                     it.copy(
                         isLoading = false,
                         messages = it.messages + AgentUiMessage.RunSummary(
@@ -865,9 +857,9 @@ class AgentChatViewModel @Inject constructor(
                             totalToolCalls = event.totalToolCalls,
                             totalDurationMs = event.totalDurationMs
                         ),
-                        historyDepth = engine?.historyCount() ?: it.historyDepth,
-                        contextUsedTokens = engine?.currentTokenCount() ?: it.contextUsedTokens,
-                        contextMaxTokens = engine?.maxContextTokens() ?: it.contextMaxTokens
+                        historyDepth = metrics.first ?: it.historyDepth,
+                        contextUsedTokens = metrics.second ?: it.contextUsedTokens,
+                        contextMaxTokens = metrics.third ?: it.contextMaxTokens
                     )
                 }
             }
@@ -940,7 +932,7 @@ class AgentChatViewModel @Inject constructor(
      */
     fun abort() {
         // 取消前：先刷出未落盘的流式缓冲，拿到完整文本快照。
-        flushStreamBuffers()
+        streamBuffers.flush()
         val partialResponse = _uiState.value.currentResponse
         val partialThinking = _uiState.value.currentThinking
 
@@ -968,7 +960,7 @@ class AgentChatViewModel @Inject constructor(
                 currentToolCall = null
             )
         }
-        resetStreamBuffers()
+        streamBuffers.reset()
         toolFlushJob?.cancel()
         toolFlushJob = null
         toolOutputBuffer.clear()
@@ -982,7 +974,7 @@ class AgentChatViewModel @Inject constructor(
     fun newChat() {
         currentJob?.cancel()
         // 清空所有流式/工具运行态，防止残留缓冲串入新会话。
-        resetStreamBuffers()
+        streamBuffers.reset()
         toolFlushJob?.cancel()
         toolFlushJob = null
         toolOutputBuffer.clear()
@@ -1146,7 +1138,7 @@ class AgentChatViewModel @Inject constructor(
         val result = SlashCommands.handle(command, githubTokenManager)
 
         // 指令会取消上一个流式任务：先清空流式缓冲，防残留文本串入新一轮。
-        resetStreamBuffers()
+        streamBuffers.reset()
 
         // 始终追加反馈消息，让用户看到指令被识别 + 当前状态：
         // Skill/连接器/插件指令使用专用横幅（PipelineBanner），其余指令用 System 行。
@@ -1190,8 +1182,5 @@ class AgentChatViewModel @Inject constructor(
 
         /** 工具输出 UI 刷新节流间隔（≈1 帧 = 16ms）。 */
         private const val FLUSH_INTERVAL_MS = 16L
-
-        /** 回复/思考流式文本 UI 刷新节流间隔（≈2 帧 = 33ms，约 30fps）。 */
-        private const val STREAM_FLUSH_INTERVAL_MS = 33L
     }
 }

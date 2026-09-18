@@ -73,7 +73,14 @@ object ModelsCatalog {
                 .build()
 
             val builder = Request.Builder().url(endpoint).get()
-            if (apiKey.isNotBlank()) builder.addHeader("Authorization", "Bearer $apiKey")
+            // 鉴权分叉：Anthropic 官方 /v1/models 只认 x-api-key + anthropic-version，
+            // 只发 Bearer 会 403 "Request not allowed"（内置 Anthropic 预设拉模型必败的根因）。
+            if (isAnthropicEndpoint(baseUrl) && apiKey.isNotBlank()) {
+                builder.addHeader("x-api-key", apiKey)
+                builder.addHeader("anthropic-version", "2023-06-01")
+            } else if (apiKey.isNotBlank()) {
+                builder.addHeader("Authorization", "Bearer $apiKey")
+            }
             builder.addHeader("Accept", "application/json")
             extraHeaders.forEach { (k, v) -> if (k.isNotBlank()) builder.addHeader(k, v) }
 
@@ -96,6 +103,10 @@ object ModelsCatalog {
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return ""
         return "$trimmed/models"
     }
+
+    /** Anthropic 官方端点（鉴权头分叉判定，见 fetchModels）。 */
+    internal fun isAnthropicEndpoint(baseUrl: String): Boolean =
+        baseUrl.contains("anthropic.com", ignoreCase = true)
 
     /**
      * 解析 `GET /models` 响应体。容忍三种形状：

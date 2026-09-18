@@ -212,8 +212,14 @@ fun TerminalGrid(
 
     // 会话就绪（首次拿到渲染快照）后自动聚焦 IME 桥：进入终端即可直接敲命令，
     // 不必"先点一下碰运气"。仅聚焦一次，避免与用户主动隐藏键盘反复打架。
+    // P0 补齐：requestFocus() 在部分设备/输入法上不会拉起 IME（本文件 showKeyboard
+    // 的 KDoc 已记载此事实）—— 进入终端时同样显式补一次 show()，否则用户看到的是
+    // "$ 提示符 + 一大片空白、键盘不弹"的死屏误象。
     LaunchedEffect(render != null) {
-        if (render != null) runCatching { focusRequester.requestFocus() }
+        if (render != null) {
+            runCatching { focusRequester.requestFocus() }
+            keyboardController?.show()
+        }
     }
 
     // 指针 → 行列（滚动偏移 + 行内 cell 宽度步进 —— CJK 对齐）

@@ -12,6 +12,8 @@ import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.ui.language.LanguageManager
+import com.apex.agent.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,7 +56,9 @@ class SlashMenuProvider @Inject constructor(
     skillRegistry: SkillRegistry,
     private val mcpManager: McpManager,
     private val pluginManager: PluginManager,
-    private val connectorRegistry: ConnectorRegistry
+    private val connectorRegistry: ConnectorRegistry,
+    // i18n：菜单分组/提示文案按当前语言取词（组合外场景）
+    private val languageManager: LanguageManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -129,7 +133,7 @@ class SlashMenuProvider @Inject constructor(
             icon = Icons.Default.Extension,
             items = items,
             badge = if (active.isNotEmpty()) "${active.size}" else null,
-            hint = if (active.isEmpty()) "暂无已启用 Skill" else null
+            hint = if (active.isEmpty()) languageManager.getString(R.string.chat_slash_no_skills) else null
         )
     }
 
@@ -149,11 +153,16 @@ class SlashMenuProvider @Inject constructor(
         val connectedCount = items.count { it.status == SlashItemStatus.CONNECTED }
         return SlashMenuCategory(
             id = "mcp",
-            title = "MCP 服务器",
+            title = languageManager.getString(R.string.chat_slash_mcp_servers),
             icon = Icons.Default.Api,
             items = items,
-            badge = if (connectedCount > 0) "已连接 $connectedCount" else null,
-            hint = if (items.isEmpty()) "未配置 MCP 服务器（市场页可添加）" else null
+            badge = if (connectedCount > 0)
+                String.format(
+                    languageManager.getString(R.string.chat_slash_mcp_connected),
+                    connectedCount
+                )
+            else null,
+            hint = if (items.isEmpty()) languageManager.getString(R.string.chat_slash_mcp_empty) else null
         )
     }
 
@@ -172,10 +181,11 @@ class SlashMenuProvider @Inject constructor(
         }
         return SlashMenuCategory(
             id = "plugins",
-            title = "插件",
+            title = languageManager.getString(R.string.chat_slash_plugins),
             icon = Icons.Default.Build,
             items = items,
-            hint = if (items.isEmpty()) "未发现已安装的插件" else "已加载插件仅验证连通 —— 工具执行桥接建设中"
+            hint = if (items.isEmpty()) languageManager.getString(R.string.chat_slash_plugins_empty)
+            else languageManager.getString(R.string.chat_slash_plugins_partial)
         )
     }
 
@@ -210,10 +220,10 @@ class SlashMenuProvider @Inject constructor(
         }
         return SlashMenuCategory(
             id = "connectors",
-            title = "连接器",
+            title = languageManager.getString(R.string.chat_slash_connectors),
             icon = Icons.Default.Link,
             items = items,
-            hint = if (items.isEmpty()) "无启用连接器（市场页可添加）" else null
+            hint = if (items.isEmpty()) languageManager.getString(R.string.chat_slash_connectors_empty) else null
         )
     }
 

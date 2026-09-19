@@ -1,0 +1,432 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 核心 UI 字符串（英文默认）—— 抽屉 / 上下文仪表盘 / 设置 / 模型配置 / 存储 / 记忆 /
+     任务 / 权限 / 日志 / 新手引导。中文在 values-zh/strings_core.xml；语言切换经
+     LanguageManager + MainActivity attachBaseContext/recreate 生效。 -->
+<resources>
+    <!-- ═══ 抽屉与导航目的地（ApexRoot / ApexDrawerContent）═══ -->
+    <string name="drawer_agent">Agent</string>
+    <string name="drawer_terminal">Terminal</string>
+    <string name="drawer_market">Market</string>
+    <string name="drawer_memory">Memory</string>
+    <string name="drawer_tasks">Tasks</string>
+    <string name="drawer_storage">Storage</string>
+    <string name="drawer_permissions">Permissions</string>
+    <string name="drawer_log">Logs</string>
+    <string name="drawer_settings">Settings</string>
+    <string name="drawer_glasslab">Glass Lab</string>
+    <string name="drawer_open_nav">Open navigation</string>
+    <string name="drawer_tagline">All-in-one AI assistant</string>
+    <string name="drawer_mem_count">%1$d items</string>
+    <string name="drawer_github_not_connected">GitHub not connected</string>
+
+    <!-- ═══ 顶部上下文仪表盘（ContextMeterBar）═══ -->
+    <string name="context_dashboard">Context Dashboard</string>
+    <string name="context_used_tokens">Tokens used</string>
+    <string name="context_max_tokens">Context limit</string>
+    <string name="context_usage_ratio">Usage</string>
+    <string name="context_status">Status</string>
+    <string name="context_status_danger">Critical</string>
+    <string name="context_status_warning">Warning</string>
+    <string name="context_status_normal">Normal</string>
+    <string name="context_compress">Compress context</string>
+    <string name="context_compress_hint">Auto compression is triggered by the engine once usage exceeds the threshold</string>
+
+    <!-- ═══ 设置中心（SettingsScreen）═══ -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_tab_models">Models</string>
+    <string name="settings_tab_interface">Interface</string>
+    <string name="settings_testing">Testing…</string>
+    <string name="settings_test">Test</string>
+    <string name="settings_conn_success">Connection successful</string>
+    <string name="settings_conn_failed">Connection failed</string>
+
+    <!-- Generation -->
+    <string name="settings_section_generation">Generation</string>
+    <string name="settings_temperature_desc">Higher is more divergent; lower is more stable and reproducible. 0.2–0.7 recommended for agent tasks</string>
+    <string name="settings_top_p_desc">Nucleus sampling cutoff; adjust this or Temperature, not both</string>
+    <string name="settings_top_k_label">Top K (0=disabled)</string>
+    <string name="settings_top_k_desc">Mostly used by local models (Qwen/Gemma/llama.cpp)</string>
+    <string name="settings_min_p_desc">Truncates by probability ratio; 0.05–0.1 recommended for local models</string>
+    <string name="settings_freq_penalty_desc">Penalizes repeated tokens by occurrence count</string>
+    <string name="settings_presence_penalty_desc">Penalizes anything that has appeared, encouraging new topics</string>
+    <string name="settings_rep_penalty_desc">Common for local models; 1.0 means no penalty</string>
+    <string name="settings_seed_desc">Fixed random seed for reproducible output; 0 = auto</string>
+    <string name="settings_stop_seq_label">Stop Sequences (comma-separated)</string>
+    <string name="settings_stop_seq_desc">Generation stops when matched, e.g. \"\\n\\nUser:\"</string>
+    <string name="settings_max_output_desc">Output cap for a single reply</string>
+
+    <!-- Reasoning -->
+    <string name="settings_section_reasoning">Reasoning</string>
+    <string name="settings_effort_desc">The model\'s native thinking intensity (OpenAI o-series / DeepSeek-R1 / Qwen3 etc.); ignored automatically by unsupported models</string>
+    <string name="settings_budget_desc">Chain-of-thought token budget; not hard-tied to Effort (providers differ in semantics)</string>
+    <string name="settings_show_thinking_desc">Show the model\'s thinking process in the chat stream (data plumbed; chat rendering comes later)</string>
+
+    <!-- Context -->
+    <string name="settings_section_context">Context</string>
+    <string name="settings_ctx_window_label">Context Window preset</string>
+    <string name="settings_ctx_window_desc">Nominal context window; pick a preset, then fine-tune below</string>
+    <string name="settings_ctx_exact_label">Exact value (tokens)</string>
+    <string name="settings_ctx_exact_desc">Synced with the preset above; current: %1$s</string>
+    <string name="settings_reserved_label">Reserved Output Tokens (for Agent)</string>
+    <string name="settings_reserved_desc">Budget reserved for system prompt + tools + history so the context does not fill up</string>
+
+    <!-- Tools -->
+    <string name="settings_section_tools">Tools</string>
+    <string name="settings_enable_tools_desc">When off, the model only outputs text and calls no tools</string>
+    <string name="settings_tool_choice_desc">AUTO = model decides; REQUIRED = force calls; NONE = disabled</string>
+    <string name="settings_parallel_calls_desc">Allow the model to return multiple parallel tool calls at once</string>
+    <string name="settings_max_tool_calls_desc">Tool call limit per turn</string>
+    <string name="settings_tool_timeout_desc">Timeout for a single tool execution</string>
+    <string name="settings_tool_result_desc">Token truncation threshold before tool results enter the context</string>
+
+    <!-- Vision -->
+    <string name="settings_section_vision">Vision</string>
+    <string name="settings_vision_desc">Let the Agent read screenshots / images (data plumbed; engine hookup later)</string>
+    <string name="settings_screenshot_quality_desc">Compression quality when screenshots enter the context (data plumbed)</string>
+    <string name="settings_max_screenshots_desc">Max number of screenshots kept in context (data plumbed)</string>
+    <string name="settings_vision_model_label">Vision Model (role)</string>
+    <string name="settings_not_set">Not set</string>
+
+    <!-- Network -->
+    <string name="settings_section_network">Network</string>
+    <string name="settings_read_timeout_desc">Time spent waiting for response data; raise it for long streaming replies</string>
+    <string name="settings_request_timeout_desc">Total timeout for the whole request</string>
+    <string name="settings_retry_count_desc">Automatic retries after a failed request</string>
+    <string name="settings_retry_delay_desc">Wait before the first retry (exponential backoff afterwards)</string>
+    <string name="settings_streaming_desc">Streaming output (typewriter effect); off returns the whole block at once</string>
+    <string name="settings_keep_alive_desc">Connection reuse toggle (data plumbed; the client currently always pools connections)</string>
+
+    <!-- Prompt -->
+    <string name="settings_section_prompt">Prompt</string>
+    <string name="settings_prompt_prefix_label">System Prompt Prefix (prepended to the system prompt)</string>
+    <string name="settings_preset_default">Default (clear)</string>
+    <string name="settings_preset_desc">Picking a preset fills the prefix above; you can still edit it afterwards</string>
+
+    <!-- Advanced -->
+    <string name="settings_section_advanced">Advanced</string>
+    <string name="settings_strict_schema_desc">Strict JSON Schema mode (supported by only some providers)</string>
+
+    <!-- Agent -->
+    <string name="settings_section_agent">Agent · Runtime</string>
+    <string name="settings_mode_auto">Auto (legacy)</string>
+    <string name="settings_mode_build">Build · think and act</string>
+    <string name="settings_mode_chat">Chat (legacy)</string>
+    <string name="settings_mode_plan">Plan · plan first, then execute</string>
+    <string name="settings_mode_spec">Spec · confirm the spec, then execute</string>
+    <string name="settings_mode_reflect">Reflect · review and improve</string>
+    <string name="settings_mode_assist">Assist · human decides</string>
+    <string name="settings_mode_custom">Custom · custom instructions</string>
+    <string name="settings_mode_desc">Default execution mode; takes effect after an app restart</string>
+    <string name="settings_think_minimal">Minimal · act directly</string>
+    <string name="settings_think_light">Light · brief thinking</string>
+    <string name="settings_think_standard">Standard · normal reasoning</string>
+    <string name="settings_think_deep">Deep · deep thinking</string>
+    <string name="settings_think_maximum">Maximum · deepest thinking</string>
+    <string name="settings_think_desc">Reasoning depth before decisions (affects the system prompt; takes effect after restart)</string>
+    <string name="settings_max_iterations_desc">Max iterations per task, prevents infinite loops</string>
+    <string name="settings_reflection_rounds_desc">One review → fix pass per round in Reflect mode</string>
+    <string name="settings_advanced_behavior">Advanced Agent Behavior (data plumbed)</string>
+    <string name="settings_reflection_desc">Enable self-review and correction after generation</string>
+
+    <!-- Compression -->
+    <string name="settings_section_compression">Context Compression</string>
+    <string name="settings_compression_subtitle">Takes effect after an app restart / new session</string>
+    <string name="settings_max_ctx_tokens_desc">Context budget; compression triggers when exceeded</string>
+    <string name="settings_threshold_desc">Compression triggers when context usage reaches this ratio</string>
+    <string name="settings_preserve_turns_desc">Keep the last N turns verbatim when compressing</string>
+    <string name="settings_tool_output_len_desc">Truncate tool output beyond this length (characters)</string>
+
+    <!-- Interface / appearance -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme_mode">Theme mode</string>
+    <string name="settings_theme_system">Follow system</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_apply_now">Applies immediately</string>
+    <string name="settings_dynamic_color">Dynamic Color</string>
+    <string name="settings_dynamic_color_desc">Android 12+ picks colors from the system wallpaper, overriding preset palettes</string>
+    <string name="settings_font_scale">Font scale</string>
+    <string name="settings_font_scale_desc">Global font scale, applies immediately</string>
+    <string name="settings_accent_palettes">Preset palettes</string>
+    <string name="settings_accent_selected">Selected palette</string>
+    <string name="settings_accent_desc">11 preset palettes combine independently with dark/light mode and apply immediately; wallpaper colors take over when Dynamic Color is on.</string>
+
+    <!-- Chat display -->
+    <string name="settings_section_chat">Chat Display</string>
+    <string name="settings_timestamps">Show message timestamps</string>
+    <string name="settings_timestamps_desc">Show an HH:mm timestamp by each message bubble, applies immediately</string>
+
+    <!-- Notes -->
+    <string name="settings_section_notes">Notes</string>
+    <string name="settings_notes_body">· Terminal font size, max lines, monochrome mode, etc. are configured in the \"Terminal appearance\" card on the Terminal page.\n· Some toggles are data plumbed (see each item\'s note); the engine layers hook them up later.\n· Model profile / provider / role mapping changes save instantly; Agent engine parameters take effect after an app restart.</string>
+
+    <!-- Providers dialog -->
+    <string name="settings_close">Close</string>
+    <string name="settings_builtin">Built-in</string>
+    <string name="settings_edit">Edit</string>
+    <string name="settings_delete">Delete</string>
+    <string name="settings_add_provider">+ Add provider</string>
+    <string name="settings_delete_provider_title">Delete provider</string>
+    <string name="settings_delete_provider_text">Delete \"%1$s\"?\n\nIts model profiles will be reassigned to no provider. This cannot be undone.</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_edit_provider">Edit provider</string>
+    <string name="settings_keys_hint">API Keys (one per line)</string>
+    <string name="settings_rotation_disabled">DISABLED · off</string>
+    <string name="settings_rotation_sequential">SEQUENTIAL · round-robin</string>
+    <string name="settings_rotation_on_error">ON_ERROR · switch on error</string>
+    <string name="settings_rotation_rate_limit">ON_RATE_LIMIT · switch on 429 only</string>
+    <string name="settings_rotation_desc">Multi-key rotation strategy (data plumbed; client hookup later)</string>
+    <string name="settings_default_headers">Default Headers (provider-level defaults)</string>
+    <string name="settings_base_url_hint">OpenAI-compatible endpoint, e.g. https://api.openai.com/v1</string>
+
+    <!-- Roles dialog -->
+    <string name="settings_done">Done</string>
+    <string name="settings_model_roles">Model Roles · multi-model</string>
+    <string name="settings_role_note">Role mappings are saved; real multi-client routing lands in the Agent engine later.</string>
+
+    <!-- About -->
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_subtitle">Version / open-source components / repository</string>
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_package">Package name</string>
+    <string name="settings_about_build_type">Build type</string>
+    <string name="settings_about_components">Open-source components</string>
+    <string name="settings_about_components_list">Jetpack Compose · Hilt (Dagger) · Room · OkHttp · kotlinx.serialization · kotlinx.coroutines · Coil · Shizuku API · WorkManager · androidx.security · Haze (Liquid Glass) · Vico (charts) · EasyFloat</string>
+    <string name="settings_about_no_browser">No app found that can open links</string>
+    <string name="settings_about_view_repo">View the GitHub repository</string>
+    <string name="settings_about_star">Give this project a star — thank you!</string>
+    <string name="settings_about_credits">This project\'s architecture draws heavily on the open-source community (Termux, proot, Operit, etc.) — saluting all contributors.</string>
+
+    <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
+    <string name="settings_error_provider_not_found">Provider not found: %1$s</string>
+    <string name="settings_error_invalid_base_url">Base URL missing or invalid; cannot fetch models</string>
+    <string name="settings_error_profile_not_found">Model profile not found</string>
+    <string name="settings_error_model_id_blank">Model name cannot be empty</string>
+    <string name="settings_error_base_url_empty">Base URL is empty (check the provider config)</string>
+    <string name="settings_error_api_key_empty">API Key is empty (check the provider config)</string>
+    <string name="settings_test_success">Connected: received a %1$d-character response</string>
+    <string name="settings_test_failed">Connection failed: %1$s</string>
+
+    <!-- ═══ 模型配置卡（ModelSetupCard）═══ -->
+    <string name="model_card_title">Model configuration</string>
+    <string name="model_card_subtitle">Profiles / providers / keys / model IDs — all in one place</string>
+    <string name="model_empty_hint">No model profiles yet — tap the button below to create one (defaults to the \"Custom\" provider; you fill in the Base URL).</string>
+    <string name="model_create_profile">+ New model profile</string>
+    <string name="model_new_profile_name">New model</string>
+    <string name="model_profile_label">Model profile</string>
+    <string name="model_default_badge">Default</string>
+    <string name="model_no_provider">No provider</string>
+    <string name="model_no_model_id">No model set</string>
+    <string name="model_profile_summary">%1$s · %2$s</string>
+    <string name="model_new">+ New</string>
+    <string name="model_duplicate">Duplicate</string>
+    <string name="model_reset_params">Reset params</string>
+    <string name="model_delete">Delete</string>
+    <string name="model_profile_name">Profile name</string>
+    <string name="model_no_provider_selected">No provider selected</string>
+    <string name="model_select_provider">Select model provider</string>
+    <string name="model_base_url_blank_hint">Enter your custom endpoint here, e.g. https://api.xxx.com/v1</string>
+    <string name="model_request_url_hint">Requests go to %1$s/chat/completions</string>
+    <string name="model_url_deviated">⚠ The current Base URL deviates from the official %1$s preset (official: %2$s). The fetched model list is returned by that endpoint — every model id in it (including test / incomplete names) comes from there, not from the official list.</string>
+    <string name="model_restore_official">Restore official endpoint %1$s</string>
+    <string name="model_hide_key">Hide</string>
+    <string name="model_show_key">Show</string>
+    <string name="model_api_key_hint">Entered by you, stored locally with AES-256-GCM encryption, never written to config files in plain text</string>
+    <string name="model_id_label">Model ID</string>
+    <string name="model_id_hint">Tap \"Fetch models\" on the right to pull from the endpoint, or type it in directly</string>
+    <string name="model_selected_model">Selected model: %1$s</string>
+    <string name="model_fetch_models">Fetch models</string>
+    <string name="model_is_default">Default model</string>
+    <string name="model_set_default">Set as default</string>
+    <string name="model_role_mapping">Role mapping…</string>
+    <string name="model_capabilities">Capabilities</string>
+    <string name="model_current_endpoint">Current endpoint</string>
+    <string name="model_reset_confirm_text">Reset the sampling / reasoning / context / tools / network parameters of \"%1$s\" to defaults?\n\nName, provider, model ID and capabilities are kept.</string>
+    <string name="model_reset">Reset</string>
+    <string name="model_cancel">Cancel</string>
+    <string name="model_delete_profile_title">Delete model profile</string>
+    <string name="model_delete_confirm_text">Delete \"%1$s\" (%2$s)?\n\nThis cannot be undone; the default profile cannot be deleted.</string>
+    <string name="model_available_title">Models available from %1$s · %2$s (%3$d)</string>
+    <string name="model_deviated_banner">⚠ Endpoint deviates from the official preset — this list comes from that relay/custom endpoint, not the official model table</string>
+    <string name="model_filter">Filter models</string>
+    <string name="model_empty_models">The endpoint returned no models. Check that the Base URL is correct and the API Key has permission, or just enter a model ID manually below.</string>
+    <string name="model_manual_id_label">Or enter a model ID manually</string>
+    <string name="model_use_custom_id">Use custom ID</string>
+    <string name="model_close">Close</string>
+
+    <!-- ═══ 存储与数据管理（StorageScreen）═══ -->
+    <string name="storage_title">Storage</string>
+    <string name="storage_refresh">Refresh</string>
+    <string name="storage_attachments">Attachments</string>
+    <string name="storage_space_used">Space used</string>
+    <string name="storage_files">Files</string>
+    <string name="storage_unit_files">%1$d</string>
+    <string name="storage_clear_attachments">Clear attachments</string>
+    <string name="storage_attachments_desc">Local cache of chat attachments; after clearing, attachment previews in history become unavailable (Agent-side file references break).</string>
+    <string name="storage_ubuntu_title">Ubuntu environment (rootfs, built-in)</string>
+    <string name="storage_status">Status</string>
+    <string name="storage_rootfs_not_installed">Not unpacked</string>
+    <string name="storage_rootfs_ready">Ready</string>
+    <string name="storage_rootfs_failed">Error</string>
+    <string name="storage_calculating">Calculating…</string>
+    <string name="storage_delete_ubuntu">Delete Ubuntu environment (keeps user data)</string>
+    <string name="storage_ubuntu_desc">Removes the unpacked rootfs and unpack cache; guest /root user data and workspace are kept — unpack offline again to restore. Full management (unpack/repair) is in the Environment Center on the Terminal page.</string>
+    <string name="storage_conversation_history">Chat history</string>
+    <string name="storage_messages">Messages</string>
+    <string name="storage_unit_msgs">%1$d</string>
+    <string name="storage_export_text">Export as text</string>
+    <string name="storage_clear">Clear</string>
+    <string name="storage_conversation_desc">The current global conversation (persists across restarts). Export a backup before clearing; afterwards the Agent\'s chat context starts from zero.</string>
+    <string name="storage_log_title">Logs (in-memory ring buffer)</string>
+    <string name="storage_records">Records</string>
+    <string name="storage_usage">Usage</string>
+    <string name="storage_log_desc">Logs live in an in-memory ring buffer (released when the app restarts); view and export them on the Logs page.</string>
+    <string name="storage_confirm_attachments_title">Clear attachments?</string>
+    <string name="storage_confirm_attachments_text">This will delete all %1$d attachment files (%2$s). This cannot be undone.</string>
+    <string name="storage_confirm_rootfs_title">Delete the Ubuntu environment?</string>
+    <string name="storage_confirm_rootfs_text">This will delete the unpacked rootfs (%1$s) and the unpack cache; the built-in package ships with the APK and can be unpacked offline again anytime; user data (/root, workspace) is kept.</string>
+    <string name="storage_about_1gb">~1 GB</string>
+    <string name="storage_confirm_conversation_title">Clear chat history?</string>
+    <string name="storage_confirm_conversation_text">This will delete all %1$d messages; the Agent\'s context starts from zero. Export a backup first.</string>
+    <string name="storage_confirm">Confirm</string>
+    <string name="storage_cancel">Cancel</string>
+
+    <!-- ═══ 记忆（MemoryScreen）═══ -->
+    <string name="memory_title">Memory</string>
+    <string name="memory_search_nodes">Search nodes</string>
+    <string name="memory_got_it">Got it</string>
+    <string name="memory_nodes">Nodes</string>
+    <string name="memory_macros">Macro skills</string>
+    <string name="memory_search_label">Search nodes (text / keywords)</string>
+    <string name="memory_no_match">No memory nodes match \"%1$s\"</string>
+    <string name="memory_recent_episodes">Recent episodes</string>
+    <string name="memory_empty_episodes">No memory episodes yet\nEpisodes will be deposited here after the Agent runs tasks</string>
+    <string name="memory_frequent_macros">Top macro skills</string>
+    <string name="memory_empty_macros">No distilled macro skills yet\nAfter tasks succeed, the Agent deposits reusable FSM macros</string>
+    <string name="memory_delete_episode_title">Delete memory episode</string>
+    <string name="memory_delete_episode_text">Delete \"%1$s\"? Associated edges are removed together (nodes are a shared dictionary and are not hard-deleted).</string>
+    <string name="memory_delete">Delete</string>
+    <string name="memory_cancel">Cancel</string>
+    <string name="memory_episode_meta">%1$s · %2$s · %3$d actions</string>
+    <string name="memory_distilled">Distilled to macro</string>
+    <string name="memory_no_text">(no text)</string>
+    <string name="memory_generic">General</string>
+    <string name="memory_macro_stats">%1$s · %2$d success / %3$d fail</string>
+    <string name="memory_crystallized">Crystallized</string>
+    <string name="memory_steps">%1$d steps</string>
+    <string name="memory_dream_title">Dream consolidation</string>
+    <string name="memory_dream_running">Consolidating: decay / pruning / macro optimization…</string>
+    <string name="memory_dream_desc">Energy decay + pruning of low-value memories (runs on a cycle; can also be triggered manually)</string>
+    <string name="memory_dream_now">Consolidate now</string>
+    <string name="memory_quarantine_title">Immune quarantine</string>
+    <string name="memory_quarantined">%1$d suspicious UI fingerprints quarantined (phishing / overlay traits)</string>
+    <string name="memory_quarantine_clear">No suspicious UI fingerprints quarantined (normal)</string>
+    <string name="memory_clear">Clear</string>
+
+    <!-- ═══ 任务历史（TaskHistoryScreen）═══ -->
+    <string name="tasks_title">Tasks</string>
+    <string name="tasks_refresh">Refresh</string>
+    <string name="tasks_empty_title">No task records yet</string>
+    <string name="tasks_empty_desc">Start a request in task mode (Plan / Spec) from the chat page\nand tasks will be persisted here (kept across restarts).</string>
+    <string name="tasks_overview">Task overview</string>
+    <string name="tasks_total">Total</string>
+    <string name="tasks_active">Active</string>
+    <string name="tasks_completed">Done</string>
+    <string name="tasks_failed">Failed</string>
+    <string name="tasks_cancelled">Cancelled</string>
+    <string name="tasks_daily_created">Created in the last 7 days</string>
+    <string name="tasks_card_meta">%1$s · %2$s</string>
+    <string name="tasks_card_meta_duration">%1$s · %2$s · took %3$s</string>
+    <string name="tasks_collapse">Collapse</string>
+    <string name="tasks_expand">Expand</string>
+    <string name="tasks_user_input">User input</string>
+    <string name="tasks_plan_steps">Plan steps</string>
+    <string name="tasks_result">Result</string>
+    <string name="tasks_error">Error</string>
+    <string name="tasks_id_retry">ID: %1$s · %2$d retries</string>
+    <string name="tasks_status_pending">Queued</string>
+    <string name="tasks_status_planning">Planning</string>
+    <string name="tasks_status_running">Running</string>
+    <string name="tasks_status_waiting">Awaiting</string>
+    <string name="tasks_status_paused">Paused</string>
+    <string name="tasks_status_cancelling">Cancelling</string>
+    <string name="tasks_status_recovering">Recovering</string>
+    <string name="tasks_status_retrying">Retrying</string>
+    <string name="tasks_status_completed">Done</string>
+    <string name="tasks_status_failed">Failed</string>
+    <string name="tasks_status_cancelled">Cancelled</string>
+
+    <!-- ═══ 权限管理（PermissionsScreen）═══ -->
+    <string name="perms_title">Permissions</string>
+    <string name="perms_root_desc">Highest privilege — runs all system operations (/system, /data, mount, SELinux)</string>
+    <string name="perms_detect">Detect</string>
+    <string name="perms_accessibility">Accessibility service</string>
+    <string name="perms_accessibility_desc">Reads the UI tree, simulates taps, takes screenshots (the Agent\'s eyes and hands)</string>
+    <string name="perms_enabled">Enabled</string>
+    <string name="perms_enable">Enable</string>
+    <string name="perms_overlay">Overlay</string>
+    <string name="perms_overlay_desc">Shows content above other apps</string>
+    <string name="perms_notifications">Notifications</string>
+    <string name="perms_notifications_desc">Sends foreground-service notifications and reads notifications</string>
+    <string name="perms_storage">Storage</string>
+    <string name="perms_storage_desc">Reads and writes files (workspace, downloads)</string>
+    <string name="perms_shizuku_desc">ADB-level privilege — runs pm/am/settings and other system commands without Root</string>
+    <string name="perms_ready">Ready</string>
+    <string name="perms_install_launch">Install / launch</string>
+    <string name="perms_authorize">Authorize</string>
+    <string name="perms_granted">Granted</string>
+    <string name="perms_status_granted">Granted</string>
+    <string name="perms_status_denied">Not granted</string>
+    <string name="perms_status_pending">Not authorized</string>
+    <string name="perms_status_running">Running</string>
+
+    <!-- ═══ 日志查看器（LogViewerScreen）═══ -->
+    <string name="log_copy">Copy</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_export">Export</string>
+    <string name="log_follow">Follow</string>
+    <string name="log_follow_stopped">Paused</string>
+    <string name="log_count_summary">%1$d entries · %2$dMB/%3$dMB</string>
+    <string name="log_clear_title">Clear log buffer</string>
+    <string name="log_clear_text">This will discard all %1$d in-memory log records (up to %2$dMB). This cannot be undone.</string>
+    <string name="log_cancel">Cancel</string>
+    <string name="log_total">Total</string>
+    <string name="log_errors">Errors</string>
+    <string name="log_buffer">Buffer</string>
+    <string name="log_all">All</string>
+    <string name="log_level_min">Level ≥</string>
+    <string name="log_search_hint">Search message or source…</string>
+    <string name="log_sessions">Sessions</string>
+    <string name="log_session_label">Session #%1$d</string>
+    <string name="log_collapse">Collapse</string>
+    <string name="log_stack">Stack</string>
+    <string name="log_export_chooser">Export logs</string>
+
+    <!-- ═══ 新手引导（OnboardingScreen）═══ -->
+    <string name="onboarding_skip">Skip</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_start">Get started</string>
+    <string name="onboarding_mascot">Apex Agent mascot</string>
+    <string name="onboarding_tagline">The AI terminal agent in your pocket</string>
+    <string name="onboarding_welcome_desc">Chat-driven · real terminal · 100+ tools\nLet the Agent actually get work done on your phone</string>
+    <string name="onboarding_cap_agent_title">Conversational agent</string>
+    <string name="onboarding_cap_agent_desc">Multi-model access, plan confirmation, tool orchestration — executes complex tasks step by step and reports back</string>
+    <string name="onboarding_cap_terminal_title">Ubuntu terminal</string>
+    <string name="onboarding_cap_terminal_desc">A real Linux environment on your phone: apt packages, bash scripts, a full filesystem (rootfs ships inside the APK — works offline)</string>
+    <string name="onboarding_cap_market_title">Skills &amp; marketplace</string>
+    <string name="onboarding_cap_market_desc">100+ built-in tools on demand; the skill marketplace keeps expanding the Agent\'s capabilities</string>
+    <string name="onboarding_what_title">What it can do</string>
+    <string name="onboarding_perm_title">Grant one permission first</string>
+    <string name="onboarding_perm_desc">Only this one is required — everything else can come later</string>
+    <string name="onboarding_perm_notif_title">Notification permission</string>
+    <string name="onboarding_perm_notif_desc">Android 13+ requires explicit consent — the foreground service\'s persistent notification and the task-completion and confirmation alerts all depend on it; without it, notifications stay silently invisible</string>
+    <string name="onboarding_perm_granted">✓ Granted</string>
+    <string name="onboarding_perm_retry">Try again</string>
+    <string name="onboarding_perm_request">Grant notifications</string>
+    <string name="onboarding_perm_optional">Accessibility · overlay · storage and other advanced permissions\ncan be enabled later under \"Drawer → Permissions\"</string>
+    <string name="onboarding_final_title">One last step</string>
+    <string name="onboarding_ready_desc">After that, enter your API key under \"Settings → Model configuration\"\n(OpenAI / Anthropic / compatible endpoints)\nso the Agent can start thinking</string>
+    <string name="onboarding_quickstart_title">Quick start</string>
+    <string name="onboarding_quickstart_steps">1 · Open \"Settings\" from the drawer and configure a model\n2 · Back on the Agent chat page, send your first message\n3 · Try offline-unpacking the built-in Ubuntu on the \"Terminal\" page\n4 · Let the Agent install packages, run scripts and edit files for you</string>
+</resources>

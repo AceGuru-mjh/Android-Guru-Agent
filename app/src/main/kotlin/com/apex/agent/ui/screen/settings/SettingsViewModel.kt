@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.settings
 
 import androidx.lifecycle.ViewModel
+import com.apex.agent.R
 import com.apex.agent.core.llm.LlmClientFactory
 import com.apex.agent.core.llm.LlmConfig
 import com.apex.agent.core.llm.ModelProfile
@@ -8,6 +9,7 @@ import com.apex.agent.core.llm.ModelRoleConfig
 import com.apex.agent.core.llm.ModelsCatalog
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.RemoteModelInfo
+import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +26,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val repo: SettingsRepository
+    private val repo: SettingsRepository,
+    private val languageManager: LanguageManager
 ) : ViewModel() {
 
     val profiles: StateFlow<List<ModelProfile>> = repo.profiles
@@ -80,10 +83,14 @@ class SettingsViewModel @Inject constructor(
     ): Result<List<RemoteModelInfo>> =
         withContext(Dispatchers.IO) {
             val resolved = repo.getProvider(providerId)
-                ?: return@withContext Result.failure(Exception("未找到服务商：$providerId"))
+                ?: return@withContext Result.failure(
+                    Exception(languageManager.getString(R.string.settings_error_provider_not_found).format(providerId))
+                )
             val baseUrl = (baseUrlOverride ?: resolved.baseUrl).trim()
             if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                return@withContext Result.failure(Exception("Base URL 未填写或不合法，无法获取模型"))
+                return@withContext Result.failure(
+                    Exception(languageManager.getString(R.string.settings_error_invalid_base_url))
+                )
             }
             ModelsCatalog.fetchModels(
                 baseUrl = baseUrl,
@@ -106,17 +113,29 @@ class SettingsViewModel @Inject constructor(
             val provider = profile?.let { repo.getProvider(it.providerId) }
 
             if (profile == null) {
-                return@withContext TestResult(false, "未找到该模型配置")
+                return@withContext TestResult(
+                    false,
+                    languageManager.getString(R.string.settings_error_profile_not_found)
+                )
             }
             if (profile.modelId.isBlank()) {
-                return@withContext TestResult(false, "模型名称不能为空")
+                return@withContext TestResult(
+                    false,
+                    languageManager.getString(R.string.settings_error_model_id_blank)
+                )
             }
             val config = LlmConfig.fromProfile(profile, provider)
             if (config.baseUrl.isBlank()) {
-                return@withContext TestResult(false, "Base URL 为空（请检查 Provider 配置）")
+                return@withContext TestResult(
+                    false,
+                    languageManager.getString(R.string.settings_error_base_url_empty)
+                )
             }
             if (config.apiKey.isBlank()) {
-                return@withContext TestResult(false, "API Key 为空（请检查 Provider 配置）")
+                return@withContext TestResult(
+                    false,
+                    languageManager.getString(R.string.settings_error_api_key_empty)
+                )
             }
 
             try {
@@ -130,9 +149,17 @@ class SettingsViewModel @Inject constructor(
                     temperature = config.temperature,
                     maxTokens = 16
                 )
-                TestResult(true, "连接成功：收到 ${result.content?.length ?: 0} 字符响应")
+                TestResult(
+                    true,
+                    languageManager.getString(R.string.settings_test_success)
+                        .format(result.content?.length ?: 0)
+                )
             } catch (e: Exception) {
-                TestResult(false, "连接失败：${e.message ?: e.javaClass.simpleName}")
+                TestResult(
+                    false,
+                    languageManager.getString(R.string.settings_test_failed)
+                        .format(e.message ?: e.javaClass.simpleName)
+                )
             }
         }
     }

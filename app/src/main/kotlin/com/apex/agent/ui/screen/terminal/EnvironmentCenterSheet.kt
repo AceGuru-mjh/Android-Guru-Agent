@@ -50,10 +50,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.annotation.StringRes
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 
 /**
@@ -110,10 +113,9 @@ internal fun EnvironmentCenterSheet(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SurfaceBadge(Icons.Default.Layers, MaterialTheme.colorScheme.primary)
                 Column {
-                    Text("环境中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.term_env_center_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "环境随 APK 内置（完整 Ubuntu，rootfs 档案 ~300MB+）—— 首次使用离线解包约 2~5 分钟" +
-                            "（解压后占用 ~1GB 存储，进度实时显示）；解包与删除均可逆，用户数据（/root、workspace）保留",
+                        stringResource(R.string.term_env_center_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -135,24 +137,24 @@ internal fun EnvironmentCenterSheet(
             // ═══ 2. Android 本地 Shell（内置）═══
             SettingsCard(Icons.Default.Android, "Android Shell") {
                 Text(
-                    "设备自带命令行环境（mksh / toybox：ls、grep、am、pm 等）。无需下载，随时可用；不含 apt / bash 完整工具链。",
+                    stringResource(R.string.term_android_shell_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
-                StatusBadge(text = "内置", color = Color(0xFF3E9C51))
+                StatusBadge(text = stringResource(R.string.term_builtin), color = Color(0xFF3E9C51))
             }
 
             // ═══ 3. 环境依赖（Ubuntu 内工具链）═══
-            SettingsCard(Icons.Default.Terminal, "环境依赖（Ubuntu 内）") {
+            SettingsCard(Icons.Default.Terminal, stringResource(R.string.term_deps_title)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("使用镜像源", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text("国内镜像加速（清华源）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.term_use_mirror), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.term_mirror_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Switch(
                         checked = useMirror,
@@ -162,11 +164,11 @@ internal fun EnvironmentCenterSheet(
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ActionButton("一键安装全部", install.runningId != null, Modifier.weight(1f)) { onInstallAll() }
-                    ActionButton("Android 依赖", install.runningId != null, Modifier.weight(1f)) { onInstallAndroid() }
+                    ActionButton(stringResource(R.string.term_install_all), install.runningId != null, Modifier.weight(1f)) { onInstallAll() }
+                    ActionButton(stringResource(R.string.term_android_deps), install.runningId != null, Modifier.weight(1f)) { onInstallAndroid() }
                 }
                 Spacer(Modifier.height(10.dp))
-                Text("可独立安装：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.term_install_individually), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(6.dp))
                 depItems.forEach { item ->
                     DepRow(
@@ -200,22 +202,18 @@ internal fun EnvironmentCenterSheet(
     if (showRemoveConfirm) {
         AlertDialog(
             onDismissRequest = { showRemoveConfirm = false },
-            title = { Text("删除 Ubuntu 环境？") },
+            title = { Text(stringResource(R.string.term_remove_ubuntu_title)) },
             text = {
-                Text(
-                    "将删除解包后的 rootfs（约 1GB+）与解包缓存，释放存储。内置安装包随 APK 保留，" +
-                        "可随时重新离线解包；用户数据（guest /root 与 workspace）保留。" +
-                        "正在运行的 Ubuntu 会话需先全部关闭。"
-                )
+                Text(stringResource(R.string.term_remove_ubuntu_text))
             },
             confirmButton = {
                 TextButton(onClick = {
                     showRemoveConfirm = false
                     onRemoveUbuntu()
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.term_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { showRemoveConfirm = false }) { Text("取消") }
+                TextButton(onClick = { showRemoveConfirm = false }) { Text(stringResource(R.string.term_cancel)) }
             }
         )
     }
@@ -239,10 +237,9 @@ private fun UbuntuEnvironmentCard(
         phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING ||
         phase == UbuntuLifecycleCoordinator.Phase.RECOVERING
 
-    SettingsCard(Icons.Default.Terminal, "Ubuntu 24.04 LTS（内置）") {
+    SettingsCard(Icons.Default.Terminal, stringResource(R.string.term_ubuntu_card_title)) {
         Text(
-            "完整 Linux 开发环境（apt / bash / python / 构建工具链），PRoot 免 root 运行。" +
-                "官方 rootfs 随 APK 内置（构建期 SHA256 校验），首次使用离线解包；apt 引导需网络，离线时自动降级可用。",
+            stringResource(R.string.term_ubuntu_card_desc),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -260,7 +257,7 @@ private fun UbuntuEnvironmentCard(
             )
             rootfsSize?.let { bytes ->
                 Text(
-                    "占用 ${formatBytes(bytes)}",
+                    stringResource(R.string.term_disk_usage, formatBytes(bytes)),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -279,16 +276,18 @@ private fun UbuntuEnvironmentCard(
             )
             Spacer(Modifier.height(4.dp))
             val bytesTotal = progress.bytesTotal
+            // i18n：字节进度片段在组合内预取（buildString 非组合上下文）
+            val progressBytes = if (bytesTotal != null && bytesTotal > 0) {
+                stringResource(
+                    R.string.term_progress_bytes,
+                    formatBytes(progress.bytesTransferred),
+                    formatBytes(bytesTotal)
+                )
+            } else null
             Text(
                 buildString {
                     append(progress.message)
-                    if (bytesTotal != null && bytesTotal > 0) {
-                        append("  （")
-                        append(formatBytes(progress.bytesTransferred))
-                        append(" / ")
-                        append(formatBytes(bytesTotal))
-                        append("）")
-                    }
+                    progressBytes?.let { append(it) }
                 },
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
@@ -318,7 +317,7 @@ private fun UbuntuEnvironmentCard(
         if (phase == UbuntuLifecycleCoordinator.Phase.FAILED && lastError != null) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "上次错误：${lastError.take(120)}",
+                stringResource(R.string.term_last_error, lastError.take(120)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 maxLines = 3
@@ -326,7 +325,7 @@ private fun UbuntuEnvironmentCard(
         } else if (phase == UbuntuLifecycleCoordinator.Phase.READY && bootstrapNote != null) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "apt 引导未完成（${bootstrapNote.take(100)}）—— 环境可用，apt 操作将在使用时真实报错；网络恢复后可修复。",
+                stringResource(R.string.term_bootstrap_note, bootstrapNote.take(100)),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFE0A63C),
                 maxLines = 3
@@ -337,46 +336,47 @@ private fun UbuntuEnvironmentCard(
         Spacer(Modifier.height(10.dp))
         when (phase) {
             UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> {
-                ActionButton("解包内置环境（离线，约 2~5 分钟）", loading = false) { onInstall() }
+                ActionButton(stringResource(R.string.term_unpack_built_in), loading = false) { onInstall() }
             }
             UbuntuLifecycleCoordinator.Phase.INSTALLING -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("rootfs 解包/校验中…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.term_unpacking), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.weight(1f))
-                    OutlinedButton(onClick = onCancel) { Text("取消", color = MaterialTheme.colorScheme.error) }
+                    OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.term_cancel), color = MaterialTheme.colorScheme.error) }
                 }
             }
             UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING, UbuntuLifecycleCoordinator.Phase.RECOVERING -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Text(
-                        if (phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING) "初始化：apt 源 / 网络 / 基础包…" else "状态收敛中…",
+                        if (phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING) stringResource(R.string.term_bootstrapping)
+                        else stringResource(R.string.term_converging),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
             UbuntuLifecycleCoordinator.Phase.ROOTFS_READY -> {
-                ActionButton("完成初始化（apt 引导）", loading = false) { onInstall() }
+                ActionButton(stringResource(R.string.term_finish_bootstrap), loading = false) { onInstall() }
             }
             UbuntuLifecycleCoordinator.Phase.READY -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("新建 Ubuntu 会话", loading = false, modifier = Modifier.weight(1f)) { onCreateSession() }
-                    OutlinedButton(onClick = onRepair) { Text("修复") }
+                    ActionButton(stringResource(R.string.term_new_ubuntu_session), loading = false, modifier = Modifier.weight(1f)) { onCreateSession() }
+                    OutlinedButton(onClick = onRepair) { Text(stringResource(R.string.term_repair)) }
                     OutlinedButton(onClick = onRemove) {
                         Icon(Icons.Default.Delete, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.error)
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.term_delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
             UbuntuLifecycleCoordinator.Phase.FAILED -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("重试安装", loading = false, modifier = Modifier.weight(1f)) { onInstall() }
-                    OutlinedButton(onClick = onRepair) { Text("修复") }
+                    ActionButton(stringResource(R.string.term_retry_install), loading = false, modifier = Modifier.weight(1f)) { onInstall() }
+                    OutlinedButton(onClick = onRepair) { Text(stringResource(R.string.term_repair)) }
                     OutlinedButton(onClick = onRemove) {
                         Icon(Icons.Default.Delete, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.error)
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.term_delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -400,14 +400,20 @@ private fun StatusBadge(text: String, color: Color) {
     }
 }
 
-private fun phaseLabel(phase: UbuntuLifecycleCoordinator.Phase): String = when (phase) {
-    UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未解包"
-    UbuntuLifecycleCoordinator.Phase.INSTALLING -> "解包/校验中"
-    UbuntuLifecycleCoordinator.Phase.ROOTFS_READY -> "待初始化"
-    UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING -> "初始化中"
-    UbuntuLifecycleCoordinator.Phase.READY -> "已就绪"
-    UbuntuLifecycleCoordinator.Phase.RECOVERING -> "恢复中"
-    UbuntuLifecycleCoordinator.Phase.FAILED -> "异常"
+@Composable
+private fun phaseLabel(phase: UbuntuLifecycleCoordinator.Phase): String =
+    stringResource(phaseLabelRes(phase))
+
+/** i18n：阶段标签 @StringRes 映射，组合内取词。 */
+@StringRes
+private fun phaseLabelRes(phase: UbuntuLifecycleCoordinator.Phase): Int = when (phase) {
+    UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> R.string.term_phase_not_installed
+    UbuntuLifecycleCoordinator.Phase.INSTALLING -> R.string.term_phase_installing
+    UbuntuLifecycleCoordinator.Phase.ROOTFS_READY -> R.string.term_phase_rootfs_ready
+    UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING -> R.string.term_phase_bootstrapping
+    UbuntuLifecycleCoordinator.Phase.READY -> R.string.term_phase_ready
+    UbuntuLifecycleCoordinator.Phase.RECOVERING -> R.string.term_phase_recovering
+    UbuntuLifecycleCoordinator.Phase.FAILED -> R.string.term_phase_failed
 }
 
 private fun phaseColor(phase: UbuntuLifecycleCoordinator.Phase): Color = when (phase) {
@@ -486,7 +492,8 @@ internal fun DepRow(item: TerminalViewModel.DepItem, busy: Boolean, installing: 
             Text(item.name, style = MaterialTheme.typography.bodyMedium)
         }
         TextButton(enabled = !busy, onClick = onInstall) {
-            Text(if (installing) "安装中…" else "安装")
+            Text(if (installing) stringResource(R.string.term_installing)
+            else stringResource(R.string.term_install))
         }
     }
 }

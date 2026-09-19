@@ -58,9 +58,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.core.llm.ModelCapabilities
 import com.apex.agent.core.llm.ModelCapabilityHeuristics
 import com.apex.agent.core.llm.ModelProfile
@@ -127,6 +129,9 @@ internal fun ModelSetupCard(
     var resetTarget by remember { mutableStateOf<ModelProfile?>(null) }
 
     val scope = rememberCoroutineScope()
+
+    // i18n：新档案默认名（createProfile 在 onClick 内调用，stringResource 需上提到组合层取词）
+    val newProfileName = stringResource(R.string.model_new_profile_name)
 
     // ═══ 诚实化（用户质疑"test 模型 / deepseekflash 名字不完整"的根因）═══
     // 列表内容 = 端点 /models 响应的逐字透传：若 Base URL 指向第三方中转站，
@@ -198,7 +203,7 @@ internal fun ModelSetupCard(
             ?: providers.firstOrNull()?.id ?: ""
         val id = "profile_${System.currentTimeMillis()}"
         viewModel.upsertProfile(
-            ModelProfile(id = id, name = "新模型", providerId = newProviderId, modelId = "")
+            ModelProfile(id = id, name = newProfileName, providerId = newProviderId, modelId = "")
         )
         onSelect(id)
         // 同步回填新 provider 的 URL/Key —— 若留给 LaunchedEffect 回填，期间重启的
@@ -227,9 +232,9 @@ internal fun ModelSetupCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("模型配置", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.model_card_title), style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "多档案 / 服务商 / 密钥 / 模型 ID 一站配置",
+                        stringResource(R.string.model_card_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline
                     )
@@ -238,12 +243,12 @@ internal fun ModelSetupCard(
 
             if (selected == null) {
                 Text(
-                    "还没有模型档案，点击下方按钮新建一个（默认使用「自定义」服务商，Base URL 由你填写）。",
+                    stringResource(R.string.model_empty_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline
                 )
                 Button(onClick = { createProfile() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("+ 新建模型档案")
+                    Text(stringResource(R.string.model_create_profile))
                 }
                 return@Card
             }
@@ -258,7 +263,7 @@ internal fun ModelSetupCard(
                     value = if (sel.isDefault) "★ ${sel.name}" else sel.name,
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("模型档案") },
+                    label = { Text(stringResource(R.string.model_profile_label)) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProfile) },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -280,15 +285,19 @@ internal fun ModelSetupCard(
                                             if (p.isDefault) {
                                                 Spacer(Modifier.width(6.dp))
                                                 Text(
-                                                    "默认",
+                                                    stringResource(R.string.model_default_badge),
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
                                             }
                                         }
                                         Text(
-                                            "${providers.firstOrNull { prov -> prov.id == p.providerId }?.displayName ?: "无 Provider"}" +
-                                                " · ${p.modelId.ifBlank { "未设模型" }}",
+                                            stringResource(
+                                                R.string.model_profile_summary,
+                                                providers.firstOrNull { prov -> prov.id == p.providerId }?.displayName
+                                                    ?: stringResource(R.string.model_no_provider),
+                                                p.modelId.ifBlank { stringResource(R.string.model_no_model_id) }
+                                            ),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.outline,
                                             maxLines = 1,
@@ -317,20 +326,20 @@ internal fun ModelSetupCard(
 
             // ── 档案操作：新建 / 复制 / 重置参数（带确认）/ 删除（带确认）──
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { createProfile() }) { Text("+ 新建", fontSize = 12.sp) }
-                TextButton(onClick = { viewModel.duplicateProfile(sel.id) }) { Text("复制", fontSize = 12.sp) }
-                TextButton(onClick = { resetTarget = sel }) { Text("重置参数", fontSize = 12.sp) }
+                TextButton(onClick = { createProfile() }) { Text(stringResource(R.string.model_new), fontSize = 12.sp) }
+                TextButton(onClick = { viewModel.duplicateProfile(sel.id) }) { Text(stringResource(R.string.model_duplicate), fontSize = 12.sp) }
+                TextButton(onClick = { resetTarget = sel }) { Text(stringResource(R.string.model_reset_params), fontSize = 12.sp) }
                 TextButton(
                     enabled = profiles.size > 1 && !sel.isDefault,
                     onClick = { deleteTarget = sel }
-                ) { Text("删除", fontSize = 12.sp) }
+                ) { Text(stringResource(R.string.model_delete), fontSize = 12.sp) }
             }
 
             // ── 档案名称 ──
             OutlinedTextField(
                 value = sel.name,
                 onValueChange = { viewModel.upsertProfile(sel.copy(name = it)) },
-                label = { Text("档案名称") },
+                label = { Text(stringResource(R.string.model_profile_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -341,10 +350,10 @@ internal fun ModelSetupCard(
                 onExpandedChange = { expandedProvider = it }
             ) {
                 OutlinedTextField(
-                    value = provider?.displayName ?: "未选择服务商",
+                    value = provider?.displayName ?: stringResource(R.string.model_no_provider_selected),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("选择模型服务商") },
+                    label = { Text(stringResource(R.string.model_select_provider)) },
                     leadingIcon = { Icon(Icons.Outlined.SmartToy, null, Modifier.size(18.dp)) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvider) },
                     modifier = Modifier
@@ -397,15 +406,17 @@ internal fun ModelSetupCard(
                 supportingText = {
                     Column {
                         Text(
-                            if (baseUrl.isBlank()) "自定义端点请在此填写，例：https://api.xxx.com/v1"
-                            else "请求发往 ${baseUrl.trimEnd('/')}/chat/completions",
+                            if (baseUrl.isBlank()) stringResource(R.string.model_base_url_blank_hint)
+                            else stringResource(R.string.model_request_url_hint, baseUrl.trimEnd('/')),
                             style = MaterialTheme.typography.labelSmall
                         )
                         if (urlDeviated) {
                             Text(
-                                "⚠ 当前 Base URL 偏离「${provider?.displayName}」官方预设" +
-                                    "（官方：$officialBaseUrl）。拉到的模型清单由该端点返回，" +
-                                    "出现的 model id（含 test / 命名不完整项）均来自它，非官方列表。",
+                                stringResource(
+                                    R.string.model_url_deviated,
+                                    provider?.displayName ?: "",
+                                    officialBaseUrl
+                                ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.error
                             )
@@ -428,7 +439,7 @@ internal fun ModelSetupCard(
                     }) {
                         Icon(Icons.Outlined.Refresh, null, Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("恢复官方端点 $officialBaseUrl", fontSize = 12.sp)
+                        Text(stringResource(R.string.model_restore_official, officialBaseUrl), fontSize = 12.sp)
                     }
                 }
             }
@@ -443,13 +454,14 @@ internal fun ModelSetupCard(
                     IconButton(onClick = { keyVisible = !keyVisible }) {
                         Icon(
                             if (keyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                            contentDescription = if (keyVisible) "隐藏" else "显示"
+                            contentDescription = if (keyVisible) stringResource(R.string.model_hide_key)
+                            else stringResource(R.string.model_show_key)
                         )
                     }
                 },
                 supportingText = {
                     Text(
-                        "由你输入，AES-256-GCM 加密存储在设备本地，不明文写入配置文件",
+                        stringResource(R.string.model_api_key_hint),
                         style = MaterialTheme.typography.labelSmall
                     )
                 },
@@ -465,11 +477,11 @@ internal fun ModelSetupCard(
                 OutlinedTextField(
                     value = sel.modelId,
                     onValueChange = { viewModel.upsertProfile(sel.copy(modelId = it.trim())) },
-                    label = { Text("模型 ID") },
+                    label = { Text(stringResource(R.string.model_id_label)) },
                     supportingText = {
                         Text(
-                            if (sel.modelId.isBlank()) "点右侧「获取模型」从端点拉取，也可直接手填"
-                            else "已选模型：${sel.modelId}",
+                            if (sel.modelId.isBlank()) stringResource(R.string.model_id_hint)
+                            else stringResource(R.string.model_selected_model, sel.modelId),
                             style = MaterialTheme.typography.labelSmall
                         )
                     },
@@ -502,7 +514,7 @@ internal fun ModelSetupCard(
                         Icon(Icons.Outlined.Refresh, null, Modifier.size(16.dp))
                     }
                     Spacer(Modifier.width(4.dp))
-                    Text("获取模型")
+                    Text(stringResource(R.string.model_fetch_models))
                 }
             }
 
@@ -522,13 +534,16 @@ internal fun ModelSetupCard(
                 OutlinedButton(
                     enabled = !sel.isDefault,
                     onClick = { viewModel.setDefaultProfile(sel.id) }
-                ) { Text(if (sel.isDefault) "已是默认模型" else "设为默认") }
+                ) { Text(
+                    if (sel.isDefault) stringResource(R.string.model_is_default)
+                    else stringResource(R.string.model_set_default)
+                ) }
                 TextButton(onClick = onManageProviders) { Text("Providers…") }
-                TextButton(onClick = onManageRoles) { Text("角色映射…") }
+                TextButton(onClick = onManageRoles) { Text(stringResource(R.string.model_role_mapping)) }
             }
 
             // ── 能力标记（自 SettingsScreen.CapabilityEditor 迁入，合并后唯一使用方在本卡）──
-            Text("能力标记", style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.model_capabilities), style = MaterialTheme.typography.labelMedium)
             CapabilityEditor(sel.capabilities) { caps ->
                 viewModel.upsertProfile(sel.copy(capabilities = caps))
             }
@@ -537,7 +552,7 @@ internal fun ModelSetupCard(
 
     if (showModelPicker) {
         AvailableModelsDialog(
-            providerName = provider?.displayName ?: "当前端点",
+            providerName = provider?.displayName ?: stringResource(R.string.model_current_endpoint),
             requestUrl = baseUrl.trim().trimEnd('/') + "/models",
             urlDeviated = urlDeviated,
             models = discoveredModels,
@@ -566,9 +581,9 @@ internal fun ModelSetupCard(
     resetTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { resetTarget = null },
-            title = { Text("重置参数") },
+            title = { Text(stringResource(R.string.model_reset_params)) },
             text = {
-                Text("将「${target.name}」的采样 / 推理 / 上下文 / 工具 / 网络参数恢复为默认值？\n\n名称、Provider、模型 ID 与能力标记保留。")
+                Text(stringResource(R.string.model_reset_confirm_text, target.name))
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -585,9 +600,9 @@ internal fun ModelSetupCard(
                         )
                     )
                     resetTarget = null
-                }) { Text("重置") }
+                }) { Text(stringResource(R.string.model_reset)) }
             },
-            dismissButton = { TextButton(onClick = { resetTarget = null }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { resetTarget = null }) { Text(stringResource(R.string.model_cancel)) } }
         )
     }
 
@@ -595,17 +610,23 @@ internal fun ModelSetupCard(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除模型档案") },
+            title = { Text(stringResource(R.string.model_delete_profile_title)) },
             text = {
-                Text("确定删除「${target.name}」（${target.modelId.ifBlank { "未设模型" }}）？\n\n该操作不可恢复；默认档案不可删除。")
+                Text(
+                    stringResource(
+                        R.string.model_delete_confirm_text,
+                        target.name,
+                        target.modelId.ifBlank { stringResource(R.string.model_no_model_id) }
+                    )
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteProfile(target.id)
                     deleteTarget = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.model_delete), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.model_cancel)) } }
         )
     }
 }
@@ -647,7 +668,7 @@ private fun AvailableModelsDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text("$providerName · $requestHost 的可用模型（${models.size}）")
+                Text(stringResource(R.string.model_available_title, providerName, requestHost, models.size))
                 Text(
                     "GET $requestUrl",
                     style = MaterialTheme.typography.labelSmall,
@@ -657,7 +678,7 @@ private fun AvailableModelsDialog(
                 )
                 if (urlDeviated) {
                     Text(
-                        "⚠ 端点偏离官方预设 —— 清单由该中转/自定义端点返回，非官方模型表",
+                        stringResource(R.string.model_deviated_banner),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -669,15 +690,14 @@ private fun AvailableModelsDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("筛选模型") },
+                    label = { Text(stringResource(R.string.model_filter)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
                 if (models.isEmpty()) {
                     Text(
-                        "端点未返回任何模型。请确认 Base URL 正确、API Key 有权限，" +
-                            "或直接在下方手动填写模型 ID。",
+                        stringResource(R.string.model_empty_models),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -726,7 +746,7 @@ private fun AvailableModelsDialog(
                 OutlinedTextField(
                     value = customModelId,
                     onValueChange = { customModelId = it },
-                    label = { Text("或手动填写模型 ID") },
+                    label = { Text(stringResource(R.string.model_manual_id_label)) },
                     placeholder = { Text("my-model-v1") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -739,11 +759,11 @@ private fun AvailableModelsDialog(
                     Button(
                         enabled = customModelId.isNotBlank(),
                         onClick = { onPick(customModelId.trim()) }
-                    ) { Text("使用自定义 ID") }
+                    ) { Text(stringResource(R.string.model_use_custom_id)) }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.model_close)) } }
     )
 }
 

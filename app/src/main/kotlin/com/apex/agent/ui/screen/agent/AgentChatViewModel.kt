@@ -16,7 +16,11 @@ import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
+import com.apex.agent.ui.screen.settings.AgentSettings
 import com.apex.agent.ui.screen.settings.SettingsRepository
+import com.apex.agent.ui.language.LanguageManager
+import com.apex.agent.R
+import androidx.annotation.StringRes
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -47,8 +51,17 @@ class AgentChatViewModel @Inject constructor(
     // T76：任务运行时控制器（execute/abort 经此获得 checkpoint/恢复能力）
     private val taskController: AgentTaskStatusController,
     // 历史对话仓库（归档/恢复/删除；逻辑主体在 AgentChatHistoryController.kt）
-    internal val chatHistory: ChatHistoryManager
+    internal val chatHistory: ChatHistoryManager,
+    // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
+    private val languageManager: LanguageManager
 ) : ViewModel() {
+
+    /** i18n：按当前语言取无参文案。 */
+    private fun str(@StringRes resId: Int): String = languageManager.getString(resId)
+
+    /** i18n：带占位符文案（%1$s/%1$d）在组合外格式化。 */
+    private fun strFmt(@StringRes resId: Int, vararg args: Any): String =
+        String.format(languageManager.getString(resId), *args)
 
     // v2：memory.count() 在主线程 = 全量 JSON 反序列化（旧实现在构造器调用，
     // 几千条历史时进聊天页卡顿），改为 IO 线程异步回填（见下方 init）；
@@ -216,13 +229,18 @@ class AgentChatViewModel @Inject constructor(
      * 使其可被 memory_search_nodes 按关键词召回。整理主题取文本前 40 字符。
      */
     fun organizeToMemory(text: String) {
-        val goal = text.take(40).trim().ifBlank { "对话整理" }
+        val goal = text.take(40).trim().ifBlank { str(R.string.chat_memory_goal_default) }
         viewModelScope.launch {
             runCatching { csMemSessionManager.organizeText(goal, text) }
-                .onSuccess { _uiFeedback.tryEmit("已整理到记忆：$goal") }
+                .onSuccess { _uiFeedback.tryEmit(strFmt(R.string.chat_organized_to_memory, goal)) }
                 .onFailure { e ->
                     android.util.Log.e("AgentChatViewModel", "organizeToMemory failed", e)
-                    _uiFeedback.tryEmit("整理到记忆失败：${e.message ?: "未知错误"}")
+                    _uiFeedback.tryEmit(
+                        strFmt(
+                            R.string.chat_organize_failed,
+                            e.message ?: str(R.string.chat_unknown_error)
+                        )
+                    )
                 }
         }
     }
@@ -239,15 +257,20 @@ class AgentChatViewModel @Inject constructor(
             val report = runCatching { engine.compressNow() }.getOrNull()
             if (report == null) {
                 _uiState.update { s ->
-                    s.copy(messages = s.messages + AgentUiMessage.System("⚠️ 压缩不可用（未启用压缩引擎）"))
+                    s.copy(messages = s.messages + AgentUiMessage.System(str(R.string.chat_compress_unavailable)))
                 }
                 return@launch
             }
             _uiState.update { s ->
                 s.copy(
                     messages = s.messages + AgentUiMessage.System(
-                        "📦 已压缩上下文：${report.beforeTokens}→${report.afterTokens} tokens " +
-                            "(策略=${report.strategy}, 移除 ${report.messagesRemoved} 条)"
+                        strFmt(
+                            R.string.chat_vm_context_compressed_manual,
+                            report.beforeTokens,
+                            report.afterTokens,
+                            report.strategy,
+                            report.messagesRemoved
+                        )
                     ),
                     contextUsedTokens = engine.currentTokenCount(),
                     contextMaxTokens = engine.maxContextTokens()
@@ -374,7 +397,7 @@ class AgentChatViewModel @Inject constructor(
                 _uiState.update { s ->
                     s.copy(
                         messages = s.messages + AgentUiMessage.System(
-                            "⚠️ 斜杠指令不携带附件，已移除 ${currentAttachments.size} 个附件"
+                            strFmt(R.string.chat_slash_attachments_removed, currentAttachments.size)
                         )
                     )
                 }
@@ -446,7 +469,10 @@ class AgentChatViewModel @Inject constructor(
             _uiState.update { s ->
                 s.copy(
                     messages = s.messages + AgentUiMessage.Error(
-                        message = "附件处理失败：${e.message ?: e::class.simpleName}",
+                        message = strFmt(
+                            R.string.chat_attachment_failed,
+                            e.message ?: e::class.simpleName ?: ""
+                        ),
                         canRetry = true
                     ),
                     isLoading = false
@@ -546,7 +572,10 @@ class AgentChatViewModel @Inject constructor(
             _uiState.update { s ->
                 s.copy(
                     messages = s.messages + AgentUiMessage.Error(
-                        message = "执行失败：${e.message ?: e::class.simpleName}",
+                        message = strFmt(
+                            R.string.chat_execution_failed,
+                            e.message ?: e::class.simpleName ?: ""
+                        ),
                         canRetry = true
                     ),
                     isLoading = false
@@ -639,7 +668,7 @@ class AgentChatViewModel @Inject constructor(
                 currentToolCallSteps = listOf(
                     ToolStep(
                         phase = StepPhase.START,
-                        text = "调用 ${event.toolName}，参数：\n${event.arguments}",
+                        text = strFmt(R.string.chat_tool_step_start, event.toolName, event.arguments),
                         seq = nextStepSeq()
                     )
                 )
@@ -698,7 +727,8 @@ class AgentChatViewModel @Inject constructor(
                 if (event.callId != activeToolCallId) return
                 _uiState.update { state ->
                     val tc = state.currentToolCall ?: return@update state
-                    val msg = event.message ?: "进度 ${((event.percent ?: 0f) * 100).toInt()}%"
+                    val msg = event.message
+                        ?: strFmt(R.string.chat_progress_percent, ((event.percent ?: 0f) * 100).toInt())
                     val progressStep = ToolStep(
                         phase = StepPhase.PROGRESS,
                         text = msg,
@@ -745,9 +775,9 @@ class AgentChatViewModel @Inject constructor(
                     .filter { it.id != liveOutputStepId } + ToolStep(
                     phase = if (event.success) StepPhase.COMPLETE else StepPhase.ERROR,
                     text = if (event.success)
-                        "完成（${event.durationMs}ms）：${stepOutputDigest}"
+                        strFmt(R.string.chat_tool_step_done, event.durationMs, stepOutputDigest)
                     else
-                        "失败（${event.durationMs}ms）：${stepOutputDigest}",
+                        strFmt(R.string.chat_tool_step_failed, event.durationMs, stepOutputDigest),
                     seq = nextStepSeq()
                 )).takeLast(AgentToolCallUi.MAX_LIVE_TOOL_STEPS)
                 liveOutputStepId = null
@@ -825,10 +855,16 @@ class AgentChatViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         messages = state.messages + AgentUiMessage.System(
-                            "📦 Context compressed: ${event.beforeTokens}→${event.afterTokens} tokens " +
-                            "(${event.strategy}, removed ${event.messagesRemoved} msgs" +
-                            (if (event.messagesTruncated > 0) ", truncated ${event.messagesTruncated}" else "") +
-                            ")"
+                            strFmt(
+                                R.string.chat_vm_context_compressed,
+                                event.beforeTokens,
+                                event.afterTokens,
+                                event.strategy,
+                                event.messagesRemoved,
+                                if (event.messagesTruncated > 0)
+                                    strFmt(R.string.chat_vm_truncated_suffix, event.messagesTruncated)
+                                else ""
+                            )
                         )
                     )
                 }
@@ -891,7 +927,7 @@ class AgentChatViewModel @Inject constructor(
                 finishActiveBanner()
                 _uiState.update { state ->
                     state.copy(
-                        messages = state.messages + AgentUiMessage.System("⏹ 已中止"),
+                        messages = state.messages + AgentUiMessage.System(str(R.string.chat_aborted)),
                         isLoading = false
                     )
                 }
@@ -922,6 +958,15 @@ class AgentChatViewModel @Inject constructor(
         _uiState.update { it.copy(thinkingLevel = level) }
         // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+        // T1（思考程度真实化）：思考档位同步映射为模型原生 reasoning 强度并
+        // 持久化到默认 Profile —— DynamicLlmClient 监听 profiles 即时重建，
+        // 配合能力位/差异化 body 修复后，下一次请求真实下发
+        // reasoning_effort / thinking.budget_tokens / enable_thinking。
+        // NONE 档 → ReasoningEffort.NONE（不发 reasoning 字段，覆盖旧档位）。
+        val effort = level.toReasoningEffortName()
+            ?.let { name -> runCatching { ReasoningEffort.valueOf(name) }.getOrNull() }
+            ?: ReasoningEffort.NONE
+        setReasoningEffort(effort)
     }
 
     fun confirmPlan(confirmed: Boolean) {
@@ -974,7 +1019,7 @@ class AgentChatViewModel @Inject constructor(
                 if (partialThinking.isNotBlank()) {
                     add(AgentUiMessage.ThinkingMessage(partialThinking))
                 }
-                add(AgentUiMessage.System("⏹ 已中止"))
+                add(AgentUiMessage.System(str(R.string.chat_aborted)))
             }
             state.copy(
                 messages = state.messages + extra,
@@ -1021,6 +1066,9 @@ class AgentChatViewModel @Inject constructor(
 
     /** 全部 Provider（用于模型列表展示 Provider 名）。 */
     val providers: StateFlow<List<ProviderConfig>> = settingsRepository.providers
+
+    /** 界面相关 Agent 设置（sendKeyBehavior / showRunSummary 等即时生效项的数据源）。 */
+    val uiSettings: StateFlow<AgentSettings> = settingsRepository.agentSettings
 
     /** UX-3：LLM 是否已配置（判定口径 = DynamicLlmClient 的真/NoOp 边界，见 AgentChatOnboarding.kt；空会话+未配置时聊天区显示引导卡）。 */
     val llmConfigured: StateFlow<Boolean> = settingsRepository.llmConfiguredFlow(viewModelScope)

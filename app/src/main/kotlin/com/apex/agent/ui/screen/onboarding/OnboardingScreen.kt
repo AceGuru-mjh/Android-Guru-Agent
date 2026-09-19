@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -108,7 +109,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                     onClick = {
                         scope.launch { pagerState.animateScrollToPage(pageCount - 1) }
                     }
-                ) { Text("跳过") }
+                ) { Text(stringResource(R.string.onboarding_skip)) }
             }
 
             // ── 主体横滑 ──
@@ -179,7 +180,8 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
-                        if (isLastPage) "开始使用" else "下一步",
+                        if (isLastPage) stringResource(R.string.onboarding_start)
+                        else stringResource(R.string.onboarding_next),
                         style = MaterialTheme.typography.titleMedium
                     )
                     Spacer(Modifier.width(6.dp))
@@ -214,7 +216,7 @@ private fun WelcomePage() {
             Box(contentAlignment = Alignment.Center) {
                 Image(
                     painter = painterResource(R.drawable.ic_invader_logo),
-                    contentDescription = "Apex Agent 品牌吉祥物",
+                    contentDescription = stringResource(R.string.onboarding_mascot),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.size(116.dp)
                 )
@@ -235,7 +237,7 @@ private fun WelcomePage() {
         Spacer(Modifier.height(12.dp))
 
         Text(
-            text = "口袋里的 AI 终端智能体",
+            text = stringResource(R.string.onboarding_tagline),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.primary,
             textAlign = TextAlign.Center
@@ -244,7 +246,7 @@ private fun WelcomePage() {
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = "对话驱动 · 真实终端 · 百项工具\n让 Agent 在你的手机上真正干活",
+            text = stringResource(R.string.onboarding_welcome_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -265,18 +267,18 @@ private fun CapabilitiesPage() {
     val capabilities = listOf(
         Capability(
             Icons.Default.SmartToy,
-            "对话智能体",
-            "多模型接入、计划确认、工具编排 —— 复杂任务一步步执行并汇报"
+            stringResource(R.string.onboarding_cap_agent_title),
+            stringResource(R.string.onboarding_cap_agent_desc)
         ),
         Capability(
             Icons.Default.Terminal,
-            "Ubuntu 终端",
-            "手机上跑真实的 Linux 环境：apt 装包、bash 脚本、完整文件系统（rootfs 随 APK 内置，离线即用）"
+            stringResource(R.string.onboarding_cap_terminal_title),
+            stringResource(R.string.onboarding_cap_terminal_desc)
         ),
         Capability(
             Icons.Default.Storefront,
-            "技能与市场",
-            "100+ 内置工具按需取用，技能市场持续扩展 Agent 的能力边界"
+            stringResource(R.string.onboarding_cap_market_title),
+            stringResource(R.string.onboarding_cap_market_desc)
         )
     )
 
@@ -288,7 +290,7 @@ private fun CapabilitiesPage() {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            "它能做什么",
+            stringResource(R.string.onboarding_what_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
@@ -361,14 +363,14 @@ private fun PermissionsPage(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            "先授一枚权限",
+            stringResource(R.string.onboarding_perm_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            "仅此一项必选，其余都可以之后再开",
+            stringResource(R.string.onboarding_perm_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -409,14 +411,13 @@ private fun PermissionsPage(
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "通知权限",
+                    stringResource(R.string.onboarding_perm_notif_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Android 13+ 需要显式授权 —— 前台服务的常驻通知、" +
-                        "任务完成与需要确认的提醒都依赖它；不授权则通知静默不可见",
+                    stringResource(R.string.onboarding_perm_notif_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -428,7 +429,7 @@ private fun PermissionsPage(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     ) {
                         Text(
-                            "✓ 已授权",
+                            stringResource(R.string.onboarding_perm_granted),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -436,7 +437,10 @@ private fun PermissionsPage(
                     }
                 } else {
                     Button(onClick = onRequestNotification) {
-                        Text(if (notifGranted == false) "再试一次" else "授权通知")
+                        Text(
+                            if (notifGranted == false) stringResource(R.string.onboarding_perm_retry)
+                            else stringResource(R.string.onboarding_perm_request)
+                        )
                     }
                 }
             }
@@ -446,7 +450,7 @@ private fun PermissionsPage(
 
         // 可选权限提示（引导去权限管理页）
         Text(
-            "无障碍 · 悬浮窗 · 存储等进阶权限，\n可稍后在「抽屉 → 权限」按需开启",
+            stringResource(R.string.onboarding_perm_optional),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -474,14 +478,14 @@ private fun ReadyPage() {
         Spacer(Modifier.height(24.dp))
 
         Text(
-            "最后一步",
+            stringResource(R.string.onboarding_final_title),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "进入后先在「设置 → 模型配置」填入你的\nAPI 密钥（OpenAI / Anthropic / 兼容端点），\nAgent 才能开始思考",
+            stringResource(R.string.onboarding_ready_desc),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -499,16 +503,13 @@ private fun ReadyPage() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "上手路线",
+                    stringResource(R.string.onboarding_quickstart_title),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    "1 · 抽屉菜单打开「设置」配置模型\n" +
-                        "2 · 回到 Agent 对话页发第一条消息\n" +
-                        "3 · 试试「终端」页离线解包内置 Ubuntu\n" +
-                        "4 · 让 Agent 帮你装包、跑脚本、改文件",
+                    stringResource(R.string.onboarding_quickstart_steps),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

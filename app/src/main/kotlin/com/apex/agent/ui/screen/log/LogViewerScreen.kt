@@ -50,12 +50,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.apex.agent.R
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
@@ -76,6 +78,8 @@ import kotlinx.coroutines.withContext
 fun LogViewerScreen() {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // i18n：导出分享 chooser 标题（onClick 内不可调用 stringResource，上提取词）
+    val exportLogsTitle = stringResource(R.string.log_export_chooser)
 
     var records by remember { mutableStateOf<List<LogRecord>>(emptyList()) }
     var stats by remember { mutableStateOf(AppLogger.instance.stats.value) }
@@ -145,7 +149,7 @@ fun LogViewerScreen() {
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.width(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("复制")
+                Text(stringResource(R.string.log_copy))
             }
             FilledTonalButton(
                 onClick = { showClearConfirm = true },
@@ -153,15 +157,21 @@ fun LogViewerScreen() {
             ) {
                 Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.width(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("清空")
+                Text(stringResource(R.string.log_clear))
             }
             FilledTonalButton(
-                onClick = { exportAndShare(context, records.joinToString("\n") { it.toFlatString() }) },
+                onClick = {
+                    exportAndShare(
+                        context,
+                        records.joinToString("\n") { it.toFlatString() },
+                        exportLogsTitle
+                    )
+                },
                 contentPadding = ButtonDefaults.ButtonWithIconContentPadding
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.width(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("导出")
+                Text(stringResource(R.string.log_export))
             }
             Spacer(Modifier.weight(1f))
             // 自动滚动开关
@@ -175,10 +185,15 @@ fun LogViewerScreen() {
                     modifier = Modifier.width(16.dp)
                 )
                 Spacer(Modifier.width(4.dp))
-                Text(if (autoScroll) "跟随" else "已停")
+                Text(if (autoScroll) stringResource(R.string.log_follow) else stringResource(R.string.log_follow_stopped))
             }
             Text(
-                "${records.size} 条 · ${(stats.totalBytes / 1024 / 1024)}MB/${stats.maxBytes / 1024 / 1024}MB",
+                stringResource(
+                    R.string.log_count_summary,
+                    records.size,
+                    stats.totalBytes / 1024 / 1024,
+                    stats.maxBytes / 1024 / 1024
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -190,16 +205,24 @@ fun LogViewerScreen() {
         if (showClearConfirm) {
             AlertDialog(
                 onDismissRequest = { showClearConfirm = false },
-                title = { Text("清空日志缓冲区") },
-                text = { Text("将丢弃内存中的全部 ${records.size} 条日志记录（最高可至 ${stats.maxBytes / 1024 / 1024}MB），不可恢复。") },
+                title = { Text(stringResource(R.string.log_clear_title)) },
+                text = {
+                    Text(
+                        stringResource(
+                            R.string.log_clear_text,
+                            records.size,
+                            stats.maxBytes / 1024 / 1024
+                        )
+                    )
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         AppLogger.instance.clear()
                         records = emptyList()
                         showClearConfirm = false
-                    }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                    }) { Text(stringResource(R.string.log_clear), color = MaterialTheme.colorScheme.error) }
                 },
-                dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("取消") } }
+                dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text(stringResource(R.string.log_cancel)) } }
             )
         }
 
@@ -236,9 +259,9 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                StatChip("总计", "${stats.total}", MaterialTheme.colorScheme.primary)
+                StatChip(stringResource(R.string.log_total), "${stats.total}", MaterialTheme.colorScheme.primary)
                 StatChip(
-                    "错误",
+                    stringResource(R.string.log_errors),
                     "${stats.errorCount}",
                     if (stats.errorCount > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant,
                     onClick = onClickError
@@ -269,7 +292,7 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "缓冲",
+                    stringResource(R.string.log_buffer),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -330,7 +353,7 @@ private fun FilterControls(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            CategoryTab("全部", selectedCategory == null) { onCategorySelected(null) }
+            CategoryTab(stringResource(R.string.log_all), selectedCategory == null) { onCategorySelected(null) }
             LogCategory.entries.forEach { cat ->
                 CategoryTab(cat.displayName, selectedCategory == cat) { onCategorySelected(cat) }
             }
@@ -342,7 +365,7 @@ private fun FilterControls(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("级别≥", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.log_level_min), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LogLevel.entries.filter { it != LogLevel.SILENT }.forEach { lvl ->
                 LevelChip(lvl, minLevel.atLeast(lvl)) { onMinLevelChanged(lvl) }
             }
@@ -353,7 +376,7 @@ private fun FilterControls(
             value = keyword,
             onValueChange = onKeywordChanged,
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索消息或来源…") },
+            placeholder = { Text(stringResource(R.string.log_search_hint)) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp)
@@ -367,10 +390,11 @@ private fun FilterControls(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("会话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SessionChip("全部", sessionId == null) { onSessionSelected(null) }
+                Text(stringResource(R.string.log_sessions), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SessionChip(stringResource(R.string.log_all), sessionId == null) { onSessionSelected(null) }
                 sessions.reversed().take(8).forEach { s ->
-                    val label = if (s.label.isNotEmpty()) s.label else "会话#${s.id}"
+                    val label = if (s.label.isNotEmpty()) s.label
+                    else stringResource(R.string.log_session_label, s.id)
                     SessionChip(label, sessionId == s.id) { onSessionSelected(s.id) }
                 }
             }
@@ -471,14 +495,14 @@ private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
             }
             if (hasTrace) {
                 Text(
-                    if (expanded) "收起" else "堆栈",
+                    if (expanded) stringResource(R.string.log_collapse) else stringResource(R.string.log_stack),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
             IconButton(onClick = onCopy, modifier = Modifier.width(28.dp).height(28.dp)) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "复制", modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.log_copy), modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -505,7 +529,7 @@ private val exportScope = kotlinx.coroutines.CoroutineScope(
 )
 private var exportJob: kotlinx.coroutines.Job? = null
 
-private fun exportAndShare(context: android.content.Context, content: String) {
+private fun exportAndShare(context: android.content.Context, content: String, chooserTitle: String) {
     // （混沌审查两轮同题：#100 单例作用域+取消旧任务 优于 #101 每次新建 SupervisorJob
     // 作用域且从不 cancel 的方案 —— 连点仍会积累孤儿 Job；此处取 #100 实现，
     // appContext 跨异步边界解包两方一致。）
@@ -529,7 +553,7 @@ private fun exportAndShare(context: android.content.Context, content: String) {
             }
             withContext(Dispatchers.Main) {
                 appContext.startActivity(
-                    Intent.createChooser(intent, "导出日志").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    Intent.createChooser(intent, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
         } catch (e: Exception) {

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Terminal screen strings (English default). Chinese in values-zh/strings_terminal.xml.
+     Language switching: LanguageManager + MainActivity attachBaseContext/recreate. -->
+<resources>
+
+    <!-- ═══ TerminalScreen ═══ -->
+    <string name="term_title">Terminal</string>
+    <string name="term_cd_nav">Open navigation</string>
+    <string name="term_cd_env_center">Environment center</string>
+    <string name="term_cd_settings">Terminal settings</string>
+    <string name="term_new_session_title">New terminal session</string>
+    <string name="term_new_session_ubuntu_desc">Ubuntu sessions provide a full Linux dev environment (apt / bash / toolchains); the rootfs ships inside the APK (full Ubuntu, ~300MB+ archive). First offline unpack takes ~2–5 minutes, with progress shown in the banner.</string>
+    <string name="term_ubuntu_session">Ubuntu session</string>
+    <string name="term_cd_new_session">New session</string>
+    <string name="term_cd_close_session">Close session</string>
+    <string name="term_no_session">No active session</string>
+    <string name="term_waiting_input">⌨ Waiting for input</string>
+    <string name="term_banner_failed_title">Ubuntu environment error</string>
+    <string name="term_banner_not_installed_title">Ubuntu dev environment not unpacked</string>
+    <string name="term_banner_failed_desc">Last unpack/bootstrap failed; you can retry</string>
+    <string name="term_banner_not_installed_desc">Full Linux environment: gcc / python3 / git / vim / man out of the box (offline unpack built in, ~2–5 minutes)</string>
+    <string name="term_retry">Retry</string>
+    <string name="term_unpack">Unpack</string>
+    <string name="term_env_center">Environment center</string>
+    <string name="term_installing_banner">Unpacking Ubuntu rootfs offline… (~2–5 minutes, you can wait in background)</string>
+    <string name="term_bootstrapping_banner">Ubuntu bootstrap: apt sources / network / base packages… (auto-degrades when offline)</string>
+    <string name="term_converging_banner">Ubuntu environment settling…</string>
+    <string name="term_settings_title">Terminal settings</string>
+    <string name="term_appearance">Terminal appearance</string>
+    <string name="term_font_size">Font size</string>
+    <string name="term_monochrome">Monochrome mode</string>
+    <string name="term_keybar">Keyboard helper row (ESC / CTRL / arrows)</string>
+    <string name="term_feedback">Feedback</string>
+    <string name="term_vibrate_on_bell">Vibrate on bell (BEL)</string>
+    <string name="term_vibrate_desc">Vibrate when the shell rings BEL (failed completion, Ctrl+G, command errors).</string>
+    <string name="term_keep_screen_on">Keep screen on</string>
+    <string name="term_keep_screen_on_desc">No screen timeout while reading long task output (builds / apt / logs).</string>
+    <string name="term_blacklist_title">Command blacklist / whitelist</string>
+    <string name="term_blacklist_desc">When the whitelist is non-empty, only its commands are allowed; blacklisted commands are always denied. Matched by the first segment of the command (e.g. rm / adb).</string>
+    <string name="term_blacklist">Blacklist</string>
+    <string name="term_whitelist">Whitelist</string>
+    <string name="term_env_hint">Environment unpacking and management (built-in Ubuntu / toolchain deps) lives in the environment center behind the layers icon in the top bar.</string>
+    <string name="term_close">Close</string>
+    <string name="term_cmd_hint">e.g. rm / adb / format</string>
+    <string name="term_add">Add</string>
+    <string name="term_remove">Remove</string>
+
+    <!-- ═══ EnvironmentCenterSheet ═══ -->
+    <string name="term_env_center_title">Environment center</string>
+    <string name="term_env_center_desc">The environment ships inside the APK (full Ubuntu, rootfs archive ~300MB+) — first offline unpack takes ~2–5 minutes (~1GB storage after extraction, progress shown live). Unpacking and removal are both reversible; user data (/root, workspace) is preserved.</string>
+    <string name="term_android_shell_desc">The device’s built-in command-line environment (mksh / toybox: ls, grep, am, pm, …). No download needed, available anytime; does not include the full apt / bash toolchain.</string>
+    <string name="term_builtin">Built-in</string>
+    <string name="term_deps_title">Environment dependencies (inside Ubuntu)</string>
+    <string name="term_use_mirror">Use mirror</string>
+    <string name="term_mirror_desc">Mirror acceleration for China (TUNA)</string>
+    <string name="term_install_all">Install all</string>
+    <string name="term_android_deps">Android deps</string>
+    <string name="term_install_individually">Install individually:</string>
+    <string name="term_remove_ubuntu_title">Remove Ubuntu environment?</string>
+    <string name="term_remove_ubuntu_text">This removes the unpacked rootfs (~1GB+) and the unpack cache, freeing storage. The built-in archive stays inside the APK and can be unpacked offline again anytime; user data (guest /root and workspace) is preserved. All running Ubuntu sessions must be closed first.</string>
+    <string name="term_delete">Delete</string>
+    <string name="term_cancel">Cancel</string>
+    <string name="term_ubuntu_card_title">Ubuntu 24.04 LTS (built-in)</string>
+    <string name="term_ubuntu_card_desc">Full Linux dev environment (apt / bash / python / build toolchains) running via PRoot without root. The official rootfs ships inside the APK (SHA-256 verified at build time); first use unpacks offline. apt bootstrap needs network and auto-degrades when offline.</string>
+    <string name="term_disk_usage">Uses %1$s</string>
+    <string name="term_progress_bytes">  (%1$s / %2$s)</string>
+    <string name="term_last_error">Last error: %1$s</string>
+    <string name="term_bootstrap_note">apt bootstrap incomplete (%1$s) — the environment is usable, but apt operations will fail with real errors until the network returns and it is repaired.</string>
+    <string name="term_unpack_built_in">Unpack built-in environment (offline, ~2–5 min)</string>
+    <string name="term_unpacking">Unpacking/verifying rootfs…</string>
+    <string name="term_bootstrapping">Bootstrap: apt sources / network / base packages…</string>
+    <string name="term_converging">Settling state…</string>
+    <string name="term_finish_bootstrap">Finish bootstrap (apt)</string>
+    <string name="term_new_ubuntu_session">New Ubuntu session</string>
+    <string name="term_repair">Repair</string>
+    <string name="term_retry_install">Retry install</string>
+    <string name="term_phase_not_installed">Not unpacked</string>
+    <string name="term_phase_installing">Unpacking/verifying</string>
+    <string name="term_phase_rootfs_ready">Awaiting bootstrap</string>
+    <string name="term_phase_bootstrapping">Bootstrapping</string>
+    <string name="term_phase_ready">Ready</string>
+    <string name="term_phase_recovering">Recovering</string>
+    <string name="term_phase_failed">Error</string>
+    <string name="term_installing">Installing…</string>
+    <string name="term_install">Install</string>
+</resources>

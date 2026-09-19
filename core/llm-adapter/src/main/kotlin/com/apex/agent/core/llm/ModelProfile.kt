@@ -144,6 +144,18 @@ data class ModelProfile(
     val toolTimeoutSeconds: Int = 30,
     val maxToolResultTokens: Int = 4096,
 
+    /**
+     * 模型原生联网搜索（Provider-native web search）。
+     * OFF = 默认不发送任何搜索参数（兼容所有端点）；
+     * AUTO = 按端点自动启用（baseUrl/providerId 推断，未知端点回退 OFF）。
+     * 详见 [WebSearchMode]。
+     *
+     * 必须带默认值：本类被 [com.apex.agent.ui.screen.settings.SettingsRepository]
+     * JSON 序列化持久化，旧版本落盘的 Profile 无此字段，缺省回退 OFF 才能反序列化不炸。
+     * 运行时经 [LlmConfig.Companion.fromProfile] 透传到 [LlmConfig.webSearch]。
+     */
+    val webSearch: WebSearchMode = WebSearchMode.OFF,
+
     // ── Structured Output ─────────────────────────────────────
     val structuredOutputMode: StructuredOutputMode = StructuredOutputMode.TEXT,
     val structuredOutputStrict: Boolean = false,

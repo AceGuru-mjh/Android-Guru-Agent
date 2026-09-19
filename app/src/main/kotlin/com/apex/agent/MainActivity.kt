@@ -21,6 +21,7 @@ import com.apex.agent.service.ApexCoreService
 import com.apex.agent.ui.ApexRoot
 import com.apex.agent.ui.screen.onboarding.OnboardingScreen
 import com.apex.agent.ui.screen.settings.SettingsRepository
+import com.apex.agent.ui.theme.AccentPalette
 import com.apex.agent.ui.theme.ApexTheme
 import com.apex.agent.ui.theme.LocalShowTimestamps
 import dagger.hilt.android.AndroidEntryPoint
@@ -57,7 +58,11 @@ class MainActivity : ComponentActivity() {
                 "light" -> false
                 else -> isSystemInDarkTheme()
             }
-            ApexTheme(darkTheme = darkTheme, dynamicColor = settings.dynamicColor) {
+            ApexTheme(
+                darkTheme = darkTheme,
+                dynamicColor = settings.dynamicColor,
+                accentPalette = AccentPalette.fromKey(settings.accentPalette)
+            ) {
                 // 全局字体缩放：在系统 fontScale 基础上叠加设置中心的缩放系数
                 val density = LocalDensity.current
                 CompositionLocalProvider(

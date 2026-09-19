@@ -415,6 +415,9 @@ data class AgentSettings(
     // ── 界面 ──
     val themeMode: String = "system",         // system | dark | light
     val dynamicColor: Boolean = false,
+    // 预设主题配色（mint | amber | coral | violet | ocean | rose | forest）；
+    // Dynamic Color 开启时被壁纸取色覆盖。见 ui/theme/ThemePalettes.kt。
+    val accentPalette: String = "mint",
     val fontScale: Float = 1.0f,              // 0.8..1.4
     val showTimestamps: Boolean = true,
 

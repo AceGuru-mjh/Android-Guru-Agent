@@ -171,6 +171,19 @@ class ApexAgentEngine(
     }
 
     /**
+     * 恢复历史会话上下文（历史对话功能）：内存 [conversationHistory] 与
+     * 持久化记忆同步替换为指定消息，后续对话自然接续该会话。
+     *
+     * 仅接收 user/assistant 文本对 —— 工具调用链的 toolCallId 配对无法从
+     * 展示态历史重建（强行回填会被 API 拒绝），调用方负责过滤。
+     */
+    fun restoreHistory(messages: List<LlmMessage>) {
+        conversationHistory.clear()
+        conversationHistory.addAll(messages)
+        memory?.save(messages)
+    }
+
+    /**
      * 当前持久化的消息条数（用于 UI 显示历史深度）。
      */
     fun historyCount(): Int = memory?.count() ?: conversationHistory.size

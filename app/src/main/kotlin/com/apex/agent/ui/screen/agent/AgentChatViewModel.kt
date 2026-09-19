@@ -33,7 +33,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class AgentChatViewModel @Inject constructor(
-    private val agentEngine: AgentEngine,
+    internal val agentEngine: AgentEngine,
     private val memory: ConversationMemory,
     private val csMemSessionManager: CsMemSessionManager,
     val githubTokenManager: GithubTokenManager,
@@ -45,19 +45,32 @@ class AgentChatViewModel @Inject constructor(
     private val toolRegistry: ToolRegistry,
     @ApplicationContext private val context: Context,
     // T76：任务运行时控制器（execute/abort 经此获得 checkpoint/恢复能力）
-    private val taskController: AgentTaskStatusController
+    private val taskController: AgentTaskStatusController,
+    // 历史对话仓库（归档/恢复/删除；逻辑主体在 AgentChatHistoryController.kt）
+    internal val chatHistory: ChatHistoryManager
 ) : ViewModel() {
 
     // v2：memory.count() 在主线程 = 全量 JSON 反序列化（旧实现在构造器调用，
     // 几千条历史时进聊天页卡顿），改为 IO 线程异步回填（见下方 init）；
     // 同时保留 internal 可见性（供抽出的 AgentChatQuestionHandler.kt 扩展访问）。
     internal val _uiState = MutableStateFlow(AgentChatUiState())
+
+    // ═══ 历史对话（ChatHistory）：逻辑主体在 AgentChatHistoryController.kt ═══
+    // （God-file 预算拆分，模式同 AgentChatQuestionHandler.kt：归档/flush/恢复/删除均为 internal 扩展）
+    internal val _chatSessions = MutableStateFlow<List<ChatSessionSummary>>(emptyList())
+    val chatSessions: StateFlow<List<ChatSessionSummary>> = _chatSessions.asStateFlow()
+    /** 当前会话在历史库的 id（null=新会话）/ 创建时间 / 防抖归档在途任务。 */
+    internal var currentHistorySessionId: String? = null
+    internal var currentHistorySessionCreatedAt: Long? = null
+    internal var historyPersistJob: Job? = null
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
     init {
         viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
         // P2-8/P3（6-c）：reasoningEffort chip 初始跟随默认 Profile；contextMaxTokens 回填引擎真实值（原恒 1 → 仪表盘 0%/上限1）。
         settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let { p -> _uiState.update { it.copy(reasoningEffort = p.reasoningEffort) } }
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
+        // 历史对话：会话列表初始加载 + 消息流防抖自动归档
+        installChatHistoryAutoPersist()
     }
 
     /** 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人（抽出的单一职责协作类；scope 即 viewModelScope）。 */
@@ -243,7 +256,8 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    private var currentJob: Job? = null
+    // internal：AgentChatHistoryController.kt 的恢复会话需取消在途执行（拆分既定模式）
+    internal var currentJob: Job? = null
 
     // ═══ 工具输出流式缓冲（16ms 节流刷新）═══
     // 每个 ToolOutputChunk 直接更新 StateFlow 会导致高频重组（模型/工具吐字快时
@@ -251,17 +265,19 @@ class AgentChatViewModel @Inject constructor(
     // (≈1 帧) 的 flush Job；期间到达的 chunk 不再启动新 Job，到点后一次性把
     // 缓冲区快照写入 currentToolCall.output。既保留所有文本，又把重组次数压到
     // 每秒 ≤60 次。
-    private val toolOutputBuffer = StringBuilder()
-    private var activeToolCallId: String? = null
-    private var toolFlushJob: Job? = null
+    // 以下流式/工具运行态 internal：resetStreamingState()（历史恢复共用）
+    // 在 AgentChatHistoryController.kt 扩展中访问 —— God-file 预算拆分既定模式。
+    internal val toolOutputBuffer = StringBuilder()
+    internal var activeToolCallId: String? = null
+    internal var toolFlushJob: Job? = null
     /**
      * 运行期工具步骤流的单一事实源（带时间戳的步骤序列）。
      * [ToolCallStart] 时重置，[ToolOutputChunk] 原地替换"活输出"步/[ToolProgress] 追加；
      * [ToolCallComplete] 读取它构造最终过程流，避免反复从 StateFlow 派生。
      */
-    private var currentToolCallSteps: List<ToolStep>? = null
+    internal var currentToolCallSteps: List<ToolStep>? = null
     /** 当前"活输出"步骤（唯一一条被反复原地替换的 OUTPUT 步）的 id；null 表示暂无。 */
-    private var liveOutputStepId: String? = null
+    internal var liveOutputStepId: String? = null
     /** 步骤序列号发生器（单调递增），供时间线自动滚动 key 使用。 */
     private var stepSeqCounter: Long = 0
     private fun nextStepSeq(): Long = ++stepSeqCounter
@@ -270,7 +286,7 @@ class AgentChatViewModel @Inject constructor(
     // 详见 [StreamingFlushBuffers]（为守住 God-file 行数预算抽出的独立文件）：
     // chunk 入缓冲、33ms flush Job 统一刷入 UI 状态；Complete/ThinkingComplete/
     // ToolCallStart/abort/Error 时由调用方做最终 flush。
-    private val streamBuffers = StreamingFlushBuffers(viewModelScope) { responseDelta, thinkingDelta ->
+    internal val streamBuffers = StreamingFlushBuffers(viewModelScope) { responseDelta, thinkingDelta ->
         _uiState.update { state ->
             state.copy(
                 currentResponse = state.currentResponse + responseDelta,
@@ -304,11 +320,11 @@ class AgentChatViewModel @Inject constructor(
      * 在该流水线的 agent 循环中产生的工具调用会携带对应来源分类与名称，
      * 便于 UI 区分"这是一个 Skill / 连接器 / 插件调用"。循环结束后清空。
      */
-    private var routeContextKind: ToolKind? = null
-    private var routeContextName: String? = null
+    internal var routeContextKind: ToolKind? = null
+    internal var routeContextName: String? = null
 
     /** 正在展示中的流水线横幅 id（[AgentUiMessage.PipelineBanner]），收尾时原地置为完成态。 */
-    private var activeBannerId: String? = null
+    internal var activeBannerId: String? = null
 
     /** 引擎一轮执行收尾时调用：把未完成的流水线横幅置为完成态（停止脉冲、显示耗时）。 */
     private fun finishActiveBanner() {
@@ -979,38 +995,7 @@ class AgentChatViewModel @Inject constructor(
         routeContextName = null
     }
 
-    fun newChat() {
-        currentJob?.cancel()
-        // 清空所有流式/工具运行态，防止残留缓冲串入新会话。
-        streamBuffers.reset()
-        toolFlushJob?.cancel()
-        toolFlushJob = null
-        toolOutputBuffer.clear()
-        activeToolCallId = null
-        liveOutputStepId = null
-        currentToolCallSteps = null
-        activeBannerId = null
-        routeContextKind = null
-        routeContextName = null
-        viewModelScope.launch {
-            (agentEngine as? ApexAgentEngine)?.clearHistory()
-            _uiState.update {
-                it.copy(
-                    messages = emptyList(),
-                    currentThinking = "",
-                    currentResponse = "",
-                    currentToolCall = null,
-                    plan = null,
-                    awaitingPlanConfirmation = false,
-                    spec = null,
-                    awaitingSpecConfirmation = false,
-                    pendingUserInput = null,
-                    isLoading = false,
-                    historyDepth = 0
-                )
-            }
-        }
-    }
+    // newChat() 已迁至 AgentChatHistoryController.kt（历史归档冲刷 + 会话态清空一体；行数预算拆分）
 
     /** P2-8（6-c）：原写 legacy 死键 llm_reasoning_effort（全工程无消费者）；改持久化到默认 ModelProfile（DynamicLlmClient 监听 profiles 即时重建生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) {

@@ -1,6 +1,7 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.R
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.llm.runtime.DefaultModelRuntime
 import com.apex.agent.core.llm.runtime.ModelRuntime

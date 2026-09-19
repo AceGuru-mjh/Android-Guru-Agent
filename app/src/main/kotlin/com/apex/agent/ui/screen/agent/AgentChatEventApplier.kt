@@ -6,6 +6,7 @@ import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.ApexAgentEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 

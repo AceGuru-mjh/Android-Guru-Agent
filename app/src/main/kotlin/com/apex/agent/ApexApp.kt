@@ -39,10 +39,10 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var dreamRenderer: DreamRenderer
 
-    // T82: Ubuntu 产品级生命周期 —— App 启动时恢复现场（reconcile + 状态派生），
-    // **绝不自动下载**：首次安装仍是显式动作（Agent 调 terminal.ubuntu.ensure /
-    // 用户进依赖下载中心）。warmUp 只做崩溃后一致性收敛（stale staging 清理、
-    // 孤儿 temp 清理、bootstrap 中断态标记）—— "App 重启后知道 Ubuntu 在不在"。
+    // T82→T85: Ubuntu 产品级生命周期 —— App 启动时恢复现场（reconcile + 状态派生），
+    // T85 内置交付语义：rootfs 随 APK 内置（完整 Ubuntu ~300MB+ 档），解包**纯离线**，
+    // 因此启动即自动预备（无需用户同意下载 —— 没有任何下载）。首次启动约 2~5 分钟
+    // 后台解包 + 引导；进度经 stateFlow/progressFlow 供终端页 / 环境中心订阅。
     @Inject
     lateinit var ubuntuLifecycle: UbuntuLifecycleCoordinator
 
@@ -73,7 +73,7 @@ class ApexApp : Application(), Configuration.Provider {
         // 启动 CS-Mem 记忆写入管道与后台梦境整理（见报告 P0：初始化缺口）。
         initCsMem()
 
-        // T82: Ubuntu 生命周期现场恢复（不下载、不 bootstrap —— 只做 reconcile）。
+        // T85: Ubuntu 生命周期恢复 + 内置 rootfs 自动预备（见 initUbuntuLifecycleRecovery）。
         initUbuntuLifecycleRecovery()
 
         // Tool System v3：环境能力遥测桥（accessibility_ready / keyboard_active）。
@@ -98,14 +98,22 @@ class ApexApp : Application(), Configuration.Provider {
     }
 
     /**
-     * T82: App 重启后的 Ubuntu 状态收敛。
+     * T85: App 启动后的 Ubuntu 状态收敛 + **自动预备**。
      *
      * warmUp 语义（UbuntuLifecycleCoordinator）：
      * - rootfs 安装中断 → 清 stale staging / 孤儿 temp（provisioner.reconcile）；
      * - bootstrap 中断态 → 状态机如实标记（下次 ensureReady 续跑未完成阶段）；
      * - 已 READY → 秒级确认，零副作用。
      *
-     * 刻意 NOT 触发下载：用户没同意消耗 ~30MB 流量前，App 不替用户做决定。
+     * T85 自动预备（下载时代 → 内置时代的语义切换）：
+     * - warmUp 后 phase == NOT_INSTALLED → 直接后台 ensureReady（离线解包内置
+     *   rootfs，无网络消耗 —— 「用户没同意流量」的老顾虑已不存在）；
+     * - phase == ROOTFS_READY → 引导增强也顺手补齐（bootstrap 失败自动降级，
+     *   不阻塞可用性）；
+     * - FAILED → 不自动重试（用户在终端页/环境中心手动重试，保留失败现场）。
+     *
+     * 用户体验目标：安装 APK → 打开 App → 无需任何点击，Ubuntu 在后台就绪；
+     * 进终端页时看到的是实时进度而非「未解包」等待用户行动的横幅。
      */
     private fun initUbuntuLifecycleRecovery() {
         appScope.launch {
@@ -117,6 +125,22 @@ class ApexApp : Application(), Configuration.Provider {
                 .onFailure {
                     Log.w("ApexAgent", "Ubuntu lifecycle warmUp failed: ${it.message}")
                 }
+            // T85：内置 rootfs 自动预备（幂等单飞 —— 终端页/Agent 并发 ensureReady
+            // 只会共享同一次编排）。IO 调度：ensureReady 链含文件解压与子进程探测。
+            val phase = ubuntuLifecycle.stateFlow.value.phase
+            if (phase == UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED ||
+                phase == UbuntuLifecycleCoordinator.Phase.ROOTFS_READY
+            ) {
+                val r = runCatching {
+                    kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        ubuntuLifecycle.ensureReady()
+                    }
+                }.getOrNull()
+                Log.i(
+                    "ApexAgent",
+                    "Ubuntu auto-provision: ${r?.let { it::class.simpleName } ?: "failed"}"
+                )
+            }
         }
     }
 

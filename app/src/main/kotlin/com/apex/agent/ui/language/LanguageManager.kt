@@ -68,6 +68,10 @@ class LanguageManager @Inject constructor(
     /** 非 Compose 场景（ViewModel / 服务层）按当前语言取字符串资源。 */
     fun getString(@StringRes resId: Int): String = resolvedContext.getString(resId)
 
+    /** 非 Compose 场景带格式化参数（等价 Context.getString(resId, formatArgs)）。 */
+    fun getString(@StringRes resId: Int, vararg formatArgs: Any): String =
+        resolvedContext.getString(resId, *formatArgs)
+
     companion object {
         const val LANG_SYSTEM = "system"
         const val LANG_ZH = "zh"

@@ -183,6 +183,43 @@ class StreamingOpenAiClient(
             ) maxOf(requestedTokens, 8192) else null
         }
 
+        // ── 原生联网搜索（Provider 分支）────────────────────────────
+        // 为什么在 buildJsonObject 之前算：搜索参数分两处注入请求体——
+        // ① OPENAI / DASHSCOPE / OPENROUTER 用各自的独立顶层字段（下方 when 注入）；
+        // ② ZHIPU / DEEPSEEK / ANTHROPIC 的搜索开关是 server-side tool，必须写进
+        //    tools 数组 —— 而 kotlinx.serialization 的 JsonArray 构建后不可变，
+        //    无法事后追加，只能在构建期与 function tools 一并写入。
+        // OFF（默认）时 searchToolEntries 为空且下方 when 走 else —— 请求体
+        // 与旧版完全一致，兼容所有端点。
+        val searchMode = config.webSearch.resolveFor(config.baseUrl, config.providerId)
+        val searchToolEntries: List<JsonObject> = when (searchMode) {
+            WebSearchMode.ZHIPU -> listOf(
+                // 智谱 GLM：web_search 作为 server-side tool 挂进 tools 数组；
+                // search_result=true 让响应携带 message.search_result[] 引用列表。
+                buildJsonObject {
+                    put("type", "web_search")
+                    putJsonObject("web_search") {
+                        put("enable", true)
+                        put("search_result", true)
+                    }
+                }
+            )
+            WebSearchMode.DEEPSEEK -> listOf(
+                // DeepSeek Responses 兼容端点：接受 {"type":"web_search"}
+                // （与 GLM 同为 server-side tool 形态，但无嵌套配置）。
+                buildJsonObject { put("type", "web_search") }
+            )
+            WebSearchMode.ANTHROPIC -> listOf(
+                // Anthropic 原生 server tool（经 OpenAI 兼容代理透传时保持同形）。
+                buildJsonObject {
+                    put("type", "web_search_20250305")
+                    put("name", "web_search")
+                    put("max_uses", 3)
+                }
+            )
+            else -> emptyList()
+        }
+
         return buildJsonObject {
             put("model", config.model)
             // B3 修复：仅 OpenAI o-series / gpt-5（API 硬性拒绝）不发 temperature，
@@ -356,34 +393,93 @@ class StreamingOpenAiClient(
                 }
             }
             
-            if (config.enableTools && tools.isNotEmpty()) {
+            // ── Tools（function tools + 原生搜索 server tools）────────
+            // 旧逻辑：enableTools 且 tools 非空才发送 tools 数组。扩展：ZHIPU /
+            // DEEPSEEK / ANTHROPIC 的搜索开关就住在 tools 里，即使没有 function
+            // tools 也必须创建数组。OFF（默认）时 searchToolEntries 为空，
+            // 条件退化为旧版 `config.enableTools && tools.isNotEmpty()` —— 请求体
+            // 与旧版逐字节一致。
+            val hasFunctionTools = config.enableTools && tools.isNotEmpty()
+            if (hasFunctionTools || searchToolEntries.isNotEmpty()) {
                 putJsonArray("tools") {
-                    for (tool in tools) {
-                        addJsonObject {
-                            put("type", "function")
-                            putJsonObject("function") {
-                                put("name", tool.name)
-                                put("description", tool.description)
-                                put("parameters", Json.parseToJsonElement(tool.parameters))
+                    if (hasFunctionTools) {
+                        for (tool in tools) {
+                            addJsonObject {
+                                put("type", "function")
+                                putJsonObject("function") {
+                                    put("name", tool.name)
+                                    put("description", tool.description)
+                                    // P0 防爆：单个工具的 parameters 非法 JSON 时，旧实现
+                                    // 直接抛异常 → 所有带工具的请求整体失败（一个坏
+                                    // schema 拖死全部 ~113 个工具）。现在降级为空对象
+                                    // schema（模型仍可调用，参数不校验），并保留该工具。
+                                    put(
+                                        "parameters",
+                                        runCatching { Json.parseToJsonElement(tool.parameters) }
+                                            .getOrElse {
+                                                Json.parseToJsonElement(
+                                                    """{"type":"object","properties":{}}"""
+                                                )
+                                            }
+                                    )
+                                }
                             }
                         }
                     }
+                    // server-side 搜索 tool 追加在 function tools 之后
+                    // （JsonArray 不可变，构建期一并写入 —— 见上方说明）。
+                    searchToolEntries.forEach { add(it) }
                 }
-                put(
-                    "tool_choice",
-                    when (config.toolChoice) {
-                        ToolChoiceMode.AUTO -> "auto"
-                        ToolChoiceMode.REQUIRED -> "required"
-                        ToolChoiceMode.NONE -> "none"
+                // tool_choice / parallel_tool_calls 仅在存在 function tools 时发送：
+                // server-side 搜索 tool 由服务端自行调度、不参与 tool_choice 语义，
+                // 只带搜索 tool 却发 tool_choice 的请求在部分端点会 400。
+                if (hasFunctionTools) {
+                    put(
+                        "tool_choice",
+                        when (config.toolChoice) {
+                            ToolChoiceMode.AUTO -> "auto"
+                            ToolChoiceMode.REQUIRED -> "required"
+                            ToolChoiceMode.NONE -> "none"
+                        }
+                    )
+                    if (config.parallelToolCalls) {
+                        put("parallel_tool_calls", true)
+                    } else {
+                        // T72 §二十二修复：旧实现 false 时直接省略键，导致用户无法
+                        // 关闭并行工具调用（服务端默认 true）。现在显式发送 false。
+                        put("parallel_tool_calls", false)
                     }
-                )
-                if (config.parallelToolCalls) {
-                    put("parallel_tool_calls", true)
-                } else {
-                    // T72 §二十二修复：旧实现 false 时直接省略键，导致用户无法
-                    // 关闭并行工具调用（服务端默认 true）。现在显式发送 false。
-                    put("parallel_tool_calls", false)
                 }
+            }
+
+            // ── 原生联网搜索（独立顶层字段形态）─────────────────────
+            // OPENAI / DASHSCOPE / OPENROUTER 不走 tools 数组，用各自的专有顶层
+            // 字段开关；ZHIPU / DEEPSEEK / ANTHROPIC 的 server tool 已并入上方
+            // tools 数组（else 分支覆盖）。when 单分支命中，每个键至多写一次，
+            // 不存在重复键问题。OFF（默认）时不写任何键 —— 未知/严格端点
+            // 看不到非标准字段（防 400）。
+            when (searchMode) {
+                WebSearchMode.OPENAI ->
+                    // OpenAI gpt-4o-search-preview / gpt-4o-mini-search-preview 的
+                    // 原生开关（Chat Completions 的 web_search_options）；
+                    // search_context_size 控制抓取量，medium 为官方推荐平衡档。
+                    putJsonObject("web_search_options") {
+                        put("search_context_size", "medium")
+                    }
+                WebSearchMode.DASHSCOPE ->
+                    // 阿里百炼 compatible-mode 的 Qwen 联网开关：顶层布尔字段。
+                    put("enable_search", true)
+                WebSearchMode.OPENROUTER ->
+                    // OpenRouter 原生 web 插件（等价给模型名加 :online 后缀）。
+                    // 它同时兼容 OpenAI 的 web_search_options，但官方文档推荐的
+                    // plugins 形态在旧网关上兼容面更广，故采用 plugins。
+                    putJsonArray("plugins") {
+                        addJsonObject {
+                            put("id", "web")
+                            put("max_results", 5)
+                        }
+                    }
+                else -> Unit
             }
 
             // ── 多模态输出（图片生成）─────────────────────────────
@@ -413,7 +509,23 @@ class StreamingOpenAiClient(
             // 兼容层的图像输出）。旧实现只按 jsonPrimitive 解析，数组形态抛异常
             // 被整体丢弃 —— 图片模型表现为“模型什么都没说”。
             val contentMedia = MultimodalOutputExtractor.parseContent(delta?.get("content"))
-            val content = contentMedia.text
+
+            // 原生联网搜索引用：OpenAI/DeepSeek 的 delta.annotations（或 content-parts
+            // 内嵌 annotations）、智谱的 delta.search_result；部分网关（智谱等）把
+            // 引用挂在流式最后一帧的 message 上（delta 缺失）—— 用 message 兜底。
+            // 注意：只从 message 取引用、不取正文 —— 正文已由前面的增量 delta 流过，
+            // 再合并 message.content 会把整段答案重复一遍（引用是元数据、无此风险）。
+            // 提取后格式化为 Markdown Sources 块追加到 content 尾部，让引擎/UI 都能
+            // 看到搜索来源；无引用时 content 保持原样（非搜索模型行为不变）。
+            val citations = SearchCitations.extractAndFormat(
+                delta ?: choice["message"]?.let { m -> runCatching { m.jsonObject }.getOrNull() }
+            )
+            val baseText = contentMedia.text
+            val content = when {
+                citations == null -> baseText
+                baseText == null || baseText.isEmpty() -> citations
+                else -> baseText + citations
+            }
 
             // message 级 images / video_url（GLM CogView chat 式生图 / 生视频网关）
             val images = contentMedia.images +
@@ -473,7 +585,17 @@ class StreamingOpenAiClient(
 
         // 多模态输出：message.content 可能为 content-parts 数组（同流式路径）。
         val contentMedia = MultimodalOutputExtractor.parseContent(message?.get("content"))
-        val content = contentMedia.text
+
+        // 原生联网搜索引用（OpenAI/DeepSeek 的 message.annotations、智谱的
+        // message.search_result）→ Markdown Sources 块。非搜索模型无这些字段，
+        // 提取结果为 null，content 保持原样（行为不变）。
+        val citations = SearchCitations.extractAndFormat(message)
+        val baseText = contentMedia.text
+        val content = when {
+            citations == null -> baseText
+            baseText == null || baseText.isEmpty() -> citations
+            else -> baseText + citations
+        }
         val images = contentMedia.images +
             MultimodalOutputExtractor.parseImagesArray(message?.get("images"))
         val videos = contentMedia.videos +

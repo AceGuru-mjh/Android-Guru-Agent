@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.R
 import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.KeySequenceEncoder
@@ -12,6 +13,7 @@ import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
+import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -23,6 +25,8 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -48,7 +52,9 @@ class TerminalViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val terminalRuntime: TerminalRuntime,
     // T82: Ubuntu 产品级生命周期 —— 依赖安装中心的路由底座（apt 命令只能跑在 Ubuntu 会话）。
-    private val ubuntuLifecycle: UbuntuLifecycleCoordinator
+    private val ubuntuLifecycle: UbuntuLifecycleCoordinator,
+    // i18n：通知/安装日志文案（非 Compose 场景，LanguageManager 按当前语言取词）
+    private val lang: LanguageManager
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("apex_terminal", Context.MODE_PRIVATE)
@@ -120,6 +126,17 @@ class TerminalViewModel @Inject constructor(
      */
     private val pendingLine = StringBuilder()
 
+    /**
+     * T85: Ubuntu 优先默认会话策略的挂起标记 —— 等待环境 READY 期间用户未手工
+     * 创建过会话时，READY 到达后自动拉起 Ubuntu 会话（见 [init] 的第二个收集器）。
+     * 用户一旦自己建了会话（含环境面板的「先用 Android Shell」）即失效。
+     */
+    @Volatile
+    private var autoUbuntuSessionPending = false
+
+    /** 会话创建互斥（UI 手动新建 / READY 自动拉起 / 依赖安装降级共享）。 */
+    private val createMutex = Mutex()
+
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
         viewModelScope.launch {
@@ -128,14 +145,41 @@ class TerminalViewModel @Inject constructor(
                 Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
             }
             refreshSessionsInternal()
-            // 无任何会话（首次进入终端页）→ 自动拉起 Android shell 会话，
-            // 用户无需理解“会话”概念即可开始敲命令。
             if (_sessions.value.none { it.isAlive }) {
-                createSessionInternal(backendId = BACKEND_LOCAL)
+                // T85: Ubuntu 优先 —— 有完整 Linux 环境绝不默认降级到 Android toybox。
+                // - READY → 直接建 Ubuntu 会话（bash / gcc / python3 真实可用）；
+                // - 未 READY → 挂起等待（ApexApp 启动时已自动预备；这里 join 单飞
+                //   兜底「冷启动直接进终端页」的竞态），READY 后自动建；
+                // - FAILED → 停在环境面板等用户重试，不偷偷降级。
+                if (ubuntuLifecycle.stateFlow.value.phase ==
+                    UbuntuLifecycleCoordinator.Phase.READY
+                ) {
+                    createMutex.withLock { createSessionInternal(backendId = BACKEND_UBUNTU) }
+                } else {
+                    autoUbuntuSessionPending = true
+                    // join 自动预备（幂等单飞；已进行中则等待共享结果）。
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { ubuntuLifecycle.ensureReady() }
+                    }
+                }
             } else {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
             }
             startSessionPolling()
+        }
+
+        // T85: 环境 READY 到达 → 若用户仍未手工建过会话，自动拉起 Ubuntu 会话。
+        // 首次安装（后台解包 2~5 分钟）期间用户停在环境面板，无需任何点击。
+        viewModelScope.launch {
+            ubuntuLifecycle.stateFlow.collect { st ->
+                if (st.phase == UbuntuLifecycleCoordinator.Phase.READY &&
+                    autoUbuntuSessionPending &&
+                    _sessions.value.none { it.isAlive }
+                ) {
+                    autoUbuntuSessionPending = false
+                    createMutex.withLock { createSessionInternal(backendId = BACKEND_UBUNTU) }
+                }
+            }
         }
     }
 
@@ -220,9 +264,11 @@ class TerminalViewModel @Inject constructor(
     fun createSession(backendId: String) {
         if (creating) return
         creating = true
+        // 用户手工新建（含环境面板「先用 Android Shell」）→ 取消 READY 自动拉起
+        autoUbuntuSessionPending = false
         viewModelScope.launch {
             try {
-                createSessionInternal(backendId)
+                createMutex.withLock { createSessionInternal(backendId) }
             } finally {
                 creating = false
             }
@@ -240,13 +286,13 @@ class TerminalViewModel @Inject constructor(
                 ubuntuLifecycle.ensureReady()
             }
             if (r is UbuntuLifecycleCoordinator.EnsureResult.Failed) {
-                _notice.value = "Ubuntu 环境不可用：${r.message.take(120)}"
+                _notice.value = lang.getString(R.string.term_notice_ubuntu_unavailable, r.message.take(120))
                 return
             }
         }
         val created = terminalRuntime.create(backendId = backendId)
         val result = created.getOrElse { e ->
-            _notice.value = "会话创建失败：${e.message?.take(120)}"
+            _notice.value = lang.getString(R.string.term_notice_create_failed, e.message?.take(120) ?: "")
             return
         }
         sessionBackends[result.sessionId] = result.backendId to result.runtimeType
@@ -278,7 +324,7 @@ class TerminalViewModel @Inject constructor(
         // 状态条也不给任何线索。这里给出明确反馈。
         val sid = _activeSessionId.value
         if (sid == null) {
-            _notice.value = "没有活跃会话，输入未送达（请新建会话）"
+            _notice.value = lang.getString(R.string.term_notice_no_session_input)
             return
         }
         if (text.isEmpty()) return
@@ -288,7 +334,7 @@ class TerminalViewModel @Inject constructor(
             val before = text.substring(0, newlineIdx)
             val candidate = (pendingLine.toString() + before).trim()
             if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
-                _notice.value = "⛔ 命令已被黑白名单拦截：${candidate.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
+                _notice.value = lang.getString(R.string.term_notice_blocked, candidate.take(40))
                 return // 不写入（含回车）—— readline 行保持未提交；缓冲保留继续同步追加
             }
             // 放行：行缓冲重置，回车后的剩余字符属于下一行缓冲
@@ -301,7 +347,7 @@ class TerminalViewModel @Inject constructor(
 
         viewModelScope.launch {
             terminalRuntime.write(sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW, text = text)
-                .onFailure { _notice.value = "输入失败：${it.message?.take(80)}" }
+                .onFailure { _notice.value = lang.getString(R.string.term_notice_input_failed, it.message?.take(80) ?: "") }
         }
     }
 
@@ -319,7 +365,7 @@ class TerminalViewModel @Inject constructor(
                 TerminalKey.ENTER -> {
                     val candidate = pendingLine.toString().trim()
                     if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
-                        _notice.value = "⛔ 命令已被黑白名单拦截：${candidate.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
+                        _notice.value = lang.getString(R.string.term_notice_blocked, candidate.take(40))
                         return@launch
                     }
                     pendingLine.setLength(0)
@@ -371,7 +417,7 @@ class TerminalViewModel @Inject constructor(
         if (text.isEmpty()) return
         val firstLine = text.lineSequence().firstOrNull()?.trim() ?: ""
         if (firstLine.isNotBlank() && !isCommandAllowed(firstLine)) {
-            _notice.value = "⛔ 粘贴内容首行命中黑白名单：${firstLine.take(40)}（已拦截）"
+            _notice.value = lang.getString(R.string.term_notice_paste_blocked, firstLine.take(40))
             return
         }
         pendingLine.setLength(0)
@@ -403,7 +449,7 @@ class TerminalViewModel @Inject constructor(
             // T84：IO —— 完整 rootfs（~300MB+ 档，解压分钟级）绝不能压 Main。
             val r = withContext(kotlinx.coroutines.Dispatchers.IO) { ubuntuLifecycle.ensureReady() }
             if (r is UbuntuLifecycleCoordinator.EnsureResult.Failed) {
-                _notice.value = "Ubuntu 解包失败：${r.message.take(160)}"
+                _notice.value = lang.getString(R.string.term_notice_unpack_failed, r.message.take(160))
             }
         }
     }
@@ -421,7 +467,8 @@ class TerminalViewModel @Inject constructor(
         viewModelScope.launch {
             // T84：IO —— repair 链是文件/子进程操作。
             val r = withContext(kotlinx.coroutines.Dispatchers.IO) { ubuntuLifecycle.repair() }
-            _notice.value = if (r.verifiedHealthy) "修复完成：环境已恢复健康" else "修复未收敛：${r.detail ?: r.actions.joinToString().take(120)}"
+            _notice.value = if (r.verifiedHealthy) lang.getString(R.string.term_notice_repair_ok)
+            else lang.getString(R.string.term_notice_repair_unresolved, r.detail ?: r.actions.joinToString().take(120))
         }
     }
 
@@ -609,26 +656,26 @@ class TerminalViewModel @Inject constructor(
 
     fun installAll(onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
-            _install.update { it.copy(runningId = "__all__", log = it.log + "▶ 开始安装全部环境依赖（镜像=${_useMirror.value}）…\n") }
+            _install.update { it.copy(runningId = "__all__", log = it.log + lang.getString(R.string.term_notice_install_all_start, _useMirror.value.toString())) }
             depItems.forEachIndexed { index, item ->
                 onProgress(index, depItems.size)
                 val cmd = if (_useMirror.value) item.installMirror else item.installOfficial
                 execAndAppend(item.id, cmd)
             }
-            _install.update { it.copy(runningId = null, log = it.log + "\n✅ 全部依赖安装命令已执行完毕。请查看上方输出确认结果。\n") }
+            _install.update { it.copy(runningId = null, log = it.log + lang.getString(R.string.term_notice_install_all_done)) }
         }
     }
 
     fun installAndroidOnly(onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         viewModelScope.launch {
             val items = depItems.filter { it.group == DepGroup.ANDROID }
-            _install.update { it.copy(runningId = "__android__", log = it.log + "▶ 开始安装 Android 开发依赖（镜像=${_useMirror.value}）…\n") }
+            _install.update { it.copy(runningId = "__android__", log = it.log + lang.getString(R.string.term_notice_install_android_start, _useMirror.value.toString())) }
             items.forEachIndexed { index, item ->
                 onProgress(index, items.size)
                 val cmd = if (_useMirror.value) item.installMirror else item.installOfficial
                 execAndAppend(item.id, cmd)
             }
-            _install.update { it.copy(runningId = null, log = it.log + "\n✅ Android 开发依赖安装命令已执行完毕。\n") }
+            _install.update { it.copy(runningId = null, log = it.log + lang.getString(R.string.term_notice_install_android_done)) }
         }
     }
 
@@ -642,14 +689,14 @@ class TerminalViewModel @Inject constructor(
 
     private suspend fun execAndAppend(id: String, cmd: String) {
         val sid = ensureDepInstallSession() ?: run {
-            _install.update { it.copy(log = it.log + "❌ 无法创建终端会话（设备不支持 PTY）\n") }
+            _install.update { it.copy(log = it.log + lang.getString(R.string.term_notice_no_pty)) }
             return
         }
         val output = withContext(kotlinx.coroutines.Dispatchers.IO) {
             val runResult = terminalRuntime.run(sid, cmd, InputOwner.SYSTEM, background = false)
-            val run = runResult.getOrElse { return@withContext "❌ run 失败: ${it.message}\n" }
+            val run = runResult.getOrElse { return@withContext lang.getString(R.string.term_notice_run_failed, it.message ?: "") }
             val waitResult = terminalRuntime.wait(sid, com.apex.agent.platform.terminal.wait.WaitCondition.ProcessExited(jobId = run.jobId), 120_000)
-            val wait = waitResult.getOrElse { return@withContext "❌ wait 失败: ${it.message}\n" }
+            val wait = waitResult.getOrElse { return@withContext lang.getString(R.string.term_notice_wait_failed, it.message ?: "") }
             val exitCode = when (wait) {
                 is com.apex.agent.platform.terminal.wait.WaitResult.Matched -> {
                     val ev = wait.event
@@ -657,13 +704,13 @@ class TerminalViewModel @Inject constructor(
                 }
                 is com.apex.agent.platform.terminal.wait.WaitResult.Timeout -> {
                     terminalRuntime.signal(sid, com.apex.agent.platform.terminal.io.UnixSignal.SIGKILL, InputOwner.SYSTEM, run.jobId)
-                    return@withContext "⚠️ 超时（120s），可能仍在后台进行。\n"
+                    return@withContext lang.getString(R.string.term_notice_wait_timeout)
                 }
-                is com.apex.agent.platform.terminal.wait.WaitResult.SessionGone -> return@withContext "❌ 会话已关闭\n"
+                is com.apex.agent.platform.terminal.wait.WaitResult.SessionGone -> return@withContext lang.getString(R.string.term_notice_session_gone)
             }
             val obs = terminalRuntime.observe(sid, TerminalRuntime.ObserveMode.RAW, run.startCursor, 65536)
                 .getOrNull()?.raw ?: ""
-            val tail = if (obs.length > 4000) "…(已截断)\n" + obs.takeLast(4000) else obs
+            val tail = if (obs.length > 4000) lang.getString(R.string.term_notice_truncated) + obs.takeLast(4000) else obs
             tail + if (exitCode != 0) "\n[exit=$exitCode]\n" else "\n"
         }
         _install.update { it.copy(log = it.log + output) }
@@ -688,7 +735,7 @@ class TerminalViewModel @Inject constructor(
             depSessionId = active
             return active
         }
-        _install.update { it.copy(log = it.log + "⚠️ Ubuntu 会话不可用 — 降级 Android shell（apt 命令可能失败）\n") }
+        _install.update { it.copy(log = it.log + lang.getString(R.string.term_notice_fallback_android)) }
         val r = terminalRuntime.create(backendId = BACKEND_LOCAL)
         return if (r.isSuccess) {
             val sid = r.getOrThrow().sessionId

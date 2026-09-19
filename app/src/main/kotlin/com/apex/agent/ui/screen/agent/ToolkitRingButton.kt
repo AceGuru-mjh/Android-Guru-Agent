@@ -208,7 +208,7 @@ fun ToolkitRingButton(
                 ToolkitExpandableItem(
                     icon = Icons.Default.DataObject,
                     label = if (outputFormat == OutputFormat.NONE) stringResource(R.string.chat_structured_output)
-                    else stringResource(R.string.chat_structured_output_fmt, outputFormat.label),
+                    else stringResource(R.string.chat_structured_output_fmt, outputFormatLabel(outputFormat)),
                     expanded = formatExpanded,
                     onClick = { formatExpanded = !formatExpanded }
                 )
@@ -234,7 +234,7 @@ fun ToolkitRingButton(
                                     .padding(start = 36.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
                             ) {
                                 Text(
-                                    fmt.label,
+                                    outputFormatLabel(fmt),
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -290,6 +290,17 @@ fun ToolkitRingButton(
 }
 
 // ═══ 菜单项基础组件 ═══
+
+/**
+ * 结构化输出格式显示名（UI 层本地化；OutputFormat.label 为 core 侧文案，
+ * JSON/XML 等格式名本身即通用词，仅本地化 NONE/CUSTOM 两个带语义的词）。
+ */
+@Composable
+private fun outputFormatLabel(fmt: OutputFormat): String = when (fmt) {
+    OutputFormat.NONE -> stringResource(R.string.chat_format_none)
+    OutputFormat.CUSTOM -> stringResource(R.string.chat_format_custom)
+    else -> fmt.label
+}
 
 /**
  * 函数调用二级菜单的单个工具行（Checkbox + 名称 + id + 风险徽标）。
@@ -637,7 +648,7 @@ fun ToolkitChipsRow(
             ToolkitChip(Icons.Default.Extension, toolNameOf(id)) { onRemoveFunction(id) }
         }
         if (outputFormat != OutputFormat.NONE) {
-            ToolkitChip(Icons.Default.DataObject, stringResource(R.string.chat_structured_output_fmt, outputFormat.label), onCloseFormat)
+            ToolkitChip(Icons.Default.DataObject, stringResource(R.string.chat_structured_output_fmt, outputFormatLabel(outputFormat)), onCloseFormat)
         }
         if (enabledRulesCount > 0) {
             ToolkitChip(Icons.Default.MenuBook, stringResource(R.string.chat_rules_loaded, enabledRulesCount), onDisableAllRules)

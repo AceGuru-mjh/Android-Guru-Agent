@@ -265,4 +265,10 @@
     <string name="chat_slash_plugins_partial">已加载插件仅验证连通 —— 工具执行桥接建设中</string>
     <string name="chat_slash_connectors">连接器</string>
     <string name="chat_slash_connectors_empty">无启用连接器（市场页可添加）</string>
+
+    <!-- ═══ Toolkit structured-output formats & unconfigured-LLM guard ═══ -->
+    <string name="chat_format_none">关闭</string>
+    <string name="chat_format_custom">自定义 Schema</string>
+    <string name="chat_llm_not_configured">请先在设置中配置API（Base URL + API Key + Model）</string>
+    <string name="chat_llm_not_configured_short">请先在设置中配置API</string>
 </resources>

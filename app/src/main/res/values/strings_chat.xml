@@ -265,4 +265,10 @@
     <string name="chat_slash_plugins_partial">Loaded plugins are connectivity-verified only — tool bridge in progress</string>
     <string name="chat_slash_connectors">Connectors</string>
     <string name="chat_slash_connectors_empty">No enabled connectors (add in Market)</string>
+
+    <!-- ═══ Toolkit structured-output formats & unconfigured-LLM guard ═══ -->
+    <string name="chat_format_none">Off</string>
+    <string name="chat_format_custom">Custom schema</string>
+    <string name="chat_llm_not_configured">API is not configured yet (Base URL + API Key + Model). Open Settings to set it up.</string>
+    <string name="chat_llm_not_configured_short">API is not configured yet</string>
 </resources>

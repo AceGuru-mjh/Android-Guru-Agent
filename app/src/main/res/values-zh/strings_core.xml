@@ -429,4 +429,9 @@
     <string name="onboarding_ready_desc">进入后先在「设置 → 模型配置」填入你的\nAPI 密钥（OpenAI / Anthropic / 兼容端点），\nAgent 才能开始思考</string>
     <string name="onboarding_quickstart_title">上手路线</string>
     <string name="onboarding_quickstart_steps">1 · 抽屉菜单打开「设置」配置模型\n2 · 回到 Agent 对话页发第一条消息\n3 · 试试「终端」页离线解包内置 Ubuntu\n4 · 让 Agent 帮你装包、跑脚本、改文件</string>
+
+    <!-- ═══ Foreground service notification (ApexCoreService) ═══ -->
+    <string name="core_notif_channel_name">Apex Agent 服务</string>
+    <string name="core_notif_channel_desc">AI助手后台运行通知</string>
+    <string name="core_notif_running">AI助手运行中</string>
 </resources>

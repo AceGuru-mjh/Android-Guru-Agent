@@ -83,4 +83,53 @@
     <string name="term_phase_failed">异常</string>
     <string name="term_installing">安装中…</string>
     <string name="term_install">安装</string>
+
+    <!-- ═══ T85 Console: top bar subtitle / env panel / busy strip / session dialog ═══ -->
+    <string name="term_env_preparing">环境准备中 %1$d%%</string>
+    <string name="term_env_error_short">环境异常</string>
+    <string name="term_waiting_session">等待会话</string>
+    <string name="term_env_prep_title">Ubuntu 环境准备中</string>
+    <string name="term_env_prep_desc">完整 Linux 开发环境随应用内置 · 离线解包，无需下载</string>
+    <string name="term_step_unpack">解压内置 Ubuntu 档案</string>
+    <string name="term_step_configure">配置系统环境</string>
+    <string name="term_step_toolchain">初始化工具链</string>
+    <string name="term_starting">启动中…</string>
+    <string name="term_prep_footnote">首次准备约 2~5 分钟（约 1GB 磁盘）· 完成后自动进入终端</string>
+    <string name="term_use_android_first">先用 Android Shell</string>
+    <string name="term_env_failed_title">环境准备失败</string>
+    <string name="term_open_env_center_diag">打开环境中心诊断</string>
+    <string name="term_no_terminal_session">当前没有终端会话</string>
+    <string name="term_env_ready_hint">Ubuntu 环境已就绪 · bash / gcc / python3 / git 开箱即用</string>
+    <string name="term_busy_unpacking">Ubuntu 环境解包中 %1$d%% · 完成后可新建 Ubuntu 会话</string>
+    <string name="term_busy_bootstrap">Ubuntu 工具链初始化中…</string>
+    <string name="term_session_ubuntu_desc">完整 Linux 环境 · bash / gcc / python3 / git（推荐）</string>
+    <string name="term_session_android_desc">系统 toybox 环境 · 适合快查设备（无完整工具链）</string>
+
+    <!-- ═══ Renderer: selection toolbar / placeholders ═══ -->
+    <string name="term_not_started">终端未启动</string>
+    <string name="term_copy">复制</string>
+    <string name="term_jump_latest">↓ 跳到最新</string>
+    <string name="term_paste">粘贴</string>
+
+    <!-- ═══ ViewModel notices (LanguageManager.getString) ═══ -->
+    <string name="term_notice_ubuntu_unavailable">Ubuntu 环境不可用：%1$s</string>
+    <string name="term_notice_create_failed">会话创建失败：%1$s</string>
+    <string name="term_notice_no_session_input">没有活跃会话，输入未送达（请新建会话）</string>
+    <string name="term_notice_blocked">⛔ 命令已被黑白名单拦截：%1$s（未执行；Ctrl+C 或 Ctrl+U 清除当前行）</string>
+    <string name="term_notice_input_failed">输入失败：%1$s</string>
+    <string name="term_notice_paste_blocked">⛔ 粘贴内容首行命中黑白名单：%1$s（已拦截）</string>
+    <string name="term_notice_unpack_failed">Ubuntu 解包失败：%1$s</string>
+    <string name="term_notice_repair_ok">修复完成：环境已恢复健康</string>
+    <string name="term_notice_repair_unresolved">修复未收敛：%1$s</string>
+    <string name="term_notice_install_all_start">▶ 开始安装全部环境依赖（镜像=%1$s）…\n</string>
+    <string name="term_notice_install_all_done">\n✅ 全部依赖安装命令已执行完毕。请查看上方输出确认结果。\n</string>
+    <string name="term_notice_install_android_start">▶ 开始安装 Android 开发依赖（镜像=%1$s）…\n</string>
+    <string name="term_notice_install_android_done">\n✅ Android 开发依赖安装命令已执行完毕。\n</string>
+    <string name="term_notice_no_pty">❌ 无法创建终端会话（设备不支持 PTY）\n</string>
+    <string name="term_notice_run_failed">❌ run 失败: %1$s\n</string>
+    <string name="term_notice_wait_failed">❌ wait 失败: %1$s\n</string>
+    <string name="term_notice_wait_timeout">⚠️ 超时（120s），可能仍在后台进行。\n</string>
+    <string name="term_notice_session_gone">❌ 会话已关闭\n</string>
+    <string name="term_notice_truncated">…(已截断)\n</string>
+    <string name="term_notice_fallback_android">⚠️ Ubuntu 会话不可用 — 降级 Android shell（apt 命令可能失败）\n</string>
 </resources>

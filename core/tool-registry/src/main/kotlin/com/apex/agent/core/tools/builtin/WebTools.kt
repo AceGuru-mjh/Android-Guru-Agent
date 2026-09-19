@@ -88,24 +88,28 @@ class WebFetchTool(
             }
 
             val response = httpClient.newCall(reqBuilder.build()).awaitOk()
-            val rawBody = response.body?.string() ?: ""
-            val contentType = response.header("Content-Type") ?: ""
-            val statusCode = response.code
+            response.use {
+                val rawBody = it.body?.string() ?: ""
+                val contentType = it.header("Content-Type") ?: ""
+                val statusCode = it.code
 
-            if (statusCode !in 200..299) {
-                return "❌ HTTP $statusCode\n${rawBody.take(500)}"
-            }
+                if (statusCode !in 200..299) {
+                    // P0 修复：错误必须以 "Error:" 开头——v3 管线（熔断器/统计/UI
+                    // 成败判定）依赖该前缀。旧的 "❌ HTTP xxx" 会被误判为成功。
+                    return "Error: HTTP $statusCode fetching $url\n${rawBody.take(500)}"
+                }
 
-            when (mode) {
-                "raw" -> formatRaw(rawBody, contentType, maxChars)
-                "structure" -> extractStructure(rawBody, url)
-                "links" -> extractLinks(rawBody, maxChars)
-                else -> extractReadableText(rawBody, maxChars)
+                when (mode) {
+                    "raw" -> formatRaw(rawBody, contentType, maxChars)
+                    "structure" -> extractStructure(rawBody, url)
+                    "links" -> extractLinks(rawBody, maxChars)
+                    else -> extractReadableText(rawBody, maxChars)
+                }
             }
         } catch (e: CancellationException) {
             throw e // 工具取消必须向上传播，不能折叠成错误文本
         } catch (e: Exception) {
-            "❌ Fetch failed: ${e.message}"
+            "Error: fetch failed: ${e.message ?: e::class.simpleName}"
         }
     }
 
@@ -223,10 +227,20 @@ class WebFetchTool(
 }
 
 /**
- * 网络搜索工具
+ * 网络搜索工具（多供应商回退链）
  *
- * Uses DuckDuckGo's HTML endpoint (no API key required) to perform a web search.
- * Returns titles, URLs, and snippets for the top results.
+ * P0 修复：旧实现单一依赖 DuckDuckGo html 端点爬虫——该端点对非浏览器流量
+ * （尤其数据中心 IP）返回 403 反爬拦截，且页面改版后正则解析静默产出
+ * "No results found"。表象即"网络搜索不能用"。
+ *
+ * 现改为三级供应商链，每个供应商独立解析器，任一返回非空结果即成功：
+ * 1. DuckDuckGo HTML（无需 Key，结果质量好）
+ * 2. DuckDuckGo Lite（同源但轻量模板，反爬策略不同）
+ * 3. Bing Web（无 Key 可用，桌面 UA）
+ *
+ * 全部失败时返回 "Error: ..." 前缀文本（v3 管线的成败判定依赖该前缀：
+ * 旧实现返回 "Search failed: HTTP 403" 不带 Error 前缀，被熔断器/统计/UI
+ * 误判为成功，导致模型反复重试烧限流额度）。
  */
 class WebSearchTool(
     private val httpClient: OkHttpClient = WebFetchTool.defaultClient()
@@ -268,80 +282,223 @@ class WebSearchTool(
             val query = json["query"]?.jsonPrimitive?.content
                 ?: return "Error: 'query' parameter is required"
             val maxResults = (json["max_results"]?.jsonPrimitive?.intOrNull ?: 5).coerceIn(1, 10)
-
-            // DuckDuckGo HTML搜索（无需API Key）
-            val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = "https://html.duckduckgo.com/html/?q=$encodedQuery"
-
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; ApexAgent) AppleWebKit/537.36")
-                .build()
-
-            val response = httpClient.newCall(request).awaitOk()
-            val html = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return "Search failed: HTTP ${response.code}"
-            }
-
-            val results = parseSearchResults(html, maxResults)
-
-            if (results.isEmpty()) {
-                return "No results found for: $query"
-            }
-
-            buildString {
-                appendLine("Search results for: \"$query\" (${results.size} results)")
-                appendLine("---")
-                results.forEachIndexed { i, result ->
-                    appendLine("${i + 1}. ${result.title}")
-                    appendLine("   URL: ${result.url}")
-                    appendLine("   ${result.snippet}")
-                    appendLine()
-                }
-                appendLine("Use web_fetch to read full content of any result.")
-            }
+            searchWithFallback(query, maxResults)
         } catch (e: CancellationException) {
             throw e // 工具取消必须向上传播
         } catch (e: Exception) {
-            "Search error: ${e.message}"
+            "Error: search failed: ${e.message ?: e::class.simpleName}"
         }
+    }
+
+    private suspend fun searchWithFallback(query: String, maxResults: Int): String {
+        val failures = mutableListOf<String>()
+
+        // 局部 suspend 帮助函数：尝试单个供应商。成功返回结果；失败或解析出
+        // 0 条结果时记入 failures 并返回 null（由 ?: 链触发下一供应商）。
+        suspend fun attempt(
+            name: String,
+            block: suspend () -> List<SearchResult>
+        ): List<SearchResult>? = try {
+            val results = block()
+            if (results.isEmpty()) {
+                failures.add("$name: parsed 0 results")
+                null
+            } else {
+                results
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failures.add("$name: ${e.message ?: e::class.simpleName}")
+            null
+        }
+
+        val results = attempt("duckduckgo-html") { searchDuckDuckGoHtml(query, maxResults) }
+            ?: attempt("duckduckgo-lite") { searchDuckDuckGoLite(query, maxResults) }
+            ?: attempt("bing") { searchBing(query, maxResults) }
+            ?: return "Error: search failed for \"$query\" — all 3 providers exhausted " +
+                "(${failures.joinToString("; ")}). Likely network blocking or anti-bot " +
+                "interception. Try web_fetch on a specific URL instead, or rephrase the query."
+
+        return formatResults(query, results)
     }
 
     private data class SearchResult(val title: String, val url: String, val snippet: String)
 
-    private fun parseSearchResults(html: String, maxResults: Int): List<SearchResult> {
-        val results = mutableListOf<SearchResult>()
+    /** 统一的搜索请求体获取：非 2xx 抛 IOException（被回退链捕获后换供应商）。 */
+    private suspend fun fetchBody(url: String, userAgent: String): String {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", userAgent)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.8,zh-CN;q=0.6")
+            .build()
+        httpClient.newCall(request).awaitOk().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("HTTP ${response.code}")
+            }
+            return response.body?.string() ?: ""
+        }
+    }
 
-        // DuckDuckGo HTML结果格式
-        val resultPattern = Regex(
+    // ── 供应商 1：DuckDuckGo HTML 端点 ──
+    private suspend fun searchDuckDuckGoHtml(query: String, maxResults: Int): List<SearchResult> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val html = fetchBody(
+            "https://html.duckduckgo.com/html/?q=$encodedQuery",
+            DESKTOP_UA
+        )
+        return parseDuckDuckGoResults(html, maxResults)
+    }
+
+    // ── 供应商 2：DuckDuckGo Lite 端点（同源但模板不同，反爬策略不同） ──
+    private suspend fun searchDuckDuckGoLite(query: String, maxResults: Int): List<SearchResult> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val html = fetchBody(
+            "https://lite.duckduckgo.com/lite/?q=$encodedQuery",
+            MOBILE_UA
+        )
+        return parseDuckDuckGoLiteResults(html, maxResults)
+    }
+
+    // ── 供应商 3：Bing Web（无 Key 可用） ──
+    private suspend fun searchBing(query: String, maxResults: Int): List<SearchResult> {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val html = fetchBody(
+            "https://www.bing.com/search?q=$encodedQuery&count=10",
+            DESKTOP_UA
+        )
+        return parseBingResults(html, maxResults)
+    }
+
+    private fun formatResults(query: String, results: List<SearchResult>): String = buildString {
+        appendLine("Search results for: \"$query\" (${results.size} results)")
+        appendLine("---")
+        results.forEachIndexed { i, result ->
+            appendLine("${i + 1}. ${result.title}")
+            appendLine("   URL: ${result.url}")
+            appendLine("   ${result.snippet}")
+            appendLine()
+        }
+        appendLine("Use web_fetch to read full content of any result.")
+    }
+
+    // ── 解析器：DDG HTML（result__a / result__snippet） ──
+    private fun parseDuckDuckGoResults(html: String, maxResults: Int): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        for (match in DDG_RESULT_PATTERN.findAll(html)) {
+            if (results.size >= maxResults) break
+            var url = match.groupValues[1]
+            val title = match.groupValues[2].replace(RX_ANY_TAG, "").trim()
+            val snippet = match.groupValues[3].replace(RX_ANY_TAG, "").trim()
+            url = unwrapDdgRedirect(url)
+            if (title.isNotBlank()) results.add(SearchResult(title, url, snippet))
+        }
+        return results
+    }
+
+    // ── 解析器：DDG Lite（表格布局，<a rel=nofollow href> + result-snippet） ──
+    private fun parseDuckDuckGoLiteResults(html: String, maxResults: Int): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        val snippets = DDG_LITE_SNIPPET_PATTERN.findAll(html)
+            .map { it.groupValues[1].replace(RX_ANY_TAG, "").trim() }
+            .toList()
+        var index = 0
+        for (match in DDG_LITE_LINK_PATTERN.findAll(html)) {
+            if (results.size >= maxResults) break
+            var url = match.groupValues[1]
+            val title = match.groupValues[2].replace(RX_ANY_TAG, "").trim()
+            // 跳过站内导航链接，只要外链结果
+            if (!url.startsWith("http") || url.contains("duckduckgo.com")) continue
+            url = unwrapDdgRedirect(url)
+            val snippet = snippets.getOrNull(index)?.take(200) ?: ""
+            index++
+            if (title.isNotBlank()) results.add(SearchResult(title, url, snippet))
+        }
+        return results
+    }
+
+    // ── 解析器：Bing（b_algo 块内 h2>a + p） ──
+    // 实测（2025+ Bing 页面）结果链接普遍被包成 bing.com/ck/a?...&u=a1<base64>
+    // 点击跟踪重定向，链接统一过 [decodeBingRedirect] 解出真实 URL。
+    private fun parseBingResults(html: String, maxResults: Int): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        for (match in BING_RESULT_PATTERN.findAll(html)) {
+            if (results.size >= maxResults) break
+            val url = decodeBingRedirect(match.groupValues[1])
+            val title = match.groupValues[2].replace(RX_ANY_TAG, "").trim()
+            val snippet = BING_SNIPPET_PATTERN.find(match.groupValues[3])
+                ?.groupValues?.get(1)?.replace(RX_ANY_TAG, "")?.trim() ?: ""
+            if (title.isNotBlank() && url.startsWith("http")) {
+                results.add(SearchResult(title, url, decodeEntities(snippet).take(200)))
+            }
+        }
+        return results
+    }
+
+    /** DDG 的外链走 //duckduckgo.com/l/?uddg=<encoded> 重定向，解出真实 URL。 */
+    private fun unwrapDdgRedirect(url: String): String = if (url.contains("uddg=")) {
+        try {
+            java.net.URLDecoder.decode(url.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+        } catch (e: Exception) { url }
+    } else url
+
+    /**
+     * Bing 点击跟踪重定向解码：`https://www.bing.com/ck/a?...&u=a1<base64 目标 URL>&...`。
+     * 实测 2025+ Bing 结果 href 普遍被包成 /ck/a 重定向；不带重定时本函数是 no-op。
+     * u 参数前缀 a1 后为 URL-safe base64，还原标准 base64（-→+、_→/、补 =）后解码。
+     */
+    private fun decodeBingRedirect(url: String): String {
+        if (!url.contains("bing.com/ck/")) return url
+        return try {
+            val clean = url.replace("&amp;", "&")
+            val u = clean.substringAfter("&u=").substringBefore("&")
+            if (u.length > 2) {
+                val b64 = u.substring(2)
+                    .replace('-', '+')
+                    .replace('_', '/')
+                    .padEnd((u.length - 2 + 3) / 4 * 4, '=')
+                val decoded = java.util.Base64.getDecoder().decode(b64).decodeToString()
+                if (decoded.startsWith("http")) decoded else url
+            } else {
+                url
+            }
+        } catch (e: Exception) {
+            url
+        }
+    }
+
+    private fun decodeEntities(s: String): String = s
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+
+    companion object {
+        private const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        private const val MOBILE_UA =
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+
+        private val DDG_RESULT_PATTERN = Regex(
             """<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>""",
             RegexOption.DOT_MATCHES_ALL
         )
-
-        for (match in resultPattern.findAll(html)) {
-            if (results.size >= maxResults) break
-
-            var url = match.groupValues[1]
-            val title = match.groupValues[2].replace(Regex("<[^>]+>"), "").trim()
-            val snippet = match.groupValues[3].replace(Regex("<[^>]+>"), "").trim()
-
-            // DuckDuckGo使用重定向URL
-            if (url.contains("uddg=")) {
-                url = try {
-                    java.net.URLDecoder.decode(
-                        url.substringAfter("uddg=").substringBefore("&"), "UTF-8"
-                    )
-                } catch (e: Exception) { url }
-            }
-
-            if (title.isNotBlank()) {
-                results.add(SearchResult(title, url, snippet))
-            }
-        }
-
-        return results
+        private val DDG_LITE_LINK_PATTERN = Regex(
+            """<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""",
+            RegexOption.DOT_MATCHES_ALL
+        )
+        private val DDG_LITE_SNIPPET_PATTERN = Regex(
+            """<td[^>]*class="result-snippet"[^>]*>(.*?)</td>""",
+            RegexOption.DOT_MATCHES_ALL
+        )
+        private val BING_RESULT_PATTERN = Regex(
+            """<li class="b_algo"[\s\S]*?<h2><a[^>]*href="([^"]+)"[^>]*>(.*?)</a></h2>([\s\S]*?)</li>"""
+        )
+        private val BING_SNIPPET_PATTERN = Regex(
+            """<p[^>]*>(.*?)</p>""",
+            RegexOption.DOT_MATCHES_ALL
+        )
     }
 }
 
@@ -433,29 +590,31 @@ class HttpRequestTool(
                 "PATCH" -> requestBuilder.patch(
                     (body ?: "").toRequestBody(contentType.toMediaType())
                 )
-                else -> return "Error: Unsupported method $method"
+                else -> return "Error: unsupported method $method"
             }
 
             val response = httpClient.newCall(requestBuilder.build()).awaitOk()
-            val responseBody = response.body?.string() ?: ""
+            response.use {
+                val responseBody = it.body?.string() ?: ""
 
-            buildString {
-                appendLine("HTTP ${response.code} ${response.message}")
-                appendLine("URL: $url")
-                appendLine("---")
-                // 关键响应头
-                response.header("Content-Type")?.let { appendLine("Content-Type: $it") }
-                response.header("Content-Length")?.let { appendLine("Content-Length: $it") }
-                appendLine("---")
-                appendLine(responseBody.take(5000))
-                if (responseBody.length > 5000) {
-                    appendLine("[... truncated]")
+                buildString {
+                    appendLine("HTTP ${it.code} ${it.message}")
+                    appendLine("URL: $url")
+                    appendLine("---")
+                    // 关键响应头
+                    it.header("Content-Type")?.let { h -> appendLine("Content-Type: $h") }
+                    it.header("Content-Length")?.let { h -> appendLine("Content-Length: $h") }
+                    appendLine("---")
+                    appendLine(responseBody.take(5000))
+                    if (responseBody.length > 5000) {
+                        appendLine("[... truncated]")
+                    }
                 }
             }
         } catch (e: CancellationException) {
             throw e // 工具取消必须向上传播
         } catch (e: Exception) {
-            "HTTP request error: ${e.message}"
+            "Error: http request failed: ${e.message ?: e::class.simpleName}"
         }
     }
 }

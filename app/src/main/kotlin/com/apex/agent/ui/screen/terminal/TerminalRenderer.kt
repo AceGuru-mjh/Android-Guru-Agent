@@ -52,11 +52,13 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -78,6 +80,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.terminalemulator.RenderCell
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
@@ -139,14 +142,17 @@ private fun vibrateOnce(context: android.content.Context) {
     )
 }
 
-/** 终端主题（深色底自含调色 —— 终端内容不受 app 主题影响）。 */
+/** 终端主题（深色底自含调色 —— 终端内容不受 app 主题影响；T85 对齐 ConsoleTheme
+ * 的 mint 强调色，整页视觉连续：页 chrome 0xFF0C1210 / 内容区 0xFF0E1411）。 */
 private object TerminalTheme {
-    val background = Color(0xFF14161A)
-    val foreground = Color(0xFFD4D7DE)
-    val selection = Color(0x664C8DFF)
-    val cursor = Color(0xFF9CC3FF)
-    val toolbarBg = Color(0xFF1B1F26)
-    val toolbarKey = Color(0xFF232A35)
+    val background = Color(0xFF0E1411)
+    val foreground = Color(0xFFD6E5DC)
+    val selection = Color(0x664EE9B0)
+    val cursor = Color(0xFF7CF0C6)
+    val toolbarBg = Color(0xFF111815)
+    val toolbarKey = Color(0xFF1A2420)
+    val toolbarKeyHi = Color(0xFF4EE9B0)
+    val toolbarKeyText = Color(0xFFAABBB1)
 }
 
 /** cell 级选择区间（行/列；列区间左闭右开，含 from 至 to 前一列）。 */
@@ -215,8 +221,6 @@ fun TerminalGrid(
     // ── IME 隐藏桥 + 焦点 ──
     val focusRequester = remember { FocusRequester() }
     var imeBuffer by remember { mutableStateOf(TextFieldValue("")) }
-    /** 是否正处于 IME 组合态（拼音/日语/联想候选未上屏）。 */
-    var composing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     /**
@@ -383,7 +387,7 @@ fun TerminalGrid(
             if (render == null || totalRows == 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        "终端未启动",
+                        stringResource(R.string.term_not_started),
                         color = Color(0xFF5A6270),
                         fontSize = 13.sp,
                         fontFamily = FontFamily.Monospace
@@ -451,10 +455,10 @@ fun TerminalGrid(
                         TextButton(onClick = {
                             clipboard.setText(AnnotatedString(selectedText()))
                             selectionAnchor = null; selectionHead = null
-                        }) { Text("复制", fontSize = 12.sp) }
+                        }) { Text(stringResource(R.string.term_copy), fontSize = 12.sp) }
                         TextButton(onClick = {
                             selectionAnchor = null; selectionHead = null
-                        }) { Text("取消", fontSize = 12.sp, color = Color(0xFF8A93A3)) }
+                        }) { Text(stringResource(R.string.term_cancel), fontSize = 12.sp, color = Color(0xFF8A93A3)) }
                     }
                 }
 
@@ -472,7 +476,7 @@ fun TerminalGrid(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "↓ 跳到最新",
+                            stringResource(R.string.term_jump_latest),
                             fontSize = 12.sp,
                             color = TerminalTheme.cursor,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
@@ -498,36 +502,32 @@ fun TerminalGrid(
                         }
                     }
 
-                    if (new.composition != null) {
-                        // ① 组合中（拼音/候选未上屏）：组合文本**未确定**，不能写进 PTY，
-                        //    仅跟踪在缓冲里 —— 否则会把 li/ni/hao 这些中间态也发给 shell。
-                        composing = true
-                        imeBuffer = new
-                        return@BasicTextField
-                    }
-
-                    if (composing) {
-                        // ② 组合结束（候选上屏）：组合期间一个字节都没下发过，
-                        //    因此 **整段 new.text 都是新内容**，必须整体下发。
-                        //
-                        //    ⚠ 旧实现在这里仍走增量 diff："li"(2) → "里"(1) 被判成
-                        //    「长度变短 = 删除」→ 只发退格，**上屏的汉字永远进不了终端**
-                        //    （中文用户表现为"字符根本打不进去"）。
-                        composing = false
-                        deliver(new.text)
-                        imeBuffer = TextFieldValue("", TextRange(0))
-                        return@BasicTextField
-                    }
-
-                    // ③ 非组合：按公共前缀做增量 diff
-                    //    - 尾部变短 → 退格（覆盖 IME 在隐藏框里的删除动作）；
-                    //    - 前缀被改写（自动纠正/候选替换）→ 退格 + 重发，不再要求 startsWith
-                    //      （旧实现要求 new.startsWith(old)，一旦不等就静默丢弃整次输入）。
+                    // 统一的增量 diff：以「上一帧保留文本」为基准，只下发新增尾部、
+                    // 用退格收回被删/被改的前缀。
+                    //
+                    // 组合态（composition）也走同一路径 —— 不单独缓存。原因：Gboard/百度/讯飞等
+                    // 常把整词当成一个 composing span 一直不提交，直到按空格/回车；若组合态
+                    // 完全不下发，字符就一直不出现，表现正是"打不进去"。现在每次
+                    // setComposingText 的增量都实时进 PTY，候选上屏（commit）时旧组合文本由
+                    // 退格收回 —— 这与真实终端的行为一致（输入法组合文本显示时被后续提交替换）。
+                    //
+                    // 🔑 关键修复：基准 `old` 必须是**上一帧保留下来的真实文本**，绝不能像旧
+                    //    实现那样每敲一字就把 `imeBuffer` 重置成空 —— 那会让受控的 BasicTextField
+                    //    告诉输入法"文本已清空"，而输入法内部还认为框里有字，状态脱节后输入法
+                    //    会在**第二字起停止投递**（或重复投递），表现就是"字符根本打不进去"。
+                    //    因此这里保持 `imeBuffer = new`（与编辑器/输入法一致），只在回车提交后
+                    //    才清空，使下一行从干净状态开始。
                     val old = imeBuffer.text
                     val common = old.commonPrefixWith(new.text).length
                     repeat((old.length - common).coerceAtLeast(0)) { onKey(TerminalKey.BACKSPACE) }
                     if (new.text.length > common) deliver(new.text.substring(common))
-                    imeBuffer = TextFieldValue("", TextRange(0))
+                    imeBuffer = if (new.text.contains('\n') || new.text.contains('\r')) {
+                        // 回车提交：本行已发，清空缓冲，下一行从干净状态开始
+                        TextFieldValue("", TextRange(0))
+                    } else {
+                        // 保持缓冲与编辑器一致 —— 输入法不会因"被清空"而中止投递
+                        new
+                    }
                 },
                 textStyle = baseStyle.copy(color = Color.Transparent),
                 modifier = Modifier
@@ -543,6 +543,7 @@ fun TerminalGrid(
             KeyToolbar(
                 ctrlActive = ctrlLatched,
                 onCtrlToggle = { ctrlLatched = !ctrlLatched },
+                onText = onText,
                 onKey = onKey,
                 onControl = onControl,
                 onShowKeyboard = ::showKeyboard,
@@ -717,12 +718,23 @@ private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float): Floa
     return x
 }
 
-// ═══════════════════════ 特殊键工具栏 ═══════════════════════
+// ═══════════════════════ 特殊键工具栏（T85 重做：Termux 风格）═══════════════════════
 
+/**
+ * 触屏辅助键行（T85 重做）。
+ *
+ * 设计对齐 Termux extra-keys：
+ *  - **主簇**（滚动区前端，一眼可达）：拉起键盘 / 退格 / ESC / TAB / CTRL 锁存 /
+ *    方向键 —— 高频键排在最前；
+ *  - **扩展簇**（继续横向滚动）：常用 shell 符号（| ~ - / \ $ & 等 —— 免切输入法
+ *    的符号面板）+ 控制码（^C ^D ^Z ^L ^U）+ HOME/END/PgUp/PgDn + 粘贴；
+ *  - 触控目标 36dp 高（Material 无障碍阈值）；CTRL 锁存高亮为 mint 实底深字。
+ */
 @Composable
 private fun KeyToolbar(
     ctrlActive: Boolean,
     onCtrlToggle: () -> Unit,
+    onText: (String) -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
     onShowKeyboard: () -> Unit,
@@ -733,15 +745,16 @@ private fun KeyToolbar(
             .fillMaxWidth()
             .background(TerminalTheme.toolbarBg)
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp, vertical = 5.dp),
+            .padding(horizontal = 5.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // ── 主簇 ──
         // 显式拉起输入法：触屏上"点一下没反应"的兜底入口
-        ToolbarKey("⌨") { onShowKeyboard() }
+        ToolbarKey("⌨", emphasized = true) { onShowKeyboard() }
         // 退格：隐藏 IME 桥的缓冲恒为空，输入法拿不到"可删除的 surrounding text"，
         // 触屏上必须给一个确定可用的删除键（否则打错字只能靠 Ctrl+U 整行重来）。
-        ToolbarKey("⌫") { onKey(TerminalKey.BACKSPACE) }
+        ToolbarKey("⌫", emphasized = true) { onKey(TerminalKey.BACKSPACE) }
         ToolbarKey("ESC") { onKey(TerminalKey.ESC) }
         ToolbarKey("TAB") { onKey(TerminalKey.TAB) }
         ToolbarKey(
@@ -753,35 +766,62 @@ private fun KeyToolbar(
         ToolbarKey("↓") { onKey(TerminalKey.ARROW_DOWN) }
         ToolbarKey("←") { onKey(TerminalKey.ARROW_LEFT) }
         ToolbarKey("→") { onKey(TerminalKey.ARROW_RIGHT) }
-        ToolbarKey("HOME") { onKey(TerminalKey.HOME) }
-        ToolbarKey("END") { onKey(TerminalKey.END) }
-        ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
-        ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
+
+        // ── 扩展簇：shell 符号（免切输入法的符号面板）──
+        ToolbarKey("|") { onText("|") }
+        ToolbarKey("~") { onText("~") }
+        ToolbarKey("-") { onText("-") }
+        ToolbarKey("/") { onText("/") }
+        ToolbarKey("\\") { onText("\\") }
+        ToolbarKey("$") { onText("$") }
+        ToolbarKey("&") { onText("&") }
+        ToolbarKey(";") { onText(";") }
+        ToolbarKey("<") { onText("<") }
+        ToolbarKey(">") { onText(">") }
+        ToolbarKey("*") { onText("*") }
+        ToolbarKey("=") { onText("=") }
+
+        // ── 扩展簇：控制码 / 导航 ──
         ToolbarKey("^C") { onControl('c') }
         ToolbarKey("^D") { onControl('d') }
         ToolbarKey("^Z") { onControl('z') }
         ToolbarKey("^L") { onControl('l') }
         ToolbarKey("^U") { onControl('u') }   // 清空当前行（readline 惯例）
-        ToolbarKey("粘贴") { onPaste() }
+        ToolbarKey("HOME") { onKey(TerminalKey.HOME) }
+        ToolbarKey("END") { onKey(TerminalKey.END) }
+        ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
+        ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
+        ToolbarKey(stringResource(R.string.term_paste)) { onPaste() }
     }
 }
 
 @Composable
-private fun ToolbarKey(label: String, highlighted: Boolean = false, onClick: () -> Unit) {
+private fun ToolbarKey(
+    label: String,
+    highlighted: Boolean = false,
+    emphasized: Boolean = false,
+    onClick: () -> Unit
+) {
     Box(
         modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(
-                if (highlighted) Color(0xFF4C8DFF) else TerminalTheme.toolbarKey,
-                RoundedCornerShape(7.dp)
+                when {
+                    highlighted -> TerminalTheme.toolbarKeyHi
+                    emphasized -> Color(0xFF223729)
+                    else -> TerminalTheme.toolbarKey
+                }
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 11.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             label,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontFamily = FontFamily.Monospace,
-            color = if (highlighted) Color.White else Color(0xFFAAB3C2)
+            color = if (highlighted) Color(0xFF06120D) else TerminalTheme.toolbarKeyText
         )
     }
 }

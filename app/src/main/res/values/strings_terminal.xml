@@ -83,4 +83,53 @@
     <string name="term_phase_failed">Error</string>
     <string name="term_installing">Installing…</string>
     <string name="term_install">Install</string>
+
+    <!-- ═══ T85 Console: top bar subtitle / env panel / busy strip / session dialog ═══ -->
+    <string name="term_env_preparing">Preparing environment %1$d%%</string>
+    <string name="term_env_error_short">Environment error</string>
+    <string name="term_waiting_session">Waiting for session</string>
+    <string name="term_env_prep_title">Preparing Ubuntu environment</string>
+    <string name="term_env_prep_desc">Full Linux dev environment ships inside the app · offline unpack, no download</string>
+    <string name="term_step_unpack">Unpack built-in Ubuntu archive</string>
+    <string name="term_step_configure">Configure system environment</string>
+    <string name="term_step_toolchain">Initialize toolchain</string>
+    <string name="term_starting">Starting…</string>
+    <string name="term_prep_footnote">First-time prep takes ~2–5 minutes (~1GB disk) · terminal opens automatically when done</string>
+    <string name="term_use_android_first">Use Android Shell first</string>
+    <string name="term_env_failed_title">Environment preparation failed</string>
+    <string name="term_open_env_center_diag">Open environment center to diagnose</string>
+    <string name="term_no_terminal_session">No terminal session yet</string>
+    <string name="term_env_ready_hint">Ubuntu environment ready · bash / gcc / python3 / git out of the box</string>
+    <string name="term_busy_unpacking">Unpacking Ubuntu environment %1$d%% · new Ubuntu sessions unlock when done</string>
+    <string name="term_busy_bootstrap">Initializing Ubuntu toolchain…</string>
+    <string name="term_session_ubuntu_desc">Full Linux environment · bash / gcc / python3 / git (recommended)</string>
+    <string name="term_session_android_desc">System toybox environment · quick device checks (no full toolchain)</string>
+
+    <!-- ═══ Renderer: selection toolbar / placeholders ═══ -->
+    <string name="term_not_started">Terminal not started</string>
+    <string name="term_copy">Copy</string>
+    <string name="term_jump_latest">↓ Jump to latest</string>
+    <string name="term_paste">Paste</string>
+
+    <!-- ═══ ViewModel notices (LanguageManager.getString) ═══ -->
+    <string name="term_notice_ubuntu_unavailable">Ubuntu environment unavailable: %1$s</string>
+    <string name="term_notice_create_failed">Session creation failed: %1$s</string>
+    <string name="term_notice_no_session_input">No active session — input not delivered (create a session first)</string>
+    <string name="term_notice_blocked">⛔ Command blocked by blacklist/whitelist: %1$s (not executed; Ctrl+C or Ctrl+U clears the line)</string>
+    <string name="term_notice_input_failed">Input failed: %1$s</string>
+    <string name="term_notice_paste_blocked">⛔ Paste blocked: first line hit the blacklist/whitelist: %1$s</string>
+    <string name="term_notice_unpack_failed">Ubuntu unpack failed: %1$s</string>
+    <string name="term_notice_repair_ok">Repair finished: environment healthy again</string>
+    <string name="term_notice_repair_unresolved">Repair not settled: %1$s</string>
+    <string name="term_notice_install_all_start">▶ Installing all environment dependencies (mirror=%1$s)…\n</string>
+    <string name="term_notice_install_all_done">\n✅ All dependency install commands finished. Check the output above to confirm.\n</string>
+    <string name="term_notice_install_android_start">▶ Installing Android dev dependencies (mirror=%1$s)…\n</string>
+    <string name="term_notice_install_android_done">\n✅ Android dev dependency install commands finished.\n</string>
+    <string name="term_notice_no_pty">❌ Cannot create terminal session (device lacks PTY support)\n</string>
+    <string name="term_notice_run_failed">❌ run failed: %1$s\n</string>
+    <string name="term_notice_wait_failed">❌ wait failed: %1$s\n</string>
+    <string name="term_notice_wait_timeout">⚠️ Timed out (120s) — may still be running in background.\n</string>
+    <string name="term_notice_session_gone">❌ Session closed\n</string>
+    <string name="term_notice_truncated">…(truncated)\n</string>
+    <string name="term_notice_fallback_android">⚠️ Ubuntu session unavailable — falling back to Android shell (apt commands may fail)\n</string>
 </resources>

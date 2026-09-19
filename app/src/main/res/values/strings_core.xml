@@ -429,4 +429,9 @@
     <string name="onboarding_ready_desc">After that, enter your API key under \"Settings → Model configuration\"\n(OpenAI / Anthropic / compatible endpoints)\nso the Agent can start thinking</string>
     <string name="onboarding_quickstart_title">Quick start</string>
     <string name="onboarding_quickstart_steps">1 · Open \"Settings\" from the drawer and configure a model\n2 · Back on the Agent chat page, send your first message\n3 · Try offline-unpacking the built-in Ubuntu on the \"Terminal\" page\n4 · Let the Agent install packages, run scripts and edit files for you</string>
+
+    <!-- ═══ Foreground service notification (ApexCoreService) ═══ -->
+    <string name="core_notif_channel_name">Apex Agent service</string>
+    <string name="core_notif_channel_desc">AI assistant background runtime notification</string>
+    <string name="core_notif_running">AI assistant running</string>
 </resources>

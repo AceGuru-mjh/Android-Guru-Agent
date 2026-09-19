@@ -4,6 +4,7 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
+import com.apex.agent.core.engine.task.DanglingToolCallRepair
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.llm.runtime.LlmRequestContext
 import com.apex.agent.core.llm.runtime.ModelRuntime
@@ -65,6 +66,14 @@ class ApexAgentEngine(
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
     private val environmentInfoProvider: EnvironmentInfoProvider? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null,
+    /**
+     * 已连接服务提供者（GitHub/连接器等）：非空时系统提示词注入
+     * "## Connected Services" 段，让模型知道这些服务的工具已就绪。
+     *
+     * 根因修复：旧版模型不知道 GitHub 已连接，106 个工具里 7 个
+     * github_* 从不被选中；连接器同理。为空则省略该段（测试兼容）。
+     */
+    private val connectedServicesProvider: ConnectedServicesProvider? = null,
     /**
      * T72 — 多模型运行时。非空时所有 LLM 调用按 [LlmRequestContext.role] 路由到
      * 对应 Profile / Client，并做能力校验、降级、诊断。
@@ -963,10 +972,41 @@ class ApexAgentEngine(
     // ═══════════════════════════════════════════════════════
 
     private fun buildMessages(): List<LlmMessage> {
+        repairDanglingToolCalls()
         val messages = mutableListOf<LlmMessage>()
         messages.add(LlmMessage.System(buildSystemPrompt()))
         messages.addAll(conversationHistory)
         return messages
+    }
+
+    /**
+     * P0 修复（会话级报废根因）：发送前修补悬空 tool_call 历史。
+     *
+     * 场景：引擎在 `addMessage(Assistant(toolCalls))` 持久化之后、全部
+     * `ToolResult` 补齐之前被中断（用户发送新消息触发 cancel / 进程被杀 /
+     * ask_user 等待中退出）→ 历史末尾留下无配对 ToolResult 的 tool_calls
+     * → OpenAI 兼容端点对后续**每一次**请求都返回 400
+     * （"tool_calls must be followed by tool messages"）→ 该会话所有后续
+     * 消息全部失败，表象即"工具全坏了"。
+     *
+     * 原有的 [DanglingToolCallRepair] 只在崩溃恢复路径（TaskRuntime/
+     * Orchestrator）调用，普通取消场景不经过。现改在每次构建请求消息前
+     * 幂等修补：无悬空时零开销（纯扫描），有悬空时就地改写内存历史并同步
+     * 持久化，合成文本提示模型"结果未知、重做前先验证"。
+     */
+    private fun repairDanglingToolCalls() {
+        val report = DanglingToolCallRepair.repair(conversationHistory)
+        if (!report.hasRepairs) return
+        conversationHistory.clear()
+        conversationHistory.addAll(report.repairedHistory)
+        memory?.save(conversationHistory)
+        AppLogger.instance.warn(
+            LogCategory.ENGINE, "AgentEngine",
+            "Repaired ${report.repairedCallIds.size} dangling tool_call(s): " +
+                report.repairedCallIds.joinToString(", ") +
+                " (interrupted before ToolResult was recorded)",
+            tags = arrayOf("dangling-repair")
+        )
     }
 
     /**
@@ -1001,7 +1041,8 @@ class ApexAgentEngine(
             config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
         },
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
-        environmentSummary = environmentInfoProvider?.environmentSummary()
+        environmentSummary = environmentInfoProvider?.environmentSummary(),
+        connectedServices = connectedServicesProvider?.connectedServicesSummary()
     )
 
     private fun buildPlanPrompt(input: String): String =

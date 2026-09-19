@@ -95,10 +95,33 @@ class GithubApiService @Inject constructor(
     suspend fun listBranches(owner: String, repo: String): List<GithubBranch> =
         apiCall("/repos/${encodeSegment(owner)}/${encodeSegment(repo)}/branches")
 
-    suspend fun searchCode(query: String, repo: String? = null, perPage: Int = 10): GithubSearchResult {
-        val repoFilter = if (repo != null) "+repo:${encodeQuery(repo)}" else ""
-        return apiCall("/search/code?q=${encodeQuery(query)}$repoFilter&per_page=$perPage")
+    /**
+     * 代码搜索。GitHub legacy /search/code 硬约束：query 必须含至少一个
+     * repo:/user:/org: 限定符（纯关键词搜索返回 422 Validation Failed）。
+     * 调用方（GithubSearchCodeTool）负责在缺限定符时提前拒绝并给出指引。
+     */
+    suspend fun searchCode(
+        query: String,
+        repo: String? = null,
+        org: String? = null,
+        user: String? = null,
+        perPage: Int = 10
+    ): GithubSearchResult {
+        val qualifiers = buildString {
+            repo?.let { append("+repo:").append(encodeQuery(it)) }
+            org?.let { append("+org:").append(encodeQuery(it)) }
+            user?.let { append("+user:").append(encodeQuery(it)) }
+        }
+        return apiCall("/search/code?q=${encodeQuery(query)}$qualifiers&per_page=$perPage")
     }
+
+    /**
+     * 仓库搜索（/search/repositories，按 star 降序）。
+     * 与 [searchCode] 对称：返回包装类（含 total_count 与 items），
+     * 供工具展示命中总数而非仅当前页条数。
+     */
+    suspend fun searchRepositories(query: String, perPage: Int = 10): GithubSearchReposResult =
+        apiCall("/search/repositories?q=${encodeQuery(query)}&per_page=$perPage&sort=stars")
 
     /**
      * 拉取一页列表 + 下一页 URL（解析 `Link: rel="next"` 头）。
@@ -285,3 +308,4 @@ data class PagedResult<T>(val items: List<T>, val nextUrl: String?)
 @Serializable data class GithubBranchCommit(val sha: String = "")
 @Serializable data class GithubSearchResult(val total_count: Int = 0, val items: List<GithubSearchItem> = emptyList())
 @Serializable data class GithubSearchItem(val name: String = "", val path: String = "", val html_url: String = "", val repository: GithubRepo? = null)
+@Serializable data class GithubSearchReposResult(val total_count: Int = 0, val items: List<GithubRepo> = emptyList())

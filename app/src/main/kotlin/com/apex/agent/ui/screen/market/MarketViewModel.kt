@@ -2,6 +2,9 @@ package com.apex.agent.ui.screen.market
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.core.tools.ToolCircuitBreaker
+import com.apex.agent.core.tools.ToolTraceRecorder
+import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
@@ -12,9 +15,12 @@ import com.apex.agent.core.tools.mcp.McpTransport
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.marketplace.MarketInstallManager
+import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import com.apex.agent.plugin.host.PluginManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,8 +66,31 @@ data class MarketSkillRow(
      * UI 显示为「内置」标记而不是「安装」按钮 —— 旧实现给它一个安装按钮，
      * 点了只是往本地写一份 JSON，观感是装了，实际什么外部内容都没拉取。
      */
-    val builtin: Boolean = false
-)
+    val builtin: Boolean = false,
+    // ── cs-mem 认知健康（v2 增强：让市场"活"起来）──
+    /** 能量 [0.01, 10.0]；衰减到 0.05 以下会被梦境折叠。1.0 = 默认/新装。 */
+    val energy: Float = 1.0f,
+    /** 已结晶为可跳过 LLM 的确定性宏（高频成功技能）。 */
+    val isCrystallized: Boolean = false,
+    /** 最近一次执行时间戳（ms）；0 = 从未执行。 */
+    val lastUsedAt: Long = 0,
+    val successCount: Int = 0,
+    val failureCount: Int = 0,
+    // ── 市场元数据（来自 manifest，用于分类过滤与详情页）──
+    val category: String? = null,
+    val tags: List<String> = emptyList(),
+    val author: String = "",
+    val version: String = "",
+    val trustLevel: String = "community"
+) {
+    /** 成功率 0..1。 */
+    val successRate: Float get() =
+        if (successCount + failureCount == 0) 0f
+        else successCount.toFloat() / (successCount + failureCount)
+
+    /** 是否低能量（需要被使用否则会衰减）。 */
+    val isLowEnergy: Boolean get() = installed && energy < 0.5f && !isCrystallized
+}
 
 data class MarketMcpRow(
     val name: String,
@@ -101,6 +130,19 @@ data class MarketUiState(
     val githubHits: List<MarketInstallManager.GitHubRepoHit> = emptyList(),
     val githubSearching: Boolean = false,
     val githubError: String? = null,
+    // ── v2 认知市场增强 ──
+    /** 当前选中分类过滤（null = 全部）。镜像 ToolCategory 枚举名。 */
+    val categoryFilter: String? = null,
+    /** 本地搜索查询（已安装技能 + 内置模板的模糊匹配，ToolSuggester 驱动）。 */
+    val skillQuery: String = "",
+    /** 模糊搜索建议（"你是不是要找…"）。 */
+    val skillSuggestions: List<String> = emptyList(),
+    /** 当前打开的技能详情对话框对应的 skillId。null = 关闭。 */
+    val detailSkillId: String? = null,
+    /** 详情对话框加载的分析数据。null = 未加载/加载中。 */
+    val detailState: SkillDetailUiState? = null,
+    /** 详情加载中。 */
+    val detailLoading: Boolean = false,
     // 全局
     val busy: Boolean = false,
     /** 正在连接的 MCP 服务器名（null = 无）：连接中禁用对应行按钮，防双击并发重连 */
@@ -129,8 +171,18 @@ class MarketViewModel @Inject constructor(
     private val connectorRegistry: ConnectorRegistry,
     private val pluginManager: PluginManager,
     private val installManager: MarketInstallManager,
-    private val modelScopeSource: ModelScopeSource
+    private val modelScopeSource: ModelScopeSource,
+    // ── v2 认知市场：注入 cs-mem + 工具分析四件套（均为 @Singleton）──
+    private val memoryGraphStore: MemoryGraphStore,
+    private val usageTracker: ToolUsageTracker,
+    private val circuitBreaker: ToolCircuitBreaker,
+    private val traceRecorder: ToolTraceRecorder
 ) : ViewModel() {
+
+    /** 技能分析投影器（聚合 cs-mem + 工具统计 + 熔断 + 轨迹 → 详情 UI 状态）。 */
+    private val skillAnalytics = SkillAnalytics(
+        memoryGraphStore, usageTracker, circuitBreaker, traceRecorder
+    )
 
     private val _uiState = MutableStateFlow(MarketUiState())
     val uiState: StateFlow<MarketUiState> = _uiState.asStateFlow()
@@ -140,7 +192,7 @@ class MarketViewModel @Inject constructor(
 
     init { refresh() }
 
-    /** 全量刷新（IO 线程）：技能/MCP/连接器/插件快照。保留集成源列表避免安装后列表闪失。 */
+    /** 全量刷新（IO 线程）：技能/MCP/连接器/插件快照 + cs-mem 健康数据。保留集成源列表避免安装后列表闪失。 */
     fun refresh() {
         viewModelScope.launch {
             val snapshot = withContext(Dispatchers.IO) { snapshotState() } ?: return@launch
@@ -154,29 +206,53 @@ class MarketViewModel @Inject constructor(
                 githubHits = state.githubHits,
                 githubSearching = state.githubSearching,
                 githubError = state.githubError,
+                categoryFilter = state.categoryFilter,
+                skillQuery = state.skillQuery,
+                skillSuggestions = state.skillSuggestions,
+                detailSkillId = state.detailSkillId,
+                detailState = state.detailState,
+                detailLoading = state.detailLoading,
                 busy = state.busy,
                 lastMessage = state.lastMessage
             ) }
         }
     }
 
-    private fun snapshotState(): MarketUiState? {
+    private suspend fun snapshotState(): MarketUiState? {
         return runCatching {
             val installed = skillRegistry.getInstalled()
             val installedIds = installed.map { it.manifest.id }.toSet()
+
+            // cs-mem 健康批量投影：为每个已安装技能取 energy/crystallized/lastUsedAt/success/failure
+            val healthMap = skillAnalytics.batchProjectSkillHealth(installedIds.toList())
+
             val skills = installed.map {
+                val h = healthMap[it.manifest.id]
                 MarketSkillRow(
                     id = it.manifest.id,
                     name = it.manifest.name,
                     description = it.manifest.description,
                     installed = true,
-                    enabled = it.enabled
+                    enabled = it.enabled,
+                    energy = h?.energy ?: 1.0f,
+                    isCrystallized = h?.isCrystallized ?: false,
+                    lastUsedAt = h?.lastUsedAt ?: 0,
+                    successCount = h?.successCount ?: 0,
+                    failureCount = h?.failureCount ?: 0,
+                    category = it.manifest.category,
+                    tags = it.manifest.tags,
+                    author = it.manifest.author,
+                    version = it.manifest.version,
+                    trustLevel = it.manifest.trustLevel
                 )
             }
-            val templates = skillMenuProvider.getBuiltinTemplates().map {
+            val templates = skillMenuProvider.getBuiltinTemplates().map { t ->
+                val tpl = SkillMenuProvider.BUILTIN_TEMPLATES.firstOrNull { it.id == t.id }
                 MarketSkillRow(
-                    id = it.id, name = it.label, description = it.description,
-                    installed = false, enabled = false, source = "builtin", builtin = true
+                    id = t.id, name = t.label, description = t.description,
+                    installed = false, enabled = false, source = "builtin", builtin = true,
+                    category = tpl?.category,
+                    tags = tpl?.tags.orEmpty()
                 )
             }
             val connected = mcpManager.getConnectedServers().toSet()
@@ -526,6 +602,77 @@ class MarketViewModel @Inject constructor(
             )
             _uiState.update { it.copy(busy = false) }
             refresh()
+        }
+    }
+
+    // ═══ 认知市场：详情 + 分类过滤 + 模糊搜索 ═══
+
+    /**
+     * 打开技能详情对话框：异步从 cs-mem + ToolUsageTracker + CircuitBreaker + TraceRecorder
+     * 投影出 [SkillDetailUiState]（能源/结晶/调用统计/熔断/轨迹）。
+     */
+    fun loadSkillDetail(skillId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(detailSkillId = skillId, detailLoading = true, detailState = null) }
+            val manifest = withContext(Dispatchers.IO) {
+                skillRegistry.getInstalled().firstOrNull { it.manifest.id == skillId }?.manifest
+            }
+            val detail = skillAnalytics.projectSkillAnalytics(skillId, manifest)
+            _uiState.update { it.copy(detailState = detail, detailLoading = false) }
+        }
+    }
+
+    /** 关闭技能详情对话框。 */
+    fun closeSkillDetail() {
+        _uiState.update { it.copy(detailSkillId = null, detailState = null, detailLoading = false) }
+    }
+
+    /** 设置分类过滤（null = 全部分类）。 */
+    fun setCategoryFilter(category: String?) {
+        _uiState.update { it.copy(categoryFilter = category) }
+    }
+
+    /**
+     * 本地技能搜索：对已安装 + 内置模板做 ToolSuggester 模糊匹配。
+     * 输入空时清空建议并显示全部。
+     */
+    fun setSkillQuery(query: String) {
+        val trimmed = query.trim()
+        _uiState.update { it.copy(skillQuery = trimmed) }
+        if (trimmed.isBlank()) {
+            _uiState.update { it.copy(skillSuggestions = emptyList()) }
+            return
+        }
+        viewModelScope.launch {
+            // 候选 id = 已安装 + 内置模板
+            val candidates = withContext(Dispatchers.IO) {
+                val installed = skillRegistry.getInstalled().map { it.manifest.id }
+                val templates = SkillMenuProvider.BUILTIN_TEMPLATES.map { it.id }
+                (installed + templates).distinct()
+            }
+            val suggestions = com.apex.agent.core.tools.ToolSuggester.suggest(
+                trimmed, candidates, maxSuggestions = 5
+            )
+            _uiState.update { it.copy(skillSuggestions = suggestions) }
+        }
+    }
+
+    /**
+     * 对当前已安装技能 + 内置模板应用分类过滤 + 搜索查询。
+     * 返回过滤后的技能列表（UI 渲染用）。
+     */
+    fun filteredSkills(): List<MarketSkillRow> {
+        val state = _uiState.value
+        val all = state.skills + state.skillTemplates
+        return all.filter { row ->
+            // 分类过滤
+            (state.categoryFilter == null || row.category == state.categoryFilter) &&
+            // 搜索查询：精确匹配 id/name/tags/description
+            (state.skillQuery.isBlank() ||
+                row.id.contains(state.skillQuery, ignoreCase = true) ||
+                row.name.contains(state.skillQuery, ignoreCase = true) ||
+                row.description.contains(state.skillQuery, ignoreCase = true) ||
+                row.tags.any { it.contains(state.skillQuery, ignoreCase = true) })
         }
     }
 }

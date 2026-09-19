@@ -2,6 +2,7 @@ package com.apex.agent.ui.screen.market
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +17,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +35,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
 /**
@@ -81,6 +85,7 @@ internal fun BrowsePluginsTab(state: MarketUiState, viewModel: MarketViewModel) 
 
 // ═══ 市场 · Skills ═══
 
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     var showImportDialog by remember { mutableStateOf(false) }
@@ -147,9 +152,14 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
 
-        val templates = state.skillTemplates
-        if (templates.isEmpty()) {
-            MarketEmptyState(hint = "暂无可展示的技能模板")
+        // ── v2 认知市场：搜索框 + 分类过滤 + 模糊建议 ──
+        SkillSearchAndFilter(state, viewModel)
+
+        // 过滤后的技能列表（已安装 + 内置模板，按分类与查询过滤）
+        val filtered = rememberFilteredSkills(state, viewModel)
+
+        if (filtered.isEmpty()) {
+            MarketEmptyState(hint = "未找到匹配的技能（试试调整分类或搜索关键词）")
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -159,18 +169,11 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                 item {
                     MarketHeader(
                         "内置 = App 自带能力（工具已原生注册，无安装步骤，用 /skill:<id> 直接调用）；" +
-                            "其余技能需从 GitHub 或 URL 联网拉取，安装后到「已安装管理」启停。"
+                            "已安装技能点击查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）。"
                     )
                 }
-                items(templates, key = { it.id }) { skill ->
-                    MarketCard(
-                        title = skill.name,
-                        subtitle = skill.id,
-                        description = skill.description,
-                        trailing = {
-                            MarketStatusChip(text = "内置", positive = false)
-                        }
-                    )
+                items(filtered, key = { it.id }) { skill ->
+                    SkillListCard(skill, viewModel)
                 }
             }
         }
@@ -206,6 +209,125 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
             }
         )
     }
+}
+
+/** 搜索框 + 分类过滤 chips + 模糊建议。 */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SkillSearchAndFilter(state: MarketUiState, viewModel: MarketViewModel) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        OutlinedTextField(
+            value = state.skillQuery,
+            onValueChange = { viewModel.setSkillQuery(it) },
+            placeholder = { Text("搜索技能 / 标签 / 描述（支持模糊匹配）", style = MaterialTheme.typography.labelMedium) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium
+        )
+        // 模糊建议
+        if (state.skillSuggestions.isNotEmpty()) {
+            Spacer(modifier = Modifier.size(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    "你是不是要找：",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                state.skillSuggestions.take(3).forEach { suggestion ->
+                    TextButton(
+                        onClick = { viewModel.setSkillQuery(suggestion) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                    ) {
+                        Text(suggestion, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+        // 分类过滤 chips
+        Spacer(modifier = Modifier.size(4.dp))
+        CategoryFilterChips(state.categoryFilter, viewModel)
+    }
+}
+
+/** 分类过滤 chip 行。 */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryFilterChips(
+    selected: String?,
+    viewModel: MarketViewModel
+) {
+    val categories = listOf(
+        "SHELL" to "Shell",
+        "FILE" to "文件",
+        "WEB" to "网络",
+        "BROWSER" to "浏览器",
+        "MEMORY" to "记忆",
+        "SYSTEM" to "系统",
+        "UI" to "UI",
+        "AGENT" to "Agent",
+        "UTILITY" to "工具",
+        "MCP" to "MCP"
+    )
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        FilterChip(
+            selected = selected == null,
+            onClick = { viewModel.setCategoryFilter(null) },
+            label = { Text("全部", style = MaterialTheme.typography.labelSmall) }
+        )
+        categories.forEach { (name, label) ->
+            FilterChip(
+                selected = selected == name,
+                onClick = { viewModel.setCategoryFilter(if (selected == name) null else name) },
+                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+            )
+        }
+    }
+}
+
+/** 技能列表卡片 —— 已安装显示能量条/结晶徽章，未安装（内置）显示内置标记。点击已安装技能打开认知详情。 */
+@Composable
+private fun SkillListCard(skill: MarketSkillRow, viewModel: MarketViewModel) {
+    val cardModifier = if (skill.installed) {
+        Modifier
+            .fillMaxWidth()
+            .clickable { viewModel.loadSkillDetail(skill.id) }
+    } else {
+        Modifier.fillMaxWidth()
+    }
+    Column(modifier = cardModifier) {
+        MarketCard(
+            title = skill.name,
+            subtitle = if (skill.installed) "${skill.id} · v${skill.version}" else skill.id,
+            description = skill.description,
+            trailing = {
+                if (skill.builtin) {
+                    MarketStatusChip(text = "内置", positive = false)
+                } else if (skill.isCrystallized) {
+                    MarketCrystallizedBadge()
+                } else if (skill.isLowEnergy) {
+                    MarketLowEnergyBadge()
+                }
+            }
+        )
+        // 已安装技能：展示能量条
+        if (skill.installed) {
+            Spacer(modifier = Modifier.size(4.dp))
+            MarketEnergyBar(energy = skill.energy)
+        }
+    }
+}
+
+/** 应用分类 + 搜索过滤（纯内存计算，无 IO）。 */
+@Composable
+private fun rememberFilteredSkills(state: MarketUiState, viewModel: MarketViewModel): List<MarketSkillRow> {
+    return viewModel.filteredSkills()
 }
 
 // ═══ 市场 · MCP ═══

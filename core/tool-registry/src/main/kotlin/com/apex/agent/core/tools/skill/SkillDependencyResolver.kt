@@ -102,4 +102,90 @@ object SkillDependencyResolver {
     }
 
     private enum class Color { WHITE, GRAY, BLACK }
+
+    /**
+     * 构建依赖图快照（供市场 UI 可视化）。
+     *
+     * @param skills 待绘制的技能集
+     * @param available 已安装技能 id 集（用于标记缺失依赖）
+     * @return 节点列表 + 边列表 + 缺失依赖集 + 环列表
+     *
+     * 节点深度 = 在拓扑序中的层级（被依赖者深度 0），用于缩进渲染。
+     * 边方向：依赖者 → 被依赖者（A 依赖 B，则边 A→B）。
+     */
+    fun buildDependencyGraph(
+        skills: List<SkillManifest>,
+        available: Set<String> = skills.map { it.id }.toSet()
+    ): DependencyGraph {
+        val byId = skills.associateBy { it.id }
+        val cycles = detectCycles(skills)
+        val cycleIds = cycles.flatten().toSet()
+        val missing = mutableSetOf<String>()
+        val nodes = mutableListOf<DependencyNode>()
+        val edges = mutableListOf<DependencyEdge>()
+
+        // 计算每个节点的拓扑深度（被依赖者在前，深度小）
+        val depthCache = mutableMapOf<String, Int>()
+        fun depth(id: String): Int {
+            depthCache[id]?.let { return it }
+            val deps = byId[id]?.dependencies.orEmpty().filter { it in byId }
+            val d = if (deps.isEmpty()) 0 else (deps.maxOf { depth(it) } + 1)
+            depthCache[id] = d
+            return d
+        }
+
+        skills.forEach { skill ->
+            val isCyclic = skill.id in cycleIds
+            nodes.add(
+                DependencyNode(
+                    id = skill.id,
+                    name = skill.name,
+                    depth = depth(skill.id),
+                    isCyclic = isCyclic,
+                    isInstalled = skill.id in available
+                )
+            )
+            skill.dependencies.forEach { dep ->
+                if (dep !in byId && dep !in available) {
+                    missing.add(dep)
+                } else if (dep in byId) {
+                    edges.add(DependencyEdge(from = skill.id, to = dep))
+                }
+            }
+        }
+
+        return DependencyGraph(
+            nodes = nodes.sortedBy { it.depth },
+            edges = edges,
+            missingDependencies = missing,
+            cycles = cycles
+        )
+    }
+}
+
+/** 依赖图节点。 */
+data class DependencyNode(
+    val id: String,
+    val name: String,
+    /** 拓扑深度（被依赖者在前）。 */
+    val depth: Int,
+    val isCyclic: Boolean,
+    val isInstalled: Boolean
+)
+
+/** 依赖图有向边（依赖者 → 被依赖者）。 */
+data class DependencyEdge(
+    val from: String,
+    val to: String
+)
+
+/** 完整依赖图快照。 */
+data class DependencyGraph(
+    val nodes: List<DependencyNode>,
+    val edges: List<DependencyEdge>,
+    val missingDependencies: Set<String>,
+    val cycles: List<List<String>>
+) {
+    /** 是否存在环或缺失依赖（图不健康时安装会失败）。 */
+    val isHealthy: Boolean get() = cycles.isEmpty() && missingDependencies.isEmpty()
 }

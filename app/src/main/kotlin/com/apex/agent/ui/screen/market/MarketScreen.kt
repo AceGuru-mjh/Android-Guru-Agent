@@ -110,4 +110,18 @@ fun MarketScreen(viewModel: MarketViewModel = hiltViewModel()) {
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }
+
+    // ═══ v2 认知市场：技能详情对话框（cs-mem 能量 + 调用统计 + 熔断 + 轨迹）═══
+    val detailSkillId = state.detailSkillId
+    if (detailSkillId != null) {
+        val skillRow = state.skills.firstOrNull { it.id == detailSkillId }
+        val skillName = skillRow?.name ?: detailSkillId
+        MarketSkillDetailDialog(
+            skillId = detailSkillId,
+            skillName = skillName,
+            detailState = state.detailState,
+            loading = state.detailLoading,
+            onDismiss = viewModel::closeSkillDetail
+        )
+    }
 }

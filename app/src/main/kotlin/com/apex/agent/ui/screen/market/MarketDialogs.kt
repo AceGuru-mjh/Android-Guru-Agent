@@ -2,8 +2,15 @@ package com.apex.agent.ui.screen.market
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -11,6 +18,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -18,7 +26,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -86,7 +97,7 @@ fun AddMcpDialog(
                 )
 
                 Text("形态", style = MaterialTheme.typography.labelMedium)
-                androidx.compose.foundation.layout.Row(
+                Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     McpTransport.entries.forEach { t ->
@@ -280,7 +291,7 @@ fun AddConnectorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text("类型", style = MaterialTheme.typography.labelMedium)
-                androidx.compose.foundation.layout.Row(
+                Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf("api", "ssh", "database", "storage").forEach { t ->
@@ -440,3 +451,257 @@ private val REPO_INPUT_PATTERN = Regex("[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 
 /** JSON 对象起始字符（unicode 转义写法，避免字面量大括号干扰 CI 括号检查）。 */
 private const val JSON_OBJECT_OPEN = "\u007B"
+
+// ═══ v2 认知市场：依赖图可视化 + 干运行预览对话框 ═══
+
+/**
+ * 依赖图对话框 —— 拓扑排序展示技能依赖关系（被依赖者在前）。
+ *
+ * 用 [SkillDependencyResolver.buildDependencyGraph] 计算节点深度 + 边 + 环 + 缺失依赖。
+ * 节点按深度缩进渲染，环节点标红，缺失依赖标黄。
+ *
+ * @param skills 待展示的技能清单列表
+ * @param available 已安装技能 id 集（用于标记缺失/已装）
+ * @param onDismiss 关闭回调
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun SkillDependencyGraphDialog(
+    skills: List<com.apex.agent.core.tools.skill.SkillManifest>,
+    available: Set<String>,
+    onDismiss: () -> Unit
+) {
+    val graph = remember(skills, available) {
+        com.apex.agent.core.tools.skill.SkillDependencyResolver
+            .buildDependencyGraph(skills, available)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = {
+            Column {
+                Text("依赖图", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${graph.nodes.size} 节点 · ${graph.edges.size} 边" +
+                        if (graph.isHealthy) " · 健康" else " · 不健康",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (graph.isHealthy) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // 环警告
+                if (graph.cycles.isNotEmpty()) {
+                    Text(
+                        "⚠ 检测到 ${graph.cycles.size} 个循环依赖：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    graph.cycles.forEach { cycle ->
+                        Text(
+                            "  " + cycle.joinToString(" → "),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                // 缺失依赖
+                if (graph.missingDependencies.isNotEmpty()) {
+                    Text(
+                        "⚠ 缺失依赖 ${graph.missingDependencies.size} 个：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    graph.missingDependencies.forEach { dep ->
+                        Text(
+                            "  • $dep",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                // 拓扑节点列表
+                Text(
+                    "拓扑序（被依赖者在前）：",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                graph.nodes.forEach { node ->
+                    val indent = "  ".repeat(node.depth)
+                    val marker = when {
+                        node.isCyclic -> "⟳"
+                        node.isInstalled -> "✓"
+                        else -> "○"
+                    }
+                    val color = when {
+                        node.isCyclic -> MaterialTheme.colorScheme.error
+                        node.isInstalled -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Text(
+                        "$indent$marker ${node.name} (${node.id})",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = color
+                    )
+                }
+            }
+        }
+    )
+}
+
+/**
+ * 干运行预览对话框 —— 安装前预览解析后的 manifest 摘要 + 缺失依赖 + 工具数 + 权限要求。
+ *
+ * @param preview [MarketInstallManager.dryRunInstall] 返回的预览数据
+ * @param onConfirm 确认安装回调
+ * @param onDismiss 关闭回调
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun ManifestDryRunDialog(
+    preview: com.apex.agent.marketplace.MarketInstallManager.ManifestPreview,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = preview.canInstall
+            ) { Text("确认安装") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = {
+            Column {
+                Text(preview.name, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "${preview.id} · v${preview.version}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // 描述
+                if (preview.description.isNotBlank()) {
+                    Text(
+                        preview.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                // 元数据网格
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    PreviewChip("作者", preview.author.ifBlank { "—" })
+                    PreviewChip("许可证", preview.license)
+                    PreviewChip("信任", preview.trustLevel)
+                    PreviewChip("分类", preview.category ?: "—")
+                    PreviewChip("工具数", preview.toolCount.toString())
+                    if (preview.hasPromptInjection) {
+                        PreviewChip("Prompt", "有注入")
+                    }
+                    PreviewChip("权限", preview.privilegeLevel)
+                }
+                // 标签
+                if (preview.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "标签：" + preview.tags.joinToString(" ") { "#$it" },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // 缺失依赖警告
+                if (preview.missingDependencies.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "⚠ 缺失依赖 ${preview.missingDependencies.size} 个：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    preview.missingDependencies.forEach { dep ->
+                        Text(
+                            "  • $dep",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "安装将被拒绝 —— 请先安装上述依赖。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // 权限要求
+                if (preview.requirements.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "权限/工具要求：",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        preview.requirements.joinToString(", "),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+    )
+}
+
+/** 预览 chip —— 键值小标签。 */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PreviewChip(label: String, value: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}

@@ -69,8 +69,8 @@ jobs:
           # T83：Ubuntu rootfs 随 APK 内置（应用内下载安装已移除，基础环境离线可用）。
           # 构建期拉取 → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
           # 失败即阻断构建 —— 绝不打包指纹不符的 rootfs。
-          # T84：tag 构建仍是官方 ubuntu-base 骨架；完整 rootfs 产物链
-          #（rootfs.yml → 托管 Release → 三处真值表钉值）就绪后切源。
+          # T84 已切完整环境档（run #10 指纹，PR #131 钉值）：tag 构建产出
+          # arm64 ~316MB / universal ~903MB（v1.3.0 实测）。
           scripts/fetch_rootfs.sh
 
       - name: Prewarm dependencies (retry on JitPack flakiness)

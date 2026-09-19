@@ -118,13 +118,13 @@ object SlashCommandRouter {
             sourceName = command.id
         )
         is SlashCommand.Plugin -> SlashCommandRoute(
-            // 诚实化：PluginManager.registerPluginTools 仍是 TODO（AIDL 接口未定型），
-            // ToolRegistry 中不存在 plugin 工具 —— 原文案会让模型寻找不存在的工具并
-            // 可能虚构执行结果。改为如实告知，禁止伪造。
-            systemMessage = "📦 插件: ${command.id}（Agent 工具桥接建设中）",
+            // 插件工具桥已激活（IApexPluginHost 宿主桥 + PluginManager 真实注册）：
+            // 插件加载后其工具已注册进 ToolRegistry，模型可直接调用。
+            // 未加载（loadedPlugins 不含该包）时如实引导去市场页安装/启用。
+            systemMessage = "📦 插件: ${command.id}（工具已注册进 Agent 工具表）",
             agentPrompt = command.buildAgentPrompt(
-                verb = "插件 ${command.id} 已加载并验证连通，但 Agent 侧插件工具桥（AIDL → ToolRegistry）尚未接线 —— 请如实告知用户当前版本暂不能执行插件工具，不要虚构执行结果",
-                toolHint = "插件运行时"
+                verb = "插件 ${command.id} 已加载，其工具已注册进 ToolRegistry —— 请直接调用对应的插件工具完成任务（如 browser_* 网页自动化工具）。若工具不存在，提示用户去 市场 → 插件 页面安装/启用该插件后重试",
+                toolHint = "插件工具（browser_* 等）"
             ),
             routeKind = "plugin",
             sourceName = command.id

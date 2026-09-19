@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 不引用 @mipmap 图标：插件 APK 无 res 资源（plugin-workflow 的
+         @mipmap/ic_launcher 是悬空引用，模块无 res 目录时无法通过 AAPT 链接），
+         缺省走系统应用图标即可安装。 -->
+    <application
+        android:label="Apex Web Automation Plugin">
+
+        <!-- 插件服务：主APK通过此Service连接插件（exported：宿主是独立 APK，必须跨进程绑定） -->
+        <service
+            android:name=".WebAutomationPluginService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.apex.agent.plugin.PLUGIN" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

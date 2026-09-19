@@ -143,6 +143,16 @@ class RealVirtualTerminal(
     fun drainClipboardRequests(): List<String> = core.drainClipboardRequests()
 
     /**
+     * T85：宿主应答回写通道（DA1/DA2/DSR-CPR）—— 透传给 TerminalCore。
+     * SessionManagerImpl 装配时接线为 nativeWrite；应答为终端自生字节，
+     * 非用户/Agent 输入，不过策略门禁。
+     */
+    @Volatile
+    var responseSink: ((ByteArray) -> Unit)?
+        get() = core.responseSink
+        set(value) { core.responseSink = value }
+
+    /**
      * Last visible (cursor) line as plain text — for InputWaiting heuristic (Spec §29).
      * The cursor row of the rendered screen, trimmed.
      */

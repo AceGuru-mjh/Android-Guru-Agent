@@ -53,6 +53,15 @@ object KeySequenceEncoder {
             '_' -> 0x1F
             ' ' -> 0x00
             '?' -> 0x7F
+            // T85（Termux 对齐 §1.15）：Ctrl+数字 —— xterm 映射
+            //   ^2=NUL ^3=ESC ^4=FS ^5=GS ^6=RS ^7=US ^8=DEL
+            '2' -> 0x00
+            '3' -> 0x1B
+            '4' -> 0x1C
+            '5' -> 0x1D
+            '6' -> 0x1E
+            '7' -> 0x1F
+            '8' -> 0x7F
             else -> return null
         }
         return byteArrayOf(b.toByte())

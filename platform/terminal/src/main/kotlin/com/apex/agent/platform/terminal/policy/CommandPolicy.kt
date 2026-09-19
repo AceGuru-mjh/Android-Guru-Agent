@@ -93,7 +93,7 @@ object CommandParser {
      * `ls "my file.txt"` → text="ls" hadQuoting=false（引号在后段不影响执行名）。
      * 未闭合引号按词尾处理（hadQuoting=true，保守路径判 complex）。
      */
-    internal fun extractFirstToken(s: String): FirstToken {
+    fun extractFirstToken(s: String): FirstToken {
         val sb = StringBuilder()
         var i = 0
         var quoting = false
@@ -121,7 +121,7 @@ object CommandParser {
     }
 
     /** [extractFirstToken] 的结果：去引号后的文本 + 是否出现过引号/转义。 */
-    internal data class FirstToken(val text: String, val hadQuoting: Boolean)
+    data class FirstToken(val text: String, val hadQuoting: Boolean)
 
     /**
      * T85：把一行命令按 shell 操作符切段（引号内不切）。
@@ -129,7 +129,7 @@ object CommandParser {
      * `echo a && rm -rf /` → ["echo a ", " rm -rf /"]。
      * 引号内的 `|`/`;` 不是操作符：`grep "a|b" file` 保持单段。
      */
-    internal fun splitSegments(line: String): List<String> {
+    fun splitSegments(line: String): List<String> {
         val out = mutableListOf<String>()
         val sb = StringBuilder()
         var inQuote: Char? = null

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +58,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -118,6 +120,7 @@ fun TerminalRenderer(
         onText = viewModel::sendInput,
         onKey = viewModel::sendKey,
         onControl = viewModel::sendControlChar,
+        onFontSize = viewModel::setFontSize,
         onPaste = viewModel::pasteText,
         onResize = viewModel::resizeTerminal,
         // 响铃（BEL）反馈：对齐 Termux/ConnectBot —— 补全失败、命令报错时给一下振动
@@ -149,8 +152,21 @@ private object TerminalTheme {
     val toolbarKey = Color(0xFF232A35)
 }
 
-/** cell 级选择区间（行/列；列区间左闭右开，含 from 至 to 前一列）。 */
-private data class SelRange(val startRow: Int, val startCol: Int, val endRow: Int, val endCol: Int)
+/**
+ * T85（M-2）：行稳定 id —— scrollbackBase - scrollback.size + 列表下标。
+ * scrollback 淘汰/增长时 id 不变，选区/光标定位不再随内容位移错位。
+ */
+private fun rowIdFor(index: Int, scrollbackBase: Long, scrollbackCount: Int): Long =
+    scrollbackBase - scrollbackCount + index
+
+/** 行 id → 当前列表下标（不在范围内的行已被淘汰/不存在 → null）。 */
+private fun indexForRow(id: Long, scrollbackBase: Long, scrollbackCount: Int, totalRows: Int): Int? {
+    val idx = (id - scrollbackBase + scrollbackCount).toInt()
+    return if (idx in 0 until totalRows) idx else null
+}
+
+/** cell 级选择区间（行 id/列；列区间左闭右开，含 from 至 to 前一列）。 */
+private data class SelRange(val startRowId: Long, val startCol: Int, val endRowId: Long, val endCol: Int)
 
 @Composable
 fun TerminalGrid(
@@ -165,6 +181,8 @@ fun TerminalGrid(
     onResize: (rows: Int, cols: Int) -> Unit,
     /** 响铃（BEL 0x07）回调 —— 序号变化即触发，宿主决定振动/提示/忽略。 */
     onBell: () -> Unit = {},
+    /** T85：双指捏合缩放字号（钳制与持久化在 VM）。 */
+    onFontSize: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -172,11 +190,18 @@ fun TerminalGrid(
     val keyboardController = LocalSoftwareKeyboardController.current
 
     // ── 字体度量（monospace）：探测字符宽 + 1.25×行高 ──
+    // T85（H2）：同时探测真实宽字符 advance —— VT 层 CJK 占 2 列，但 Android
+    // 等宽字体的 CJK 字形 advance ≠ 2×ASCII advance（JetBrains Mono 类字体
+    // CJK ≈ 1.67×）。光标/选区/点击定位一律用实测值，含中文的行不再向右漂移。
     val baseStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSize.sp)
     val textMeasurer = rememberTextMeasurer()
     val charWidthPx = remember(fontSize) {
         val probe = textMeasurer.measure("0".repeat(10), baseStyle)
         (probe.size.width / 10f).coerceAtLeast(1f)
+    }
+    val wideCharWidthPx = remember(fontSize) {
+        val probe = textMeasurer.measure("你你你你你", baseStyle)
+        (probe.size.width / 5f).coerceAtLeast(charWidthPx * 1.2f)
     }
     val lineHeightSp = remember(fontSize) { (fontSize * 1.25f).sp }
     val lineHeightPx = with(density) { lineHeightSp.toPx() }
@@ -193,6 +218,9 @@ fun TerminalGrid(
     // ── 滚动：跟随输出吸底；用户上滚即脱离 ──
     val listState = rememberLazyListState()
     var follow by remember { mutableStateOf(true) }
+    // T85（M-2）：行稳定 key 基准 —— scrollbackBase 单调递增，行 id 不随淘汰位移。
+    val scrollbackBase = render?.scrollbackBase ?: 0L
+    val scrollbackCount = render?.scrollback?.size ?: 0
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canForward) ->
@@ -204,19 +232,23 @@ fun TerminalGrid(
         if (follow && totalRows > 0) listState.scrollToItem(totalRows - 1)
     }
 
-    // ── 选择状态（cell 级；anchor=起点，head=终点）──
-    var selectionAnchor by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var selectionHead by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // ── 选择状态（cell 级；anchor=起点，head=终点；T85：行用稳定 id）──
+    var selectionAnchor by remember { mutableStateOf<Pair<Long, Int>?>(null) }
+    var selectionHead by remember { mutableStateOf<Pair<Long, Int>?>(null) }
     val selectionActive = selectionAnchor != null && selectionHead != null
 
-    // ── CTRL 锁存（下一次字母输入转控制码）──
+    // ── CTRL / ALT 锁存（下一次字母输入转控制码 / ESC 前缀）──
     var ctrlLatched by remember { mutableStateOf(false) }
+    var altLatched by remember { mutableStateOf(false) }
 
     // ── IME 隐藏桥 + 焦点 ──
     val focusRequester = remember { FocusRequester() }
     var imeBuffer by remember { mutableStateOf(TextFieldValue("")) }
     /** 是否正处于 IME 组合态（拼音/日语/联想候选未上屏）。 */
     var composing by remember { mutableStateOf(false) }
+    /** T85（M1）：是否已自动聚焦过 —— 只在首次进入终端时拉起键盘，切换会话/
+     *  快照重建（render null→非 null）不再把用户手动收起的键盘强行弹回。 */
+    var focusedOnce by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     /**
@@ -235,15 +267,19 @@ fun TerminalGrid(
     // P0 补齐：requestFocus() 在部分设备/输入法上不会拉起 IME（本文件 showKeyboard
     // 的 KDoc 已记载此事实）—— 进入终端时同样显式补一次 show()，否则用户看到的是
     // "$ 提示符 + 一大片空白、键盘不弹"的死屏误象。
+    // T85（M1）：旧 key 是 `render != null`，切会话时快照先置 null 再恢复，
+    // 每次切换都会重新弹键盘与用户"打架"。改为 focusedOnce 一次性门槛。
     LaunchedEffect(render != null) {
-        if (render != null) {
+        if (render != null && !focusedOnce) {
+            focusedOnce = true
             runCatching { focusRequester.requestFocus() }
             keyboardController?.show()
         }
     }
 
-    // 指针 → 行列（滚动偏移 + 行内 cell 宽度步进 —— CJK 对齐）
-    fun cellAt(offset: Offset): Pair<Int, Int>? {
+    // 指针 → 行列（滚动偏移 + 行内 cell 宽度步进 —— CJK 用实测宽字符 advance）。
+    // 返回 (行 id, 列) —— 稳定 id 让选区不随 scrollback 位移错位（M-2）。
+    fun cellAt(offset: Offset): Pair<Long, Int>? {
         val rows = rowsState.value
         if (rows.isEmpty()) return null
         val contentY = offset.y + listState.firstVisibleItemIndex * lineHeightPx +
@@ -253,10 +289,10 @@ fun TerminalGrid(
         var px = 0f
         var col = 0
         while (col < cells.size && px < offset.x) {
-            px += if (cells[col].flags and RenderCell.FLAG_WIDE != 0) charWidthPx * 2 else charWidthPx
+            px += if (cells[col].flags and RenderCell.FLAG_WIDE != 0) wideCharWidthPx else charWidthPx
             col++
         }
-        return row to col
+        return rowIdFor(row, scrollbackBase, scrollbackCount) to col
     }
 
     /**
@@ -264,11 +300,12 @@ fun TerminalGrid(
      *
      * 词内字符 = 字母数字 + 路径/标识符常见符号（`-_. /:`），因此双击能一次选中
      * `/sdcard/Download/a b.txt` 里的一段路径，而不是单个字符。
-     * 返回 (anchor, head)，列区间左闭右开。
+     * 返回 (anchor, head)，列区间左闭右开；行为稳定 id。
      */
-    fun wordRangeAt(row: Int, col: Int): Pair<Pair<Int, Int>, Pair<Int, Int>>? {
+    fun wordRangeAt(rowId: Long, col: Int): Pair<Pair<Long, Int>, Pair<Long, Int>>? {
         val rows = rowsState.value
-        val cells = rows.getOrNull(row) ?: return null
+        val r = indexForRow(rowId, scrollbackBase, scrollbackCount, rows.size) ?: return null
+        val cells = rows.getOrNull(r) ?: return null
         if (col < 0 || col >= cells.size) return null
 
         fun isWordChar(text: String): Boolean {
@@ -282,7 +319,7 @@ fun TerminalGrid(
         var end = col
         while (end < cells.size && isWordChar(cells[end].text)) end++
         if (start >= end) return null
-        return (row to start) to (row to end)
+        return (rowId to start) to (rowId to end)
     }
 
     fun selRange(): SelRange? {
@@ -299,12 +336,17 @@ fun TerminalGrid(
         val range = selRange() ?: return ""
         val rows = rowsState.value
         val builder = StringBuilder()
-        for (r in range.startRow..range.endRow) {
-            val cells = rows.getOrNull(r) ?: continue
-            val from = if (r == range.startRow) range.startCol else 0
-            val to = if (r == range.endRow) range.endCol else cells.size
-            for (c in from until minOf(to, cells.size)) builder.append(cells[c].text)
-            if (r != range.endRow) builder.append('\n')
+        var id = range.startRowId
+        while (id <= range.endRowId) {
+            val r = indexForRow(id, scrollbackBase, scrollbackCount, rows.size)
+            if (r != null) {
+                val cells = rows[r]
+                val from = if (id == range.startRowId) range.startCol else 0
+                val to = if (id == range.endRowId) range.endCol else cells.size
+                for (c in from until minOf(to, cells.size)) builder.append(cells[c].text)
+                if (id != range.endRowId) builder.append('\n')
+            }
+            id++
         }
         return builder.toString()
     }
@@ -313,6 +355,23 @@ fun TerminalGrid(
     fun handleHardwareKey(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         val kc = event.nativeKeyEvent.keyCode
+        // T85（Termux 对齐）：Ctrl+Shift+C/V = 复制选区/粘贴 —— 物理键盘用户肌肉记忆。
+        if (event.isCtrlPressed && event.isShiftPressed) {
+            when (kc) {
+                android.view.KeyEvent.KEYCODE_C -> {
+                    val text = selectedText()
+                    if (text.isNotEmpty()) {
+                        clipboard.setText(AnnotatedString(text))
+                        selectionAnchor = null; selectionHead = null
+                    }
+                    return true
+                }
+                android.view.KeyEvent.KEYCODE_V -> {
+                    clipboard.getText()?.text?.let { onPaste(it) }
+                    return true
+                }
+            }
+        }
         if (event.isCtrlPressed && kc in android.view.KeyEvent.KEYCODE_A..android.view.KeyEvent.KEYCODE_Z) {
             onControl('a' + (kc - android.view.KeyEvent.KEYCODE_A))
             return true
@@ -359,6 +418,16 @@ fun TerminalGrid(
                 .fillMaxWidth()
                 .onSizeChanged { viewSize = it }
                 .onPreviewKeyEvent { handleHardwareKey(it) }
+                // T85（Termux 对齐）：双指捏合缩放字号 —— 手势只在多指时触发，
+                // 与单击/长按/拖选不冲突；字号经 onFontSize 回调走 VM 钳制与持久化。
+                .pointerInput(fontSize) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f && zoom > 0.3f && zoom < 3f) {
+                            val next = (fontSize * zoom)
+                            onFontSize(next.toInt().coerceIn(8, 24))
+                        }
+                    }
+                }
                 // 点击整个终端区域（含"终端未启动"占位）都拉起输入法 —— 旧实现只挂在
                 // LazyColumn 上，会话未启动 / 无输出时点哪都没反应。
                 .pointerInput(Unit) {
@@ -381,13 +450,23 @@ fun TerminalGrid(
                 }
         ) {
             if (render == null || totalRows == 0) {
+                // T85：空状态从孤零零一句"终端未启动"升级为可行动引导。
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "终端未启动",
-                        color = Color(0xFF5A6270),
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "终端未启动",
+                            color = Color(0xFF5A6270),
+                            fontSize = 13.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            "点击此处唤起键盘，或右上角 ＋ 新建会话",
+                            color = Color(0xFF424A57),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             } else {
                 // ── 输出 grid（只组合可视行；tap=聚焦/清除选择；长按起选+拖动扩选）──
@@ -402,13 +481,28 @@ fun TerminalGrid(
                                     cellAt(offset)?.let { selectionAnchor = it; selectionHead = it }
                                 },
                                 onDrag = { change, _ ->
+                                    // T85（M-7）：拖到视口上/下边缘时自动滚动列表
+                                    //（旧实现选择范围被锁死在当前可视区，Termux 体验缺口）。
+                                    val h = size.height.toFloat()
+                                    val edge = EDGE_SCROLL_PX
+                                    when {
+                                        change.position.y < edge && listState.canScrollBackward ->
+                                            scope.launch { listState.scrollBy(-lineHeightPx) }
+                                        change.position.y > h - edge && listState.canScrollForward ->
+                                            scope.launch { listState.scrollBy(lineHeightPx) }
+                                    }
                                     cellAt(change.position)?.let { selectionHead = it }
                                 },
                                 onDragEnd = { /* 保留选择直至点击/取消 */ }
                             )
                         }
                 ) {
-                    items(totalRows) { index ->
+                    // T85（M-2）：行稳定 key —— scrollback 淘汰/增长时 LazyColumn
+                    // 按行 id 复用节点，阅读历史不再整体跳动。
+                    items(
+                        count = totalRows,
+                        key = { index -> rowIdFor(index, scrollbackBase, scrollbackCount) }
+                    ) { index ->
                         TerminalRow(
                             cells = allRows[index],
                             baseStyle = baseStyle,
@@ -418,23 +512,27 @@ fun TerminalGrid(
                     }
                 }
 
-                // ── 选择高亮（可视行 → 视口坐标）──
+                // ── 选择高亮（可视行 → 视口坐标；按行 id 对齐）──
                 if (selectionActive) {
                     SelectionOverlay(
                         listState = listState,
                         rowsState = rowsState,
                         selRange = selRange(),
+                        scrollbackBase = scrollbackBase,
+                        scrollbackCount = scrollbackCount,
                         charWidthPx = charWidthPx,
+                        wideCharWidthPx = wideCharWidthPx,
                         lineHeightPx = lineHeightPx
                     )
                 }
 
-                // ── 光标（闪烁 beam；x 按行内 cell 宽度步进）──
+                // ── 光标（闪烁；形状由 DECSCUSR 驱动；x 按实测宽字符 advance）──
                 if (render.cursorVisible && !selectionActive) {
                     CursorOverlay(
                         listState = listState,
                         render = render,
                         charWidthPx = charWidthPx,
+                        wideCharWidthPx = wideCharWidthPx,
                         lineHeightPx = lineHeightPx
                     )
                 }
@@ -485,16 +583,23 @@ fun TerminalGrid(
             BasicTextField(
                 value = imeBuffer,
                 onValueChange = { new ->
-                    /** 下发一段文本到 PTY（CTRL 锁存时单字母转控制码）。 */
+                    /** 下发一段文本到 PTY（CTRL/ALT 锁存时单字母转控制码/ESC 前缀）。 */
                     fun deliver(chunk: String) {
                         // 换行归一：终端的"提交"是 \r（Enter 键语义），不是 \n
                         val text = chunk.replace('\n', '\r')
                         if (text.isEmpty()) return
-                        if (ctrlLatched && text.length == 1 && text[0].isLetter()) {
-                            onControl(text[0])
-                            ctrlLatched = false
-                        } else {
-                            onText(text)
+                        val single = text.length == 1
+                        when {
+                            // CTRL 锁存：单字母 → 控制码（^A..^Z）
+                            ctrlLatched && single && text[0].isLetter() -> {
+                                onControl(text[0]); ctrlLatched = false
+                            }
+                            // T85（Termux 对齐）：ALT 锁存：单字母 → ESC+字母
+                            //（Meta 前缀，bash 里 Alt+f/b 按词跳转、Alt+. 取上参数）
+                            altLatched && single -> {
+                                onText("\u001B$text"); altLatched = false
+                            }
+                            else -> onText(text)
                         }
                     }
 
@@ -542,9 +647,15 @@ fun TerminalGrid(
         if (showKeybar) {
             KeyToolbar(
                 ctrlActive = ctrlLatched,
+                altActive = altLatched,
                 onCtrlToggle = { ctrlLatched = !ctrlLatched },
+                onAltToggle = {
+                    altLatched = !altLatched
+                    if (altLatched) ctrlLatched = false  // 互斥：一次只锁一个修饰键
+                },
                 onKey = onKey,
                 onControl = onControl,
+                onText = onText,
                 onShowKeyboard = ::showKeyboard,
                 onPaste = {
                     clipboard.getText()?.text?.let { onPaste(it) }
@@ -601,7 +712,8 @@ private fun buildRowAnnotated(cells: List<RenderCell>, monochrome: Boolean): Ann
 private fun sameStyle(a: RenderCell, b: RenderCell): Boolean =
     a.fg == b.fg && a.bg == b.bg && a.flags == b.flags
 
-/** RenderCell → SpanStyle；monochrome 忽略颜色（保留字形/下划线语义）。 */
+/** RenderCell → SpanStyle；monochrome 忽略颜色但**保留反显**（T85/L2：
+ *  旧实现单色模式下 vim 状态栏/可视选区完全不可见）。 */
 private fun spanStyleFor(cell: RenderCell, monochrome: Boolean): SpanStyle? {
     val inverse = cell.flags and RenderCell.FLAG_INVERSE != 0
     val bold = cell.flags and RenderCell.FLAG_BOLD != 0
@@ -624,6 +736,10 @@ private fun spanStyleFor(cell: RenderCell, monochrome: Boolean): SpanStyle? {
             bg = rawBg
         }
         if (dim && fg != null) fg = fg.copy(alpha = 0.55f)
+    } else if (inverse) {
+        // 单色模式反显：用主题底/前景互换保持可辨识（无彩色但不丢语义）。
+        fg = TerminalTheme.background
+        bg = TerminalTheme.foreground
     }
     if (fg == null && bg == null && !bold && !italic && !underline && !strike) return null
     return SpanStyle(
@@ -642,22 +758,27 @@ private fun spanStyleFor(cell: RenderCell, monochrome: Boolean): SpanStyle? {
 
 // ═══════════════════════ 光标 / 选择 overlay ═══════════════════════
 
+/** 拖选边缘自动滚动的触发带宽度（px）。 */
+private val EDGE_SCROLL_PX = 56f
+
 @Composable
 private fun CursorOverlay(
     listState: LazyListState,
     render: TerminalRenderSnapshot,
     charWidthPx: Float,
+    wideCharWidthPx: Float,
     lineHeightPx: Float
 ) {
     val itemIndex = render.scrollback.size + render.cursorRow
     val visible = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
         ?: return
-    // x：行内按 cell 宽度步进（宽字符 2 列），越界尾部按 1 列步进
+    // x：行内按 cell 实测 advance 步进（T85/H2：CJK 用实测宽字符 advance，
+    // 旧 2×ASCII 步进在含中文的行越靠右偏差越大）。
     val rowCells = render.lines.getOrNull(render.cursorRow) ?: emptyList()
     var x = 0f
     var col = 0
     while (col < render.cursorCol && col < rowCells.size) {
-        x += if (rowCells[col].flags and RenderCell.FLAG_WIDE != 0) charWidthPx * 2 else charWidthPx
+        x += if (rowCells[col].flags and RenderCell.FLAG_WIDE != 0) wideCharWidthPx else charWidthPx
         col++
     }
     if (render.cursorCol > rowCells.size) x += (render.cursorCol - rowCells.size) * charWidthPx
@@ -668,11 +789,29 @@ private fun CursorOverlay(
         animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
         label = "cursor-alpha"
     )
+    val density = LocalDensity.current
+    // T85：光标形状由 DECSCUSR 驱动（vim 插入/普通模式可区分）——
+    // BLOCK 块状 / UNDERLINE 下划线 / BAR 竖杠（默认，本项目传统形状）。
     Box(
         modifier = Modifier
             .offset { IntOffset(x.roundToInt(), visible.offset) }
-            .width(2.dp)
-            .height(with(LocalDensity.current) { (lineHeightPx * 0.86f).toDp() })
+            .then(with(density) {
+                when (render.cursorStyle) {
+                    com.apex.agent.terminalemulator.CursorStyle.BLOCK ->
+                        Modifier
+                            .width(charWidthPx.toDp())
+                            .height((lineHeightPx * 0.86f).toDp())
+                    com.apex.agent.terminalemulator.CursorStyle.UNDERLINE ->
+                        Modifier
+                            .width(charWidthPx.toDp())
+                            .height((lineHeightPx * 0.14f).toDp())
+                            .offset(y = (lineHeightPx * 0.72f).toDp())
+                    com.apex.agent.terminalemulator.CursorStyle.BAR ->
+                        Modifier
+                            .width(2.dp)
+                            .height((lineHeightPx * 0.86f).toDp())
+                }
+            })
             .background(TerminalTheme.cursor.copy(alpha = 0.9f * alpha))
     )
 }
@@ -682,20 +821,24 @@ private fun SelectionOverlay(
     listState: LazyListState,
     rowsState: State<List<List<RenderCell>>>,
     selRange: SelRange?,
+    scrollbackBase: Long,
+    scrollbackCount: Int,
     charWidthPx: Float,
+    wideCharWidthPx: Float,
     lineHeightPx: Float
 ) {
     val range = selRange ?: return
     Canvas(modifier = Modifier.fillMaxSize()) {
         for (info in listState.layoutInfo.visibleItemsInfo) {
-            val r = info.index
-            if (r < range.startRow || r > range.endRow) continue
-            val cells = rowsState.value.getOrNull(r) ?: continue
-            val from = if (r == range.startRow) range.startCol else 0
-            val to = if (r == range.endRow) range.endCol else cells.size
+            // T85（M-2）：可视行按稳定 id 对齐选区（scrollback 位移不再错位）。
+            val rowId = rowIdFor(info.index, scrollbackBase, scrollbackCount)
+            if (rowId < range.startRowId || rowId > range.endRowId) continue
+            val cells = rowsState.value.getOrNull(info.index) ?: continue
+            val from = if (rowId == range.startRowId) range.startCol else 0
+            val to = if (rowId == range.endRowId) range.endCol else cells.size
             if (to <= from) continue
-            val x0 = columnX(cells, from, charWidthPx)
-            val x1 = columnX(cells, to, charWidthPx)
+            val x0 = columnX(cells, from, charWidthPx, wideCharWidthPx)
+            val x1 = columnX(cells, to, charWidthPx, wideCharWidthPx)
             drawRect(
                 color = TerminalTheme.selection,
                 topLeft = Offset(x0, info.offset.toFloat()),
@@ -705,12 +848,12 @@ private fun SelectionOverlay(
     }
 }
 
-/** 行内列号 → 像素 x（宽字符 2 列步进；越界按 1 列）。 */
-private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float): Float {
+/** 行内列号 → 像素 x（T85：宽字符用实测 advance；越界按 1 列）。 */
+private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float, wideCharWidthPx: Float): Float {
     var x = 0f
     var i = 0
     while (i < col && i < cells.size) {
-        x += if (cells[i].flags and RenderCell.FLAG_WIDE != 0) charWidthPx * 2 else charWidthPx
+        x += if (cells[i].flags and RenderCell.FLAG_WIDE != 0) wideCharWidthPx else charWidthPx
         i++
     }
     if (col > cells.size) x += (col - cells.size) * charWidthPx
@@ -722,9 +865,12 @@ private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float): Floa
 @Composable
 private fun KeyToolbar(
     ctrlActive: Boolean,
+    altActive: Boolean,
     onCtrlToggle: () -> Unit,
+    onAltToggle: () -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
+    onText: (String) -> Unit,
     onShowKeyboard: () -> Unit,
     onPaste: () -> Unit
 ) {
@@ -749,6 +895,13 @@ private fun KeyToolbar(
             highlighted = ctrlActive,
             onClick = onCtrlToggle
         )
+        // T85（Termux 对齐）：ALT 锁存 —— 下一个字母发 ESC+字母（Meta 前缀），
+        // bash readline 里 Alt+f/b 按词跳转、Alt+. 取上一参数、Alt+d 删词。
+        ToolbarKey(
+            label = "ALT",
+            highlighted = altActive,
+            onClick = onAltToggle
+        )
         ToolbarKey("↑") { onKey(TerminalKey.ARROW_UP) }
         ToolbarKey("↓") { onKey(TerminalKey.ARROW_DOWN) }
         ToolbarKey("←") { onKey(TerminalKey.ARROW_LEFT) }
@@ -762,6 +915,13 @@ private fun KeyToolbar(
         ToolbarKey("^Z") { onControl('z') }
         ToolbarKey("^L") { onControl('l') }
         ToolbarKey("^U") { onControl('u') }   // 清空当前行（readline 惯例）
+        // T85（Termux 对齐）：高频符号键 —— 触屏输入法切符号页成本高，
+        // 管道/路径/转义是命令行的呼吸（Termux 默认 extra keys 同款）。
+        ToolbarKey("-") { onText("-") }
+        ToolbarKey("/") { onText("/") }
+        ToolbarKey("\\") { onText("\\") }
+        ToolbarKey("|") { onText("|") }
+        ToolbarKey("~") { onText("~") }
         ToolbarKey("粘贴") { onPaste() }
     }
 }

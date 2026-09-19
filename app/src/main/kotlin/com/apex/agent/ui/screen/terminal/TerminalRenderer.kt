@@ -57,6 +57,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
@@ -139,14 +140,17 @@ private fun vibrateOnce(context: android.content.Context) {
     )
 }
 
-/** 终端主题（深色底自含调色 —— 终端内容不受 app 主题影响）。 */
+/** 终端主题（深色底自含调色 —— 终端内容不受 app 主题影响；T85 对齐 ConsoleTheme
+ * 的 mint 强调色，整页视觉连续：页 chrome 0xFF0C1210 / 内容区 0xFF0E1411）。 */
 private object TerminalTheme {
-    val background = Color(0xFF14161A)
-    val foreground = Color(0xFFD4D7DE)
-    val selection = Color(0x664C8DFF)
-    val cursor = Color(0xFF9CC3FF)
-    val toolbarBg = Color(0xFF1B1F26)
-    val toolbarKey = Color(0xFF232A35)
+    val background = Color(0xFF0E1411)
+    val foreground = Color(0xFFD6E5DC)
+    val selection = Color(0x664EE9B0)
+    val cursor = Color(0xFF7CF0C6)
+    val toolbarBg = Color(0xFF111815)
+    val toolbarKey = Color(0xFF1A2420)
+    val toolbarKeyHi = Color(0xFF4EE9B0)
+    val toolbarKeyText = Color(0xFFAABBB1)
 }
 
 /** cell 级选择区间（行/列；列区间左闭右开，含 from 至 to 前一列）。 */
@@ -543,6 +547,7 @@ fun TerminalGrid(
             KeyToolbar(
                 ctrlActive = ctrlLatched,
                 onCtrlToggle = { ctrlLatched = !ctrlLatched },
+                onText = onText,
                 onKey = onKey,
                 onControl = onControl,
                 onShowKeyboard = ::showKeyboard,
@@ -717,12 +722,23 @@ private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float): Floa
     return x
 }
 
-// ═══════════════════════ 特殊键工具栏 ═══════════════════════
+// ═══════════════════════ 特殊键工具栏（T85 重做：Termux 风格）═══════════════════════
 
+/**
+ * 触屏辅助键行（T85 重做）。
+ *
+ * 设计对齐 Termux extra-keys：
+ *  - **主簇**（滚动区前端，一眼可达）：拉起键盘 / 退格 / ESC / TAB / CTRL 锁存 /
+ *    方向键 —— 高频键排在最前；
+ *  - **扩展簇**（继续横向滚动）：常用 shell 符号（| ~ - / \ $ & 等 —— 免切输入法
+ *    的符号面板）+ 控制码（^C ^D ^Z ^L ^U）+ HOME/END/PgUp/PgDn + 粘贴；
+ *  - 触控目标 36dp 高（Material 无障碍阈值）；CTRL 锁存高亮为 mint 实底深字。
+ */
 @Composable
 private fun KeyToolbar(
     ctrlActive: Boolean,
     onCtrlToggle: () -> Unit,
+    onText: (String) -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
     onShowKeyboard: () -> Unit,
@@ -733,15 +749,16 @@ private fun KeyToolbar(
             .fillMaxWidth()
             .background(TerminalTheme.toolbarBg)
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp, vertical = 5.dp),
+            .padding(horizontal = 5.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // ── 主簇 ──
         // 显式拉起输入法：触屏上"点一下没反应"的兜底入口
-        ToolbarKey("⌨") { onShowKeyboard() }
+        ToolbarKey("⌨", emphasized = true) { onShowKeyboard() }
         // 退格：隐藏 IME 桥的缓冲恒为空，输入法拿不到"可删除的 surrounding text"，
         // 触屏上必须给一个确定可用的删除键（否则打错字只能靠 Ctrl+U 整行重来）。
-        ToolbarKey("⌫") { onKey(TerminalKey.BACKSPACE) }
+        ToolbarKey("⌫", emphasized = true) { onKey(TerminalKey.BACKSPACE) }
         ToolbarKey("ESC") { onKey(TerminalKey.ESC) }
         ToolbarKey("TAB") { onKey(TerminalKey.TAB) }
         ToolbarKey(
@@ -753,35 +770,62 @@ private fun KeyToolbar(
         ToolbarKey("↓") { onKey(TerminalKey.ARROW_DOWN) }
         ToolbarKey("←") { onKey(TerminalKey.ARROW_LEFT) }
         ToolbarKey("→") { onKey(TerminalKey.ARROW_RIGHT) }
-        ToolbarKey("HOME") { onKey(TerminalKey.HOME) }
-        ToolbarKey("END") { onKey(TerminalKey.END) }
-        ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
-        ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
+
+        // ── 扩展簇：shell 符号（免切输入法的符号面板）──
+        ToolbarKey("|") { onText("|") }
+        ToolbarKey("~") { onText("~") }
+        ToolbarKey("-") { onText("-") }
+        ToolbarKey("/") { onText("/") }
+        ToolbarKey("\\") { onText("\\") }
+        ToolbarKey("$") { onText("$") }
+        ToolbarKey("&") { onText("&") }
+        ToolbarKey(";") { onText(";") }
+        ToolbarKey("<") { onText("<") }
+        ToolbarKey(">") { onText(">") }
+        ToolbarKey("*") { onText("*") }
+        ToolbarKey("=") { onText("=") }
+
+        // ── 扩展簇：控制码 / 导航 ──
         ToolbarKey("^C") { onControl('c') }
         ToolbarKey("^D") { onControl('d') }
         ToolbarKey("^Z") { onControl('z') }
         ToolbarKey("^L") { onControl('l') }
         ToolbarKey("^U") { onControl('u') }   // 清空当前行（readline 惯例）
+        ToolbarKey("HOME") { onKey(TerminalKey.HOME) }
+        ToolbarKey("END") { onKey(TerminalKey.END) }
+        ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
+        ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
         ToolbarKey("粘贴") { onPaste() }
     }
 }
 
 @Composable
-private fun ToolbarKey(label: String, highlighted: Boolean = false, onClick: () -> Unit) {
+private fun ToolbarKey(
+    label: String,
+    highlighted: Boolean = false,
+    emphasized: Boolean = false,
+    onClick: () -> Unit
+) {
     Box(
         modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(
-                if (highlighted) Color(0xFF4C8DFF) else TerminalTheme.toolbarKey,
-                RoundedCornerShape(7.dp)
+                when {
+                    highlighted -> TerminalTheme.toolbarKeyHi
+                    emphasized -> Color(0xFF223729)
+                    else -> TerminalTheme.toolbarKey
+                }
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 11.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             label,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontFamily = FontFamily.Monospace,
-            color = if (highlighted) Color.White else Color(0xFFAAB3C2)
+            color = if (highlighted) Color(0xFF06120D) else TerminalTheme.toolbarKeyText
         )
     }
 }

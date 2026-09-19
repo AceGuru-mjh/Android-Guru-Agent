@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -120,6 +122,17 @@ class TerminalViewModel @Inject constructor(
      */
     private val pendingLine = StringBuilder()
 
+    /**
+     * T85: Ubuntu 优先默认会话策略的挂起标记 —— 等待环境 READY 期间用户未手工
+     * 创建过会话时，READY 到达后自动拉起 Ubuntu 会话（见 [init] 的第二个收集器）。
+     * 用户一旦自己建了会话（含环境面板的「先用 Android Shell」）即失效。
+     */
+    @Volatile
+    private var autoUbuntuSessionPending = false
+
+    /** 会话创建互斥（UI 手动新建 / READY 自动拉起 / 依赖安装降级共享）。 */
+    private val createMutex = Mutex()
+
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
         viewModelScope.launch {
@@ -128,14 +141,41 @@ class TerminalViewModel @Inject constructor(
                 Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
             }
             refreshSessionsInternal()
-            // 无任何会话（首次进入终端页）→ 自动拉起 Android shell 会话，
-            // 用户无需理解“会话”概念即可开始敲命令。
             if (_sessions.value.none { it.isAlive }) {
-                createSessionInternal(backendId = BACKEND_LOCAL)
+                // T85: Ubuntu 优先 —— 有完整 Linux 环境绝不默认降级到 Android toybox。
+                // - READY → 直接建 Ubuntu 会话（bash / gcc / python3 真实可用）；
+                // - 未 READY → 挂起等待（ApexApp 启动时已自动预备；这里 join 单飞
+                //   兜底「冷启动直接进终端页」的竞态），READY 后自动建；
+                // - FAILED → 停在环境面板等用户重试，不偷偷降级。
+                if (ubuntuLifecycle.stateFlow.value.phase ==
+                    UbuntuLifecycleCoordinator.Phase.READY
+                ) {
+                    createMutex.withLock { createSessionInternal(backendId = BACKEND_UBUNTU) }
+                } else {
+                    autoUbuntuSessionPending = true
+                    // join 自动预备（幂等单飞；已进行中则等待共享结果）。
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { ubuntuLifecycle.ensureReady() }
+                    }
+                }
             } else {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
             }
             startSessionPolling()
+        }
+
+        // T85: 环境 READY 到达 → 若用户仍未手工建过会话，自动拉起 Ubuntu 会话。
+        // 首次安装（后台解包 2~5 分钟）期间用户停在环境面板，无需任何点击。
+        viewModelScope.launch {
+            ubuntuLifecycle.stateFlow.collect { st ->
+                if (st.phase == UbuntuLifecycleCoordinator.Phase.READY &&
+                    autoUbuntuSessionPending &&
+                    _sessions.value.none { it.isAlive }
+                ) {
+                    autoUbuntuSessionPending = false
+                    createMutex.withLock { createSessionInternal(backendId = BACKEND_UBUNTU) }
+                }
+            }
         }
     }
 
@@ -220,9 +260,11 @@ class TerminalViewModel @Inject constructor(
     fun createSession(backendId: String) {
         if (creating) return
         creating = true
+        // 用户手工新建（含环境面板「先用 Android Shell」）→ 取消 READY 自动拉起
+        autoUbuntuSessionPending = false
         viewModelScope.launch {
             try {
-                createSessionInternal(backendId)
+                createMutex.withLock { createSessionInternal(backendId) }
             } finally {
                 creating = false
             }

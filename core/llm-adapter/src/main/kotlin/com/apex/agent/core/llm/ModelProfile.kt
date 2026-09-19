@@ -19,6 +19,10 @@ data class ModelCapabilities(
     val jsonMode: Boolean = false,
     val imageInput: Boolean = false,
     val longContext: Boolean = false,
+    /** 图片生成（多模态输出）：chat 内生图（OpenRouter image 模型 / Gemini 图像输出 / CogView-chat 等）。 */
+    val imageGeneration: Boolean = false,
+    /** 视频生成（多模态输出）：chat 内生视频（video_url part / message.video_url）。 */
+    val videoGeneration: Boolean = false,
 ) {
     fun summary(): String = buildList {
         if (text) add("Text")
@@ -26,6 +30,8 @@ data class ModelCapabilities(
         if (toolCalling) add("Tools")
         if (structuredOutput) add("JSON")
         if (reasoning) add("Reason")
+        if (imageGeneration) add("ImageGen")
+        if (videoGeneration) add("VideoGen")
         if (longContext) add("LongCtx")
     }.joinToString(" · ")
 }

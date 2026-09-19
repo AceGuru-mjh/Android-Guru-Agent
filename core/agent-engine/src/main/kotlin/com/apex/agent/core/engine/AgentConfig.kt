@@ -107,6 +107,28 @@ enum class ThinkingLevel(val level: Int, val description: String) {
         DEEP -> 4096
         MAXIMUM -> 16384
     }
+
+    /**
+     * T1（思考程度真实化）：映射为模型原生思考强度 [com.apex.agent.core.llm.ReasoningEffort]
+     * 的枚举名，app 层（AgentChatViewModel.setThinkingLevel）转回枚举后持久化到
+     * 默认 ModelProfile —— DynamicLlmClient 监听 profiles 即时重建，下一次请求
+     * 即真实下发 reasoning_effort / thinking.budget_tokens / enable_thinking
+     * （由 StreamingOpenAiClient 按 Provider 差异化）。
+     *
+     * 返回 null（NONE 档）= 不思考：app 层应回退 [com.apex.agent.core.llm.ReasoningEffort.NONE]
+     * （apiValue 为 null，请求体不发 reasoning 字段）。
+     *
+     * 为什么返回 String 而不是枚举：agent-engine 与 ReasoningEffort 所在的
+     * llm-adapter 已有依赖，但保持 ThinkingLevel 纯枚举层不直接硬引用，
+     * 映射关系集中在本处，便于单测与后续调档。
+     */
+    fun toReasoningEffortName(): String? = when (this) {
+        NONE -> null
+        LIGHT -> "LOW"
+        STANDARD -> "MEDIUM"
+        DEEP -> "HIGH"
+        MAXIMUM -> "MAX"
+    }
 }
 
 /**

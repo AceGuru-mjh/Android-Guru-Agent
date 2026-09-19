@@ -413,6 +413,9 @@ class DefaultTaskOrchestrator(
             }
 
             // Always emit Complete (matches ApexAgentEngine contract).
+            // S-c（5a）：此处 summary 保留 taskGoal —— 编排器事件面向后台任务
+            // 历史（TaskState.Finished 需要 goal 摘要），不进聊天流（聊天流走
+            // ApexAgentEngine，其 Complete.summary 已改为空串，不再报"任务完成"）。
             val elapsed = System.currentTimeMillis() - stateMachine.taskStartTimeMs
             val totalToolCalls = effectiveTotalToolCalls()
             if (stateMachine.currentState !is TaskState.Finished) {
@@ -605,11 +608,12 @@ class DefaultTaskOrchestrator(
                 LlmRequestContext.primary("orchestrator_react_loop")
             }
             try {
+                // B1：不显式传 temperature —— 哨兵回退到 Profile 值（与 AgentEngine
+                // 同一语义），设置页改参数对下一次请求真实生效。
                 runtime.chatStream(
                     context = reactContext,
                     messages = conversationHistory.toList(),
-                    tools = tools,
-                    temperature = agentConfig.temperature
+                    tools = tools
                 ).collect { chunk: LlmStreamChunk ->
                     // 正文内容：逐段流式转发为 ResponseChunk（与 AgentEngine 一致，
                     // 此前编排器把正文误当 ThinkingChunk 整段缓存，UI 无法逐字渲染）。

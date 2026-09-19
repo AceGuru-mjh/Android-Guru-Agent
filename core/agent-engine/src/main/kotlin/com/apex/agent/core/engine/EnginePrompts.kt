@@ -257,8 +257,10 @@ internal object EnginePrompts {
         }
         appendLine()
         appendLine(
-            "Summarize what was accomplished in 2-4 sentences. Note any issues, " +
-                "partial completions, or follow-ups the user should know about."
+            "State the final outcome and key deliverables directly in 2-4 sentences. " +
+                "Do NOT announce completion (no phrases like 'task complete', '任务已完成', " +
+                "'all done'), and no closing pleasantries. Note any issues, partial " +
+                "completions, or follow-ups the user should know about."
         )
     }
 
@@ -329,7 +331,9 @@ internal object EnginePrompts {
         }
         appendLine()
         appendLine(
-            "Summarize what was delivered in 2-4 sentences. Report any unmet acceptance " +
+            "State the final outcome and key deliverables directly in 2-4 sentences. " +
+                "Do NOT announce completion (no phrases like 'task complete', '任务已完成', " +
+                "'all done'), and no closing pleasantries. Report any unmet acceptance " +
                 "criteria, issues, or follow-ups the user should know about."
         )
     }

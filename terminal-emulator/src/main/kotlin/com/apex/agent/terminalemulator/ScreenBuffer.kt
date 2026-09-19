@@ -22,6 +22,13 @@ class ScreenBuffer(
     private var cells: Array<Array<TerminalCell>> = Array(rows) { Array(cols) { TerminalCell.BLANK } }
     private val scrollback: ArrayDeque<Array<TerminalCell>> = ArrayDeque()
 
+    /**
+     * T85（M-2）：自创建起滚入 scrollback 的总行数 —— **只增不减**
+     *（超出 [maxScrollbackLines] 被逐出的最旧行也计入）。
+     * 作为 UI 行稳定 key 的单调基准（见 TerminalRenderSnapshot.scrollbackBase）。
+     */
+    private var linesEverScrolled: Long = 0L
+
     /** Raw cell assignment (no wide-trail fixup) — used by insert/shift operations. */
     fun setCell(row: Int, col: Int, cell: TerminalCell) {
         if (row in 0 until rows && col in 0 until cols) cells[row][col] = cell
@@ -76,6 +83,7 @@ class ScreenBuffer(
             for (i in 0 until count) {
                 if (scrollback.size >= maxScrollbackLines) scrollback.pollFirst()
                 scrollback.addLast(cells[top + i].copyOf())
+                linesEverScrolled++  // T85：单调基准（含被逐出行）
             }
         }
         // Move lines up
@@ -189,4 +197,27 @@ class ScreenBuffer(
     /** Test/observation accessor for a saved scrollback row (internal).
      * ArrayDeque has no indexed 'get' operator, so use elementAt (O(n)). */
     internal fun scrollbackLine(index: Int): Array<TerminalCell> = scrollback.elementAt(index)
+
+    /**
+     * T85（P-2）：批量取 scrollback 行 [from, until)（旧→新，左闭右开）。
+     *
+     * 旧路径 = 调用方逐行 elementAt —— java ArrayDeque 无随机访问，每次 O(n)，
+     * 400 行快照 ≈ 32 万元素遍历/帧。本方法单次遍历切片，O(until-from)。
+     */
+    internal fun scrollbackRows(from: Int, until: Int): List<Array<TerminalCell>> {
+        if (from < 0 || until <= from) return emptyList()
+        val size = minOf(until, scrollback.size) - from
+        if (size <= 0) return emptyList()
+        val out = ArrayList<Array<TerminalCell>>(size)
+        var idx = 0
+        for (row in scrollback) {
+            if (idx >= from) out.add(row)
+            idx++
+            if (idx >= until) break
+        }
+        return out
+    }
+
+    /** T85（M-2）：单调滚入计数（含被逐出的最旧行），供 UI 行稳定 key 作基准。 */
+    val scrollbackLinesEver: Long get() = linesEverScrolled
 }

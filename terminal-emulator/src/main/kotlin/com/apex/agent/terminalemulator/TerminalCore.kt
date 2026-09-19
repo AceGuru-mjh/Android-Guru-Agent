@@ -68,6 +68,25 @@ class TerminalCore(
     private var bellPending = false
     private var bellSeq = 0L
 
+    // T85：REP（CSI Ps b）重复目标 —— 上一个落屏的可打印码点。
+    private var lastPrintableCp: Int = -1
+
+    // T85：光标形状（DECSCUSR）。宿主经 [cursorStyle] 读取并绘制对应形状。
+    private var cursorStyle = CursorStyle.BAR
+
+    /**
+     * T85：宿主应答通道。DA1/DA2/DSR（CPR）需要向 PTY 回写响应序列 ——
+     * 纯 JVM 的 TerminalCore 无法直接写 PTY，由宿主注入回调。
+     * null（默认）= 应答丢弃（单元测试/无 PTY 场景）。
+     */
+    @Volatile
+    var responseSink: ((ByteArray) -> Unit)? = null
+
+    /** 应答序列回写（仅 DA/DSR 等终端自生应答；非用户/Agent 输入，不过策略门禁）。 */
+    private fun respond(seq: String) {
+        responseSink?.invoke(seq.toByteArray(Charsets.US_ASCII))
+    }
+
     // Anchor of the last placed printable's base cell — combining marks attach here (§10/§11).
     private var lastBaseRow = 0
     private var lastBaseCol = 0
@@ -159,6 +178,7 @@ class TerminalCore(
             flags = if (width == 2) TerminalCell.FLAG_WIDE_LEAD else 0)
         currentBuffer.put(prow, pcol, cell)
         lastBaseRow = prow; lastBaseCol = pcol
+        lastPrintableCp = cp  // T85：REP（CSI b）重复目标
         mutations += ScreenMutation.rows(prow, prow)
 
         // Advance cursor
@@ -167,7 +187,12 @@ class TerminalCore(
             cursor.wrapPending = modes.autoWrap
         } else {
             cursor.row = prow; cursor.column = (pcol + width).coerceAtMost(cols - 1)
-            if (cursor.column == cols - 1 && modes.autoWrap) cursor.wrapPending = true
+            // T85（重大预存缺陷）：wrapPending 只能在「字符实际落在最后一格」时置位。
+            // 旧实现光标一走到最后一格（该格仍为空）就置位 —— 顺序输入永远填不上
+            // 最后一列，换行提前一个字符发生（80 列终端每行最多显示 79 字符，
+            // vim 状态栏/表格右缘/进度条全部缺一格）。xterm 语义：最后一格被
+            // 打印后才悬挂换行。
+            cursor.wrapPending = modes.autoWrap && (pcol + width >= cols)
         }
     }
 
@@ -212,36 +237,73 @@ class TerminalCore(
     // ─── CSI sequences (§5) ───
     private fun handleCsi(seq: VtParser.CSISequence) {
         when (seq.finalByte) {
-            'A' -> moveCursor(-seq.param(0, 1), 0)                    // CUU
-            'B' -> moveCursor(seq.param(0, 1), 0)                     // CUD
-            'C' -> moveCursor(0, seq.param(0, 1))                     // CUF
-            'D' -> moveCursor(0, -seq.param(0, 1))                    // CUB
-            'E' -> { cursor.row = clampRow(cursor.row + seq.param(0, 1)); cursor.column = 0 }  // CNL
-            'F' -> { cursor.row = clampRow(cursor.row - seq.param(0, 1)); cursor.column = 0 }  // CPL
-            'G' -> cursor.column = (seq.param(0, 1) - 1).coerceIn(0, cols - 1)  // CHA
-            'd' -> cursor.row = originRow(seq.param(0, 1))            // VPA
+            // T85（C-2）：显式参数 0 一律按 xterm 语义视为缺省 1 —— 旧实现
+            // `CSI 0 A` 不移动、`CSI 1;0 r` 底界归零。paramOrDefault(0=用缺省)。
+            'A' -> moveCursor(-seq.paramOrDefault(0, 1), 0)           // CUU
+            'B' -> moveCursor(seq.paramOrDefault(0, 1), 0)            // CUD
+            'C' -> moveCursor(0, seq.paramOrDefault(0, 1))            // CUF
+            'D' -> moveCursor(0, -seq.paramOrDefault(0, 1))           // CUB
+            // T85（C-6）：CNL/CPL/CHA/VPA 补清 wrapPending（xterm 语义：光标绝对
+            // 定位清除悬挂换行，否则随后的可打印字符可能落在意外行）。
+            'E' -> { cursor.row = clampRow(cursor.row + seq.paramOrDefault(0, 1)); cursor.column = 0; cursor.wrapPending = false }  // CNL
+            'F' -> { cursor.row = clampRow(cursor.row - seq.paramOrDefault(0, 1)); cursor.column = 0; cursor.wrapPending = false }  // CPL
+            'G' -> { cursor.column = (seq.paramOrDefault(0, 1) - 1).coerceIn(0, cols - 1); cursor.wrapPending = false }  // CHA
+            'd' -> { cursor.row = originRow(seq.paramOrDefault(0, 1)); cursor.wrapPending = false }  // VPA
             'H', 'f' -> {  // CUP / HVP
-                cursor.column = (seq.param(1, 1) - 1).coerceIn(0, cols - 1)
-                cursor.row = originRow(seq.param(0, 1))
+                cursor.column = (seq.paramOrDefault(1, 1) - 1).coerceIn(0, cols - 1)
+                cursor.row = originRow(seq.paramOrDefault(0, 1))
                 cursor.wrapPending = false
             }
             'J' -> eraseDisplay(seq.param(0, 0))                      // ED
             'K' -> eraseLine(seq.param(0, 0))                          // EL
-            'S' -> currentBuffer.scrollUp(seq.param(0, 1), scrollRegion.top, scrollRegion.bottom)  // SU
-            'T' -> currentBuffer.scrollDown(seq.param(0, 1), scrollRegion.top, scrollRegion.bottom)  // SD
-            'L' -> { currentBuffer.insertLines(cursor.row, seq.param(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.INSERT_LINES, cursor.row..scrollRegion.bottom) }  // IL
-            'M' -> { currentBuffer.deleteLines(cursor.row, seq.param(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.DELETE_LINES, cursor.row..scrollRegion.bottom) }  // DL
-            'P' -> deleteChars(seq.param(0, 1))                       // DCH — delete chars
-            '@' -> insertChars(seq.param(0, 1))                        // ICH — insert chars
-            'X' -> { currentBuffer.eraseRow(cursor.row, cursor.column, cursor.column + seq.param(0, 1) - 1, currentStyle); mutations += ScreenMutation.rows(cursor.row, cursor.row) }  // ECH
-            'm' -> applySgr(seq.params)                                // SGR
+            'S' -> currentBuffer.scrollUp(seq.paramOrDefault(0, 1), scrollRegion.top, scrollRegion.bottom)  // SU
+            'T' -> currentBuffer.scrollDown(seq.paramOrDefault(0, 1), scrollRegion.top, scrollRegion.bottom)  // SD
+            'L' -> { currentBuffer.insertLines(cursor.row, seq.paramOrDefault(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.INSERT_LINES, cursor.row..scrollRegion.bottom) }  // IL
+            'M' -> { currentBuffer.deleteLines(cursor.row, seq.paramOrDefault(0, 1), scrollRegion.top, scrollRegion.bottom); mutations += ScreenMutation(ScreenMutation.MutationType.DELETE_LINES, cursor.row..scrollRegion.bottom) }  // DL
+            'P' -> deleteChars(seq.paramOrDefault(0, 1))              // DCH — delete chars
+            '@' -> insertChars(seq.paramOrDefault(0, 1))              // ICH — insert chars
+            'X' -> { currentBuffer.eraseRow(cursor.row, cursor.column, cursor.column + seq.paramOrDefault(0, 1) - 1, currentStyle); mutations += ScreenMutation.rows(cursor.row, cursor.row) }  // ECH
+            'm' -> applySgr(seq)                                      // SGR（含冒号子参数形式）
             'r' -> {  // DECSTBM — scroll region
-                val t = seq.param(0, 1) - 1
-                val b = (if (seq.params.size > 1) seq.param(1, rows) else rows) - 1
+                val t = seq.paramOrDefault(0, 1) - 1
+                val b = (if (seq.params.size > 1) seq.paramOrDefault(1, rows) else rows) - 1
                 scrollRegion.set(t, b, rows)
                 cursor.row = if (modes.originMode) scrollRegion.top else 0
                 cursor.column = 0
             }
+            // T85：HPA/HPR/VPR —— 常用列/行定位（figlet、部分 TUI 框架使用）。
+            '`' -> { cursor.column = (seq.paramOrDefault(0, 1) - 1).coerceIn(0, cols - 1); cursor.wrapPending = false }  // HPA — 列绝对
+            'a' -> { cursor.column = clampCol(cursor.column + seq.paramOrDefault(0, 1)); cursor.wrapPending = false }  // HPR — 列相对
+            'e' -> { cursor.row = clampRow(cursor.row + seq.paramOrDefault(0, 1)); cursor.wrapPending = false }  // VPR — 行相对
+            // T85：REP —— 重复上一可打印字符（figlet/进度条）。上限防护：一次序列
+            // 至多重复 1024 次（畸形输入不至于制造百万 mutation；BoundedMutationList
+            // 兑底但仍避免无谓折叠）。
+            'b' -> {
+                val n = seq.paramOrDefault(0, 1).coerceIn(0, 1024)
+                if (lastPrintableCp > 0) repeat(n) { putPrintable(lastPrintableCp) }
+            }
+            // T85：DECSCUSR —— 光标形状。`CSI Ps SP q`（中间字节 0x20）。
+            'q' -> if (seq.intermediates.size == 1 && seq.intermediates[0] == ' ') {
+                cursorStyle = when (seq.paramOrDefault(0, 0)) {
+                    3, 4 -> CursorStyle.UNDERLINE
+                    5, 6 -> CursorStyle.BAR
+                    else -> CursorStyle.BLOCK  // 0/1/2 及其他
+                }
+            }
+            // T85：DA1/DA2 应答 —— 程序能力探测（无应答则 vim/resize 等行为异常）。
+            // 应答与 Termux 一致：DA1=`ESC[?6c`（VT102），DA2=`ESC[>0;276;0c`。
+            'c' -> if (seq.privateMarker == '>') {
+                respond("\u001B[>0;276;0c")
+            } else {
+                respond("\u001B[?6c")
+            }
+            // T85：DSR —— 5=状态 OK；6=CPR（光标位置报告，1 基）。
+            'n' -> when (seq.paramOrDefault(0, 0)) {
+                5 -> respond("\u001B[0n")
+                6 -> respond("\u001B[${cursor.row + 1};${cursor.column + 1}R")
+            }
+            // T85：DECSTR —— 软复位（样式/模式归位，不清屏、不清 scrollback）。
+            'p' -> if (seq.intermediates.size == 1 && seq.intermediates[0] == '!') softReset()
             // T82 bug fix: ANSI modes (no '?' prefix) were dropped — CSI 4 h is IRM
             // (the insert-mode path existed but was unreachable via its own standard code).
             'h' -> if (seq.privateMarker == '?') setMode(seq.params, true)   // DECSET
@@ -330,35 +392,63 @@ class TerminalCore(
     }
 
     // ─── SGR (§6) ───
-    private fun applySgr(params: IntArray) {
+    /**
+     * T85：SGR 同时支持分号扩展（38;5;n / 38;2;r;g;b）与冒号子参数
+     * （38:5:n / 38:2:r:g:b / 38:2:cs:r:g:b / 4:x 下划线样式）。
+     * 旧实现把冒号 token 解析为参数 0 —— kitty/nvim/delta 的真彩色输出被
+     * 静默重置样式（审计 C-1）。语义参考 xterm/ECMA-48：
+     *   38:5:n        → 256 色；
+     *   38:2:r:g:b    → 真彩色（无 colorspace）；
+     *   38:2:cs:r:g:b → 真彩色（带 colorspace，忽略 cs）；
+     *   4:0..4:5      → 无/单/双/波状/点/虚线下划线。
+     */
+    private fun applySgr(seq: VtParser.CSISequence) {
+        val params = seq.params
         if (params.isEmpty()) { currentStyle = TerminalStyle.DEFAULT; return }
         var i = 0
         while (i < params.size) {
             val p = params[i]
-            when {
-                p == 0 -> currentStyle = TerminalStyle.DEFAULT
-                p == 1 -> currentStyle = currentStyle.copy(bold = true)
-                p == 2 -> currentStyle = currentStyle.copy(dim = true)
-                p == 3 -> currentStyle = currentStyle.copy(italic = true)
-                p == 4 -> currentStyle = currentStyle.copy(underline = UnderlineStyle.SINGLE)
-                p == 5 -> currentStyle = currentStyle.copy(blink = true)
-                p == 7 -> currentStyle = currentStyle.copy(inverse = true)
-                p == 8 -> currentStyle = currentStyle.copy(hidden = true)
-                p == 9 -> currentStyle = currentStyle.copy(strikethrough = true)
-                p == 22 -> currentStyle = currentStyle.copy(bold = false, dim = false)
-                p == 23 -> currentStyle = currentStyle.copy(italic = false)
-                p == 24 -> currentStyle = currentStyle.copy(underline = UnderlineStyle.NONE)
-                p == 25 -> currentStyle = currentStyle.copy(blink = false)
-                p == 27 -> currentStyle = currentStyle.copy(inverse = false)
-                p == 28 -> currentStyle = currentStyle.copy(hidden = false)
-                p == 29 -> currentStyle = currentStyle.copy(strikethrough = false)
-                p in 30..37 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Indexed(p - 30))
-                p in 40..47 -> currentStyle = currentStyle.copy(background = TerminalColor.Indexed(p - 40))
-                p in 90..97 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Indexed(p - 90 + 8))
-                p in 100..107 -> currentStyle = currentStyle.copy(background = TerminalColor.Indexed(p - 100 + 8))
-                p == 39 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Default)
-                p == 49 -> currentStyle = currentStyle.copy(background = TerminalColor.Default)
-                p == 38 || p == 48 -> {
+            // 冒号子参数形式：整 token 消费，跳到下一分号项。
+            if (seq.hasSubParams(i)) {
+                val subs = seq.subParams.getValue(i)
+                when (p) {
+                    4 -> if (subs.size >= 2) {
+                        currentStyle = currentStyle.copy(underline = underlineFromSub(subs[1]))
+                    }
+                    38, 48 -> {
+                        val c = colorFromColonSubs(subs)
+                        if (c != null) {
+                            currentStyle = if (p == 38) currentStyle.copy(foreground = c)
+                            else currentStyle.copy(background = c)
+                        }
+                    }
+                }
+                i += subs.size - 1
+            } else when (p) {
+                0 -> currentStyle = TerminalStyle.DEFAULT
+                1 -> currentStyle = currentStyle.copy(bold = true)
+                2 -> currentStyle = currentStyle.copy(dim = true)
+                3 -> currentStyle = currentStyle.copy(italic = true)
+                4 -> currentStyle = currentStyle.copy(underline = UnderlineStyle.SINGLE)
+                5 -> currentStyle = currentStyle.copy(blink = true)
+                7 -> currentStyle = currentStyle.copy(inverse = true)
+                8 -> currentStyle = currentStyle.copy(hidden = true)
+                9 -> currentStyle = currentStyle.copy(strikethrough = true)
+                21 -> currentStyle = currentStyle.copy(underline = UnderlineStyle.DOUBLE)  // T85：SGR 21 双下划线（旧实现不可达）
+                22 -> currentStyle = currentStyle.copy(bold = false, dim = false)
+                23 -> currentStyle = currentStyle.copy(italic = false)
+                24 -> currentStyle = currentStyle.copy(underline = UnderlineStyle.NONE)
+                25 -> currentStyle = currentStyle.copy(blink = false)
+                27 -> currentStyle = currentStyle.copy(inverse = false)
+                28 -> currentStyle = currentStyle.copy(hidden = false)
+                29 -> currentStyle = currentStyle.copy(strikethrough = false)
+                in 30..37 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Indexed(p - 30))
+                in 40..47 -> currentStyle = currentStyle.copy(background = TerminalColor.Indexed(p - 40))
+                in 90..97 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Indexed(p - 90 + 8))
+                in 100..107 -> currentStyle = currentStyle.copy(background = TerminalColor.Indexed(p - 100 + 8))
+                39 -> currentStyle = currentStyle.copy(foreground = TerminalColor.Default)
+                49 -> currentStyle = currentStyle.copy(background = TerminalColor.Default)
+                38, 48 -> {
                     // 38;5;n (256) or 38;2;r;g;b (TrueColor)
                     // P1 fix（边界值）：SGR 参数无合法性保证（程序化构造/畸形序列可为任意 Int），
                     // 旧实现直接传入 Indexed/RGB —— 负索引在 TerminalColor.toRgb 触发
@@ -385,6 +475,55 @@ class TerminalCore(
             }
             i++
         }
+    }
+
+    /** 冒号子参数下划线样式（SGR 4:x）：0 无 / 1 单 / 2 双 / 3 波状 / 4 点 / 5 虚线。 */
+    private fun underlineFromSub(styleCode: Int): UnderlineStyle = when (styleCode) {
+        0 -> UnderlineStyle.NONE
+        2 -> UnderlineStyle.DOUBLE
+        3 -> UnderlineStyle.CURLY
+        4 -> UnderlineStyle.DOTTED
+        5 -> UnderlineStyle.DASHED
+        else -> UnderlineStyle.SINGLE
+    }
+
+    /** 冒号子参数颜色（38:x:… / 48:x:…）：[38,5,n] / [38,2,r,g,b] / [38,2,cs,r,g,b]。 */
+    private fun colorFromColonSubs(subs: IntArray): TerminalColor? {
+        if (subs.size < 2) return null
+        return when (subs[1]) {
+            5 -> if (subs.size >= 3) TerminalColor.Indexed(subs[2].coerceIn(0, 255)) else null
+            2 -> when {
+                // 38:2:cs:r:g:b —— 带色彩空间前缀（kitty 形式），忽略 cs。
+                subs.size >= 6 -> TerminalColor.RGB(
+                    subs[3].coerceIn(0, 255), subs[4].coerceIn(0, 255), subs[5].coerceIn(0, 255)
+                )
+                // 38:2:r:g:b —— 无色彩空间。
+                subs.size >= 5 -> TerminalColor.RGB(
+                    subs[2].coerceIn(0, 255), subs[3].coerceIn(0, 255), subs[4].coerceIn(0, 255)
+                )
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * T85：DECSTR 软复位 —— 按 DEC STD 070：样式/光标/模式归位，
+     * 屏幕内容与 scrollback 保留（RIS 才全清）。
+     */
+    private fun softReset() {
+        currentStyle = TerminalStyle.DEFAULT
+        cursor.row = 0; cursor.column = 0; cursor.wrapPending = false
+        modes.insertMode = false
+        modes.originMode = false
+        modes.autoWrap = true
+        modes.applicationCursor = false
+        modes.cursorVisible = true
+        savedCursor = CursorState()
+        savedStyle = TerminalStyle.DEFAULT
+        scrollRegion.set(0, rows - 1, rows)
+        cursorStyle = CursorStyle.BAR
+        mutations += ScreenMutation.FULL
     }
 
     // ─── OSC (§20) ───
@@ -511,7 +650,10 @@ class TerminalCore(
         mutations += ScreenMutation(ScreenMutation.MutationType.RESIZE, 0 until newRows)
     }
 
-    /** Full reset (§25 RIS). */
+    /** Full reset (§25 RIS). T85（C-5）：彻底化 —— 补齐 applicationCursor/
+     *  reverseVideo/tabStops/g0Charset/savedCursor/savedStyle/cursorStyle/
+     *  lastPrintableCp/pendingClipboardRequests。旧实现残留半套模式，RIS 后
+     *  DECCKM/反显/制表位可能带病存活。 */
     fun reset() {
         mainBuffer.clear(); altBuffer.clear()
         currentBuffer = mainBuffer
@@ -525,6 +667,15 @@ class TerminalCore(
         modes.insertMode = false
         modes.bracketedPaste = false
         modes.newlineMode = false
+        modes.applicationCursor = false
+        modes.reverseVideo = false
+        tabStops.resetToDefaults()
+        g0Charset = CharsetStatus.ASCII
+        savedCursor = CursorState()
+        savedStyle = TerminalStyle.DEFAULT
+        cursorStyle = CursorStyle.BAR
+        lastPrintableCp = -1
+        pendingClipboardRequests.clear()
         utf8.reset(); parser.reset()
         title = null
         mutations += ScreenMutation.FULL
@@ -565,17 +716,20 @@ class TerminalCore(
      */
     fun renderSnapshot(maxScrollbackLines: Int = 0): TerminalRenderSnapshot {
         val visible = (0 until rows).map { renderRow(currentBuffer.row(it)) }
+        // T85（P-2）：scrollback 批量取行 —— 旧实现逐行 elementAt（ArrayDeque 迭代
+        // 器 O(n)，400 行 ×O(n) ≈ 每帧 32 万元素遍历），改为一次遍历切片。
         val sb = if (maxScrollbackLines > 0 && !modes.alternateScreen) {
             val total = mainBuffer.scrollbackLineCount
             val from = (total - maxScrollbackLines).coerceAtLeast(0)
             if (total > from) {
-                (from until total).map { renderRow(mainBuffer.scrollbackLine(it)) }
+                mainBuffer.scrollbackRows(from, total).map { renderRow(it) }
             } else emptyList()
         } else emptyList()
         return TerminalRenderSnapshot(
             rows = rows, cols = cols,
             cursorRow = cursor.row, cursorCol = cursor.column,
             cursorVisible = modes.cursorVisible,
+            cursorStyle = cursorStyle,
             alternateScreen = modes.alternateScreen,
             applicationCursor = modes.applicationCursor,
             bracketedPaste = modes.bracketedPaste,
@@ -584,6 +738,7 @@ class TerminalCore(
             lines = visible,
             scrollback = sb,
             scrollbackTotal = mainBuffer.scrollbackLineCount,
+            scrollbackBase = mainBuffer.scrollbackLinesEver,
             bellSeq = drainBell()
         )
     }
@@ -766,6 +921,8 @@ data class TerminalRenderSnapshot(
     val cursorRow: Int,
     val cursorCol: Int,
     val cursorVisible: Boolean,
+    /** T85：光标形状（DECSCUSR）—— UI 据此绘制块/下划线/竖杠。 */
+    val cursorStyle: CursorStyle = CursorStyle.BAR,
     val alternateScreen: Boolean,
     /** DECCKM — arrows should be encoded ESC O A instead of ESC [ A when true. */
     val applicationCursor: Boolean,
@@ -780,6 +937,15 @@ data class TerminalRenderSnapshot(
     val scrollback: List<List<RenderCell>>,
     /** Total scrollback lines held (may exceed [scrollback].size). */
     val scrollbackTotal: Int,
+    /**
+     * T85（M-2）：scrollback 单调基准 —— 自会话起滚入 scrollback 的总行数，
+     * **只增不减**（超出容量被逐出的行也计入）。
+     *
+     * 行的稳定 id = scrollbackBase - scrollback.size + 行在合并列表中的下标。
+     * UI 用它做 LazyColumn 稳定 key：scrollback 淘汰/增长时行不再整体位移，
+     * 阅读历史不跳动、选区不错位。
+     */
+    val scrollbackBase: Long = 0L,
     /**
      * 响铃序号（BEL）：**只增不减**，宿主用「序号变了」判定刚响了一声。
      *

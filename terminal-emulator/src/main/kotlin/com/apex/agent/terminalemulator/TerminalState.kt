@@ -20,6 +20,19 @@ data class TerminalModes(
 )
 
 /**
+ * T85：光标形状（DECSCUSR，`CSI Ps SP q`）。vim/nano 等据形状区分插入/普通模式。
+ * 闪烁由宿主 UI 自行实现（宿主可在键入时重置闪烁相位）；此处只保留形状语义。
+ */
+enum class CursorStyle {
+    /** 块状（xterm 默认；DECSCUSR 1/2）。 */
+    BLOCK,
+    /** 下划线（DECSCUSR 3/4）。 */
+    UNDERLINE,
+    /** 竖杠/梁式（DECSCUSR 5/6）——本项目交互 UI 的默认形状。 */
+    BAR
+}
+
+/**
  * Cursor state (Spec §12 PR #53).
  */
 data class CursorState(
@@ -69,6 +82,11 @@ class TabStops(initialCols: Int) {
     fun set(col: Int) { if (col in 0 until cols) stops[col] = true }
     fun clear(col: Int) { if (col in 0 until cols) stops[col] = false }
     fun clearAll() { stops.fill(false) }
+
+    /** T85：恢复默认 8 列制表位（RIS 全量复位用；clearAll 只清不建）。 */
+    fun resetToDefaults() {
+        stops = BooleanArray(cols) { it % 8 == 0 && it > 0 }
+    }
 
     fun resize(newCols: Int) {
         // Recreate with default 8-col stops, preserving existing stops within overlap

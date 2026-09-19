@@ -665,6 +665,13 @@ class ApexAgentEngine(
                     contentBuilder.append(it)
                     emit(AgentEvent.ResponseChunk(it))
                 }
+                // 多模态输出：图片/视频模型生成的媒体（OpenRouter image part /
+                // CogView chat 生图 / video_url）转 markdown 注入回复流，
+                // 复用 ResponseChunk 管线直达 UI（MarkdownText 渲染 + Lightbox）。
+                MediaMarkdown.from(chunk.images, chunk.videos)?.let { mediaMd ->
+                    contentBuilder.append(mediaMd)
+                    emit(AgentEvent.ResponseChunk(mediaMd))
+                }
                 // 原生思考内容（DeepSeek-R1 / Qwen3-thinking / OpenAI o-series 等）：
                 // 透传为 ThinkingChunk，让 UI 显示思维链。
                 chunk.reasoningContent?.let {
@@ -772,6 +779,11 @@ class ApexAgentEngine(
                                 chunk.content?.let {
                                     reviseBuilder.append(it)
                                     emit(AgentEvent.ResponseChunk(it))
+                                }
+                                // 修正轮次同样透传媒体（生图模型的“重画一版”）
+                                MediaMarkdown.from(chunk.images, chunk.videos)?.let { mediaMd ->
+                                    reviseBuilder.append(mediaMd)
+                                    emit(AgentEvent.ResponseChunk(mediaMd))
                                 }
                             }
                             val revised = reviseBuilder.toString().ifBlank { draft }

@@ -7,6 +7,7 @@ import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ConfirmationSink
 import com.apex.agent.core.engine.ConversationMemory
 import com.apex.agent.core.engine.ExecutionMemoryObserver
+import com.apex.agent.core.engine.MediaMarkdown
 import com.apex.agent.core.engine.PrivilegeInfoProvider
 import com.apex.agent.core.engine.StreamingToolCallAccumulator
 import com.apex.agent.core.engine.ThinkingLevel
@@ -617,6 +618,12 @@ class DefaultTaskOrchestrator(
                             contentBuilder.append(text)
                             send(AgentEvent.ResponseChunk(text))
                         }
+                    }
+                    // 多模态输出：图片/视频模型生成的媒体转 markdown 注入回复流
+                    // （与 AgentEngine 的 MediaMarkdown 策略一致，复用 ResponseChunk 管线）。
+                    MediaMarkdown.from(chunk.images, chunk.videos)?.let { mediaMd ->
+                        contentBuilder.append(mediaMd)
+                        send(AgentEvent.ResponseChunk(mediaMd))
                     }
                     // 原生思考内容（DeepSeek-R1 / Qwen3-thinking / o-series）：
                     // 透传为 ThinkingChunk，让 UI 显示思维链（与 AgentEngine 一致）。

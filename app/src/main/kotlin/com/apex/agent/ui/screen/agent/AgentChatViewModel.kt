@@ -467,9 +467,11 @@ class AgentChatViewModel @Inject constructor(
 
         // ═══ 多模态输入：图片 → ImageContent（Vision），非图片 → FileRef（路径上下文）═══
         // 图片附件经 ImageAttachmentConverter 压缩成 base64 ImageContent，注入
-        // LlmMessage.User.images 让 Vision-capable LLM 真正看图；非图片附件仍作为
-        // 文件路径上下文（Agent 可用 read_file / search_files 读取）。单次最多 3 张图，
+        // LlmMessage.User.images 让 Vision-capable LLM 真正看图；单次最多 3 张图，
         // 防止请求体过大 / token 超限。
+        // Bug 修复：旧实现 take(3) 超出的图片与解码失败的图片被**静默丢弃**
+        //（既不进 Vision 也不进 FileRef，用户发 5 张图第 4/5 张无声消失）。
+        // 现在一律降级为 FileRef —— Agent 仍可用 read_file 读取它们。
         val imageContents = mutableListOf<ImageContent>()
         val fileRefs = mutableListOf<FileRef>()
 
@@ -478,27 +480,33 @@ class AgentChatViewModel @Inject constructor(
             val file = File(localPath)
             if (!file.exists()) continue
 
-            if (attachment.type == AttachmentType.IMAGE) {
+            if (attachment.type == AttachmentType.IMAGE &&
+                imageContents.size < MAX_VISION_IMAGES
+            ) {
                 val imageContent = ImageAttachmentConverter.fromFile(
                     file = file,
                     mimeType = attachment.mimeType
                 )
-                if (imageContent != null) imageContents.add(imageContent)
-            } else {
-                fileRefs.add(
-                    FileRef(
-                        name = attachment.name,
-                        mimeType = attachment.mimeType,
-                        localPath = localPath,
-                        sizeBytes = attachment.sizeBytes
-                    )
-                )
+                if (imageContent != null) {
+                    imageContents.add(imageContent)
+                    continue
+                }
+                // 解码/压缩失败 → 降级 FileRef（下方统一收集）
             }
+            // 非图片 / 超出 Vision 张数上限 / 转换失败的附件：以文件引用交给 Agent
+            fileRefs.add(
+                FileRef(
+                    name = attachment.name,
+                    mimeType = attachment.mimeType,
+                    localPath = localPath,
+                    sizeBytes = attachment.sizeBytes
+                )
+            )
         }
 
         val userInput = UserInput(
             text = text,
-            images = imageContents.take(3),
+            images = imageContents,
             files = fileRefs
         )
 
@@ -1179,6 +1187,12 @@ class AgentChatViewModel @Inject constructor(
         private const val KEY_DRAFT_INPUT = "draft_input"
         private const val KEY_SETTINGS = "apex_settings"
         private const val KEY_CUSTOM_INSTRUCTION = "custom_mode_instruction"
+
+        /**
+         * 单轮注入 Vision 的图片上限（请求体体积 / token 防护）。
+         * 超出的图片降级为 FileRef（Agent 可用 read_file 读取），不再静默丢弃。
+         */
+        private const val MAX_VISION_IMAGES = 3
 
         /** 工具输出 UI 刷新节流间隔（≈1 帧 = 16ms）。 */
         private const val FLUSH_INTERVAL_MS = 16L

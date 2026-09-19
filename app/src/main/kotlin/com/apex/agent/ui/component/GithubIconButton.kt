@@ -5,14 +5,12 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,18 +30,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.github.GithubTokenManager
 import kotlinx.coroutines.launch
 
 /**
  * GitHub 图标按钮（输入栏中，/ 和 + 之间）
  *
- * - 已连接：Link 图标 + primary 色
- * - 未连接：LinkOff 图标 + onSurfaceVariant 色
+ * 图标使用 GitHub 官方 Octocat mark（ic_github_mark）——旧实现用通用
+ * Link/LinkOff 图标，无法与其它“连接器”语义区分。连接态以颜色区分：
+ * - 已连接：mark + primary 色
+ * - 未连接：mark + onSurfaceVariant 色
  *
  * 点击展开下拉菜单：
  * - 已连接 → 显示用户名 + 断开按钮
@@ -73,7 +76,7 @@ fun GithubIconButton(
                 modifier = Modifier.size(40.dp)
             ) {
                 Icon(
-                    imageVector = if (connectionState.isConnected) Icons.Default.Link else Icons.Default.LinkOff,
+                    painter = painterResource(R.drawable.ic_github_mark),
                     contentDescription = "GitHub",
                     tint = if (connectionState.isConnected)
                         MaterialTheme.colorScheme.primary
@@ -113,7 +116,7 @@ fun GithubIconButton(
                     text = { Text("连接 GitHub") },
                     leadingIcon = {
                         Icon(
-                            Icons.Default.Link, null,
+                            painterResource(R.drawable.ic_github_mark), null,
                             modifier = Modifier.size(18.dp)
                         )
                     },
@@ -130,7 +133,7 @@ fun GithubIconButton(
                     text = { Text("GitHub Token (ghp_*) 密钥访问") },
                     leadingIcon = {
                         Icon(
-                            Icons.Default.LinkOff, null,
+                            painterResource(R.drawable.ic_github_mark), null,
                             modifier = Modifier.size(18.dp)
                         )
                     },
@@ -183,7 +186,20 @@ internal fun GithubTokenDialog(
 
     AlertDialog(
         onDismissRequest = { if (!isValidating) onDismiss() },
-        title = { Text("输入 GitHub Personal Access Token") },
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_github_mark),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text("输入 GitHub Personal Access Token")
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

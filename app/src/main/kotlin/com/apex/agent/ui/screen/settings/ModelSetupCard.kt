@@ -54,6 +54,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.apex.agent.core.llm.ModelCapabilityHeuristics
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelProfileDefaults
 import com.apex.agent.core.llm.ProviderConfig
@@ -390,7 +391,19 @@ internal fun ModelSetupCard(
             currentModelId = selected?.modelId.orEmpty(),
             onDismiss = { showModelPicker = false },
             onPick = { modelId ->
-                selected?.let { viewModel.upsertProfile(it.copy(modelId = modelId)) }
+                selected?.let {
+                    viewModel.upsertProfile(
+                        it.copy(
+                            modelId = modelId,
+                            // 能力启发式预填：端点 /models 不带能力元数据，
+                            // 按模型 id 命名约定推断 vision / ImageGen / VideoGen
+                            //（只加不减，用户手改过的位不会被覆盖）。
+                            capabilities = ModelCapabilityHeuristics.enrichCapabilities(
+                                modelId, it.capabilities
+                            )
+                        )
+                    )
+                }
                 showModelPicker = false
             }
         )

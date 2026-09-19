@@ -58,10 +58,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassToolCard
 import com.apex.agent.ui.glass.GlassToolStatus
 import kotlinx.coroutines.delay
@@ -100,6 +102,12 @@ internal fun toolKindStyle(kind: ToolKind): ToolKindStyle = when (kind) {
     ToolKind.SKILL -> ToolKindStyle(
         "Skill", Icons.Default.AutoAwesome,
         MaterialTheme.colorScheme.primary
+    )
+    ToolKind.GITHUB -> ToolKindStyle(
+        // 官方 Octocat mark（res/drawable/ic_github_mark）+ GitHub fg-muted 灰：
+        // 深浅主题均可读（纯黑 #181717 在暗色主题不可见）。
+        "GitHub", ImageVector.vectorResource(R.drawable.ic_github_mark),
+        Color(0xFF6E7681)
     )
     ToolKind.CONNECTOR -> ToolKindStyle(
         "连接器", Icons.Default.Link,
@@ -151,7 +159,8 @@ internal fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String
 
 /**
  * 工具卡的智能摘要行：从参数/输出中提取一行人类可读的关键信息
- * （文件路径 / 命令 / URL / server / skill），折叠时也能看懂这次调用在做什么。
+ * （文件路径 / 命令 / URL / server / skill / GitHub owner/repo），
+ * 折叠时也能看懂这次调用在做什么。
  */
 internal fun smartToolSummary(toolName: String, args: String, kind: ToolKind, server: String?): String? {
     val name = toolName.lowercase()
@@ -165,7 +174,28 @@ internal fun smartToolSummary(toolName: String, args: String, kind: ToolKind, se
         name == "web_fetch" -> path
         name == "web_search" ->
             Regex(""""query"\s*:\s*"([^"]+)"""").find(args)?.groupValues?.getOrNull(1)
+        name.startsWith("github_") -> githubSummary(name, args)
         kind == ToolKind.MCP -> server ?: path
+        else -> null
+    }
+}
+
+/**
+ * GitHub 工具的摘要：owner/repo > 查询词 > 用户名，按参数字段提取。
+ * 旧实现 github_* 落入 else 返回 null，折叠卡看不到这次在读哪个仓库。
+ */
+private fun githubSummary(name: String, args: String): String? {
+    val repo = Regex(""""(?:repo|repository)"\s*:\s*"([^"]+)"""")
+        .find(args)?.groupValues?.getOrNull(1)
+    val owner = Regex(""""owner"\s*:\s*"([^"]+)"""")
+        .find(args)?.groupValues?.getOrNull(1)
+    val query = Regex(""""query"\s*:\s*"([^"]+)"""")
+        .find(args)?.groupValues?.getOrNull(1)
+    return when {
+        repo != null && owner != null -> "$owner/$repo"
+        repo != null -> repo
+        owner != null -> "@$owner"
+        query != null -> query.take(80)
         else -> null
     }
 }

@@ -245,7 +245,14 @@ class StreamingOpenAiClient(
                                             addJsonObject {
                                                 put("type", "image_url")
                                                 putJsonObject("image_url") {
-                                                    put("url", "data:${img.mimeType};base64,${img.base64Data}")
+                                                    // URL 直传优先（ImageContent.url）；
+                                                    // 否则 base64 内联。旧实现只支持 base64，
+                                                    // 已有远程图 URL 的场景被迫重编码。
+                                                    put(
+                                                        "url",
+                                                        img.url?.takeIf { it.isNotBlank() }
+                                                            ?: "data:${img.mimeType};base64,${img.base64Data}"
+                                                    )
                                                     put("detail", img.detail)
                                                 }
                                             }
@@ -314,6 +321,17 @@ class StreamingOpenAiClient(
                     put("parallel_tool_calls", false)
                 }
             }
+
+            // ── 多模态输出（图片生成）─────────────────────────────
+            // OpenRouter 等网关要求图像输出模型显式声明 modalities，否则不返回
+            // 图片 part。仅在 Profile 声明 imageGeneration 能力时发送——非生图
+            // 端点不会看到这个非标准字段（避免严格端点 400）。
+            if (config.capabilities.imageGeneration) {
+                putJsonArray("modalities") {
+                    add("text")
+                    add("image")
+                }
+            }
         }
     }
     
@@ -327,7 +345,18 @@ class StreamingOpenAiClient(
             val delta = choice["delta"]?.jsonObject
             val finishReason = choice["finish_reason"]?.jsonPrimitive?.contentOrNull
 
-            val content = delta?.get("content")?.jsonPrimitive?.contentOrNull
+            // 多模态输出：content 可能是 content-parts 数组（OpenRouter / Gemini
+            // 兼容层的图像输出）。旧实现只按 jsonPrimitive 解析，数组形态抛异常
+            // 被整体丢弃 —— 图片模型表现为“模型什么都没说”。
+            val contentMedia = MultimodalOutputExtractor.parseContent(delta?.get("content"))
+            val content = contentMedia.text
+
+            // message 级 images / video_url（GLM CogView chat 式生图 / 生视频网关）
+            val images = contentMedia.images +
+                MultimodalOutputExtractor.parseImagesArray(delta?.get("images"))
+            val videos = contentMedia.videos +
+                listOfNotNull(MultimodalOutputExtractor.parseVideo(delta?.get("video_url"))) +
+                MultimodalOutputExtractor.parseVideosArray(delta?.get("videos"))
 
             // 原生思考内容（DeepSeek-R1 `reasoning_content`、部分 Anthropic 代理 `reasoning`）。
             // 旧实现丢弃，导致思考类模型的思维链在 UI 上不可见。
@@ -353,6 +382,8 @@ class StreamingOpenAiClient(
                 content = content,
                 toolCalls = toolCalls,
                 reasoningContent = reasoningContent,
+                images = images,
+                videos = videos,
                 isFinish = finishReason == "stop" || finishReason == "tool_calls"
             )
         } catch (e: Exception) {
@@ -376,7 +407,14 @@ class StreamingOpenAiClient(
         val choices = json["choices"]?.jsonArray
         val message = choices?.firstOrNull()?.jsonObject?.get("message")?.jsonObject
 
-        val content = message?.get("content")?.jsonPrimitive?.contentOrNull
+        // 多模态输出：message.content 可能为 content-parts 数组（同流式路径）。
+        val contentMedia = MultimodalOutputExtractor.parseContent(message?.get("content"))
+        val content = contentMedia.text
+        val images = contentMedia.images +
+            MultimodalOutputExtractor.parseImagesArray(message?.get("images"))
+        val videos = contentMedia.videos +
+            listOfNotNull(MultimodalOutputExtractor.parseVideo(message?.get("video_url"))) +
+            MultimodalOutputExtractor.parseVideosArray(message?.get("videos"))
         val toolCalls = message?.get("tool_calls")?.jsonArray?.map { tc ->
             val tcObj = tc.jsonObject
             ToolCall(
@@ -395,7 +433,7 @@ class StreamingOpenAiClient(
             )
         }
 
-        return LlmResponse(content = content, toolCalls = toolCalls, usage = usage)
+        return LlmResponse(content = content, toolCalls = toolCalls, usage = usage, images = images, videos = videos)
     }
     
     // OkHttp suspend扩展

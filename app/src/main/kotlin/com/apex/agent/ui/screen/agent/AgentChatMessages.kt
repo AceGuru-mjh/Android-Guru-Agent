@@ -67,7 +67,9 @@ internal fun AgentMessageItem(
     // UX-1：消息操作菜单门禁（流式生成中禁用删除/重生成，复制仍可用）。
     actionsEnabled: Boolean = true,
     onImageClick: (MessageAttachment) -> Unit = {},
-    onFileClick: (MessageAttachment) -> Unit = {}
+    onFileClick: (MessageAttachment) -> Unit = {},
+    // 多模态输出：Agent 回复 markdown 里的生成图片点击 → Lightbox（URL/data URI）。
+    onMarkdownImageClick: (String) -> Unit = {}
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(
@@ -84,7 +86,8 @@ internal fun AgentMessageItem(
             onOrganize = { text -> vm.organizeToMemory(text) },
             onRegenerate = { vm.regenerateResponse(message.id) },
             onDelete = { vm.deleteMessage(message.id) },
-            onDeleteFrom = { vm.deleteMessagesFrom(message.id) }
+            onDeleteFrom = { vm.deleteMessagesFrom(message.id) },
+            onImageClick = onMarkdownImageClick
         )
         is AgentUiMessage.ToolCall -> ToolCallCard(
             toolCall = message,
@@ -234,7 +237,9 @@ internal fun AgentBubble(
     actionsEnabled: Boolean = true,
     onRegenerate: () -> Unit = {},
     onDelete: () -> Unit = {},
-    onDeleteFrom: () -> Unit = {}
+    onDeleteFrom: () -> Unit = {},
+    // 多模态输出：markdown 生成图片点击 → Lightbox。
+    onImageClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -344,9 +349,9 @@ internal fun AgentBubble(
                     }
                 }
 
-                // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表）
+                // 正文（Markdown 渲染：支持代码块 / 行内代码 / 粗体 / 列表 / 图片 / 视频 / 链接）
                 SelectionContainer {
-                    MarkdownText(markdown = message.text)
+                    MarkdownText(markdown = message.text, onImageClick = onImageClick)
                 }
 
                 // 操作行：复制 / 整理到记忆（已接入 CS-Mem 后端）
@@ -392,7 +397,11 @@ internal fun AgentBubble(
 }
 
 @Composable
-internal fun StreamingResponseBubble(text: String) {
+internal fun StreamingResponseBubble(
+    text: String,
+    // 多模态输出：流式期间生成的图片点击 → Lightbox（与完成态行为一致）。
+    onImageClick: (String) -> Unit = {}
+) {
     val pulse by rememberInfiniteTransition(label = "stream-cursor").animateFloat(
         initialValue = 0.25f,
         targetValue = 1f,
@@ -455,7 +464,7 @@ internal fun StreamingResponseBubble(text: String) {
                 }
 
                 SelectionContainer {
-                    MarkdownText(markdown = text)
+                    MarkdownText(markdown = text, onImageClick = onImageClick)
                 }
                 Text(
                     text = "▍",

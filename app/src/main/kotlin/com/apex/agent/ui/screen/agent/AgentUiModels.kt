@@ -44,9 +44,12 @@ data class UserInputRequest(
  *
  * 引擎事件本身没有"类型"字段，ViewModel 在 [classifyTool] 中根据
  * toolName 前缀与已知 id 推断。这样用户能一眼区分本地工具 / MCP /
- * 联网搜索 / 网页抓取 / Skill / 连接器 / 插件调用。
+ * 联网搜索 / 网页抓取 / Skill / GitHub / 连接器 / 插件调用。
+ *
+ * GITHUB 独立于 CONNECTOR：官方 Octocat mark + GitHub 品牌灰，
+ * 与通用连接器（Link 图标 + 紫色）视觉区分。
  */
-enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL, CONNECTOR, PLUGIN }
+enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL, GITHUB, CONNECTOR, PLUGIN }
 
 @Immutable
 sealed interface AgentUiMessage {

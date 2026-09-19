@@ -35,9 +35,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.glass.GlassNavigationItem
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
@@ -274,8 +276,9 @@ private fun DrawerAuroraBackdrop(modifier: Modifier = Modifier) {
 
 /**
  * 抽屉 footer 的 GitHub 连接状态行：常显。
- * - 已连接：绿色圆点 + "@用户名"
- * - 未连接：灰色圆点 + "GitHub 未连接"
+ * - 官方 Octocat mark 图标（旧实现只有一个彩色圆点，无品牌辨识度）
+ * - 已连接：绿色状态点 + "@用户名"
+ * - 未连接：灰色状态点 + "GitHub 未连接"
  */
 @Composable
 private fun GithubStatusRow(
@@ -293,6 +296,13 @@ private fun GithubStatusRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_github_mark),
+                contentDescription = "GitHub",
+                tint = if (isConnected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp)
+            )
             Box(
                 modifier = Modifier
                     .size(8.dp)

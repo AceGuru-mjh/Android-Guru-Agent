@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -151,21 +154,24 @@ fun TerminalScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("终端") },
+                    // 顶栏置零 windowInsets，避免与根 Scaffold 状态栏双重叠加
+                    //（本屏根顶栏被抑制，状态栏空间由根 Scaffold contentWindowInsets 提供）
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    title = { Text(stringResource(R.string.term_title)) },
                     navigationIcon = {
                         // 修复双顶栏：根顶栏在本屏隐藏，左汉堡改为打开全局导航抽屉
                         IconButton(onClick = onOpenNavDrawer) {
-                            Icon(Icons.Default.Menu, contentDescription = "打开导航", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.term_cd_nav), tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     actions = {
                         // 环境中心：内置 Ubuntu rootfs 解包/管理与环境依赖（离线交付，无下载）
                         IconButton(onClick = { showEnvironmentCenter = true }) {
-                            Icon(Icons.Default.Layers, contentDescription = "环境中心", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Layers, contentDescription = stringResource(R.string.term_cd_env_center), tint = MaterialTheme.colorScheme.primary)
                         }
                         // 终端专属设置抽屉（外观/键盘行/命令黑白名单）
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Settings, contentDescription = "终端设置", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.term_cd_settings), tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -216,12 +222,11 @@ fun TerminalScreen(
     if (showNewSessionDialog) {
         AlertDialog(
             onDismissRequest = { showNewSessionDialog = false },
-            title = { Text("新建终端会话") },
+            title = { Text(stringResource(R.string.term_new_session_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Ubuntu 会话提供完整 Linux 开发环境（apt / bash / 工具链）；" +
-                            "rootfs 随 APK 内置（完整 Ubuntu，~300MB+ 档案），首次使用离线解包约 2~5 分钟，进度在横幅显示。",
+                        stringResource(R.string.term_new_session_ubuntu_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -234,7 +239,7 @@ fun TerminalScreen(
                 }) {
                     Icon(Icons.Default.Terminal, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Ubuntu 会话")
+                    Text(stringResource(R.string.term_ubuntu_session))
                 }
             },
             dismissButton = {
@@ -317,7 +322,7 @@ private fun SessionTabStrip(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Default.Add, "新建会话",
+                Icons.Default.Add, stringResource(R.string.term_cd_new_session),
                 Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
@@ -373,7 +378,7 @@ private fun SessionTab(
             )
         }
         Icon(
-            Icons.Default.Close, "关闭会话",
+            Icons.Default.Close, stringResource(R.string.term_cd_close_session),
             Modifier
                 .size(16.dp)
                 .clip(CircleShape)
@@ -401,7 +406,7 @@ private fun TerminalStatusBar(
     ) {
         if (semantic == null) {
             Text(
-                "未连接会话",
+                stringResource(R.string.term_no_session),
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -437,7 +442,7 @@ private fun TerminalStatusBar(
             // 等待输入（prompt 检测）
             if (semantic.prompt?.detected == true || semantic.input.state.name == "HIGH_CONFIDENCE") {
                 Text(
-                    "⌨ 等待输入",
+                    stringResource(R.string.term_waiting_input),
                     fontSize = 11.sp,
                     color = Color(0xFFE0A63C)
                 )
@@ -478,22 +483,24 @@ private fun UbuntuLifecycleBanner(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (phase == "FAILED") "Ubuntu 环境异常" else "Ubuntu 开发环境未解包",
+                        if (phase == "FAILED") stringResource(R.string.term_banner_failed_title)
+                        else stringResource(R.string.term_banner_not_installed_title),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        if (phase == "FAILED") "上次解包/引导失败，可重试"
-                        else "完整的 Linux 环境：gcc / python3 / git / vim / man 开箱即用（内置离线解包，约 2~5 分钟）",
+                        if (phase == "FAILED") stringResource(R.string.term_banner_failed_desc)
+                        else stringResource(R.string.term_banner_not_installed_desc),
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 TextButton(onClick = onInstall) {
-                    Text(if (phase == "FAILED") "重试" else "解包")
+                    Text(if (phase == "FAILED") stringResource(R.string.term_retry)
+                    else stringResource(R.string.term_unpack))
                 }
                 TextButton(onClick = onOpenCenter) {
-                    Text("环境中心")
+                    Text(stringResource(R.string.term_env_center))
                 }
             }
         }
@@ -509,9 +516,9 @@ private fun UbuntuLifecycleBanner(
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                 Text(
                     when (phase) {
-                        "INSTALLING" -> "Ubuntu rootfs 离线解包中…（约 2~5 分钟，可后台等待）"
-                        "BOOTSTRAPPING" -> "Ubuntu 初始化：apt 源 / 网络 / 基础包…（离线时自动降级可用）"
-                        else -> "Ubuntu 环境收敛中…"
+                        "INSTALLING" -> stringResource(R.string.term_installing_banner)
+                        "BOOTSTRAPPING" -> stringResource(R.string.term_bootstrapping_banner)
+                        else -> stringResource(R.string.term_converging_banner)
                     },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -547,46 +554,46 @@ private fun TerminalSettingsDrawer(
             // 标题
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
-                Text("终端设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.term_settings_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
 
             // ═══ 1. 终端外观与交互 ═══
-            SettingsCard(Icons.Default.Settings, "终端外观") {
-                LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
-                ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
-                ToggleRow("键盘辅助行（ESC / CTRL / 方向键）", settings.showKeybar) { onSettings { copy(showKeybar = it) } }
+            SettingsCard(Icons.Default.Settings, stringResource(R.string.term_appearance)) {
+                LabeledNumber(stringResource(R.string.term_font_size), settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
+                ToggleRow(stringResource(R.string.term_monochrome), settings.monochrome) { onSettings { copy(monochrome = it) } }
+                ToggleRow(stringResource(R.string.term_keybar), settings.showKeybar) { onSettings { copy(showKeybar = it) } }
             }
 
             // ═══ 1b. 反馈（对齐 Termux / ConnectBot 的终端反馈习惯）═══
-            SettingsCard(Icons.Default.Settings, "反馈") {
-                ToggleRow("响铃时振动（BEL）", settings.vibrateOnBell) {
+            SettingsCard(Icons.Default.Settings, stringResource(R.string.term_feedback)) {
+                ToggleRow(stringResource(R.string.term_vibrate_on_bell), settings.vibrateOnBell) {
                     onSettings { copy(vibrateOnBell = it) }
                 }
                 Text(
-                    "shell 发出 BEL（补全失败、Ctrl+G、命令报错）时振动一下。",
+                    stringResource(R.string.term_vibrate_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                ToggleRow("保持屏幕常亮", settings.keepScreenOn) {
+                ToggleRow(stringResource(R.string.term_keep_screen_on), settings.keepScreenOn) {
                     onSettings { copy(keepScreenOn = it) }
                 }
                 Text(
-                    "看长任务输出（编译 / apt / 日志）时不被息屏打断。",
+                    stringResource(R.string.term_keep_screen_on_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             // ═══ 2. 黑名单 / 白名单 ═══
-            SettingsCard(Icons.Default.Block, "命令黑名单 / 白名单") {
+            SettingsCard(Icons.Default.Block, stringResource(R.string.term_blacklist_title)) {
                 Text(
-                    "白名单非空时仅允许其中命令；黑名单中的命令始终禁止。按命令首段（如 rm / adb）匹配。",
+                    stringResource(R.string.term_blacklist_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
                 CommandListEditor(
-                    title = "黑名单",
+                    title = stringResource(R.string.term_blacklist),
                     items = blacklist.toList().sorted(),
                     onAdd = onAddBlack,
                     onRemove = onRemoveBlack,
@@ -594,7 +601,7 @@ private fun TerminalSettingsDrawer(
                 )
                 Spacer(Modifier.height(8.dp))
                 CommandListEditor(
-                    title = "白名单",
+                    title = stringResource(R.string.term_whitelist),
                     items = whitelist.toList().sorted(),
                     onAdd = onAddWhite,
                     onRemove = onRemoveWhite,
@@ -604,13 +611,13 @@ private fun TerminalSettingsDrawer(
 
             // ═══ 3. 入口提示（环境解包在环境中心）═══
             Text(
-                "环境解包与管理（内置 Ubuntu / 依赖工具链）在顶栏图层图标的环境中心。",
+                stringResource(R.string.term_env_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
-                Text("关闭")
+                Text(stringResource(R.string.term_close))
             }
         }
     }
@@ -655,12 +662,12 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
             onValueChange = { input = it },
             modifier = Modifier.weight(1f),
             singleLine = true,
-            placeholder = { Text("如 rm / adb / format", style = MaterialTheme.typography.bodySmall) },
+            placeholder = { Text(stringResource(R.string.term_cmd_hint), style = MaterialTheme.typography.bodySmall) },
             textStyle = MaterialTheme.typography.bodySmall
         )
         TextButton(onClick = {
             if (input.isNotBlank()) { onAdd(input.trim()); input = "" }
-        }) { Text("添加") }
+        }) { Text(stringResource(R.string.term_add)) }
     }
     if (items.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
@@ -668,7 +675,7 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
             items(items) { cmd ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("• $cmd", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                    TextButton(onClick = { onRemove(cmd) }) { Text("移除", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { onRemove(cmd) }) { Text(stringResource(R.string.term_remove), color = MaterialTheme.colorScheme.error) }
                 }
             }
         }

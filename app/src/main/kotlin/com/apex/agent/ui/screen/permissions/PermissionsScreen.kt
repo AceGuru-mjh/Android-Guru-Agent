@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,9 +54,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import com.apex.agent.R
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
 import kotlinx.coroutines.Dispatchers
@@ -113,7 +116,15 @@ fun PermissionsScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("权限管理") }) }
+        // 内层 Scaffold 置零 insets：状态栏已由根 Scaffold 顶栏承担，避免双重叠加
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            TopAppBar(
+                // 顶栏置零 windowInsets，避免与根 Scaffold 状态栏双重叠加
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                title = { Text(stringResource(R.string.perms_title)) }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -128,9 +139,9 @@ fun PermissionsScreen() {
             PermissionCard(
                 icon = Icons.Default.AdminPanelSettings,
                 title = "Root",
-                description = "最高权限，可执行所有系统操作（/system、/data、mount、SELinux）",
+                description = stringResource(R.string.perms_root_desc),
                 status = if (hasRoot) Status.Granted else Status.Denied,
-                actionLabel = "检测",
+                actionLabel = stringResource(R.string.perms_detect),
                 onClick = {
                     // v2：Root 检测下沉 IO 线程（fork su 最多 3s，主线程执行会 ANR）
                     scope.launch {
@@ -157,26 +168,29 @@ fun PermissionsScreen() {
             // 无障碍
             PermissionCard(
                 icon = Icons.Default.Accessibility,
-                title = "无障碍服务",
-                description = "读取UI树、模拟点击、截图（Agent的眼睛和手）",
+                title = stringResource(R.string.perms_accessibility),
+                description = stringResource(R.string.perms_accessibility_desc),
                 status = if (accessibilityGranted) Status.Granted else Status.Denied,
-                actionLabel = if (accessibilityGranted) "已开启" else "开启",
+                actionLabel = if (accessibilityGranted) stringResource(R.string.perms_enabled)
+                else stringResource(R.string.perms_enable),
                 onClick = { context.openAccessibilitySettings() }
             )
             PermissionCard(
                 icon = Icons.Default.Layers,
-                title = "悬浮窗",
-                description = "在其他应用上方显示内容",
+                title = stringResource(R.string.perms_overlay),
+                description = stringResource(R.string.perms_overlay_desc),
                 status = if (overlayGranted) Status.Granted else Status.Denied,
-                actionLabel = if (overlayGranted) "已授权" else "授权",
+                actionLabel = if (overlayGranted) stringResource(R.string.perms_granted)
+                else stringResource(R.string.perms_authorize),
                 onClick = { context.openOverlaySettings() }
             )
             PermissionCard(
                 icon = Icons.Default.Notifications,
-                title = "通知权限",
-                description = "发送前台服务通知、读取通知",
+                title = stringResource(R.string.perms_notifications),
+                description = stringResource(R.string.perms_notifications_desc),
                 status = if (notifGranted) Status.Granted else Status.Denied,
-                actionLabel = if (notifGranted) "已授权" else "授权",
+                actionLabel = if (notifGranted) stringResource(R.string.perms_granted)
+                else stringResource(R.string.perms_authorize),
                 onClick = {
                     // Android 13+：优先走标准运行时权限请求，而非直接跳系统设置页
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !notifGranted) {
@@ -188,10 +202,11 @@ fun PermissionsScreen() {
             )
             PermissionCard(
                 icon = Icons.Default.Folder,
-                title = "存储权限",
-                description = "读写文件（工作区、下载）",
+                title = stringResource(R.string.perms_storage),
+                description = stringResource(R.string.perms_storage_desc),
                 status = if (storageGranted) Status.Granted else Status.Denied,
-                actionLabel = if (storageGranted) "已授权" else "授权",
+                actionLabel = if (storageGranted) stringResource(R.string.perms_granted)
+                else stringResource(R.string.perms_authorize),
                 onClick = { context.openStorageSettings() }
             )
         }
@@ -319,7 +334,7 @@ private fun ShizukuPermissionCard(
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "ADB级权限，无需Root即可执行pm/am/settings等系统命令",
+                    stringResource(R.string.perms_shizuku_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -366,9 +381,9 @@ private fun ShizukuPermissionCard(
             ) {
                 Text(
                     when {
-                        shizukuPermission.value -> "已就绪"
-                        shizukuRunning.value -> "授权"
-                        else -> "安装/启动"
+                        shizukuPermission.value -> stringResource(R.string.perms_ready)
+                        shizukuRunning.value -> stringResource(R.string.perms_authorize)
+                        else -> stringResource(R.string.perms_install_launch)
                     }
                 )
             }
@@ -377,13 +392,15 @@ private fun ShizukuPermissionCard(
 }
 
 private enum class Status { Granted, Denied, Pending, Running }
-private val Status.label: String
-    get() = when (this) {
-        Status.Granted -> "已获得"
-        Status.Denied -> "未获得"
-        Status.Pending -> "未授权"
-        Status.Running -> "运行中"
-    }
+
+/** i18n：状态徽标文案（@Composable，经 stringResource 按当前语言取词）。 */
+@Composable
+private fun statusLabel(status: Status): String = when (status) {
+    Status.Granted -> stringResource(R.string.perms_status_granted)
+    Status.Denied -> stringResource(R.string.perms_status_denied)
+    Status.Pending -> stringResource(R.string.perms_status_pending)
+    Status.Running -> stringResource(R.string.perms_status_running)
+}
 
 @Composable
 private fun PermissionCard(
@@ -445,7 +462,7 @@ private fun StatusPill(status: Status, accent: androidx.compose.ui.graphics.Colo
         color = accent.copy(alpha = 0.14f)
     ) {
         Text(
-            status.label,
+            statusLabel(status),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = accent,

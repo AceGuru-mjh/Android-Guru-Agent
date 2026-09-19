@@ -614,10 +614,16 @@ class TerminalViewModel @Inject constructor(
         }
         val wl = _whitelist.value
         if (wl.isNotEmpty()) {
-            // 白名单模式：每段头都必须在名单内
+            // 白名单模式：每段头（同样剥离环境赋值，REVIEW-W1：与黑名单分支语义一致）
+            // 都必须在名单内。
             return CommandParser.splitSegments(trimmed).all { segment ->
+                var rest = segment.trim()
+                while (true) {
+                    val m = envAssignmentPrefix(rest) ?: break
+                    rest = m
+                }
                 val head = CommandParser.basename(
-                    CommandParser.extractFirstToken(segment.trim()).text
+                    CommandParser.extractFirstToken(rest).text
                 ).lowercase()
                 head.isEmpty() || head in wl
             }

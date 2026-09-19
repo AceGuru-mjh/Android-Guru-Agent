@@ -626,6 +626,9 @@ private fun DraggableLiveChip(state: HazeState, mode: GlassLabMode, zoneSize: In
     val scheme = MaterialTheme.colorScheme
     val night = mode == GlassLabMode.NIGHT
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    // REVIEW-R2：zoneSize 以参数传入，pointerInput(Unit) 闭包会冻结首帧值
+    //（首帧 IntSize.Zero → 探针被钳死在原点拖不动）。包 state 让拖动闭包读到最新尺寸。
+    val zoneSizeState = androidx.compose.runtime.rememberUpdatedState(zoneSize)
     val spec = GlassSpec(
         name = "", blur = 18.dp, noise = 0.10f, sheen = 0.12f,
         tint = MilkWhite.copy(alpha = if (night) 0.34f else 0.58f),
@@ -649,9 +652,10 @@ private fun DraggableLiveChip(state: HazeState, mode: GlassLabMode, zoneSize: In
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    // 钳制在对照区内（片宽 = 区宽 40%）
-                    val maxX = zoneSize.width * 0.60f
-                    val maxY = (zoneSize.height - CompareChipHeight.roundToPx()).coerceAtLeast(0).toFloat()
+                    // 钳制在对照区内（片宽 = 区宽 40%）；尺寸经 state 读最新值（R2）。
+                    val zone = zoneSizeState.value
+                    val maxX = zone.width * 0.60f
+                    val maxY = (zone.height - CompareChipHeight.roundToPx()).coerceAtLeast(0).toFloat()
                     dragOffset = Offset(
                         (dragOffset.x + dragAmount.x).coerceIn(0f, maxX),
                         (dragOffset.y + dragAmount.y).coerceIn(0f, maxY)
@@ -764,8 +768,8 @@ private fun SpecimenGlass(
     // 材质层：state 非空 = Backdrop 档（hazeEffect 实时采样，用法与
     // GlassSurface 完全一致）；为空 = Frosted 档（主题色薄霜，诚实降级）
     val material = if (state != null) {
-        val bg = if (spec.background.isSpecified()) spec.background else scheme.background
-        val fb = if (spec.fallback.isSpecified()) spec.fallback else scheme.surfaceContainerHigh.copy(alpha = 0.55f)
+        val bg = if (spec.background.isSpecified) spec.background else scheme.background
+        val fb = if (spec.fallback.isSpecified) spec.fallback else scheme.surfaceContainerHigh.copy(alpha = 0.55f)
         Modifier.hazeEffect(
             state = state,
             style = HazeStyle(
@@ -777,7 +781,7 @@ private fun SpecimenGlass(
             )
         )
     } else {
-        val topLift = if (spec.tintTop.isSpecified()) spec.tintTop else spec.tint.copy(alpha = spec.tint.alpha * 0.6f)
+        val topLift = if (spec.tintTop.isSpecified) spec.tintTop else spec.tint.copy(alpha = spec.tint.alpha * 0.6f)
         Modifier.background(
             Brush.verticalGradient(listOf(topLift, spec.tint), startY = 0f, endY = Float.POSITIVE_INFINITY),
             shape = shape

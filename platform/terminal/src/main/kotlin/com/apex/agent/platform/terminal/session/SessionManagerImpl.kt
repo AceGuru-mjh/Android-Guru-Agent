@@ -214,6 +214,14 @@ class SessionManagerImpl(
             // 6. start exit watcher
             startExitWatcher(sessionId, nativeId)
             return Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            // REVIEW-R4：结构性取消（scope shutdown）不吞 —— 取消不是装配失败，
+            // 吞掉会拿伪失败掩盖取消语义。同样回滚 native 资源后重抛。
+            runCatching { native.nativeCloseSession(nativeId) }
+            assemblies.remove(sessionId)
+            stateFlows.remove(sessionId)
+            transitionLocks.remove(sessionId)
+            throw ce
         } catch (t: Throwable) {
             // R-2：装配失败回滚 —— 回收 native PTY 与 fork 的 shell，清理登记。
             runCatching { native.nativeCloseSession(nativeId) }

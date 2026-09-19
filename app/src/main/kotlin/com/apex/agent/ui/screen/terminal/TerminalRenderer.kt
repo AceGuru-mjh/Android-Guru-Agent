@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -207,6 +208,13 @@ fun TerminalGrid(
     val lineHeightPx = with(density) { lineHeightSp.toPx() }
     val lineHeightDp = with(density) { lineHeightSp.toDp() }
 
+    // T85（REVIEW-R1）：手势闭包防陈旧捕获 —— pointerInput(Unit) 的块永不重启，
+    // 闭包里读到的组合期局部值（scrollback 基准/字体度量）会冻结在首帧；
+    // 捏合改字号、长会话 scrollback 淘汰后命中测试会整体错位。统一包 state。
+    val lineHeightPxState = rememberUpdatedState(lineHeightPx)
+    val charWidthPxState = rememberUpdatedState(charWidthPx)
+    val wideCharWidthPxState = rememberUpdatedState(wideCharWidthPx)
+
     // 全量行 = scrollback（旧→新）+ 可见屏
     val allRows: List<List<RenderCell>> = remember(render) {
         if (render == null) emptyList() else render.scrollback + render.lines
@@ -221,6 +229,8 @@ fun TerminalGrid(
     // T85（M-2）：行稳定 key 基准 —— scrollbackBase 单调递增，行 id 不随淘汰位移。
     val scrollbackBase = render?.scrollbackBase ?: 0L
     val scrollbackCount = render?.scrollback?.size ?: 0
+    val scrollbackBaseState = rememberUpdatedState(scrollbackBase)
+    val scrollbackCountState = rememberUpdatedState(scrollbackCount)
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canForward) ->
@@ -279,20 +289,24 @@ fun TerminalGrid(
 
     // 指针 → 行列（滚动偏移 + 行内 cell 宽度步进 —— CJK 用实测宽字符 advance）。
     // 返回 (行 id, 列) —— 稳定 id 让选区不随 scrollback 位移错位（M-2）。
+    // REVIEW-R1：全部度量读 state（防手势闭包陈旧捕获）。
     fun cellAt(offset: Offset): Pair<Long, Int>? {
         val rows = rowsState.value
         if (rows.isEmpty()) return null
-        val contentY = offset.y + listState.firstVisibleItemIndex * lineHeightPx +
+        val lh = lineHeightPxState.value
+        val contentY = offset.y + listState.firstVisibleItemIndex * lh +
             listState.firstVisibleItemScrollOffset
-        val row = (contentY / lineHeightPx).toInt().coerceIn(0, rows.size - 1)
+        val row = (contentY / lh).toInt().coerceIn(0, rows.size - 1)
         val cells = rows[row]
+        val cw = charWidthPxState.value
+        val wcw = wideCharWidthPxState.value
         var px = 0f
         var col = 0
         while (col < cells.size && px < offset.x) {
-            px += if (cells[col].flags and RenderCell.FLAG_WIDE != 0) wideCharWidthPx else charWidthPx
+            px += if (cells[col].flags and RenderCell.FLAG_WIDE != 0) wcw else cw
             col++
         }
-        return rowIdFor(row, scrollbackBase, scrollbackCount) to col
+        return rowIdFor(row, scrollbackBaseState.value, scrollbackCountState.value) to col
     }
 
     /**
@@ -304,7 +318,7 @@ fun TerminalGrid(
      */
     fun wordRangeAt(rowId: Long, col: Int): Pair<Pair<Long, Int>, Pair<Long, Int>>? {
         val rows = rowsState.value
-        val r = indexForRow(rowId, scrollbackBase, scrollbackCount, rows.size) ?: return null
+        val r = indexForRow(rowId, scrollbackBaseState.value, scrollbackCountState.value, rows.size) ?: return null
         val cells = rows.getOrNull(r) ?: return null
         if (col < 0 || col >= cells.size) return null
 
@@ -338,7 +352,7 @@ fun TerminalGrid(
         val builder = StringBuilder()
         var id = range.startRowId
         while (id <= range.endRowId) {
-            val r = indexForRow(id, scrollbackBase, scrollbackCount, rows.size)
+            val r = indexForRow(id, scrollbackBaseState.value, scrollbackCountState.value, rows.size)
             if (r != null) {
                 val cells = rows[r]
                 val from = if (id == range.startRowId) range.startCol else 0
@@ -485,11 +499,12 @@ fun TerminalGrid(
                                     //（旧实现选择范围被锁死在当前可视区，Termux 体验缺口）。
                                     val h = size.height.toFloat()
                                     val edge = EDGE_SCROLL_PX
+                                    val lh = lineHeightPxState.value
                                     when {
                                         change.position.y < edge && listState.canScrollBackward ->
-                                            scope.launch { listState.scrollBy(-lineHeightPx) }
+                                            scope.launch { listState.scrollBy(-lh) }
                                         change.position.y > h - edge && listState.canScrollForward ->
-                                            scope.launch { listState.scrollBy(lineHeightPx) }
+                                            scope.launch { listState.scrollBy(lh) }
                                     }
                                     cellAt(change.position)?.let { selectionHead = it }
                                 },

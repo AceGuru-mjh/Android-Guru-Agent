@@ -66,7 +66,7 @@ class UbuntuTerminalRuntimeWiringTest {
         @JvmStatic
         @BeforeClass
         fun setUpClass() {
-            assumeTrue("cdimage.ubuntu.com unreachable", networkReachable())
+            assumeTrue("hosting release unreachable", networkReachable())
 
             val base = Files.createTempDirectory("t73-wiring-").toFile()
             layout = RootfsInstallLayout.under(AbsolutePath(base.absolutePath))
@@ -109,7 +109,7 @@ class UbuntuTerminalRuntimeWiringTest {
         }
 
         private fun networkReachable(): Boolean = try {
-            val conn = URL("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS")
+            val conn = URL("https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full")
                 .openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
@@ -122,16 +122,16 @@ class UbuntuTerminalRuntimeWiringTest {
         }
 
         /**
-         * T83 夹具获取：下载真实 ubuntu-base 24.04.4 amd64 并校验固定 SHA-256
-         * （下载只是测试夹具的获取手段 —— 生产链路已是 APK 内置离线解包，零网络）。
+         * T84 夹具获取：下载真实完整 rootfs 24.04.4 amd64（交付物本体，~310MB）并校验
+         * 固定 SHA-256（下载只是测试夹具的获取手段 —— 生产链路已是 APK 内置离线解包，零网络）。
          */
         private fun downloadFixtureArchive(): File? = try {
-            val url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-amd64.tar.gz"
-            val expectedSha = "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58"
-            val tmp = File.createTempFile("t83-wiring-archive", ".tar.gz")
+            val url = "https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz"
+            val expectedSha = "57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228"
+            val tmp = File.createTempFile("t84-wiring-archive", ".tar.gz")
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
-                readTimeout = 300_000
+                readTimeout = 900_000
                 instanceFollowRedirects = true
             }
             conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }

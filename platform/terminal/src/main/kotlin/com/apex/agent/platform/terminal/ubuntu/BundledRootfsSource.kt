@@ -50,38 +50,44 @@ class BundledRootfsSource(
      * 内置工件注册表 —— 与 platform/terminal/rootfs-bundle.sha256 清单互为单一真值
      * （BundledRootfsSourceTest 交叉校验，防两处漂移）。
      *
-     * 数据来源（2026-02 实测，写死保证可复现构建）：
-     *   https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS
-     *   （附 GPG 签名；三个 checksum 均与本地下载文件逐一复核过）
+     * 数据来源（rootfs.yml CI 构建，run #10，2026-09-19 实测，写死保证可复现交付）：
+     *   https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full
+     *   （builder：scripts/build_full_rootfs.sh —— 官方 ubuntu-base 24.04.4 + 58 包完整
+     *   CLI 环境；同 Release 附 rootfs-digests.txt 三字段真值表）
      *
-     * point 升级（24.04.5+）是显式人工变更：更新本表 + rootfs-bundle.sha256 +
+     * 重跑构建（档案内容变）是显式人工变更：更新本表 + rootfs-bundle.sha256 +
      * scripts/fetch_rootfs.sh + 对应测试 —— 镜像内容变了而指纹不变等于静默不可复现。
      */
     private data class BundledArtifact(
         val architecture: CpuArchitecture,
         val jniAbi: String,
         val sha256: String,
-        val size: Long
+        val size: Long,
+        /** 解压后字节数（CI digest 报告实测）—— 设备端磁盘预检实测优先，×4 启发式兑底。 */
+        val unpackedSize: Long
     )
 
     private val bundled = listOf(
         BundledArtifact(
             architecture = CpuArchitecture.ARM64,
             jniAbi = "arm64-v8a",
-            sha256 = "04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2",
-            size = 29_870_567L
+            sha256 = "3b8a82393304e38a5209ad1f2b32e6160506ecfc06dda33f3773b9e6b2e392e2",
+            size = 314_655_061L,
+            unpackedSize = 1_171_914_752L
         ),
         BundledArtifact(
             architecture = CpuArchitecture.X86_64,
             jniAbi = "x86_64",
-            sha256 = "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58",
-            size = 29_989_394L
+            sha256 = "57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228",
+            size = 324_010_830L,
+            unpackedSize = 1_159_856_128L
         ),
         BundledArtifact(
             architecture = CpuArchitecture.ARM32,
             jniAbi = "armeabi-v7a",
-            sha256 = "991520b47f6586f38a78505cf016e300b6191bb8ff86a0723481ec23a37ab7f4",
-            size = 27_088_043L
+            sha256 = "fe4e1a0ccd8d73c376c8ed7281a0ccc60041dfba71d735b163a2e657558e250a",
+            size = 294_939_555L,
+            unpackedSize = 974_282_752L
         )
     )
 
@@ -159,6 +165,7 @@ class BundledRootfsSource(
                 archiveUrl = null,                 // BUNDLED：无网络来源，档案在设备本地
                 archiveFormat = ArchiveFormat.TAR_GZ,
                 expectedSize = match.size,
+                expectedUnpackedSize = match.unpackedSize,   // T84：磁盘预检实测优先
                 sha256 = match.sha256,
                 sourceKind = sourceKind,
                 metadataVersion = 1

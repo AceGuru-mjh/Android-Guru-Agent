@@ -95,9 +95,24 @@ class GithubApiService @Inject constructor(
     suspend fun listBranches(owner: String, repo: String): List<GithubBranch> =
         apiCall("/repos/${encodeSegment(owner)}/${encodeSegment(repo)}/branches")
 
-    suspend fun searchCode(query: String, repo: String? = null, perPage: Int = 10): GithubSearchResult {
-        val repoFilter = if (repo != null) "+repo:${encodeQuery(repo)}" else ""
-        return apiCall("/search/code?q=${encodeQuery(query)}$repoFilter&per_page=$perPage")
+    /**
+     * 代码搜索。GitHub legacy /search/code 硬约束：query 必须含至少一个
+     * repo:/user:/org: 限定符（纯关键词搜索返回 422 Validation Failed）。
+     * 调用方（GithubSearchCodeTool）负责在缺限定符时提前拒绝并给出指引。
+     */
+    suspend fun searchCode(
+        query: String,
+        repo: String? = null,
+        org: String? = null,
+        user: String? = null,
+        perPage: Int = 10
+    ): GithubSearchResult {
+        val qualifiers = buildString {
+            repo?.let { append("+repo:").append(encodeQuery(it)) }
+            org?.let { append("+org:").append(encodeQuery(it)) }
+            user?.let { append("+user:").append(encodeQuery(it)) }
+        }
+        return apiCall("/search/code?q=${encodeQuery(query)}$qualifiers&per_page=$perPage")
     }
 
     /**

@@ -300,7 +300,19 @@ class StreamingOpenAiClient(
                             putJsonObject("function") {
                                 put("name", tool.name)
                                 put("description", tool.description)
-                                put("parameters", Json.parseToJsonElement(tool.parameters))
+                                // P0 防爆：单个工具的 parameters 非法 JSON 时，旧实现
+                                // 直接抛异常 → 所有带工具的请求整体失败（一个坏
+                                // schema 拖死全部 ~113 个工具）。现在降级为空对象
+                                // schema（模型仍可调用，参数不校验），并保留该工具。
+                                put(
+                                    "parameters",
+                                    runCatching { Json.parseToJsonElement(tool.parameters) }
+                                        .getOrElse {
+                                            Json.parseToJsonElement(
+                                                """{"type":"object","properties":{}}"""
+                                            )
+                                        }
+                                )
                             }
                         }
                     }

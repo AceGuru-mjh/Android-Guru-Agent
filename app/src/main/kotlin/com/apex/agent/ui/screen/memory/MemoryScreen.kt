@@ -23,6 +23,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -367,6 +368,10 @@ private fun MacroCard(macro: FSMMacro) {
  * cs-mem 卖点的用户侧入口：
  *  - 「梦境整理」→ DreamRenderer.dreamNow()（能量衰减/修剪/宏优化，周期任务亦可手动触发）
  *  - 「免疫隔离区」→ MemoryImmuneSystem 可疑 UI 指纹计数/清除（0 = 未触发隔离，正常态）
+ *
+ * 修复：旧实现把两行内容直接平铺在 Surface 里 —— Material3 Surface 内容包在 Box
+ * 中，两个 Row 互相堆叠绘制，「梦境整理」与「免疫隔离区」的文字重叠在一起。
+ * 现显式包一层 Column 纵向排布，行间加细分隔线。
  */
 @Composable
 private fun MemoryHealthCard(
@@ -380,58 +385,67 @@ private fun MemoryHealthCard(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 梦境整理
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        Icons.Default.Bedtime, contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 梦境整理
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            Icons.Default.Bedtime, contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text("梦境整理", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(
+                        if (dreamRunning) "整理中：衰减 / 修剪 / 宏优化…" else "能量衰减 + 修剪低价值记忆（周期自动，可手动）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text("梦境整理", style = MaterialTheme.typography.labelMedium)
                 }
-                Text(
-                    if (dreamRunning) "整理中：衰减 / 修剪 / 宏优化…" else "能量衰减 + 修剪低价值记忆（周期自动，可手动）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            OutlinedButton(onClick = onDreamNow, enabled = !dreamRunning) {
-                if (dreamRunning) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("立即整理")
+                OutlinedButton(onClick = onDreamNow, enabled = !dreamRunning) {
+                    if (dreamRunning) {
+                        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("立即整理")
+                    }
                 }
             }
-        }
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 免疫隔离区
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        Icons.Default.HealthAndSafety, contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (quarantinedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 14.dp),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 免疫隔离区
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            Icons.Default.HealthAndSafety, contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (quarantinedCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("免疫隔离区", style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(
+                        if (quarantinedCount > 0) "已隔离 $quarantinedCount 个可疑 UI 指纹（钓鱼/悬浮窗特征）"
+                        else "无可疑 UI 指纹被隔离（正常态）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text("免疫隔离区", style = MaterialTheme.typography.labelMedium)
                 }
-                Text(
-                    if (quarantinedCount > 0) "已隔离 $quarantinedCount 个可疑 UI 指纹（钓鱼/悬浮窗特征）"
-                    else "无可疑 UI 指纹被隔离（正常态）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (quarantinedCount > 0) {
-                OutlinedButton(onClick = onClearQuarantine) {
-                    Text("清除", color = MaterialTheme.colorScheme.error)
+                if (quarantinedCount > 0) {
+                    OutlinedButton(onClick = onClearQuarantine) {
+                        Text("清除", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }

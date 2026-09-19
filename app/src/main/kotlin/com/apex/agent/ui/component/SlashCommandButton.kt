@@ -1,16 +1,14 @@
 package com.apex.agent.ui.component
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,11 +29,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -47,6 +46,19 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * 菜单数据由 [SlashMenuProvider] 实时提供，覆盖 Skills / MCP / 插件 / 连接器 四类，
  * 并随插件加载状态自动刷新。每个条目附带状态角标（已连接 / 离线 / 未安装 / 示例）。
+ *
+ * ## v3 修复：点击卡死（ANR）
+ * 旧实现把 [Popup]（`PopupProperties(focusable = true)`）**无条件**留在组合树里，
+ * 仅靠内层 AnimatedVisibility 控制内容显隐 —— 这与 Material3 DropdownMenu 的
+ * `if (expanded) { Popup(...) }` 模式相悖：
+ *  - 聊天页一进入组合，就存在一个**常驻的 focusable 弹窗窗口**：它在出现瞬间
+ *    抢走主窗口焦点（IME 关闭/输入框失焦），且把全屏触摸作为 ACTION_OUTSIDE
+ *    消费用于"关闭弹窗"，但弹窗本身因无条件组合永远不会真正移除 ——
+ *    焦点在弹窗窗口与主窗口之间反复拉锯，点击斜杠按钮弹开内容的瞬间
+ *    窗口尺寸变化 + 焦点迁移叠加，主线程输入管线卡死，表现为"一点就死机"。
+ *  - v3 对齐 M3 模式：**菜单打开时才组合 Popup，关闭即整体移除**。
+ *    弹窗锚定按钮左下角向上生长（BottomStart），限高 400dp 内部滚动；
+ *    点外部 / 返回键关闭（focusable 弹窗的标准语义）。
  */
 @Composable
 fun SlashCommandButton(
@@ -82,26 +94,31 @@ fun SlashCommandButton(
                 cap = StrokeCap.Round
             )
         }
-    }
 
-    DynamicSlashMenuPopup(
-        showMenu = showMenu,
-        menuFlow = slashMenuProvider.menu,
-        onRefresh = slashMenuProvider::refresh,
-        onDismiss = { showMenu = false },
-        onCommandSelected = { command ->
-            onCommandSelected(command)
-            showMenu = false
+        // v3：菜单打开时才组合 Popup —— focusable 弹窗窗口不再常驻。
+        // 锚定在按钮 Box 上（BottomStart：弹窗底边对齐按钮底边，向上生长）。
+        if (showMenu) {
+            SlashMenuPopup(
+                menuFlow = slashMenuProvider.menu,
+                onRefresh = slashMenuProvider::refresh,
+                onDismiss = { showMenu = false },
+                onCommandSelected = { command ->
+                    onCommandSelected(command)
+                    showMenu = false
+                }
+            )
         }
-    )
+    }
 }
 
 /**
- * 动态级联菜单（数据驱动）
+ * 动态级联菜单弹窗（数据驱动）。
+ *
+ * v3：仅在 [SlashCommandButton] 菜单打开期间存在；关闭（onDismiss / 选中命令）
+ * 即整体离开组合，focusable 窗口随之销毁 —— 不再有常驻弹窗抢焦点/吞触摸。
  */
 @Composable
-private fun DynamicSlashMenuPopup(
-    showMenu: Boolean,
+private fun SlashMenuPopup(
     menuFlow: StateFlow<SlashMenuData>,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
@@ -112,21 +129,20 @@ private fun DynamicSlashMenuPopup(
 
     Popup(
         onDismissRequest = onDismiss,
+        alignment = Alignment.BottomStart,
+        // 向上留 4dp 呼吸间隙，避免弹窗底边紧贴按钮底边
+        offset = IntOffset(0, with(LocalDensity.current) { (-4).dp.roundToPx() }),
         properties = PopupProperties(focusable = true)
     ) {
+        // 入场动画：组合即播放（MutableTransitionState 初始 false → 目标 true）
+        val entrance = remember { MutableTransitionState(false).apply { targetState = true } }
         AnimatedVisibility(
-            visible = showMenu,
+            visibleState = entrance,
             enter = fadeIn(tween(150)) +
                 scaleIn(initialScale = 0.95f, animationSpec = tween(150)) +
                 slideInVertically(
                     initialOffsetY = { -8 },
                     animationSpec = tween(150)
-                ),
-            exit = fadeOut(tween(120)) +
-                scaleOut(targetScale = 0.95f, animationSpec = tween(120)) +
-                slideOutVertically(
-                    targetOffsetY = { -8 },
-                    animationSpec = tween(120)
                 )
         ) {
             Surface(
@@ -138,45 +154,47 @@ private fun DynamicSlashMenuPopup(
                 Column(
                     modifier = Modifier
                         .padding(8.dp)
+                        // 限高：菜单向上生长，超出部分内部滚动 —— 弹窗永不顶出屏幕
+                        .heightIn(max = 400.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "快捷指令",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = onRefresh,
-                        modifier = Modifier.size(28.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "刷新菜单",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Text(
+                            "快捷指令",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = onRefresh,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "刷新菜单",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    menuData.categories.forEach { category ->
+                        DynamicCategoryItem(
+                            category = category,
+                            isExpanded = expandedCategory == category.id,
+                            onToggle = {
+                                expandedCategory =
+                                    if (expandedCategory == category.id) null else category.id
+                            },
+                            onItemClick = { command -> onCommandSelected(command) }
                         )
                     }
                 }
-
-                menuData.categories.forEach { category ->
-                    DynamicCategoryItem(
-                        category = category,
-                        isExpanded = expandedCategory == category.id,
-                        onToggle = {
-                            expandedCategory =
-                                if (expandedCategory == category.id) null else category.id
-                        },
-                        onItemClick = { command -> onCommandSelected(command) }
-                    )
-                }
-            }
             }
         }
     }
@@ -314,22 +332,22 @@ private fun SlashItemRow(
 @Composable
 private fun StatusChip(status: SlashItemStatus) {
     val (text, containerColor, contentColor) = when (status) {
-        SlashItemStatus.CONNECTED -> Quad(
+        SlashItemStatus.CONNECTED -> Triple(
             "已连接",
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer
         )
-        SlashItemStatus.OFFLINE -> Quad(
+        SlashItemStatus.OFFLINE -> Triple(
             "离线",
             MaterialTheme.colorScheme.surfaceVariant,
             MaterialTheme.colorScheme.onSurfaceVariant
         )
-        SlashItemStatus.NOT_INSTALLED -> Quad(
+        SlashItemStatus.NOT_INSTALLED -> Triple(
             "未安装",
             MaterialTheme.colorScheme.errorContainer,
             MaterialTheme.colorScheme.onErrorContainer
         )
-        SlashItemStatus.EXTERNAL -> Quad(
+        SlashItemStatus.EXTERNAL -> Triple(
             "示例",
             MaterialTheme.colorScheme.tertiaryContainer,
             MaterialTheme.colorScheme.onTertiaryContainer
@@ -349,5 +367,3 @@ private fun StatusChip(status: SlashItemStatus) {
         )
     }
 }
-
-private data class Quad<A, B, C>(val first: A, val second: B, val third: C)

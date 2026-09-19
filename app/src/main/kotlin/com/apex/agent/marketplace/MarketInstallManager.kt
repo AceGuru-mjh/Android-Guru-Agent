@@ -97,6 +97,63 @@ class MarketInstallManager @Inject constructor(
         return installSkillFromJson(manifestJson)
     }
 
+    // ═══ Skill：本地文件导入（SAF Uri → .zip / .json 自动识别）═══
+    //
+    // 用户反馈"Skills 不能自己导入"：此前市场页只有 GitHub / URL / 粘贴 JSON 三个
+    // 联网或手工入口，本地 skill 包（zip 打包或单个 manifest.json）无处安放。
+    // 识别策略不依赖 SAF 的 mime（不同文件管理器对 zip/json 上报极不可靠）：
+    // 读入字节流后按 ZIP 魔数 PK\x03\x04 分流，其余一律按 JSON 文本处理。
+    suspend fun installSkillFromFile(uri: android.net.Uri): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.readBytesLimited(MAX_LOCAL_FILE_BYTES)
+                } ?: throw Exception("无法读取所选文件（uri=$uri）")
+                if (bytes == null) throw Exception("文件过大（>${MAX_LOCAL_FILE_BYTES / 1024 / 1024}MB）")
+
+                val isZip = bytes.size >= 4 &&
+                    bytes[0] == 'P'.code.toByte() &&
+                    bytes[1] == 'K'.code.toByte() &&
+                    bytes[2] == 3.toByte() &&
+                    bytes[3] == 4.toByte()
+
+                if (isZip) {
+                    // 复制到 cacheDir 临时文件后走 SafeZipExtractor 管道（路径穿越/zip bomb 防御）
+                    val tmp = File(context.cacheDir, "import-skill-${System.nanoTime()}.zip")
+                    try {
+                        tmp.writeBytes(bytes)
+                        skillRegistry.installFromZip(tmp).fold(
+                            onSuccess = { "已安装 Skill：${it.name}（${it.id}，来自本地 ZIP）" },
+                            onFailure = { throw it }
+                        )
+                    } finally {
+                        runCatching { tmp.delete() }
+                    }
+                } else {
+                    val content = String(bytes, Charsets.UTF_8)
+                    skillRegistry.install(content).fold(
+                        onSuccess = { "已安装 Skill：${it.name}（${it.id}，来自本地 JSON）" },
+                        onFailure = { throw it }
+                    )
+                }
+            }.fold(
+                onSuccess = { Result.success(it) },
+                onFailure = { Result.failure(Exception("本地导入失败：${it.message}", it)) }
+            )
+        }
+
+    /** 读取本地文本文件（MCP 配置导入用，2MB 上限）。 */
+    suspend fun readTextFile(uri: android.net.Uri): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.readBytesLimited(MAX_DOWNLOAD_BYTES)
+                } ?: throw Exception("无法读取所选文件（uri=$uri）")
+                if (bytes == null) throw Exception("文件过大（>${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB）")
+                String(bytes, Charsets.UTF_8)
+            }
+        }
+
     // ═══ Skill：魔搭 SKILL.md → apex-skill-v1（prompt 型）═══
     suspend fun installModelScopeSkill(skill: ModelScopeSource.ModelScopeSkill): Result<String> {
         val markdown = modelScopeSource.fetchSkillMarkdown(skill).getOrElse {
@@ -368,5 +425,8 @@ class MarketInstallManager @Inject constructor(
 
     companion object {
         private const val MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024
+
+        /** 本地 skill 包上限：ZIP 可能携带 scripts/references 资源，放宽到 20MB。 */
+        private const val MAX_LOCAL_FILE_BYTES = 20 * 1024 * 1024
     }
 }

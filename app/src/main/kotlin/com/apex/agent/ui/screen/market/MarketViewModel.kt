@@ -263,6 +263,35 @@ class MarketViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 从本地文件导入 Skill（.zip / .json 自动识别）。
+     *
+     * 用户反馈"Skills 不能自己导入"：本地 skill 包此前没有任何入口。
+     * zip 走 SafeZipExtractor（路径穿越 / zip bomb 防御），json 直接装 manifest。
+     */
+    fun importSkillFromFile(uri: android.net.Uri) {
+        viewModelScope.launch {
+            installManager.installSkillFromFile(uri).fold(
+                onSuccess = { message(it) },
+                onFailure = { message(it.message ?: "本地导入失败") }
+            )
+            refresh()
+        }
+    }
+
+    /**
+     * 从本地文件导入 MCP 配置（`{"mcpServers": {...}}` 形态的 .json）。
+     * 复用 [importMcpConfig] 的解析与逐条报错管道。
+     */
+    fun importMcpConfigFromFile(uri: android.net.Uri) {
+        viewModelScope.launch {
+            installManager.readTextFile(uri).fold(
+                onSuccess = { text -> importMcpConfig(text) },
+                onFailure = { message("读取文件失败：${it.message}") }
+            )
+        }
+    }
+
     // ═══ MCP ═══
 
     /**

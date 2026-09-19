@@ -1,15 +1,23 @@
 package com.apex.agent.ui.screen.market
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -79,6 +87,14 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     var showUrlDialog by remember { mutableStateOf(false) }
     var showRepoDialog by remember { mutableStateOf(false) }
 
+    // 本地文件导入（.zip / .json 自动识别）—— SAF mime 对 zip/json 上报不可靠，
+    // 选择器放行 */*，内容由 MarketInstallManager 按字节魔数与解析结果识别。
+    val skillFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.importSkillFromFile(it) }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -99,14 +115,37 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
                 Text("URL 安装", style = MaterialTheme.typography.labelMedium)
             }
         }
-        OutlinedButton(
-            onClick = { showImportDialog = true },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("粘贴 manifest JSON", style = MaterialTheme.typography.labelMedium)
+            OutlinedButton(
+                onClick = { skillFilePicker.launch(arrayOf("*/*")) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    Icons.Default.UploadFile,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("本地导入", style = MaterialTheme.typography.labelMedium)
+            }
+            OutlinedButton(
+                onClick = { showImportDialog = true },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("粘贴 JSON", style = MaterialTheme.typography.labelMedium)
+            }
         }
+        Text(
+            text = "本地导入支持 .zip 技能包（含 manifest + 资源文件）与 .json manifest，自动识别。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
 
         val templates = state.skillTemplates
         if (templates.isEmpty()) {
@@ -176,6 +215,13 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
 
+    // 本地配置文件导入：选 .json（{"mcpServers": {...}} 社区通用格式）
+    val mcpFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.importMcpConfigFromFile(it) }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -201,6 +247,14 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                 description = "粘贴社区通用 MCP 配置 JSON（{\"mcpServers\": {...}}），支持 command/args/env 与 url 两种形态。"
             ) {
                 TextButton(onClick = { showImportDialog = true }) { Text("导入") }
+            }
+        }
+        item {
+            MarketInstallActionCard(
+                title = "从本地文件导入",
+                description = "选择设备上的 MCP 配置文件（.json，如从桌面端 Claude/Cursor 导出的 mcp.json），解析失败的条目会逐条报出原因。"
+            ) {
+                TextButton(onClick = { mcpFilePicker.launch(arrayOf("*/*")) }) { Text("选择文件") }
             }
         }
         item {

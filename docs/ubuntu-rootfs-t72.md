@@ -21,14 +21,23 @@
 
 ## 2. 真实发布信息（写死以保证可复现）
 
-来源：`https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS`（2026-02 实测，与本地下载文件逐一复核）：
+T84 起交付物为**完整环境档**（58 包 CLI：gcc/python3-dev/nodejs/npm/cmake/gdb/ripgrep/…），
+由本仓 CI 构建（`.github/workflows/rootfs.yml` → `scripts/build_full_rootfs.sh`，
+真实 chroot + binfmt qemu；输入为官方 ubuntu-base 24.04.4 骨架 +
+`scripts/rootfs-packages.txt` 清单）并托管于自仓 Release。真值表
+`rootfs-digests.txt` 附于同一 Release（run #10，2026-09-19 实测）：
 
-| artifact | URL | SHA-256 | size |
+| artifact | URL 前缀 | SHA-256 | size（压缩/解压） |
 |---|---|---|---|
-| ubuntu-24.04.4-arm64 | `.../ubuntu-base-24.04.4-base-arm64.tar.gz` | `04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2` | 29,870,567 |
-| ubuntu-24.04.4-amd64 | `.../ubuntu-base-24.04.4-base-amd64.tar.gz` | `c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58` | 29,989,394 |
+| ubuntu-24.04.4-arm64 | `.../ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-arm64.tar.gz` | `3b8a82393304e38a5209ad1f2b32e6160506ecfc06dda33f3773b9e6b2e392e2` | 314,655,061 / 1,171,914,752 |
+| ubuntu-24.04.4-amd64 | `.../ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz` | `57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228` | 324,010,830 / 1,159,856,128 |
+| ubuntu-24.04.4-armhf | `.../ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-armhf.tar.gz` | `fe4e1a0ccd8d73c376c8ed7281a0ccc60041dfba71d735b163a2e657558e250a` | 294,939,555 / 974,282,752 |
 
-版本策略：**锁 point release**。point 升级 = 显式改表 + 改测试，不做运行时自动跟随（镜像变而 checksum 不变 = 静默不可复现）。
+URL 前缀 = `https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/`。
+历史（T83 骨架时代）：`cdimage.ubuntu.com` 官方 SHA256SUMS（29-30MB/档）。
+
+版本策略：**锁 point release + 锁构建产物指纹**。重跑构建（档案内容变）= 显式
+改表 + 改测试，不做运行时自动跟随（镜像变而 checksum 不变 = 静默不可复现）。
 
 格式事实（arm64 包实测）：ustar magic（`ustar\0 00`）、无 PAX/GNU longname（max path 87）、2 个 hardlink（`usr/bin/perl5.38.2 → usr/bin/perl`、`usr/bin/uncompress → gunzip`）、无 setuid、`/etc/apt/sources.list.d/ubuntu.sources` 为 deb822 格式 **http** ports 源（arm64 用 `ports.ubuntu.com`，amd64 包自带 `archive.ubuntu.com`）。
 

@@ -6,7 +6,9 @@
 # APK 内置交付（学习 Operit 的内置思路 + 自有创新：构建期固定指纹的可审计链）。
 # 本脚本是该链的构建期一半：
 #
-#   官方 cdimage（URL + SHA-256 双固定于下表）
+#   自仓托管 Release（tag ubuntu-rootfs-24.04.4-full；rootfs.yml CI 用
+#     scripts/build_full_rootfs.sh 从官方 ubuntu-base 扩建的完整环境，
+#     真值表 rootfs-digests.txt 附于同一 Release —— URL + SHA-256 双固定于下表）
 #     → 下载 → 校验（脚本固定值 + rootfs-bundle.sha256 清单 双重比对）
 #     → 暂存为 platform/terminal/src/main/jniLibs/<abi>/libubuntu-rootfs.so
 #     → （gradle assemble 时打进 APK；legacy packaging 使安装器解出到
@@ -32,7 +34,8 @@ MODULE_DIR="$(cd "$(dirname "$0")/../platform/terminal" && pwd)"
 MANIFEST="$MODULE_DIR/rootfs-bundle.sha256"
 STAGE_BASE="$MODULE_DIR/src/main/jniLibs"
 POINT_VERSION="24.04.4"
-BASE_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release"
+# T84 完整 rootfs 托管源（本仓 Release；builder 见 rootfs.yml / build_full_rootfs.sh）
+BASE_URL="https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full"
 
 # T84：--arch <abi> 只处理该 ABI（PR CI 的 build-apk job 只验证 arm64 打包链，
 # 拉全 3 份是 tag 发布（universal）才需要的）。缺省 = 全部。
@@ -46,15 +49,15 @@ if [ "${1:-}" = "--arch" ]; then
   shift 2
 fi
 
-# 官方 SHA256SUMS（2026-02 实测）逐字节真值 —— 与 rootfs-bundle.sha256、
-# BundledRootfsSource.kt 注册表三处一致（BundledRootfsSourceTest 交叉校验）。
+# T84 完整 rootfs 指纹（rootfs.yml CI 构建，run #10，2026-09-19 实测）—— 与
+# rootfs-bundle.sha256、BundledRootfsSource.kt 注册表三处一致（BundledRootfsSourceTest
+# 交叉校验防漂移）。完整环境：58 包（gcc/python3-dev/nodejs/npm/cmake/gdb/ripgrep/…），
+# 压缩 ~282-310MB/架构，解压 ~0.93-1.1GB（unpacked 字段见托管 Release rootfs-digests.txt）。
 # 架构元组：<android abi> <ubuntu arch> <sha256> <size>
-# T84 待切源：完整 rootfs（scripts/build_full_rootfs.sh 产物，托管于本仓 Release
-# tag ubuntu-rootfs-24.04.4-full）就绪后，本表换其 sha/size + BASE_URL 换托管地址。
 ARTIFACTS=(
-  "arm64-v8a|arm64|04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2|29870567"
-  "x86_64|amd64|c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58|29989394"
-  "armeabi-v7a|armhf|991520b47f6586f38a78505cf016e300b6191bb8ff86a0723481ec23a37ab7f4|27088043"
+  "arm64-v8a|arm64|3b8a82393304e38a5209ad1f2b32e6160506ecfc06dda33f3773b9e6b2e392e2|314655061"
+  "x86_64|amd64|57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228|324010830"
+  "armeabi-v7a|armhf|fe4e1a0ccd8d73c376c8ed7281a0ccc60041dfba71d735b163a2e657558e250a|294939555"
 )
 
 # 只保留 --arch 选中的条目（内部过滤，不改 ARTIFACTS 真值表）
@@ -146,8 +149,8 @@ for entry in "${FILTERED_ARTIFACTS[@]}"; do
     log "$abi already staged — skip"
     continue
   fi
-  url="$BASE_URL/ubuntu-base-$POINT_VERSION-base-$ubuntu_arch.tar.gz"
-  tmp_archive="$TMP_DIR/ubuntu-base-$POINT_VERSION-base-$ubuntu_arch.tar.gz"
+  url="$BASE_URL/apex-ubuntu-full-$POINT_VERSION-$ubuntu_arch.tar.gz"
+  tmp_archive="$TMP_DIR/apex-ubuntu-full-$POINT_VERSION-$ubuntu_arch.tar.gz"
   log "downloading $abi (~$(numfmt --to=iec "$size" 2>/dev/null || echo "${size}B")) from $url"
   curl -fL --retry 3 --retry-delay 2 --connect-timeout 30 -o "$tmp_archive" "$url" \
     || fail "download failed for $ubuntu_arch"

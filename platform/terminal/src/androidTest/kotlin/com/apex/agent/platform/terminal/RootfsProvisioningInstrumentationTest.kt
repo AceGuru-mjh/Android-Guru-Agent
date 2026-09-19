@@ -34,25 +34,26 @@ import java.io.File
  * on the actual target environment (arm64 phone + Termux proot 5.1.107 from
  * APK jniLibs).
  *
- * Chain under test (the T72 acceptance, device edition):
+ * Chain under test (the T72 acceptance, device edition; T84 完整环境档案):
  *
- *   REAL download from cdimage.ubuntu.com (arm64, ~30MB over device network)
- *     → REAL SHA-256 verification (official checksum)
- *     → T72 extractor (3413 entries incl. 194 symlinks + 2 hardlinks)
+ *   REAL bundled archive from the APK's nativeLibraryDir
+ *     （T84：~300MB 完整环境档，设备首次安装即离线解包，零网络）
+ *     → REAL SHA-256 verification（BundledRootfsSource 注册表指纹）
+ *     → T84 extractor（完整环境 ~万级条目，进度分母=解压后字节）
  *     → configurator (DNS from device / system, hosts, apt dirs)
  *     → health inspector (arch = ARM64 via ELF read)
  *     → READY rootfs (stage evidence + health in metadata)
  *     → LinuxPRootBackend.prepare() with the APK's libproot.so
  *     → REAL proot (Termux build: -E / -- syntax, the production contract)
- *     → /bin/bash inside Ubuntu 24.04 → /usr/bin/apt --version
+ *     → /bin/bash inside Ubuntu 24.04 → gcc --version（完整环境开箱即用）
  *
  * This is the ONLY place the full Termux-proot argv contract (-E/-- via
  * PRootCommandBuilder, no host adaptation) executes against a real Ubuntu
  * rootfs. CI has no device — this class is compile-checked in CI and run
  * via :platform:terminal:connectedDebugAndroidTest.
  *
- * Requires: device network access to cdimage.ubuntu.com, ~400MB free space
- * under context.filesDir, ptrace permitted (production devices allow it for
+ * Requires: ~2.5GB free space under context.filesDir（完整环境：档案 ~300MB +
+ * 解压 ~1.1GB + 余量），ptrace permitted (production devices allow it for
  * debuggable apps; self-skips otherwise).
  */
 @RunWith(AndroidJUnit4::class)
@@ -134,8 +135,9 @@ class RootfsProvisioningInstrumentationTest {
         val current = runBlocking { provisioner.current() }
         assertNotNull(current)
         assertEquals("ubuntu-24.04.4-arm64", current!!.id)
+        // T84 完整环境档指纹（托管 Release rootfs-digests.txt，rootfs.yml run #10）
         assertEquals(
-            "04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2",
+            "3b8a82393304e38a5209ad1f2b32e6160506ecfc06dda33f3773b9e6b2e392e2",
             current.checksum
         )
     }

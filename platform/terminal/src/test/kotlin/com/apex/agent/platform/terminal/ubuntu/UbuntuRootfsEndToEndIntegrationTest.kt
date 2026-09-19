@@ -74,7 +74,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
         @BeforeClass
         fun setUpClass() {
             // ── network preflight（夹具下载的 assume）──
-            assumeTrue("cdimage.ubuntu.com unreachable — network preflight", networkReachable())
+            assumeTrue("hosting release unreachable — network preflight", networkReachable())
 
             // ── one REAL staged bundle + one REAL install for the whole class ──
             val base = Files.createTempDirectory("t83-e2e-").toFile()
@@ -110,16 +110,16 @@ class UbuntuRootfsEndToEndIntegrationTest {
         }
 
         /**
-         * 夹具获取：下载真实 ubuntu-base 24.04.4 amd64 并校验固定 SHA-256。
-         * 下载只是测试夹具的获取手段（生产链路已是内置离线解包，零网络）。
+         * 夹具获取：下载真实完整 rootfs 24.04.4 amd64（T84 交付物本体，~310MB）并校验
+         * 固定 SHA-256。下载只是测试夹具的获取手段（生产链路已是内置离线解包，零网络）。
          */
         private fun downloadFixtureArchive(): java.io.File? = try {
-            val url = "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-amd64.tar.gz"
-            val expectedSha = "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58"
-            val tmp = java.io.File.createTempFile("t83-e2e-archive", ".tar.gz")
+            val url = "https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz"
+            val expectedSha = "57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228"
+            val tmp = java.io.File.createTempFile("t84-e2e-archive", ".tar.gz")
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000
-                readTimeout = 300_000
+                readTimeout = 900_000
                 instanceFollowRedirects = true
             }
             conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
@@ -135,7 +135,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
         }
 
         private fun networkReachable(): Boolean = try {
-            val conn = URL("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS")
+            val conn = URL("https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full")
                 .openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
@@ -200,8 +200,8 @@ class UbuntuRootfsEndToEndIntegrationTest {
         val rootfs = result!!
         assertEquals("ubuntu-24.04.4-x86_64", rootfs.id)
         assertEquals(CpuArchitecture.X86_64, rootfs.architecture)
-        // REAL checksum from the official SHA256SUMS
-        assertEquals("c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58", rootfs.checksum)
+        // REAL checksum from the hosted full-rootfs digests (rootfs-digests.txt, run #10)
+        assertEquals("57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228", rootfs.checksum)
     }
 
     @Test
@@ -217,7 +217,8 @@ class UbuntuRootfsEndToEndIntegrationTest {
         val health = meta!!.health
         assertNotNull("health summary persisted", health)
         assertTrue("health valid (0 FAIL items)", health!!.valid)
-        assertTrue("3413-ish entries extracted: ${meta.entryCount}", (meta.entryCount ?: 0) > 3000)
+        // T84 完整环境档：条目数远超骨架时代的 3413（58 包 + 全套 dev 头文件）
+        assertTrue("full-env entry count extracted: ${meta.entryCount}", (meta.entryCount ?: 0) > 10_000)
     }
 
     @Test

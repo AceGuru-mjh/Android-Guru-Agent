@@ -635,6 +635,10 @@ private fun CapabilityEditor(caps: ModelCapabilities, onChange: (ModelCapabiliti
         item { FilterChip(selected = caps.longContext, onClick = { onChange(caps.copy(longContext = !caps.longContext)) }, label = { Text("LongCtx") }) }
         item { FilterChip(selected = caps.streaming, onClick = { onChange(caps.copy(streaming = !caps.streaming)) }, label = { Text("Stream") }) }
         item { FilterChip(selected = caps.imageInput, onClick = { onChange(caps.copy(imageInput = !caps.imageInput)) }, label = { Text("ImgIn") }) }
+        // 多模态输出能力位：开启 ImageGen 的模型请求时携带 modalities=[text,image]，
+        // 让 OpenRouter 等网关的生图模型真正返回图片 part。
+        item { FilterChip(selected = caps.imageGeneration, onClick = { onChange(caps.copy(imageGeneration = !caps.imageGeneration)) }, label = { Text("ImageGen") }) }
+        item { FilterChip(selected = caps.videoGeneration, onClick = { onChange(caps.copy(videoGeneration = !caps.videoGeneration)) }, label = { Text("VideoGen") }) }
     }
 }
 

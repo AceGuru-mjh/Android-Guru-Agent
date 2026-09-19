@@ -344,7 +344,9 @@ fun AgentChatScreen(
                     },
                     onFileClick = { att ->
                         att.localPath?.let { FileOpener.openFile(context, it, att.mimeType) }
-                    }
+                    },
+                    // 多模态输出：markdown 生成图片（URL / data URI）→ Lightbox
+                    onMarkdownImageClick = { url -> lightboxImage = url }
                 )
             }
 
@@ -353,9 +355,14 @@ fun AgentChatScreen(
                 item(key = "streaming-thinking") { ThinkingBubble(uiState.currentThinking) }
             }
 
-            // 流式回复中
+            // 流式回复中（多模态输出：生成图片直接可点开 Lightbox，与完成态一致）
             if (uiState.currentResponse.isNotEmpty()) {
-                item(key = "streaming-response") { StreamingResponseBubble(uiState.currentResponse) }
+                item(key = "streaming-response") {
+                    StreamingResponseBubble(
+                        text = uiState.currentResponse,
+                        onImageClick = { url -> lightboxImage = url }
+                    )
+                }
             }
 
             // 当前工具调用

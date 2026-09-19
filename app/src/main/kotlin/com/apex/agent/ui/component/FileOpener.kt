@@ -70,6 +70,29 @@ object FileOpener {
     }
 
     /**
+     * 打开外部 URL（http/https）：优先唤起能处理该 scheme 的应用（浏览器等）。
+     *
+     * Markdown 里的视频卡 / 链接点击时使用；与 [openFile] 的区别是无需
+     * FileProvider（remote URL 不在沙箱目录内）。
+     */
+    fun openUrl(context: Context, url: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(url)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(context, "未找到可打开此链接的应用", Toast.LENGTH_SHORT).show()
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to open url: $url (${e.message})")
+            false
+        }
+    }
+
+    /**
      * 根据文件名扩展名推断 MIME 类型。
      *
      * 优先使用系统 [MimeTypeMap]（覆盖绝大多数常见类型）；

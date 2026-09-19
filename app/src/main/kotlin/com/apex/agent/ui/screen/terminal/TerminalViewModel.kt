@@ -203,7 +203,7 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.styledScreenFlow(sid)?.sample(33)?.collect { snap ->
                 _renderState.value = snap
                 // 标题变了才回写并刷新 tab（避免每帧触发一次列表重组）
-                val t = snap.title?.trim().takeUnless { it.isNullOrEmpty() }
+                val t = snap?.title?.trim().takeUnless { it.isNullOrEmpty() }
                 if (t != null && t != sessionTitles[sid]) {
                     sessionTitles[sid] = t
                     refreshSessionsInternal()

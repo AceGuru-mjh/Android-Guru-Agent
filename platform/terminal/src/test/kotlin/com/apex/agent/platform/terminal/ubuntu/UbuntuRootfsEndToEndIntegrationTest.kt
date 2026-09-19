@@ -200,8 +200,8 @@ class UbuntuRootfsEndToEndIntegrationTest {
         val rootfs = result!!
         assertEquals("ubuntu-24.04.4-x86_64", rootfs.id)
         assertEquals(CpuArchitecture.X86_64, rootfs.architecture)
-        // REAL checksum from the official SHA256SUMS
-        assertEquals("c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58", rootfs.checksum)
+        // REAL checksum from the hosted full-rootfs digests (rootfs-digests.txt, run #10)
+        assertEquals("57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228", rootfs.checksum)
     }
 
     @Test
@@ -217,7 +217,8 @@ class UbuntuRootfsEndToEndIntegrationTest {
         val health = meta!!.health
         assertNotNull("health summary persisted", health)
         assertTrue("health valid (0 FAIL items)", health!!.valid)
-        assertTrue("3413-ish entries extracted: ${meta.entryCount}", (meta.entryCount ?: 0) > 3000)
+        // T84 完整环境档：条目数远超骨架时代的 3413（58 包 + 全套 dev 头文件）
+        assertTrue("full-env entry count extracted: ${meta.entryCount}", (meta.entryCount ?: 0) > 10_000)
     }
 
     @Test

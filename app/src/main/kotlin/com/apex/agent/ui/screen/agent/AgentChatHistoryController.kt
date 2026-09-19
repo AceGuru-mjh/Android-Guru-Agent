@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
+import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.engine.ApexAgentEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,9 +58,11 @@ internal fun AgentChatViewModel.persistChatHistorySnapshot(
     if (historyMessages.isEmpty()) return
 
     val sessionId = when {
+        // presetSessionId 是函数参数（val）：smart cast 到 String 成立
         presetSessionId != null -> presetSessionId
-        currentHistorySessionId != null -> currentHistorySessionId
-        else -> UUID.randomUUID().toString().also { currentHistorySessionId = it }
+        // currentHistorySessionId 是跨类可变属性：无法 smart cast，用 ?: 兜底建新档
+        else -> currentHistorySessionId ?: UUID.randomUUID().toString()
+            .also { currentHistorySessionId = it }
     }
     val createdAt = currentHistorySessionCreatedAt ?: System.currentTimeMillis()
     if (currentHistorySessionCreatedAt == null) currentHistorySessionCreatedAt = createdAt

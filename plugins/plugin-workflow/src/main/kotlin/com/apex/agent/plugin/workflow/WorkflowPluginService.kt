@@ -73,6 +73,12 @@ class WorkflowPluginService : Service() {
 
         override fun onActivate() {}
         override fun onDeactivate() {}
+
+        /**
+         * 宿主桥注入（IApexPlugin v3 新增方法）。工作流插件不依赖宿主能力，
+         * 空实现即可——注意 AIDL 生成的 Kotlin 签名参数为可空类型。
+         */
+        override fun attachHost(host: IBinder?) {}
     }
 
     private fun handleSaveWorkflow(args: String): String {

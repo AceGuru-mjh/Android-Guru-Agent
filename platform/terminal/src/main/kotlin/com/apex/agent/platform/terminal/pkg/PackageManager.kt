@@ -30,6 +30,25 @@ interface LinuxPackageManager {
      */
     suspend fun installed(limit: Int = 500): List<InstalledPackage> = emptyList()
 
+    /**
+     * T84：批量「已正确安装」探测 —— 单次 dpkg-query -W 多包（只读 dpkg 数据库，
+     * 零网络、零 apt lists 依赖）。
+     *
+     * 返回 package→installed 映射（只含入参包名）：
+     *  - **true**：包已正确安装（status `ii*`），或为某已装实体 Provides 的虚包
+     *    （如 `awk` ← gawk）；
+     *  - **false**：未装 / 已卸载留配置（rc）/ 输出中缺失（dpkg-query 对未知名
+     *    只报 warning，退出码 1 但其余记录仍完整 —— 绝不误报已装）。
+     *
+     * **null = 环境不可用**（rootfs 未就绪 / exec 异常 / 实现不支持）—— 调用方
+     * 回退到逐包 [isInstalled] 或保守路径，绝不可把 null 误读成「未安装」。
+     *
+     * 消费方：① 完整 rootfs 的离线 bootstrap 短路（essential 全预装 → 跳过
+     * apt update/install）；② install 磁盘预检按真实缺失数估算（全预装不再
+     * 虚报 100MB + N×250MB）。默认 null 保持既有 Fake/契约兼容。
+     */
+    suspend fun batchInstalledStatus(packages: List<String>): Map<String, Boolean>? = null
+
     suspend fun repair(): PackageOperation
 
     /** T82（基线 §5.5）：apt autoremove（写操作；默认不支持 → 结构化异常）。 */

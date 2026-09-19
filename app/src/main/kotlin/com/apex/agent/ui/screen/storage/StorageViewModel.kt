@@ -25,7 +25,7 @@ import javax.inject.Inject
  * 存储与数据管理页 ViewModel。
  *
  * T76 审计 §7 缺口补齐：AttachmentCleanupManager 的存储用量/清理 API 此前只有
- * WorkManager 周期自清在调用，无用户入口；Ubuntu rootfs（数百 MB）无删除入口；
+ * WorkManager 周期自清在调用，无用户入口；Ubuntu rootfs（完整环境，~1GB）无删除入口；
  * 全局会话历史（apex_memory: conversation_history）无导出/管理页 —— 本页统一承接。
  */
 @HiltViewModel
@@ -177,9 +177,14 @@ class StorageViewModel @Inject constructor(
     fun removeRootfs() {
         viewModelScope.launch {
             _uiState.update { it.copy(busy = true) }
-            val r = ubuntuLifecycle.removeRootfs()
-            val rootfsSize = ubuntuLifecycle.rootfsSizeBytes()
-            val phase = ubuntuLifecycle.stateFlow.value.phase
+            // T84：IO —— 删除 1GB+ 版本目录是重 IO，Main 调用必 ANR。
+            val (r, rootfsSize, phase) = withContext(Dispatchers.IO) {
+                Triple(
+                    ubuntuLifecycle.removeRootfs(),
+                    ubuntuLifecycle.rootfsSizeBytes(),
+                    ubuntuLifecycle.stateFlow.value.phase
+                )
+            }
             _uiState.update {
                 it.copy(
                     busy = false,

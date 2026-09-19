@@ -147,6 +147,19 @@ object TerminalModule {
         return RootfsTarget(distribution = "ubuntu", version = "24.04", architecture = arch)
     }
 
+    /** T83/T84：内置档案源单例 —— provisioner 的 source 与协调器的注册表指纹
+     *  端口（warmUp 新鲜度迁移）共用同一实例/同一注册表。档案本体：APK jniLibs
+     *  伪 .so（libubuntu-rootfs.so，安装时解出到 nativeLibraryDir；构建期由
+     *  scripts/fetch_rootfs.sh 拉取并双重校验 —— 运行时下载安装流程已随产品
+     *  决策移除，基础环境零网络）。 */
+    @Provides
+    @Singleton
+    fun provideBundledRootfsSource(
+        @ApplicationContext context: Context
+    ): BundledRootfsSource = BundledRootfsSource(
+        nativeLibraryDir = context.applicationInfo.nativeLibraryDir ?: ""
+    )
+
     /** T83 生产 provisioner（内置交付转向）：APK 内置档案本地拷贝 + SHA-256 复验 +
      *  原子解压 + 配置 + 健康检查 + 阶段证据 —— 下游与 T72 下载时代完全同构
      *  （downloader/extractor 源无关；见 BundledRootfsSource KDoc 的三层校验链）。
@@ -154,24 +167,19 @@ object TerminalModule {
      *  T82（Termux 基线 §3.5/§3.6/§9.2）：DNS 注入（Android LinkProperties —— 此前
      *  DI 未传，public-DNS fallback 在 DNS 受限网络直接失败）；locale.gen（zh_CN/
      *  en_US —— locales 包 postinst 自动生成）；timezone（Android 当前时区写入
-     *  /etc/timezone，tzdata postinst 生效）。
-     *
-     *  档案来源：APK jniLibs 伪 .so（libubuntu-rootfs.so，安装时解出到
-     *  nativeLibraryDir；构建期由 scripts/fetch_rootfs.sh 拉取并双重校验 ——
-     *  运行时下载安装流程已随产品决策移除，基础环境零网络）。 */
+     *  /etc/timezone，tzdata postinst 生效）。 */
     @Provides
     @Singleton
     fun provideRootfsProvisioner(
         @ApplicationContext context: Context,
-        target: RootfsTarget
+        target: RootfsTarget,
+        bundledSource: BundledRootfsSource
     ): RootfsProvisioner {
         val layout = RootfsInstallLayout.under(
             AbsolutePath(File(context.filesDir, "rootfs/ubuntu").absolutePath)
         )
         return RootfsProvisionerImpl(
-            source = BundledRootfsSource(
-                nativeLibraryDir = context.applicationInfo.nativeLibraryDir ?: ""
-            ),
+            source = bundledSource,
             validator = null,                       // 布局校验由 health inspector 承担（T72）
             layout = layout,
             metadataStore = RootfsMetadataStore(File(layout.metadataFile.value)),
@@ -407,6 +415,7 @@ object TerminalModule {
         bootstrap: UbuntuBootstrapManager,
         capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
         repairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
+        bundledSource: BundledRootfsSource,
         target: RootfsTarget
     ): UbuntuLifecycleCoordinator {
         return UbuntuLifecycleCoordinator(
@@ -480,6 +489,9 @@ object TerminalModule {
             } },
             // removeRootfs() 后复位 bootstrap.json —— 防重装时 ALREADY_READY 短路跳过引导。
             bootstrapResetFn = { bootstrap.reset().getOrThrow() },
+            // T84：注册表指纹端口 —— warmUp 新鲜度迁移（APK 换档案 → 删旧装新，
+            // 防 AlreadyReady 短路把旧 rootfs 永久钉死）。
+            bundledChecksumFn = { bundledSource.registryChecksumFor(target) },
             target = target
         )
     }

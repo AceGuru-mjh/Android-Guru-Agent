@@ -230,7 +230,7 @@ class ToolEnvironmentGate(
                 "offline tools (files, data, terminal)."
 
         ToolEnvironmentState.Flags.UBUNTU_READY ->
-            "Run terminal.ubuntu.ensure first to extract the bundled Ubuntu environment (offline, ~30s)."
+            "Run terminal.ubuntu.ensure first to extract the bundled Ubuntu environment (offline; minutes — full ~1GB environment)."
 
         ToolEnvironmentState.Flags.TERMINAL_SESSION_OPEN ->
             "Create a terminal session with terminal.create first."

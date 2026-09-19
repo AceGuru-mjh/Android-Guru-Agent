@@ -7,24 +7,27 @@ import java.io.InputStream
 /**
  * T83: Bundled RootFS Source —— Ubuntu rootfs 随 APK 内置（应用内安装 → 内置交付的产品转向）。
  *
- * ## 背景（产品决策 2026-02）
+ * ## 背景（产品决策 2026-02，升级 2026-09/T84）
  * 运行时从镜像源下载安装（应用内安装）的体验与"内置开箱即用"差距巨大：
  * 国内网络下 30MB 下载 + apt 引导链路慢且脆弱。转向 Operit 的内置思路，
  * 但有自己的创新 —— **构建期固定指纹的可审计内置交付**：
  *
  *   仓库（rootfs-bundle.sha256 + 本类注册表，单一真值互验）
- *     → CI 构建（scripts/fetch_rootfs.sh 拉取官方 ubuntu-base → 双重校验 → jniLibs 伪 .so）
+ *     → CI 构建（scripts/build_full_rootfs.sh 把官方 ubuntu-base 扩建为完整
+ *        CLI 环境；scripts/fetch_rootfs.sh 双重校验后暂存 jniLibs 伪 .so）
  *     → APK（legacy packaging：安装时 PackageManager 自动解出 nativeLibraryDir/libubuntu-rootfs.so）
  *     → 设备端（本类 open() → 本地拷贝 → SHA-256 复验 → RootfsExtractor 解压 → 配置 → 激活）
  *
- * 基础环境**零网络**：解包（~30 秒）即得 bash/apt/dpkg 完整 Ubuntu 24.04；
- * apt 引导（源配置 + apt update + 基础包）保留为可选增强（离线时生命周期
- * 协调器降级为 READY，见 UbuntuLifecycleCoordinator T83 语义）。
+ * 基础环境**零网络**：解包（分钟级 —— 完整环境档案 ~300MB+，解压 ~1GB+）
+ * 即得 gcc/python3/git/vim/man 开箱即用的完整 Ubuntu 24.04 CLI 环境；
+ * essential 包已预装 → bootstrap 经 dpkg-query 校验离线完成（T84），
+ * apt 引导降级语义保留给非完整档案场景。
  *
  * ## 交付细节（创新点：ABI 分包）
  * rootfs tarball 以 `libubuntu-rootfs.so` 之名放入 jniLibs/<abi>/ —— 借用
  * Android 的原生库 ABI 过滤：universal APK 含全部 3 ABI（每设备只解出
- * 匹配 ABI 的一份），发布时另出 arm64 纯净包（体积减半）。本项目本就因
+ * 匹配 ABI 的一份），发布时另出 arm64 纯净包（体积约为 universal 的 1/3，
+ * ~300MB+）。本项目本就因
  * PRoot exec-from-nativeLibraryDir 而钉 useLegacyPackaging=true（P71），
  * 安装器会把 jniLibs 条目解出为真实文件 —— 与 libproot.so 同机制。
  *
@@ -84,6 +87,19 @@ class BundledRootfsSource(
 
     /** jniLibs 伪 .so 文件名（PM 解出到 nativeLibraryDir 后的物理名）。 */
     private val bundleFile: File get() = File(nativeLibraryDir, BUNDLE_LIB_NAME)
+
+    /**
+     * T84：注册表指纹查询（**不要求档案在设备上存在** —— 纯查表）。
+     * 消费方：UbuntuLifecycleCoordinator.warmUp 的新鲜度迁移核对
+     *（已装 rootfs checksum ≠ 注册表 → APK 换档案了，删旧装新）；
+     * 以及 RootfsProvisionerImpl 的 AlreadyReady 短路防线。
+     * 返回 null = 该 target 无注册表条目（未知分布/版本/架构）。
+     */
+    fun registryChecksumFor(target: RootfsTarget): String? {
+        if (target.distribution != "ubuntu") return null
+        val match = bundled.firstOrNull { it.architecture == target.architecture } ?: return null
+        return match.sha256.takeIf { isValidSha256(it) }
+    }
 
     override suspend fun resolve(target: RootfsTarget): Result<RootfsArtifact> {
         if (target.distribution != "ubuntu") {

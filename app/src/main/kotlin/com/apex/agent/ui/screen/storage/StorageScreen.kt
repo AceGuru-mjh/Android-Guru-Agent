@@ -262,7 +262,7 @@ fun StorageScreen(
     if (confirmAction != null) {
         val (title, text) = when (confirmAction) {
             "attachments" -> "清空附件？" to "将删除全部 ${state.attachmentsCount} 个附件文件（${formatBytes(state.attachmentsSize)}）。此操作不可撤销。"
-            "rootfs" -> "删除 Ubuntu 环境？" to "将删除解包后的 rootfs（${state.rootfsSize?.let { formatBytes(it) } ?: "数百 MB"}）与解包缓存；内置安装包随 APK 保留，可随时重新离线解包；用户数据（/root、workspace）保留。"
+            "rootfs" -> "删除 Ubuntu 环境？" to "将删除解包后的 rootfs（${state.rootfsSize?.let { formatBytes(it) } ?: "约 1GB"}）与解包缓存；内置安装包随 APK 保留，可随时重新离线解包；用户数据（/root、workspace）保留。"
             else -> "清空会话历史？" to "将删除全部 ${state.conversationCount} 条消息，Agent 上下文从零开始。建议先导出备份。"
         }
         AlertDialog(

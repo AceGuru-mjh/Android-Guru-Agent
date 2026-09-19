@@ -205,7 +205,7 @@ fun TerminalScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Ubuntu 会话提供完整 Linux 开发环境（apt / bash / 工具链）；" +
-                            "rootfs 随 APK 内置，首次使用离线解包（约 30 秒，进度在横幅显示）。",
+                            "rootfs 随 APK 内置（完整 Ubuntu，~300MB+ 档案），首次使用离线解包约 2~5 分钟，进度在横幅显示。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -459,7 +459,7 @@ private fun UbuntuLifecycleBanner(
                     )
                     Text(
                         if (phase == "FAILED") "上次解包/引导失败，可重试"
-                        else "完整的 Linux 环境：apt / bash / 构建工具链（内置离线解包，约 30 秒）",
+                        else "完整的 Linux 环境：gcc / python3 / git / vim / man 开箱即用（内置离线解包，约 2~5 分钟）",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -484,7 +484,7 @@ private fun UbuntuLifecycleBanner(
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                 Text(
                     when (phase) {
-                        "INSTALLING" -> "Ubuntu rootfs 离线解包中…（约 30 秒，可后台等待）"
+                        "INSTALLING" -> "Ubuntu rootfs 离线解包中…（约 2~5 分钟，可后台等待）"
                         "BOOTSTRAPPING" -> "Ubuntu 初始化：apt 源 / 网络 / 基础包…（离线时自动降级可用）"
                         else -> "Ubuntu 环境收敛中…"
                     },

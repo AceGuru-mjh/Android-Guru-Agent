@@ -396,9 +396,11 @@ jobs:
       - name: Stage bundled Ubuntu rootfs (T83 内置交付)
         run: |
           # T83：Ubuntu rootfs 随 APK 内置（应用内下载安装已移除）。
-          # 构建期拉取官方 ubuntu-base → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
+          # 构建期拉取 → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
           # 失败即阻断构建 —— 绝不打包指纹不符的 rootfs。
-          scripts/fetch_rootfs.sh
+          # T84：PR CI 只验证 arm64 打包链（--arch）—— tag 发布（universal，
+          # 全 3 ABI）在 apk.yml 走全量路径；每 PR 省 2/3 rootfs 流量。
+          scripts/fetch_rootfs.sh --arch arm64-v8a
 
       - name: Prewarm dependencies (retry on JitPack flakiness)
         run: |

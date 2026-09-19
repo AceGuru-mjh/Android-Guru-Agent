@@ -15,14 +15,18 @@
 # 运行时一半见 BundledRootfsSource.kt（resolve 长度校验 + 本地拷贝 SHA-256 复验）。
 #
 # 用法：
-#   scripts/fetch_rootfs.sh            # 拉取全部 3 ABI + 双重校验 + 暂存（幂等：已就绪跳过）
-#   scripts/fetch_rootfs.sh --check    # 只校验已暂存档案（不下载；CI 快速路径）
-#   scripts/fetch_rootfs.sh --clean    # 删除暂存档案
+#   scripts/fetch_rootfs.sh                     # 拉取全部 3 ABI + 双重校验 + 暂存（幂等）
+#   scripts/fetch_rootfs.sh --arch arm64-v8a    # 只拉指定 ABI（PR CI 快路径：省 2/3 流量）
+#   scripts/fetch_rootfs.sh --check             # 只校验已暂存档案（不下载）
+#   scripts/fetch_rootfs.sh --clean             # 删除暂存档案
 #
 # 退出码：0 成功；1 校验失败/缺依赖（绝不带病暂存 —— 宁可构建失败，不可静默
 # 打包一个指纹不符的 rootfs）。
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
+log()  { echo "[fetch_rootfs] $*"; }
+fail() { echo "[fetch_rootfs] ❌ $*" >&2; exit 1; }
 
 MODULE_DIR="$(cd "$(dirname "$0")/../platform/terminal" && pwd)"
 MANIFEST="$MODULE_DIR/rootfs-bundle.sha256"
@@ -30,17 +34,38 @@ STAGE_BASE="$MODULE_DIR/src/main/jniLibs"
 POINT_VERSION="24.04.4"
 BASE_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release"
 
+# T84：--arch <abi> 只处理该 ABI（PR CI 的 build-apk job 只验证 arm64 打包链，
+# 拉全 3 份是 tag 发布（universal）才需要的）。缺省 = 全部。
+WANTED_ABIS=("arm64-v8a" "x86_64" "armeabi-v7a")
+if [ "${1:-}" = "--arch" ]; then
+  [ -n "${2:-}" ] || fail "--arch requires an abi argument (arm64-v8a|x86_64|armeabi-v7a)"
+  case "$2" in
+    arm64-v8a|x86_64|armeabi-v7a) WANTED_ABIS=("$2") ;;
+    *) fail "unknown abi: $2" ;;
+  esac
+  shift 2
+fi
+
 # 官方 SHA256SUMS（2026-02 实测）逐字节真值 —— 与 rootfs-bundle.sha256、
 # BundledRootfsSource.kt 注册表三处一致（BundledRootfsSourceTest 交叉校验）。
 # 架构元组：<android abi> <ubuntu arch> <sha256> <size>
+# T84 待切源：完整 rootfs（scripts/build_full_rootfs.sh 产物，托管于本仓 Release
+# tag ubuntu-rootfs-24.04.4-full）就绪后，本表换其 sha/size + BASE_URL 换托管地址。
 ARTIFACTS=(
   "arm64-v8a|arm64|04207713ece899c3740823d33690441ad3a7f0ded1101aca744e2b0f37ac7ff2|29870567"
   "x86_64|amd64|c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58|29989394"
   "armeabi-v7a|armhf|991520b47f6586f38a78505cf016e300b6191bb8ff86a0723481ec23a37ab7f4|27088043"
 )
 
-log()  { echo "[fetch_rootfs] $*"; }
-fail() { echo "[fetch_rootfs] ❌ $*" >&2; exit 1; }
+# 只保留 --arch 选中的条目（内部过滤，不改 ARTIFACTS 真值表）
+FILTERED_ARTIFACTS=()
+for entry in "${ARTIFACTS[@]}"; do
+  IFS='|' read -r abi _ua _sha _sz <<< "$entry"
+  for want in "${WANTED_ABIS[@]}"; do
+    [ "$abi" = "$want" ] && FILTERED_ARTIFACTS+=("$entry")
+  done
+done
+[ ${#FILTERED_ARTIFACTS[@]} -gt 0 ] || fail "no artifacts selected for: ${WANTED_ABIS[*]}"
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
@@ -48,6 +73,7 @@ command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required"
 
 # 清单交叉校验：脚本固定指纹必须与 rootfs-bundle.sha256 一致（防三处漂移之二）。
 verify_manifest_agreement() {
+  # 三处真值表互验用全量 ARTIFACTS（不受 --arch 过滤影响 —— 防漂移检查必须全量）
   for entry in "${ARTIFACTS[@]}"; do
     IFS='|' read -r abi _ubuntu_arch sha _size <<< "$entry"
     expected_line="$sha  src/main/jniLibs/$abi/libubuntu-rootfs.so"
@@ -58,9 +84,9 @@ verify_manifest_agreement() {
 }
 
 verify_staged() {
-  # 日志走 stderr —— stdout 只回传已验证计数（供命令替换捕获）。
+  # 日志走 stderr —— stdout 只回传已验证计数（供命令替换捕获）。只验选中 ABI。
   local staged=0
-  for entry in "${ARTIFACTS[@]}"; do
+  for entry in "${FILTERED_ARTIFACTS[@]}"; do
     IFS='|' read -r abi _ubuntu_arch sha size <<< "$entry"
     local f="$STAGE_BASE/$abi/libubuntu-rootfs.so"
     if [ -f "$f" ]; then
@@ -79,41 +105,41 @@ verify_staged() {
 
 case "${1:-fetch}" in
   --clean)
-    for entry in "${ARTIFACTS[@]}"; do
+    for entry in "${FILTERED_ARTIFACTS[@]}"; do
       IFS='|' read -r abi _ua _sha _sz <<< "$entry"
       rm -f "$STAGE_BASE/$abi/libubuntu-rootfs.so"
     done
-    log "staged archives removed"
+    log "staged archives removed (selected: ${WANTED_ABIS[*]})"
     exit 0
     ;;
   --check)
     verify_manifest_agreement
     staged="$(verify_staged)"
-    if [ "$staged" -eq ${#ARTIFACTS[@]} ]; then
-      log "✅ all ${#ARTIFACTS[@]} staged archives verified"
+    if [ "$staged" -eq ${#FILTERED_ARTIFACTS[@]} ]; then
+      log "✅ all ${#FILTERED_ARTIFACTS[@]} selected archives verified (${WANTED_ABIS[*]})"
     else
-      log "⚠️ only $staged/${#ARTIFACTS[@]} staged (run without --check to fetch)"
+      log "⚠️ only $staged/${#FILTERED_ARTIFACTS[@]} selected staged (run without --check to fetch)"
       exit 1
     fi
     exit 0
     ;;
   fetch) : ;;
-  *) fail "unknown argument: $1 (use --check / --clean / none)" ;;
+  *) fail "unknown argument: $1 (use --arch <abi> / --check / --clean / none)" ;;
 esac
 
 verify_manifest_agreement
 
 # 幂等：已暂存且指纹正确 → 跳过下载（本地反复 assemble 不重复花流量）。
 already="$(verify_staged || true)"
-if [ "$already" -eq ${#ARTIFACTS[@]} ]; then
-  log "✅ all archives already staged & verified — nothing to do"
+if [ "$already" -eq ${#FILTERED_ARTIFACTS[@]} ]; then
+  log "✅ all ${#FILTERED_ARTIFACTS[@]} selected archives already staged & verified — nothing to do"
   exit 0
 fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-for entry in "${ARTIFACTS[@]}"; do
+for entry in "${FILTERED_ARTIFACTS[@]}"; do
   IFS='|' read -r abi ubuntu_arch sha size <<< "$entry"
   target="$STAGE_BASE/$abi/libubuntu-rootfs.so"
   if [ -f "$target" ]; then
@@ -137,8 +163,7 @@ done
 
 # 双重校验之二：暂存结果整体过一遍 manifest（sha256sum -c，与 CI proot 校验同格式）
 staged="$(verify_staged)"
-if [ "$staged" -ne ${#ARTIFACTS[@]} ]; then
-  fail "staging incomplete ($staged/${#ARTIFACTS[@]})"
+if [ "$staged" -ne ${#FILTERED_ARTIFACTS[@]} ]; then
+  fail "staging incomplete ($staged/${#FILTERED_ARTIFACTS[@]})"
 fi
-log "✅ all ${#ARTIFACTS[@]} bundled rootfs archives staged & verified (total ~87MB → jniLibs)"
-log "   universal APK ≈ +87MB；arm64 纯净 APK ≈ +29MB（ABI 过滤自动生效）"
+log "✅ all ${#FILTERED_ARTIFACTS[@]} bundled rootfs archives staged & verified (selected: ${WANTED_ABIS[*]})"

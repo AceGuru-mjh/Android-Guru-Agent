@@ -76,5 +76,6 @@ NOT_INSTALLED ──install──▶ INSTALLING ──▶ ROOTFS_READY ──boo
   terminal 立即可见）依赖 Android 真机/模拟器，本任务未执行 —— 与 T81 一致，
   instrumentation 用例已具备（`T81UbuntuInfrastructureInstrumentationTest`），
   T82 的 coordinator 不阻塞该链路；
-- `ensureReady` 全链超时预算（DEFAULT_ENSURE_TIMEOUT_MS = 15 分钟）基于
-  "~30MB 下载 + apt update" 的量级估计，未做真机采样校准。
+- `ensureReady` 全链超时预算（T84: DEFAULT_ENSURE_TIMEOUT_MS = 30 分钟）基于
+  完整 rootfs 的量级估计（~300MB+ 档案本地拷贝 + SHA-256 + ~1GB 解压 + 离线
+  bootstrap 短路），未做真机采样校准；超时返回 InProgress（可续跑），非失败。

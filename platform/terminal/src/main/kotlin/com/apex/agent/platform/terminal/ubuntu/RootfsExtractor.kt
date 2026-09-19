@@ -107,6 +107,9 @@ class RootfsExtractor(
         val startMs = System.currentTimeMillis()
         var entries = 0
         var bytes = 0L
+        // T84：进度回调节流基准 —— 64KB 粒度对 1GB+ 档是 ~16K 次 suspend 回调，
+        // SharedFlow emit + UI 重组的代价反超解压本身。250ms 间隔上报。
+        var lastProgressAtNanos = 0L
         var regularFiles = 0
         var directories = 0
         var symlinks = 0
@@ -307,7 +310,13 @@ class RootfsExtractor(
                             out.write(buf, 0, n)
                             remaining -= n
                             bytes += n
-                            progress?.invoke(bytes, declaredArchiveSize)
+                            // T84：节流上报（首个 chunk 立即报，此后每 250ms 一次）；
+                            // 收尾的 100% 由 provisioner 在 EXTRACTING 完成时发射。
+                            val nowNanos = System.nanoTime()
+                            if (nowNanos - lastProgressAtNanos >= 250_000_000L) {
+                                lastProgressAtNanos = nowNanos
+                                progress?.invoke(bytes, declaredArchiveSize)
+                            }
                         }
                         out.fd.sync()
                     }

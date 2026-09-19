@@ -1,0 +1,101 @@
+# Apex Agent —— 完整 Ubuntu rootfs 包清单（构建 scripts/build_full_rootfs.sh 消费）
+#
+# 设计原则：
+#  1. 「真 Ubuntu」而非 OEM 引导骨架 —— 官方 ubuntu-base 只有 bash/apt/dpkg 骨架
+#     （28MB），Agent 拿到后连 curl/python/git 都没有。本清单把「开箱即用的
+#     完整 CLI 工作环境」固化进构建期：解压后 ~1GB+、压缩档 ~300MB+（v1.3.0
+#     产品红线：交付物不偷工减料），apt 仍可在线扩展。
+#  2. 覆盖 BasePackageProfile.DEFAULT.essential + recommended 的全部包 —— 设备端
+#     bootstrap 的 APT_UPDATE/BASE_PACKAGES 阶段被 dpkg-query 离线短路（T84），
+#     本清单是其预装真值来源：清单与 essential 漂移会导致短路失效（回退联网
+#     引导，功能不坏但离线体验退化）—— 漂移是显式变更，需同步两处。
+#  3. 诚实取舍：不装 manpages-posix（2MB×大量重复，dev 手册够用）；
+#     不装 golang（~250MB 解压占用量级过大，apt 按需装）；
+#     不装 rustc/default-jdk/ffmpeg 等重型运行时（同上，apt 在线扩展）。
+#
+# 分组仅注释可读，安装时全部展开传给 apt-get（--no-install-recommends）。
+
+# ── 网络 / TLS ──
+ca-certificates
+curl
+wget
+openssl
+openssh-client
+socat
+netcat-openbsd
+rsync
+
+# ── shell 与文本 ──
+bash
+bash-completion
+coreutils
+findutils
+grep
+sed
+gawk
+less
+file
+bc
+
+# ── 归档 ──
+tar
+gzip
+bzip2
+xz-utils
+zip
+unzip
+zstd
+
+# ── 进程 / 系统观察 ──
+procps
+psmisc
+lsof
+strace
+htop
+tmux
+
+# ── 版本控制 ──
+git
+
+# ── 运行时（python 全量 + venv + pip + 编译头文件）──
+# python3-dev：pip install 含 C 扩展的包（numpy 等）需要 Python.h + gcc
+python3
+python3-pip
+python3-venv
+python3-dev
+python3-full
+
+# ── 构建工具链（gcc/g++/make + pkg-config + cmake + gdb）──
+build-essential
+pkg-config
+cmake
+gdb
+
+# ── JS 运行时（Agent 跑 JS 工具链 / npm 装包）──
+nodejs
+npm
+
+# ── 数据 / 检索工具 ──
+jq
+ripgrep
+sqlite3
+
+# ── 手册（真 Ubuntu 的 CLI 体验：man bash / man gcc 可用）──
+man-db
+manpages
+manpages-dev
+
+# ── locale 与时区（构建期预生成 en_US.UTF-8 + zh_CN.UTF-8）──
+locales
+tzdata
+
+# ── 编辑器 ──
+vim
+nano
+
+# ── 网络诊断（BasePackageProfile.recommended 全集）──
+dnsutils
+iputils-ping
+net-tools
+iproute2
+tree

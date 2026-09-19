@@ -42,7 +42,17 @@ data class RootfsArtifact(
     val expectedSize: Long?,                // bytes; null if unknown
     val sha256: String?,                    // §9: null = UNVERIFIED (refuse install if strict)
     val sourceKind: RootfsSourceKind,
-    val metadataVersion: Int = 1
+    val metadataVersion: Int = 1,
+    /**
+     * T84：档案解压后的真实字节数（构建期 du 实测，随指纹一并钉入注册表）。
+     * 默认 null = 未知 → 消费方退回启发式（压缩档 ×4，tar.gz 对 ELF 根文件系统的
+     * 实测扩张比）。两个消费者：
+     *   1. §26 磁盘预检 —— 旧系数 ×20 是 ~30MB 时代的拍脑袋值，对 ~300MB+
+     *      完整 rootfs 会虚报 6GB+ 需求把正常设备拒之门外；
+     *   2. §8 EXTRACTING 进度分母 —— 解出字节/压缩字节会提前撞 100%。
+     * （放在参数列表末尾：既有位置参数构造点零改动。）
+     */
+    val expectedUnpackedSize: Long? = null
 ) {
     /** T72: verifiable = 64 hex chars AND not the all-zeros placeholder. */
     val isVerifiable: Boolean get() = BundledRootfsSource.isValidSha256(sha256)
@@ -252,6 +262,8 @@ data class HealthSummary(
 )
 
 // ─── Section 26: Storage Preflight ───
+// T84：requiredExtractSpace 优先取注册表实测的 expectedUnpackedSize；
+// 未知时退回压缩档 ×4（tar.gz rootfs 实测扩张比；旧 ×20 对 300MB+ 档虚报 6GB+）。
 data class ProvisioningStoragePreflight(
     val requiredDownloadSpace: Long,
     val requiredExtractSpace: Long,

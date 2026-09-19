@@ -286,7 +286,7 @@ class TerminalRuntimeImpl(
                 is BackendAvailability.NeedsRootfs -> TerminalRuntime.BackendStatus(
                     id = b.id, runtimeType = b.runtimeType.name,
                     available = false, state = "NEEDS_ROOTFS:${av.state}",
-                    detail = "Ubuntu rootfs 未就绪 —— 调用 terminal.ubuntu.install 解包内置档案后重试（离线，约 30 秒）"
+                    detail = "Ubuntu rootfs 未就绪 —— 调用 terminal.ubuntu.install 解包内置档案后重试（离线，完整环境约 2~5 分钟）"
                 )
                 is BackendAvailability.Failed -> TerminalRuntime.BackendStatus(
                     id = b.id, runtimeType = b.runtimeType.name,

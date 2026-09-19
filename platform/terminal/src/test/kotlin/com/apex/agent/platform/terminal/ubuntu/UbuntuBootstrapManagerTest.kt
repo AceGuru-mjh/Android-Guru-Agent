@@ -73,6 +73,10 @@ class UbuntuBootstrapManagerTest {
         var updateSucceeds = true
         var installSucceeds = true
         var installedPackages = mutableListOf<String>()
+        /** T84：批量已装探测结果（null = 无法判定，走接口默认语义）。 */
+        var batchStatusResult: Map<String, Boolean>? = null
+
+        override suspend fun batchInstalledStatus(packages: List<String>): Map<String, Boolean>? = batchStatusResult
 
         override suspend fun status() = PackageManagerStatus(
             available = true, manager = "apt-get", version = "3.0",
@@ -177,6 +181,48 @@ class UbuntuBootstrapManagerTest {
         assertEquals(1, apt.updateCalled)
         assertEquals(1, apt.installCalled)
         assertEquals(BootstrapState.READY, mgr.state())
+    }
+
+    // ───────── T84：完整 rootfs 离线短路（essential 全预装 → 跳过 apt 阶段） ─────────
+
+    @Test fun `T84 offline precheck skips apt stages when essential fully preinstalled`() = runBlocking {
+        // apt 全部必败 —— 证明成功完全来自离线短路而非真实 apt
+        val (mgr, apt, _) = newManager(aptSucceeds = false)
+        apt.batchStatusResult = BasePackageProfile.DEFAULT.essential.associateWith { true }
+        val result = mgr.bootstrap()
+        assertTrue("expected Ready, got $result", result is UbuntuBootstrapManager.BootstrapResult.Ready)
+        assertEquals("apt update must NOT run when all essential preinstalled", 0, apt.updateCalled)
+        assertEquals("apt install must NOT run when all essential preinstalled", 0, apt.installCalled)
+        assertEquals(BootstrapState.READY, mgr.state())
+    }
+
+    @Test fun `T84 offline precheck falls back to apt path when batch status unknown`() = runBlocking {
+        val (mgr, apt, _) = newManager(aptSucceeds = true)
+        apt.batchStatusResult = null   // 探测不可用（rootfs 未就绪/dpkg 失败）
+        val result = mgr.bootstrap()
+        assertTrue(result is UbuntuBootstrapManager.BootstrapResult.Ready)
+        assertEquals("unknown status must fall back to real apt", 1, apt.updateCalled)
+        assertEquals(1, apt.installCalled)
+    }
+
+    @Test fun `T84 offline precheck runs apt when some essential missing`() = runBlocking {
+        val (mgr, apt, _) = newManager(aptSucceeds = true)
+        val partial = BasePackageProfile.DEFAULT.essential.associateWith { true }.toMutableMap()
+        partial[BasePackageProfile.DEFAULT.essential.last()] = false   // 缺一个 → 不短路
+        apt.batchStatusResult = partial
+        mgr.bootstrap()
+        assertEquals("partial preinstall must still run apt", 1, apt.updateCalled)
+        assertEquals(1, apt.installCalled)
+    }
+
+    @Test fun `T84 preinstalled evidence survives idempotent re-bootstrap`() = runBlocking {
+        val (mgr, apt, _) = newManager(aptSucceeds = false)
+        apt.batchStatusResult = BasePackageProfile.DEFAULT.essential.associateWith { true }
+        mgr.bootstrap()
+        val second = mgr.bootstrap()
+        assertTrue("second call must be AlreadyReady", second is UbuntuBootstrapManager.BootstrapResult.AlreadyReady)
+        assertEquals(0, apt.updateCalled)
+        assertEquals(0, apt.installCalled)
     }
 
     @Test fun `bootstrap is idempotent on second call`() = runBlocking {

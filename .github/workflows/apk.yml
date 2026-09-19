@@ -26,7 +26,9 @@ jobs:
   build:
     name: Build APK (${{ inputs.build_type || (startsWith(github.ref, 'refs/tags/') && 'release') || 'debug' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # T84：完整 rootfs（~300MB+/ABI）暂存 + universal（含 3 份）打包 —— 45 分钟
+    # 余量不足（fetch ~1.3GB + 两次 assemble + 1.3GB APK 产出）。
+    timeout-minutes: 60
     permissions:
       contents: write   # tag 构建时创建 Release 并上传产物
     defaults:
@@ -65,8 +67,10 @@ jobs:
       - name: Stage bundled Ubuntu rootfs (T83 内置交付)
         run: |
           # T83：Ubuntu rootfs 随 APK 内置（应用内下载安装已移除，基础环境离线可用）。
-          # 构建期拉取官方 ubuntu-base → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
+          # 构建期拉取 → 双重 SHA-256 校验 → 暂存为 jniLibs 伪 .so。
           # 失败即阻断构建 —— 绝不打包指纹不符的 rootfs。
+          # T84：tag 构建仍是官方 ubuntu-base 骨架；完整 rootfs 产物链
+          #（rootfs.yml → 托管 Release → 三处真值表钉值）就绪后切源。
           scripts/fetch_rootfs.sh
 
       - name: Prewarm dependencies (retry on JitPack flakiness)
@@ -140,8 +144,9 @@ jobs:
           echo "### 📦 APK 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ "$VARIANT" = "release" ]; then
-            # T83 双产物：arm64 纯净包（内置 rootfs 仅含 arm64，~50MB）+ universal（全 3 ABI，~117MB）
+            # T83 双产物：arm64 纯净包（内置 rootfs 仅含 arm64）+ universal（全 3 ABI）
             #（中间产物停在 apk/ 层 —— 见 Build 步骤的踩坑注释）
+            # T84：完整 rootfs 后 arm64 ~300MB+ / universal ~1.3GB（du -m 实测打印）。
             mv "$APK_DIR/../app-arm64-release.apk" \
                "$APK_DIR/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
             mv "$APK_DIR/../app-universal-release.apk" \
@@ -176,13 +181,20 @@ jobs:
             echo "- 变体: $VARIANT（release 以 debug 密钥签名，可直接安装）" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Upload APK artifact
+      - name: Upload APK artifact (arm64)
         uses: actions/upload-artifact@v4
         with:
-          name: apex-agent-apk
-          path: |
-            ${{ steps.artifact.outputs.path }}
-            ${{ steps.artifact.outputs.path_universal }}
+          name: apex-agent-apk-arm64
+          path: ${{ steps.artifact.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload APK artifact (universal)
+        if: steps.artifact.outputs.path_universal != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-agent-apk-universal
+          path: ${{ steps.artifact.outputs.path_universal }}
           if-no-files-found: error
           retention-days: 30
 
@@ -199,11 +211,12 @@ jobs:
 
             自动构建产物 —— 见附件 APK（两个变体，选适合你设备的）：
 
-            - **arm64-v8a**（首选，现代手机）：内置 Ubuntu rootfs 仅含 arm64，体积更小
-            - **universal**（全 ABI）：含 arm64 / armeabi-v7a / x86_64 三份 rootfs，旧设备与模拟器适用
+            - **arm64-v8a**（首选，现代手机）：内置 Ubuntu rootfs 仅含 arm64
+            - **universal**（全 ABI）：含 arm64 / armeabi-v7a / x86_64 三份 rootfs，旧设备与模拟器适用（体积大，谨慎流量）
 
-            > T83：Ubuntu 24.04 环境已改为 APK 内置交付 —— 首次使用离线解包（约 30 秒，零网络），
-            > 不再需要应用内下载安装。apt 装包仍需网络。
+            > T84：Ubuntu 24.04 完整 CLI 环境随 APK 内置 —— 首次使用离线解包约
+            > 2~5 分钟（解压后 ~1GB 存储；gcc / python3 / git / vim / man 开箱即用），
+            > 零网络。apt 装新包才需联网。
 
             - 变体: release（debug 密钥签名，可直接安装）
             - 提交: ${{ github.sha }}

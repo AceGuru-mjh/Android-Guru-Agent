@@ -1,7 +1,13 @@
 package com.apex.agent.ui.screen.market
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -18,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -113,41 +120,82 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
         return
     }
 
+    // ── v2 认知排序：按最近使用时间倒序（从未使用的沉底）──
+    val sortedSkills = state.skills.sortedByDescending { it.lastUsedAt }
+
     MarketList(
-        items = state.skills,
+        items = sortedSkills,
         emptyHint = "暂无已安装技能",
         key = { it.id },
         header = {
             item {
                 MarketHeader(
-                    "已安装 ${state.skills.size} 个技能；开关控制是否注入对话，卸载将删除 manifest 与资源目录。"
+                    "已安装 ${state.skills.size} 个技能（按最近使用排序）；" +
+                        "点击卡片查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）；" +
+                        "开关控制是否注入对话，卸载将删除 manifest 与资源目录。"
                 )
             }
         }
     ) { skill ->
-        MarketCard(
-            title = skill.name,
-            subtitle = skill.id,
-            description = skill.description,
-            trailing = {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Switch(
-                        checked = skill.enabled,
-                        onCheckedChange = { viewModel.toggleSkill(skill.id, it) }
-                    )
-                    IconButton(onClick = { pendingUninstall = skill }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "卸载技能",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.loadSkillDetail(skill.id) }
+        ) {
+            MarketCard(
+                title = skill.name,
+                subtitle = if (skill.lastUsedAt > 0) {
+                    "${skill.id} · 最近 ${formatRelativeShort(skill.lastUsedAt)}"
+                } else {
+                    "${skill.id} · 从未执行"
+                },
+                description = skill.description,
+                trailing = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (skill.isCrystallized) {
+                            MarketCrystallizedBadge()
+                        } else if (skill.isLowEnergy) {
+                            MarketLowEnergyBadge()
+                        }
+                        Switch(
+                            checked = skill.enabled,
+                            onCheckedChange = { viewModel.toggleSkill(skill.id, it) }
                         )
+                        IconButton(onClick = { pendingUninstall = skill }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "卸载技能",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
+            )
+            // 能量条
+            Spacer(modifier = Modifier.height(4.dp))
+            MarketEnergyBar(energy = skill.energy)
+            // 成功率 + 调用计数
+            if (skill.successCount + skill.failureCount > 0) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${skill.successCount}✓ / ${skill.failureCount}✗",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    MarketSuccessRateChip(successRate = skill.successRate)
+                }
             }
-        )
+        }
     }
 
     pendingUninstall?.let { skill ->
@@ -165,6 +213,19 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
                 TextButton(onClick = { pendingUninstall = null }) { Text("取消") }
             }
         )
+    }
+}
+
+/** 相对时间简短格式（"3小时前" / "2天前" / "从未"）。 */
+private fun formatRelativeShort(timestampMs: Long): String {
+    if (timestampMs <= 0) return "从未"
+    val delta = System.currentTimeMillis() - timestampMs
+    return when {
+        delta < 60_000 -> "刚刚"
+        delta < 3_600_000 -> "${delta / 60_000}分钟前"
+        delta < 86_400_000 -> "${delta / 3_600_000}小时前"
+        delta < 30L * 86_400_000 -> "${delta / 86_400_000}天前"
+        else -> "${delta / (30L * 86_400_000)}月前"
     }
 }
 

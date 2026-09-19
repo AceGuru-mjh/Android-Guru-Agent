@@ -11,16 +11,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,6 +34,8 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -225,4 +233,132 @@ internal fun MarketStatusChip(text: String, positive: Boolean) {
             }
         )
     }
+}
+
+// ═══ 认知市场增强组件（cs-mem 能量 + 结晶徽章 + 熔断横幅）═══
+
+/**
+ * 能量条 —— 显示技能的 cs-mem 能量值 [0.01, 10.0]。
+ * 颜色分级：≥8 橙（接近结晶）/ ≥4 绿（健康）/ ≥1 蓝（正常）/ ≥0.5 橙黄（低能）/ <0.5 红（危险）。
+ */
+@Composable
+internal fun MarketEnergyBar(
+    energy: Float,
+    modifier: Modifier = Modifier
+) {
+    val color = when {
+        energy >= 8.0f -> Color(0xFFFF6B35)
+        energy >= 4.0f -> Color(0xFF4CAF50)
+        energy >= 1.0f -> Color(0xFF2196F3)
+        energy >= 0.5f -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "能量",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                String.format("%.2f", energy),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = color
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        LinearProgressIndicator(
+            progress = { (energy / 10.0f).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+        )
+    }
+}
+
+/**
+ * 结晶徽章 —— 标记已结晶为可跳过 LLM 的确定性 FSM 宏的高频技能。
+ */
+@Composable
+internal fun MarketCrystallizedBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.LocalFireDepartment,
+                contentDescription = "已结晶",
+                modifier = Modifier.size(12.dp),
+                tint = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Spacer(Modifier.width(2.dp))
+            Text(
+                "已结晶",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+/**
+ * 低能量警告徽章 —— 提示技能若不使用将被梦境折叠。
+ */
+@Composable
+internal fun MarketLowEnergyBadge(modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = "低能量",
+                modifier = Modifier.size(12.dp),
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(Modifier.width(2.dp))
+            Text(
+                "低能量",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+/**
+ * 成功率微型显示 —— 用于卡片角落。
+ */
+@Composable
+internal fun MarketSuccessRateChip(successRate: Float) {
+    val text = if (successRate > 0f) String.format("%.0f%%", successRate * 100) else "—"
+    val color = when {
+        successRate >= 0.9f -> MaterialTheme.colorScheme.primary
+        successRate >= 0.5f -> MaterialTheme.colorScheme.tertiary
+        successRate > 0f -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = color
+    )
 }

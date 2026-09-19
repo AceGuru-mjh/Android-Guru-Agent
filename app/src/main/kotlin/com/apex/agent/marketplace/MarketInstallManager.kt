@@ -62,6 +62,64 @@ class MarketInstallManager @Inject constructor(
             skillRegistry.install(content).map { "已安装 Skill：${it.name}（${it.id}）" }
         }
 
+    /**
+     * 干运行安装：解析 manifest 但不写入磁盘。供市场详情页「安装前预览」使用。
+     *
+     * 返回 [ManifestPreview]：解析后的 manifest 摘要 + 缺失依赖 + 工具数 + 权限要求。
+     * 不修改任何状态，可安全反复调用。
+     */
+    suspend fun dryRunInstall(content: String): Result<ManifestPreview> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val manifest = json.decodeFromString<
+                    com.apex.agent.core.tools.skill.SkillManifest
+                >(content)
+                val installedIds = skillRegistry.getInstalled().map { it.manifest.id }.toSet()
+                val missing = com.apex.agent.core.tools.skill.SkillDependencyResolver
+                    .validateDependencies(manifest, installedIds)
+                ManifestPreview(
+                    id = manifest.id,
+                    name = manifest.name,
+                    version = manifest.version,
+                    description = manifest.description,
+                    author = manifest.author,
+                    license = manifest.license,
+                    category = manifest.category,
+                    tags = manifest.tags,
+                    trustLevel = manifest.trustLevel,
+                    toolCount = manifest.tools.size,
+                    hasPromptInjection = manifest.promptInjection != null,
+                    missingDependencies = missing,
+                    requirements = manifest.requirements.permissions +
+                        manifest.requirements.toolsRequired,
+                    privilegeLevel = manifest.requirements.privilegeLevel,
+                    isInstalled = manifest.id in installedIds
+                )
+            }
+        }
+
+    /** 干运行预览结果。 */
+    data class ManifestPreview(
+        val id: String,
+        val name: String,
+        val version: String,
+        val description: String,
+        val author: String,
+        val license: String,
+        val category: String?,
+        val tags: List<String>,
+        val trustLevel: String,
+        val toolCount: Int,
+        val hasPromptInjection: Boolean,
+        val missingDependencies: List<String>,
+        val requirements: List<String>,
+        val privilegeLevel: String,
+        val isInstalled: Boolean
+    ) {
+        /** 是否可安全安装（无缺失依赖）。 */
+        val canInstall: Boolean get() = missingDependencies.isEmpty()
+    }
+
     // ═══ Skill：URL 安装（IO 线程 + 2MB 上限）═══
     suspend fun installSkillFromUrl(url: String): Result<String> =
         withContext(Dispatchers.IO) {

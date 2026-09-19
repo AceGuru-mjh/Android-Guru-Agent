@@ -29,7 +29,29 @@ data class SkillManifest(
     val requirements: SkillRequirements = SkillRequirements(),
     val tools: List<SkillToolDef> = emptyList(),
     val configuration: SkillConfiguration = SkillConfiguration(),
-    val promptInjection: String? = null  // Prompt Skill专用
+    val promptInjection: String? = null,  // Prompt Skill专用
+    // ── 市场元数据（v2 增强，全部向后兼容，默认值保证旧 manifest 正常加载）──
+    /** 市场分类（镜像 ToolCategory 枚举名：SHELL/FILE/WEB/...）。null = 未分类。 */
+    val category: String? = null,
+    /** 自由标签，用于市场搜索/过滤。 */
+    val tags: List<String> = emptyList(),
+    /** 主页/仓库链接，市场详情页展示。 */
+    val homepage: String? = null,
+    val repository: String? = null,
+    /** 信任级别：verified（官方/已签名）/ community（社区）/ untrusted（被标记）。默认 community。 */
+    val trustLevel: String = "community",
+    /** Ed25519 签名 hex（对 manifest 规范化字节的签名）。null = 未签名。 */
+    val signature: String? = null,
+    /** 版本变更日志。 */
+    val changelog: List<ChangelogEntry> = emptyList()
+)
+
+/** 版本变更日志条目。 */
+@Serializable
+data class ChangelogEntry(
+    val version: String,
+    val date: String? = null,   // ISO-8601 字符串
+    val notes: String = ""
 )
 
 @Serializable

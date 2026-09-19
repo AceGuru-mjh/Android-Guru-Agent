@@ -141,6 +141,37 @@ internal fun AgentChatViewModel.restoreChatSession(sessionId: String) {
     }
 }
 
+/**
+ * 新开会话：当前会话先归档进历史（含取消未触发的防抖归档任务），
+ * 再清空引擎历史 / 持久化记忆 / UI 消息流与全部流式运行态。
+ * （自 AgentChatViewModel.kt 迁入 —— 行数预算拆分；调用点 viewModel.newChat() 无感知。）
+ */
+internal fun AgentChatViewModel.newChat() {
+    currentJob?.cancel()
+    // 当前会话先归档进历史（含取消未触发的防抖归档），再复位会话 id
+    flushChatHistoryNow()
+    // 清空所有流式/工具运行态，防止残留缓冲串入新会话。
+    resetStreamingState()
+    viewModelScope.launch {
+        (agentEngine as? ApexAgentEngine)?.clearHistory()
+        _uiState.update {
+            it.copy(
+                messages = emptyList(),
+                currentThinking = "",
+                currentResponse = "",
+                currentToolCall = null,
+                plan = null,
+                awaitingPlanConfirmation = false,
+                spec = null,
+                awaitingSpecConfirmation = false,
+                pendingUserInput = null,
+                isLoading = false,
+                historyDepth = 0
+            )
+        }
+    }
+}
+
 /** 删除单个历史会话（正在聊的那条也允许删：删除后当前会话脱离历史索引）。 */
 internal fun AgentChatViewModel.deleteChatSession(sessionId: String) {
     if (currentHistorySessionId == sessionId) {

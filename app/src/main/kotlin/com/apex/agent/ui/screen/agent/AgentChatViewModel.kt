@@ -55,15 +55,13 @@ class AgentChatViewModel @Inject constructor(
     // 同时保留 internal 可见性（供抽出的 AgentChatQuestionHandler.kt 扩展访问）。
     internal val _uiState = MutableStateFlow(AgentChatUiState())
 
-    // ═══ 历史对话（ChatHistory）═══
-    // 逻辑主体在 AgentChatHistoryController.kt（God-file 预算拆分，模式同
-    // AgentChatQuestionHandler.kt）：自动归档 / flush / 恢复 / 删除均为 internal 扩展。
+    // ═══ 历史对话（ChatHistory）：逻辑主体在 AgentChatHistoryController.kt ═══
+    // （God-file 预算拆分，模式同 AgentChatQuestionHandler.kt：归档/flush/恢复/删除均为 internal 扩展）
     internal val _chatSessions = MutableStateFlow<List<ChatSessionSummary>>(emptyList())
     val chatSessions: StateFlow<List<ChatSessionSummary>> = _chatSessions.asStateFlow()
-    /** 当前会话在历史库中的 id（null = 尚未产生消息的新会话）。 */
+    /** 当前会话在历史库的 id（null=新会话）/ 创建时间 / 防抖归档在途任务。 */
     internal var currentHistorySessionId: String? = null
     internal var currentHistorySessionCreatedAt: Long? = null
-    /** 防抖归档在途任务（flush 时取消，防旧快照串进新会话）。 */
     internal var historyPersistJob: Job? = null
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
     init {
@@ -258,7 +256,7 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
-    // internal：AgentChatHistoryController.kt 的恢复会话需要取消在途执行
+    // internal：AgentChatHistoryController.kt 的恢复会话需取消在途执行（拆分既定模式）
     internal var currentJob: Job? = null
 
     // ═══ 工具输出流式缓冲（16ms 节流刷新）═══
@@ -267,8 +265,8 @@ class AgentChatViewModel @Inject constructor(
     // (≈1 帧) 的 flush Job；期间到达的 chunk 不再启动新 Job，到点后一次性把
     // 缓冲区快照写入 currentToolCall.output。既保留所有文本，又把重组次数压到
     // 每秒 ≤60 次。
-    // 以下流式/工具运行态成员 internal：resetStreamingState()（历史恢复共用）在
-    // AgentChatHistoryController.kt 扩展中访问 —— God-file 预算拆分的既定模式。
+    // 以下流式/工具运行态 internal：resetStreamingState()（历史恢复共用）
+    // 在 AgentChatHistoryController.kt 扩展中访问 —— God-file 预算拆分既定模式。
     internal val toolOutputBuffer = StringBuilder()
     internal var activeToolCallId: String? = null
     internal var toolFlushJob: Job? = null
@@ -997,31 +995,7 @@ class AgentChatViewModel @Inject constructor(
         routeContextName = null
     }
 
-    fun newChat() {
-        currentJob?.cancel()
-        // 当前会话先归档进历史（含取消未触发的防抖归档），再复位会话 id
-        flushChatHistoryNow()
-        // 清空所有流式/工具运行态，防止残留缓冲串入新会话。
-        resetStreamingState()
-        viewModelScope.launch {
-            (agentEngine as? ApexAgentEngine)?.clearHistory()
-            _uiState.update {
-                it.copy(
-                    messages = emptyList(),
-                    currentThinking = "",
-                    currentResponse = "",
-                    currentToolCall = null,
-                    plan = null,
-                    awaitingPlanConfirmation = false,
-                    spec = null,
-                    awaitingSpecConfirmation = false,
-                    pendingUserInput = null,
-                    isLoading = false,
-                    historyDepth = 0
-                )
-            }
-        }
-    }
+    // newChat() 已迁至 AgentChatHistoryController.kt（历史归档冲刷 + 会话态清空一体；行数预算拆分）
 
     /** P2-8（6-c）：原写 legacy 死键 llm_reasoning_effort（全工程无消费者）；改持久化到默认 ModelProfile（DynamicLlmClient 监听 profiles 即时重建生效）。 */
     fun setReasoningEffort(effort: ReasoningEffort) {

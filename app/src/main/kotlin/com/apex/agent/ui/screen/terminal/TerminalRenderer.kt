@@ -219,8 +219,6 @@ fun TerminalGrid(
     // ── IME 隐藏桥 + 焦点 ──
     val focusRequester = remember { FocusRequester() }
     var imeBuffer by remember { mutableStateOf(TextFieldValue("")) }
-    /** 是否正处于 IME 组合态（拼音/日语/联想候选未上屏）。 */
-    var composing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     /**
@@ -502,36 +500,32 @@ fun TerminalGrid(
                         }
                     }
 
-                    if (new.composition != null) {
-                        // ① 组合中（拼音/候选未上屏）：组合文本**未确定**，不能写进 PTY，
-                        //    仅跟踪在缓冲里 —— 否则会把 li/ni/hao 这些中间态也发给 shell。
-                        composing = true
-                        imeBuffer = new
-                        return@BasicTextField
-                    }
-
-                    if (composing) {
-                        // ② 组合结束（候选上屏）：组合期间一个字节都没下发过，
-                        //    因此 **整段 new.text 都是新内容**，必须整体下发。
-                        //
-                        //    ⚠ 旧实现在这里仍走增量 diff："li"(2) → "里"(1) 被判成
-                        //    「长度变短 = 删除」→ 只发退格，**上屏的汉字永远进不了终端**
-                        //    （中文用户表现为"字符根本打不进去"）。
-                        composing = false
-                        deliver(new.text)
-                        imeBuffer = TextFieldValue("", TextRange(0))
-                        return@BasicTextField
-                    }
-
-                    // ③ 非组合：按公共前缀做增量 diff
-                    //    - 尾部变短 → 退格（覆盖 IME 在隐藏框里的删除动作）；
-                    //    - 前缀被改写（自动纠正/候选替换）→ 退格 + 重发，不再要求 startsWith
-                    //      （旧实现要求 new.startsWith(old)，一旦不等就静默丢弃整次输入）。
+                    // 统一的增量 diff：以「上一帧保留文本」为基准，只下发新增尾部、
+                    // 用退格收回被删/被改的前缀。
+                    //
+                    // 组合态（composition）也走同一路径 —— 不单独缓存。原因：Gboard/百度/讯飞等
+                    // 常把整词当成一个 composing span 一直不提交，直到按空格/回车；若组合态
+                    // 完全不下发，字符就一直不出现，表现正是"打不进去"。现在每次
+                    // setComposingText 的增量都实时进 PTY，候选上屏（commit）时旧组合文本由
+                    // 退格收回 —— 这与真实终端的行为一致（输入法组合文本显示时被后续提交替换）。
+                    //
+                    // 🔑 关键修复：基准 `old` 必须是**上一帧保留下来的真实文本**，绝不能像旧
+                    //    实现那样每敲一字就把 `imeBuffer` 重置成空 —— 那会让受控的 BasicTextField
+                    //    告诉输入法"文本已清空"，而输入法内部还认为框里有字，状态脱节后输入法
+                    //    会在**第二字起停止投递**（或重复投递），表现就是"字符根本打不进去"。
+                    //    因此这里保持 `imeBuffer = new`（与编辑器/输入法一致），只在回车提交后
+                    //    才清空，使下一行从干净状态开始。
                     val old = imeBuffer.text
                     val common = old.commonPrefixWith(new.text).length
                     repeat((old.length - common).coerceAtLeast(0)) { onKey(TerminalKey.BACKSPACE) }
                     if (new.text.length > common) deliver(new.text.substring(common))
-                    imeBuffer = TextFieldValue("", TextRange(0))
+                    imeBuffer = if (new.text.contains('\n') || new.text.contains('\r')) {
+                        // 回车提交：本行已发，清空缓冲，下一行从干净状态开始
+                        TextFieldValue("", TextRange(0))
+                    } else {
+                        // 保持缓冲与编辑器一致 —— 输入法不会因"被清空"而中止投递
+                        new
+                    }
                 },
                 textStyle = baseStyle.copy(color = Color.Transparent),
                 modifier = Modifier

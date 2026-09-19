@@ -419,11 +419,13 @@ class WebSearchTool(
     }
 
     // ── 解析器：Bing（b_algo 块内 h2>a + p） ──
+    // 实测（2025+ Bing 页面）结果链接普遍被包成 bing.com/ck/a?...&u=a1<base64>
+    // 点击跟踪重定向，链接统一过 [decodeBingRedirect] 解出真实 URL。
     private fun parseBingResults(html: String, maxResults: Int): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
         for (match in BING_RESULT_PATTERN.findAll(html)) {
             if (results.size >= maxResults) break
-            val url = match.groupValues[1]
+            val url = decodeBingRedirect(match.groupValues[1])
             val title = match.groupValues[2].replace(RX_ANY_TAG, "").trim()
             val snippet = BING_SNIPPET_PATTERN.find(match.groupValues[3])
                 ?.groupValues?.get(1)?.replace(RX_ANY_TAG, "")?.trim() ?: ""
@@ -440,6 +442,31 @@ class WebSearchTool(
             java.net.URLDecoder.decode(url.substringAfter("uddg=").substringBefore("&"), "UTF-8")
         } catch (e: Exception) { url }
     } else url
+
+    /**
+     * Bing 点击跟踪重定向解码：`https://www.bing.com/ck/a?...&u=a1<base64 目标 URL>&...`。
+     * 实测 2025+ Bing 结果 href 普遍被包成 /ck/a 重定向；不带重定时本函数是 no-op。
+     * u 参数前缀 a1 后为 URL-safe base64，还原标准 base64（-→+、_→/、补 =）后解码。
+     */
+    private fun decodeBingRedirect(url: String): String {
+        if (!url.contains("bing.com/ck/")) return url
+        return try {
+            val clean = url.replace("&amp;", "&")
+            val u = clean.substringAfter("&u=").substringBefore("&")
+            if (u.length > 2) {
+                val b64 = u.substring(2)
+                    .replace('-', '+')
+                    .replace('_', '/')
+                    .padEnd((u.length - 2 + 3) / 4 * 4, '=')
+                val decoded = java.util.Base64.getDecoder().decode(b64).decodeToString()
+                if (decoded.startsWith("http")) decoded else url
+            } else {
+                url
+            }
+        } catch (e: Exception) {
+            url
+        }
+    }
 
     private fun decodeEntities(s: String): String = s
         .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")

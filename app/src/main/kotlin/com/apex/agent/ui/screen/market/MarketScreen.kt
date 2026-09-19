@@ -15,9 +15,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 
 /**
  * 市场（v3 顶栏双视图重构）
@@ -82,7 +84,13 @@ fun MarketScreen(viewModel: MarketViewModel = hiltViewModel()) {
                     Tab(
                         selected = state.selectedTab == tab,
                         onClick = { viewModel.selectTab(tab) },
-                        text = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        text = {
+                            Text(
+                                stringResource(tab.labelRes),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     )
                 }
             }

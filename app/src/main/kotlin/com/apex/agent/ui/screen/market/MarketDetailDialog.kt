@@ -34,10 +34,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.apex.agent.R
 
 /**
  * # 技能详情对话框
@@ -64,7 +66,7 @@ internal fun MarketSkillDetailDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_close)) }
         },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -90,7 +92,7 @@ internal fun MarketSkillDetailDialog(
                         CircularProgressIndicator(modifier = Modifier.size(32.dp))
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "正在从 cs-mem 投影认知数据…",
+                            stringResource(R.string.market_detail_loading),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -113,7 +115,7 @@ private fun DetailContent(state: SkillDetailUiState) {
     ) {
         // 1. 认知健康（cs-mem）
         item {
-            SectionTitle("认知健康", Icons.Default.Bolt)
+            SectionTitle(stringResource(R.string.market_detail_health), Icons.Default.Bolt)
             CognitiveHealthPanel(state)
         }
 
@@ -126,19 +128,24 @@ private fun DetailContent(state: SkillDetailUiState) {
 
         // 3. 调用统计聚合
         item {
-            SectionTitle("调用统计", Icons.Default.History)
+            SectionTitle(stringResource(R.string.market_detail_usage), Icons.Default.History)
             UsageSummaryPanel(state)
         }
 
         // 4. 每个工具的详细统计
         if (state.toolStats.isNotEmpty()) {
-            item { SectionTitle("工具级明细", Icons.Default.CheckCircle) }
+            item { SectionTitle(stringResource(R.string.market_detail_tool_stats), Icons.Default.CheckCircle) }
             items(state.toolStats) { row -> ToolStatRow(row) }
         }
 
         // 5. 最近轨迹（参数脱敏）
         if (state.traces.isNotEmpty()) {
-            item { SectionTitle("最近调用轨迹（参数已脱敏）", Icons.Default.Schedule) }
+            item {
+                SectionTitle(
+                    stringResource(R.string.market_detail_traces),
+                    Icons.Default.Schedule
+                )
+            }
             items(state.traces) { span -> TraceSpanRow(span) }
         }
     }
@@ -174,7 +181,7 @@ private fun CognitiveHealthPanel(state: SkillDetailUiState) {
         Column(modifier = Modifier.padding(12.dp)) {
             if (macro == null) {
                 Text(
-                    "该技能尚未被蒸馏为 cs-mem 宏（未被 Agent 实际执行过）",
+                    stringResource(R.string.market_detail_no_macro),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -185,7 +192,7 @@ private fun CognitiveHealthPanel(state: SkillDetailUiState) {
                         Spacer(Modifier.width(8.dp))
                     }
                     Text(
-                        "能量",
+                        stringResource(R.string.market_energy),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -215,10 +222,26 @@ private fun CognitiveHealthPanel(state: SkillDetailUiState) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    StatChip("成功", macro.successCount.toString(), MaterialTheme.colorScheme.primary)
-                    StatChip("失败", macro.failureCount.toString(), MaterialTheme.colorScheme.error)
-                    StatChip("成功率", String.format("%.0f%%", macro.successRate * 100), MaterialTheme.colorScheme.tertiary)
-                    StatChip("转移", macro.transitions.toString(), MaterialTheme.colorScheme.onSurfaceVariant)
+                    StatChip(
+                        stringResource(R.string.market_stat_success),
+                        macro.successCount.toString(),
+                        MaterialTheme.colorScheme.primary
+                    )
+                    StatChip(
+                        stringResource(R.string.market_stat_failure),
+                        macro.failureCount.toString(),
+                        MaterialTheme.colorScheme.error
+                    )
+                    StatChip(
+                        stringResource(R.string.market_stat_success_rate),
+                        String.format("%.0f%%", macro.successRate * 100),
+                        MaterialTheme.colorScheme.tertiary
+                    )
+                    StatChip(
+                        stringResource(R.string.market_stat_transitions),
+                        macro.transitions.toString(),
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 if (macro.lastExecutedAt > 0) {
                     Spacer(Modifier.height(6.dp))
@@ -231,7 +254,10 @@ private fun CognitiveHealthPanel(state: SkillDetailUiState) {
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            "最近执行：${formatRelative(macro.lastExecutedAt)}",
+                            stringResource(
+                                R.string.market_detail_last_executed,
+                                formatRelative(macro.lastExecutedAt)
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -240,7 +266,7 @@ private fun CognitiveHealthPanel(state: SkillDetailUiState) {
                 if (macro.isCrystallized) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "✦ 已结晶 —— 命中初始状态时可跳过 LLM 直接回放（毫秒级响应）",
+                        stringResource(R.string.market_detail_crystallized),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary,
                         fontFamily = FontFamily.Monospace
@@ -269,7 +295,7 @@ private fun CrystallizedBadge() {
             )
             Spacer(Modifier.width(2.dp))
             Text(
-                "已结晶",
+                stringResource(R.string.market_crystallized),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 fontWeight = FontWeight.SemiBold
@@ -301,6 +327,8 @@ private fun StatChip(label: String, value: String, color: Color) {
 
 @Composable
 private fun BreakerBanner(openTools: List<ToolUsageRow>) {
+    // 单工具熔断条目模板（%1$s 工具 id / %2$d 失败次数）—— Composable 层预解析。
+    val breakerToolTemplate = stringResource(R.string.market_breaker_tool)
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -318,19 +346,23 @@ private fun BreakerBanner(openTools: List<ToolUsageRow>) {
             Spacer(Modifier.width(8.dp))
             Column {
                 Text(
-                    "熔断器开启（${openTools.size} 个工具）",
+                    stringResource(R.string.market_breaker_open, openTools.size),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    openTools.joinToString(", ") { "${it.toolId}(${it.failureCount} 失败)" },
+                    // joinToString 的 lambda 非 @Composable 上下文 —— 模板先在
+                    // Composable 层预解析（lambda 内仅做格式化）。
+                    openTools.joinToString(", ") {
+                        breakerToolTemplate.format(it.toolId, it.failureCount)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    "冷却期后自动进入半开状态，成功探测一次后恢复",
+                    stringResource(R.string.market_breaker_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
@@ -343,7 +375,7 @@ private fun BreakerBanner(openTools: List<ToolUsageRow>) {
 private fun UsageSummaryPanel(state: SkillDetailUiState) {
     if (!state.hasUsage) {
         Text(
-            "暂无调用记录",
+            stringResource(R.string.market_detail_no_usage),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -360,10 +392,26 @@ private fun UsageSummaryPanel(state: SkillDetailUiState) {
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            StatChip("总调用", state.totalInvocations.toString(), MaterialTheme.colorScheme.onSurface)
-            StatChip("成功", state.totalSuccesses.toString(), MaterialTheme.colorScheme.primary)
-            StatChip("失败", state.totalFailures.toString(), MaterialTheme.colorScheme.error)
-            StatChip("成功率", String.format("%.0f%%", state.successRate * 100), MaterialTheme.colorScheme.tertiary)
+            StatChip(
+                stringResource(R.string.market_stat_total),
+                state.totalInvocations.toString(),
+                MaterialTheme.colorScheme.onSurface
+            )
+            StatChip(
+                stringResource(R.string.market_stat_success),
+                state.totalSuccesses.toString(),
+                MaterialTheme.colorScheme.primary
+            )
+            StatChip(
+                stringResource(R.string.market_stat_failure),
+                state.totalFailures.toString(),
+                MaterialTheme.colorScheme.error
+            )
+            StatChip(
+                stringResource(R.string.market_stat_success_rate),
+                String.format("%.0f%%", state.successRate * 100),
+                MaterialTheme.colorScheme.tertiary
+            )
         }
     }
 }
@@ -398,7 +446,7 @@ private fun ToolStatRow(row: ToolUsageRow) {
                 maxLines = 1
             )
             Text(
-                "${row.invocations}次",
+                stringResource(R.string.market_detail_invocations_count, row.invocations),
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -480,13 +528,15 @@ private fun energyColor(energy: Float): Color {
     }
 }
 
+/** 相对时间（秒级）—— 详情对话框专用，文案随语言切换。 */
+@Composable
 private fun formatRelative(timestampMs: Long): String {
     val delta = System.currentTimeMillis() - timestampMs
     return when {
-        delta < 60_000 -> "${delta / 1000} 秒前"
-        delta < 3_600_000 -> "${delta / 60_000} 分钟前"
-        delta < 86_400_000 -> "${delta / 3_600_000} 小时前"
-        delta < 30L * 86_400_000 -> "${delta / 86_400_000} 天前"
-        else -> "${delta / (30L * 86_400_000)} 个月前"
+        delta < 60_000 -> stringResource(R.string.market_time_seconds_ago, delta / 1000)
+        delta < 3_600_000 -> stringResource(R.string.market_time_minutes_ago, delta / 60_000)
+        delta < 86_400_000 -> stringResource(R.string.market_time_hours_ago, delta / 3_600_000)
+        delta < 30L * 86_400_000 -> stringResource(R.string.market_time_days_ago, delta / 86_400_000)
+        else -> stringResource(R.string.market_time_months_ago, delta / (30L * 86_400_000))
     }
 }

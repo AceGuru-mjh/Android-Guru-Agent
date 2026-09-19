@@ -35,10 +35,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 
 /**
  * ═══ 市场共享 UI 件 ═══
@@ -47,6 +49,36 @@ import androidx.compose.ui.unit.dp
  * 脚手架 + Browse 页签集 + Installed 页签集后，共享卡片/列表件需要
  * internal 可见性供三个文件复用，同时守住单文件 1200 行预算）。
  */
+
+/**
+ * 下载/星标等计数短格式：中文 万/亿，英文 K/M/B，其余语言按英文习惯。
+ * 数字部分先在此算好，再作为 %1$s 填入资源文案（如 “%1$s 次下载”）。
+ */
+internal fun formatDownloads(count: Long, language: String): String {
+    val zh = language.equals("zh", ignoreCase = true)
+    return when {
+        zh && count >= 100_000_000L -> String.format("%.1f亿", count / 100_000_000.0)
+        zh && count >= 10_000L -> String.format("%.1f万", count / 10_000.0)
+        count >= 1_000_000_000L -> String.format("%.1fB", count / 1_000_000_000.0)
+        count >= 1_000_000L -> String.format("%.1fM", count / 1_000_000.0)
+        count >= 1_000L -> String.format("%.1fK", count / 1_000.0)
+        else -> count.toString()
+    }
+}
+
+/** 相对时间短格式（“3分钟前” / “2天前” / “从未”）—— 供已安装列表卡片副标题用。 */
+@Composable
+internal fun formatRelativeTime(timestampMs: Long): String {
+    if (timestampMs <= 0) return stringResource(R.string.market_time_never)
+    val delta = System.currentTimeMillis() - timestampMs
+    return when {
+        delta < 60_000 -> stringResource(R.string.market_time_just_now)
+        delta < 3_600_000 -> stringResource(R.string.market_time_minutes_ago, delta / 60_000)
+        delta < 86_400_000 -> stringResource(R.string.market_time_hours_ago, delta / 3_600_000)
+        delta < 30L * 86_400_000 -> stringResource(R.string.market_time_days_ago, delta / 86_400_000)
+        else -> stringResource(R.string.market_time_months_ago, delta / (30L * 86_400_000))
+    }
+}
 
 /** 顶栏视图切换行 —— 市场 / 已安装管理 两个一级导航。 */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -58,10 +90,11 @@ internal fun MarketScopeTabs(
 ) {
     PrimaryTabRow(selectedTabIndex = scope.ordinal) {
         MarketScope.entries.forEach { item ->
+            val labelText = stringResource(item.labelRes)
             val label = if (item == MarketScope.INSTALLED && installedCount > 0) {
-                "${item.label} · $installedCount"
+                "$labelText · $installedCount"
             } else {
-                item.label
+                labelText
             }
             Tab(
                 selected = scope == item,
@@ -173,6 +206,7 @@ internal fun MarketCard(
     title: String,
     subtitle: String?,
     description: String?,
+    descriptionMaxLines: Int = 3,
     trailing: (@Composable RowScope.() -> Unit)? = null
 ) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
@@ -204,7 +238,7 @@ internal fun MarketCard(
                     description,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
+                    maxLines = descriptionMaxLines,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -256,7 +290,7 @@ internal fun MarketEnergyBar(
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "能量",
+                stringResource(R.string.market_energy),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -297,13 +331,13 @@ internal fun MarketCrystallizedBadge(modifier: Modifier = Modifier) {
         ) {
             Icon(
                 Icons.Default.LocalFireDepartment,
-                contentDescription = "已结晶",
+                contentDescription = stringResource(R.string.market_crystallized),
                 modifier = Modifier.size(12.dp),
                 tint = MaterialTheme.colorScheme.onTertiaryContainer
             )
             Spacer(Modifier.width(2.dp))
             Text(
-                "已结晶",
+                stringResource(R.string.market_crystallized),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 fontWeight = FontWeight.SemiBold
@@ -328,13 +362,13 @@ internal fun MarketLowEnergyBadge(modifier: Modifier = Modifier) {
         ) {
             Icon(
                 Icons.Default.Warning,
-                contentDescription = "低能量",
+                contentDescription = stringResource(R.string.market_low_energy),
                 modifier = Modifier.size(12.dp),
                 tint = MaterialTheme.colorScheme.onErrorContainer
             )
             Spacer(Modifier.width(2.dp))
             Text(
-                "低能量",
+                stringResource(R.string.market_low_energy),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 fontWeight = FontWeight.SemiBold

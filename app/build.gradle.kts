@@ -30,8 +30,8 @@ android {
         // 参考：developer.android.com/about/versions/10/privacy/changes
         //       （"Execute permission for app home directory" 一节）
         targetSdk = 28
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
 
         ndk {
             // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so

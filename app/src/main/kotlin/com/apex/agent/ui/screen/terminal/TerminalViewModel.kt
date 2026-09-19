@@ -507,11 +507,12 @@ class TerminalViewModel @Inject constructor(
         keepScreenOn = prefs.getBoolean("term_keep_screen_on", false)
     )
 
-    /** 双指捏合/工具栏用的字号调整（钳制在 [TerminalSettings.MIN_FONT_SIZE]..[MAX_FONT_SIZE]）。 */
+    /** 字号调整（钳制在 [TerminalSettings.MIN_FONT_SIZE]..[TerminalSettings.MAX_FONT_SIZE]）。 */
     fun setFontSize(size: Int) {
         val clamped = size.coerceIn(TerminalSettings.MIN_FONT_SIZE, TerminalSettings.MAX_FONT_SIZE)
         if (clamped == _settings.value.fontSize) return
         updateSettings { copy(fontSize = clamped) }
+    }
 
     // ═══ 黑名单 / 白名单命令 ═══
     private val _blacklist = MutableStateFlow(loadSet("cmd_blacklist"))

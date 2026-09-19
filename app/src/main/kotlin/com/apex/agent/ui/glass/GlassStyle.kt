@@ -133,7 +133,16 @@ internal data class GlassPalette(
     val specular: Color
 )
 
-/** 当前主题下的玻璃调色板。跟随 Dynamic Color。 */
+/**
+ * 当前主题下的玻璃调色板。跟随 Dynamic Color。
+ *
+ * 双态设计意图：
+ *  - 深色（保持原样）：近黑基底上的「提亮」玻璃 —— surfaceContainer 系高一层作材质，
+ *    白色边缘/高光在暗底上自然受光，主色轻微浸染呼应霓虹主题；
+ *  - 浅色（本次重调）：白基底上的「乳白磨砂玻璃」—— 磨砂层改用 surfaceVariant（比纯白
+ *    surface 深一档，避免白上白一片死白无层次），上缘白色 rim light 受光、下缘极淡
+ *    深色定界，顶部镜面高光加强扫掠；primary 以约 0.05 alpha 只给主题色「倾向」不刷屏。
+ */
 @Composable
 internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
     val scheme = MaterialTheme.colorScheme
@@ -155,18 +164,31 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             specular = Color.White.copy(alpha = style.specularAlpha)
         )
     } else {
+        // 浅色玻璃重调：乳白磨砂 + 上缘受光 + 主题色倾向 —— 修复「白天模式一片死白」
         GlassPalette(
             dark = dark,
             hazeBackground = scheme.background,
-            // 浅色：乳白玻璃，边缘转向冷灰以在白底上可见
-            hazeTint = scheme.surface.copy(alpha = style.tintAlpha + 0.08f)
-                .compositeOverNeutral(scheme.primary.copy(alpha = 0.04f)),
-            hazeFallback = scheme.surface.copy(alpha = style.scrimAlpha + 0.18f),
-            frostBase = scheme.surface.copy(alpha = style.scrimAlpha + 0.15f),
-            frostLift = Color.White.copy(alpha = style.specularAlpha * 1.4f + 0.10f),
-            edgeTop = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.55f),
-            edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.18f),
-            specular = Color.White.copy(alpha = style.specularAlpha * 1.5f)
+            // 磨砂层叠：surfaceVariant 比 surface 深一档，白底上才叠得出「一层玻璃」；
+            // 再薄叠 primary（0.05）给玻璃一点主题色倾向 —— 只给倾向，不刷屏
+            hazeTint = scheme.surfaceVariant.copy(alpha = style.tintAlpha + 0.14f)
+                .compositeOverNeutral(scheme.primary.copy(alpha = 0.05f)),
+            // 低 API 无 blur 的 scrim 兜底：更实的乳白，内容仍可读
+            // （Strong 档相加会 >1f，clamp 防 alpha 越界后 toArgb 打包错位）
+            hazeFallback = scheme.surfaceVariant.copy(
+                alpha = (style.scrimAlpha + 0.24f).coerceAtMost(1f)
+            ),
+            // Frosted 霜底：乳白偏灰 —— 在白底上能看出「一层玻璃」而非白上白
+            frostBase = scheme.surfaceVariant.copy(
+                alpha = (style.scrimAlpha + 0.22f).coerceAtMost(1f)
+            ),
+            // 顶部受光提亮：白色 lift —— 霜面上亮下实，正是磨砂玻璃的受光方向
+            frostLift = Color.White.copy(alpha = style.specularAlpha * 1.6f + 0.18f),
+            // 上缘 rim light：白玻璃受光边（绘制层会再乘激活 boost，按压更亮）
+            edgeTop = Color.White.copy(alpha = style.edgeAlpha * 1.3f + 0.06f),
+            // 下缘落影：极淡深色定界 —— 给轮廓收边，但不像旧版那样成灰框脏描边
+            edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.14f),
+            // 顶部镜面扫掠：更强的白色高光，在乳白底上仍可辨
+            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.04f)
         )
     }
     // 状态强调色：工具卡运行态 / 错误态等着色 —— 不用大面积高饱和，保持克制

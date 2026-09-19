@@ -3,11 +3,14 @@
 package com.apex.agent.ui.screen.settings
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -27,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.core.llm.*
+import com.apex.agent.ui.theme.AccentPalette
+import com.apex.agent.ui.theme.accentSwatchColor
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.util.Locale
@@ -128,24 +135,9 @@ fun SettingsScreen(
             when (selectedTab) {
                 0 -> ModelsTab(
                     profiles = profiles,
-                    providers = providers,
-                    selectedId = selectedId,
                     selected = selected,
                     viewModel = viewModel,
                     onSelect = { selectedId = it },
-                    onAdd = {
-                        val id = "profile_${System.currentTimeMillis()}"
-                        val p = ModelProfile(
-                            id = id, name = "新模型",
-                            providerId = providers.firstOrNull()?.id ?: "", modelId = ""
-                        )
-                        viewModel.upsertProfile(p)
-                        selectedId = id
-                    },
-                    onDuplicate = { viewModel.duplicateProfile(it) },
-                    onDelete = { viewModel.deleteProfile(it) },
-                    onSetDefault = { viewModel.setDefaultProfile(it) },
-                    onUpdate = { viewModel.upsertProfile(it) },
                     onManageProviders = { showProviders = true },
                     onManageRoles = { showRoles = true },
                 )
@@ -182,19 +174,14 @@ fun SettingsScreen(
 @Composable
 private fun ModelsTab(
     profiles: List<ModelProfile>,
-    providers: List<ProviderConfig>,
-    selectedId: String,
     selected: ModelProfile?,
     viewModel: SettingsViewModel,
     onSelect: (String) -> Unit,
-    onAdd: () -> Unit,
-    onDuplicate: (String) -> Unit,
-    onDelete: (String) -> Unit,
-    onSetDefault: (String) -> Unit,
-    onUpdate: (ModelProfile) -> Unit,
     onManageProviders: () -> Unit,
     onManageRoles: () -> Unit,
 ) {
+    // 高级参数分区（Generation / Reasoning / …）仍走统一 upsert 入口
+    val onUpdate: (ModelProfile) -> Unit = { viewModel.upsertProfile(it) }
     Column(
         Modifier
             .fillMaxSize()
@@ -202,22 +189,13 @@ private fun ModelsTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 一张卡完成「选服务商 → URL 预填 → 填 Key → 拉取真实模型」的主流程
+        // 合并后的单卡：多档案管理 + 选服务商 → URL 预填 → 填 Key → 拉取真实模型
+        // （原 ModelsSection 模型档案卡已并入，删除/重置/能力标记编辑也随之迁移）
         ModelSetupCard(
-            providers = providers,
-            selected = selected,
-            viewModel = viewModel
-        )
-        ModelsSection(
             profiles = profiles,
-            providers = providers,
-            selectedId = selectedId,
+            selected = selected,
+            viewModel = viewModel,
             onSelect = onSelect,
-            onAdd = onAdd,
-            onDuplicate = onDuplicate,
-            onDelete = onDelete,
-            onSetDefault = onSetDefault,
-            onUpdate = onUpdate,
             onManageProviders = onManageProviders,
             onManageRoles = onManageRoles,
         )
@@ -514,133 +492,9 @@ private fun KeyValueEditor(
 }
 
 // ───────────────────────────── 模型页分区 ─────────────────────────────
-
-@Composable
-private fun ModelsSection(
-    profiles: List<ModelProfile>,
-    providers: List<ProviderConfig>,
-    selectedId: String,
-    onSelect: (String) -> Unit,
-    onAdd: () -> Unit,
-    onDuplicate: (String) -> Unit,
-    onDelete: (String) -> Unit,
-    onSetDefault: (String) -> Unit,
-    onUpdate: (ModelProfile) -> Unit,
-    onManageProviders: () -> Unit,
-    onManageRoles: () -> Unit,
-) {
-    var resetTarget by remember { mutableStateOf<ModelProfile?>(null) }
-    var deleteTarget by remember { mutableStateOf<ModelProfile?>(null) } // 修复：删除档案加确认（破坏性操作）
-
-    // 主配置入口已上移到 ModelSetupCard；这里保留多档案管理 + 高级参数（默认收起）
-    SectionCard("Models · 模型档案（多档案 / 高级）", Icons.Outlined.SmartToy, initiallyExpanded = false) {
-        profiles.forEach { p ->
-            val prov = providers.firstOrNull { it.id == p.providerId }
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = p.id == selectedId, onClick = { onSelect(p.id) })
-                        Text(p.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                        if (p.isDefault) Icon(Icons.Default.Star, "Default",
-                            tint = MaterialTheme.colorScheme.primary)
-                    }
-                    Text("${prov?.displayName ?: "无 Provider"} · ${p.modelId} · ${p.displayContext()}",
-                        style = MaterialTheme.typography.bodySmall)
-                    if (p.capabilities.summary().isNotBlank()) {
-                        Text(p.capabilities.summary(), style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary)
-                    }
-                    Row {
-                        TextButton(onClick = { onSetDefault(p.id) }) { Text("设为默认") }
-                        TextButton(onClick = { onDuplicate(p.id) }) { Text("复制") }
-                        TextButton(onClick = { resetTarget = p }) { Text("重置参数") }
-                        TextButton(onClick = { deleteTarget = p },
-                            enabled = profiles.size > 1) { Text("删除") }
-                    }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onAdd, Modifier.weight(1f)) { Text("+ 添加模型") }
-            OutlinedButton(onClick = onManageProviders, Modifier.weight(1f)) { Text("Providers") }
-            OutlinedButton(onClick = onManageRoles, Modifier.weight(1f)) { Text("角色") }
-        }
-
-        // 选中 Profile 基本信息编辑
-        val sel = profiles.firstOrNull { it.id == selectedId }
-        sel?.let { p ->
-            HorizontalDivider()
-            TextFieldRow("模型名称", p.name) { onUpdate(p.copy(name = it)) }
-            DropdownRow("Provider", providers.map { it.id to it.displayName }, p.providerId) {
-                onUpdate(p.copy(providerId = it))
-            }
-            TextFieldRow("Model ID", p.modelId, description = "如 gpt-4o-mini / deepseek-chat / qwen2.5:7b") {
-                onUpdate(p.copy(modelId = it))
-            }
-            Text("Capabilities", style = MaterialTheme.typography.labelMedium)
-            CapabilityEditor(p.capabilities) { onUpdate(p.copy(capabilities = it)) }
-        }
-    }
-
-    resetTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { resetTarget = null },
-            title = { Text("重置参数") },
-            text = { Text("将「${target.name}」的采样 / 推理 / 上下文 / 工具 / 网络参数恢复为默认值？\n\n名称、Provider、模型 ID 与能力标记保留。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onUpdate(target.copy(
-                        temperature = 0.7f, topP = 1.0f, topK = 0, minP = 0.0f,
-                        frequencyPenalty = 0.0f, presencePenalty = 0.0f,
-                        repetitionPenalty = 1.0f, seed = null, stopSequences = emptyList(),
-                        reasoningEffort = ReasoningEffort.MEDIUM, thinkingBudget = null,
-                        maxOutputTokens = 4096, reservedOutputTokens = 4096,
-                        connectTimeoutMs = 15_000L, readTimeoutMs = 120_000L,
-                        writeTimeoutMs = 30_000L, requestTimeoutMs = 120_000L,
-                        retryCount = 2, retryDelayMs = 1_000L, maxRetryDelayMs = 10_000L,
-                    ))
-                    resetTarget = null
-                }) { Text("重置") }
-            },
-            dismissButton = { TextButton(onClick = { resetTarget = null }) { Text("取消") } }
-        )
-    }
-
-    // 修复：删除档案确认框（原为一点即删、不可恢复）
-    deleteTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("删除模型档案") },
-            text = { Text("确定删除「${target.name}」（${target.modelId}）？\n\n该操作不可恢复；默认档案不可删除。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDelete(target.id)
-                    deleteTarget = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
-        )
-    }
-}
-
-@Composable
-private fun CapabilityEditor(caps: ModelCapabilities, onChange: (ModelCapabilities) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        item { FilterChip(selected = caps.text, onClick = { onChange(caps.copy(text = !caps.text)) }, label = { Text("Text") }) }
-        item { FilterChip(selected = caps.vision, onClick = { onChange(caps.copy(vision = !caps.vision)) }, label = { Text("Vision") }) }
-        item { FilterChip(selected = caps.toolCalling, onClick = { onChange(caps.copy(toolCalling = !caps.toolCalling)) }, label = { Text("Tools") }) }
-        item { FilterChip(selected = caps.structuredOutput, onClick = { onChange(caps.copy(structuredOutput = !caps.structuredOutput)) }, label = { Text("JSON") }) }
-        item { FilterChip(selected = caps.reasoning, onClick = { onChange(caps.copy(reasoning = !caps.reasoning)) }, label = { Text("Reason") }) }
-        item { FilterChip(selected = caps.longContext, onClick = { onChange(caps.copy(longContext = !caps.longContext)) }, label = { Text("LongCtx") }) }
-        item { FilterChip(selected = caps.streaming, onClick = { onChange(caps.copy(streaming = !caps.streaming)) }, label = { Text("Stream") }) }
-        item { FilterChip(selected = caps.imageInput, onClick = { onChange(caps.copy(imageInput = !caps.imageInput)) }, label = { Text("ImgIn") }) }
-        // 多模态输出能力位：开启 ImageGen 的模型请求时携带 modalities=[text,image]，
-        // 让 OpenRouter 等网关的生图模型真正返回图片 part。
-        item { FilterChip(selected = caps.imageGeneration, onClick = { onChange(caps.copy(imageGeneration = !caps.imageGeneration)) }, label = { Text("ImageGen") }) }
-        item { FilterChip(selected = caps.videoGeneration, onClick = { onChange(caps.copy(videoGeneration = !caps.videoGeneration)) }, label = { Text("VideoGen") }) }
-    }
-}
+// 原 ModelsSection（模型档案卡）与 CapabilityEditor 已并入 ModelSetupCard.kt
+// （档案选择 / 新建复制重置删除 / 名称 / Capabilities 均在合并后的单卡内）。
+// （上游新增的 ImageGen / VideoGen 能力位已同步迁移至 ModelSetupCard 的 CapabilityEditor。）
 
 @Composable
 private fun GenerationSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
@@ -1012,13 +866,81 @@ private fun AppearanceSection(agent: AgentSettings, onAgent: (AgentSettings) -> 
             onAgent(agent.copy(themeMode = it))
         }
         SwitchRow("Dynamic Color（动态取色）", agent.dynamicColor,
-            description = "Android 12+ 按系统壁纸取色，覆盖默认配色") {
+            description = "Android 12+ 按系统壁纸取色，覆盖预设配色") {
             onAgent(agent.copy(dynamicColor = it))
         }
+        AccentPaletteRow(
+            selected = AccentPalette.fromKey(agent.accentPalette),
+            onSelect = { onAgent(agent.copy(accentPalette = it.key)) }
+        )
         SliderRow("字体缩放", agent.fontScale, 0.8f..1.4f, 12,
             description = "全局字体缩放，立即生效",
             onValueChange = { onAgent(agent.copy(fontScale = it)) },
             fmt = { "${(it * 100).roundToInt()}%" })
+    }
+}
+
+/**
+ * 预设主题配色选择器：色点 + 名称的横向滚动行。
+ *
+ * 色点颜色跟随当前深浅态（深色态展示霓虹提亮色，浅色态展示可读深色），
+ * 选中项以 onSurface 描边环 + 主色勾标标记；Dynamic Color 开启时
+ * 预设被覆盖，但仍可预选（关闭动态取色后立即生效）。
+ */
+@Composable
+private fun AccentPaletteRow(
+    selected: AccentPalette,
+    onSelect: (AccentPalette) -> Unit
+) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    Column(Modifier.fillMaxWidth()) {
+        Text("预设配色", style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(6.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(AccentPalette.entries) { palette ->
+                val swatch = accentSwatchColor(palette, dark)
+                val isSelected = palette == selected
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelect(palette) }
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(swatch)
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.outlineVariant,
+                                shape = CircleShape
+                            )
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "已选配色",
+                                tint = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        palette.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        DescriptionText("7 套预设配色，与深浅模式独立组合，立即生效；Dynamic Color 开启时由壁纸取色覆盖。")
     }
 }
 

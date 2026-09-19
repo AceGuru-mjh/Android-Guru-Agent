@@ -265,17 +265,24 @@ object ModelProfileDefaults {
             ModelCapabilities(text = true, toolCalling = true, streaming = true)),
     )
 
+    /**
+     * 默认档案种子。
+     *
+     * **默认档案 = 「自定义 OpenAI 兼容端点」**（用户需求：不要预设厂商倾向、
+     * 不要默认 GPT）—— Base URL 与模型 ID 均留空，首次配置由用户填自己的
+     * 端点 / Key / 模型 ID，任何 OpenAI 兼容中转或自建服务都从这一档开始。
+     * 另附 DeepSeek / Ollama 两个**非默认**入门档案供快速试跑。
+     */
     fun defaultProfiles(providers: List<ProviderConfig>): List<ModelProfile> {
-        val openai = providers.firstOrNull { it.id == "openai" }
+        val custom = providers.firstOrNull { it.id == "custom_openai" }
         val deepseek = providers.firstOrNull { it.id == "deepseek" }
         val ollama = providers.firstOrNull { it.id == "ollama" }
         val list = mutableListOf<ModelProfile>()
-        openai?.let {
+        custom?.let {
             list += ModelProfile(
-                id = "default-gpt", name = "GPT (Default)", providerId = it.id,
-                modelId = "gpt-4o-mini", isDefault = true,
-                capabilities = ModelCapabilities(text = true, vision = true, toolCalling = true,
-                    structuredOutput = true, streaming = true, jsonMode = true, longContext = true),
+                id = "default-custom", name = "自定义模型", providerId = it.id,
+                modelId = "", isDefault = true,
+                capabilities = ModelCapabilities(text = true, toolCalling = true, streaming = true),
             )
         }
         deepseek?.let {

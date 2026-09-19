@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -137,6 +138,10 @@ fun AgentChatScreen(
     // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
     var showCustomInstructionDialog by remember { mutableStateOf(false) }
     val customInstruction by viewModel.customInstruction.collectAsStateWithLifecycle()
+
+    // ═══ 历史对话：会话列表 + 抽屉开关（顶栏「历史」按钮唤起）═══
+    val chatSessions by viewModel.chatSessions.collectAsStateWithLifecycle()
+    var showHistory by remember { mutableStateOf(false) }
 
     // ═══ /mcp:github 未连接时的连接对话框 ═══
     // ViewModel 在路由 /mcp:github 时若发现 GitHub 未连接，会发射 requestGithubConnect
@@ -268,6 +273,18 @@ fun AgentChatScreen(
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
+
+                // 历史对话入口：消息流自动归档，点击恢复接续上下文
+                IconButton(
+                    onClick = { showHistory = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.History,
+                        contentDescription = "历史对话",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
                 // 新会话按钮
                 IconButton(
@@ -707,6 +724,18 @@ fun AgentChatScreen(
                 viewModel.setCustomInstruction("")
                 showCustomInstructionDialog = false
             }
+        )
+    }
+
+    // ═══ 历史对话抽屉：恢复 / 删除 / 清空（数据源为防抖自动归档的会话库）═══
+    if (showHistory) {
+        ChatHistorySheet(
+            sessions = chatSessions,
+            currentSessionId = viewModel.currentHistorySessionId,
+            onRestore = { viewModel.restoreChatSession(it) },
+            onDelete = { viewModel.deleteChatSession(it) },
+            onClearAll = { viewModel.clearAllChatSessions() },
+            onDismiss = { showHistory = false }
         )
     }
     }

@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -57,9 +58,13 @@ import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.theme.LocalShowTimestamps
 import java.time.format.DateTimeFormatter
+import com.apex.agent.R
 
 // ═══ 消息组件 ═══
 
+/**
+ * 单条消息渲染入口（按 AgentUiMessage 类型分发到对应气泡 / 卡片）。
+ */
 @Composable
 internal fun AgentMessageItem(
     message: AgentUiMessage,
@@ -69,7 +74,9 @@ internal fun AgentMessageItem(
     onImageClick: (MessageAttachment) -> Unit = {},
     onFileClick: (MessageAttachment) -> Unit = {},
     // 多模态输出：Agent 回复 markdown 里的生成图片点击 → Lightbox（URL/data URI）。
-    onMarkdownImageClick: (String) -> Unit = {}
+    onMarkdownImageClick: (String) -> Unit = {},
+    // 任务总结卡显隐（设置 showRunSummary；false 时 RunSummary 完全不渲染、不占位）。
+    showRunSummary: Boolean = true
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(
@@ -96,7 +103,8 @@ internal fun AgentMessageItem(
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.PipelineBanner -> PipelineBannerCard(message)
         is AgentUiMessage.StepMarker -> StepMarkerCard(message)
-        is AgentUiMessage.RunSummary -> RunSummaryCard(message)
+        // 任务总结卡：默认隐藏（showRunSummary=false 时完全不渲染，不占空间）
+        is AgentUiMessage.RunSummary -> if (showRunSummary) RunSummaryCard(message)
         is AgentUiMessage.Error -> ErrorBlock(
             message = message.message,
             canRetry = message.canRetry,
@@ -185,7 +193,7 @@ internal fun UserBubble(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
-                                contentDescription = "消息操作",
+                                contentDescription = stringResource(R.string.chat_cd_message_actions),
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                                 modifier = Modifier.size(16.dp)
                             )
@@ -243,6 +251,8 @@ internal fun AgentBubble(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // i18n：Toast 文案在组合内预取（onClick 非组合上下文，不能直接 stringResource）
+    val copiedToast = stringResource(R.string.chat_copied)
     // UX-1：气泡菜单状态。入口两处：头部（非文本区域）长按 + 头部 overflow 钮；
     // 文本区长按仍归 SelectionContainer 选择，互不冲突。
     var menuExpanded by remember { mutableStateOf(false) }
@@ -331,7 +341,7 @@ internal fun AgentBubble(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
-                                contentDescription = "消息操作",
+                                contentDescription = stringResource(R.string.chat_cd_message_actions),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -365,13 +375,13 @@ internal fun AgentBubble(
                     IconButton(
                         onClick = {
                             clipboard.setText(AnnotatedString(message.text))
-                            Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, copiedToast, Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "复制",
+                            contentDescription = stringResource(R.string.chat_cd_copy),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
@@ -385,7 +395,7 @@ internal fun AgentBubble(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Psychology,
-                            contentDescription = "整理到记忆",
+                            contentDescription = stringResource(R.string.chat_cd_organize_memory),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
@@ -517,9 +527,9 @@ internal fun ThinkingBubble(text: String, finished: Boolean = false) {
                 }
                 Text(
                     text = when {
-                        expanded -> "思考过程"
-                        finished -> "思考完成 · 点击查看"
-                        else -> "推理中…"
+                        expanded -> stringResource(R.string.chat_thinking_process)
+                        finished -> stringResource(R.string.chat_thinking_done_tap)
+                        else -> stringResource(R.string.chat_reasoning_in_progress)
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -531,7 +541,8 @@ internal fun ThinkingBubble(text: String, finished: Boolean = false) {
                     } else {
                         Icons.Default.KeyboardArrowDown
                     },
-                    contentDescription = if (expanded) "折叠思考内容" else "展开思考内容",
+                    contentDescription = if (expanded) stringResource(R.string.chat_cd_collapse_thinking)
+                    else stringResource(R.string.chat_cd_expand_thinking),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onTertiaryContainer
                 )
@@ -562,6 +573,8 @@ internal fun ErrorBlock(
     val errorColor = MaterialTheme.colorScheme.error
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // i18n：Toast 文案在组合内预取（onClick 非组合上下文）
+    val copiedErrorToast = stringResource(R.string.chat_copied_error)
     Surface(
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
         shape = RoundedCornerShape(12.dp),
@@ -587,7 +600,7 @@ internal fun ErrorBlock(
                     modifier = Modifier.size(20.dp)
                 )
                 Text(
-                    text = "执行出错",
+                    text = stringResource(R.string.chat_execution_error),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.error
@@ -597,13 +610,13 @@ internal fun ErrorBlock(
                 IconButton(
                     onClick = {
                         clipboard.setText(AnnotatedString(message))
-                        Toast.makeText(context, "已复制错误信息", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, copiedErrorToast, Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.size(28.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "复制错误信息",
+                        contentDescription = stringResource(R.string.chat_cd_copy_error),
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(15.dp)
                     )
@@ -672,7 +685,7 @@ internal fun ReflectionReviewBlock(text: String) {
                     )
                 }
                 Text(
-                    text = "评审意见",
+                    text = stringResource(R.string.chat_review_opinion),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.weight(1f)

@@ -341,17 +341,21 @@ class TerminalRuntimeImpl(
     // ───────── write ─────────
     override suspend fun write(
         sessionId: Long, owner: InputOwner, kind: WriteKind,
-        text: String?, key: TerminalKey?
+        text: String?, key: TerminalKey?, bytes: ByteArray?
     ): Result<WriteResult> {
         if (sessionManager.assembly(sessionId) == null) {
             return Result.failure(com.apex.agent.platform.terminal.errors.TerminalOperationException(com.apex.agent.platform.terminal.errors.TerminalError.SessionNotFound))
         }
         val res: Result<com.apex.agent.platform.terminal.io.WriteResult> = when (kind) {
-            WriteKind.RAW -> inputManager.writeRaw(sessionId, owner, text ?: "")
+            // T85：bytes 直通（按键序列等 UTF-8 字节不经 String 往返，
+            // 消除 ISO-8859-1 双重编码乱码）；bytes 优先，text 兑底。
+            WriteKind.RAW -> if (bytes != null) inputManager.write(sessionId, owner, bytes)
+                else inputManager.writeRaw(sessionId, owner, text ?: "")
             WriteKind.LINE -> inputManager.sendLine(sessionId, owner, text ?: "")
             WriteKind.KEY -> inputManager.sendKey(sessionId, owner, key ?: TerminalKey.ENTER)
             // T82：括号粘贴 —— VT 开启 2004 模式时包裹 ESC[200~/ESC[201~（InputManager
             // 内部按会话实际模式决定，未开启则退化为原样字节，不追加换行）。
+            // 括号包裹是平台职责：PASTE 一律走 text（UI 传纯文本），bytes 不适用。
             WriteKind.PASTE -> inputManager.sendPaste(sessionId, owner, text ?: "")
         }
         return res.map { wr ->

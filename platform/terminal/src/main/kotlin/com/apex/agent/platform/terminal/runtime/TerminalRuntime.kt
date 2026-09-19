@@ -154,12 +154,17 @@ interface TerminalRuntime {
 
     // ───────── write ─────────
     // Spec §34.5 — owner injected by Runtime.
+    //
+    // T85：新增 [bytes] 直通通道 —— 粘贴/按键转义序列等 UTF-8 字节载荷不再经
+    // String↔charset 往返（旧 UI 路径 ISO-8859-1 双重编码导致非 ASCII 粘贴乱码）。
+    // bytes 与 text 二选一：bytes 优先。
     suspend fun write(
         sessionId: Long,
         owner: InputOwner,         // injected by Runtime
         kind: WriteKind = WriteKind.LINE,
         text: String? = null,
-        key: TerminalKey? = null
+        key: TerminalKey? = null,
+        bytes: ByteArray? = null
     ): RuntimeResult<WriteResult>
 
     enum class WriteKind { RAW, LINE, KEY, PASTE }

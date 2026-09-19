@@ -8,6 +8,7 @@ import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
 import com.apex.agent.platform.terminal.io.KeySequenceEncoder
 import com.apex.agent.platform.terminal.io.TerminalKey
+import com.apex.agent.platform.terminal.policy.CommandParser
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
@@ -113,6 +114,13 @@ class TerminalViewModel @Inject constructor(
     private var creating = false
 
     /**
+     * T85（M6）：会话创建进行中 —— 旧 `creating` 锁静默吞掉 Ubuntu ensureReady
+     *（分钟级）期间的后续创建请求，对话框一关无任何反馈。现在 UI 可展示进度。
+     */
+    private val _creatingSession = MutableStateFlow(false)
+    val creatingSession: StateFlow<Boolean> = _creatingSession.asStateFlow()
+
+    /**
      * 交互行缓冲（黑白名单交互拦截用）：镜像 shell readline 当前行文本。
      * 仅跟踪「纯字符输入 + 回退删除」两种确定性变更；特殊键（方向/历史召回/
      * Ctrl 组合）使行状态不可知时清空缓冲，下次回车不检查（宁可漏检不误拦）。
@@ -182,6 +190,9 @@ class TerminalViewModel @Inject constructor(
     /** 轻量状态刷新（会话状态标签），tab 徽章用。 */
     fun selectSession(id: Long) {
         if (_activeSessionId.value == id) return
+        // T85（M3）：行缓冲跨会话泄漏 —— 会话 A 输入一半切到 B 继续输入并回车，
+        // candidate 是两个会话输入的拼接 → 可能误拦/漏拦。切换即清空。
+        pendingLine.setLength(0)
         _activeSessionId.value = id
         observeActiveSession()
     }
@@ -218,13 +229,19 @@ class TerminalViewModel @Inject constructor(
     }
 
     fun createSession(backendId: String) {
-        if (creating) return
+        if (creating) {
+            // T85（M6）：不再静默吞请求 —— 给明确反馈（StateFlow 同文案去重，不刷屏）。
+            _notice.value = "正在准备上一个会话（Ubuntu 首次解包可达分钟级），请稍候…"
+            return
+        }
         creating = true
+        _creatingSession.value = true
         viewModelScope.launch {
             try {
                 createSessionInternal(backendId)
             } finally {
                 creating = false
+                _creatingSession.value = false
             }
         }
     }
@@ -259,10 +276,23 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.close(id, force = true)
             sessionBackends.remove(id)
             sessionTitles.remove(id)
+            // T85（M3）：行缓冲随会话关闭一并清理。
+            if (_activeSessionId.value == id) pendingLine.setLength(0)
             refreshSessionsInternal()
             if (_activeSessionId.value == id) {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
             }
+        }
+    }
+
+    /** T85（L6）：一键清理全部已退出/异常会话（死 tab 不再堆满会话条）。 */
+    fun closeDeadSessions() {
+        val dead = _sessions.value.filter { !it.isAlive }
+        if (dead.isEmpty()) return
+        viewModelScope.launch {
+            dead.forEach { terminalRuntime.close(it.id, force = true) }
+            dead.forEach { sessionBackends.remove(it.id); sessionTitles.remove(it.id) }
+            refreshSessionsInternal()
         }
     }
 
@@ -286,15 +316,21 @@ class TerminalViewModel @Inject constructor(
         val newlineIdx = text.indexOfFirst { it == '\r' || it == '\n' }
         if (newlineIdx >= 0) {
             val before = text.substring(0, newlineIdx)
-            val candidate = (pendingLine.toString() + before).trim()
-            if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
-                _notice.value = "⛔ 命令已被黑白名单拦截：${candidate.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
+            val rest = text.substring(newlineIdx + 1)
+            // T85（S-4 补强）：多行 IME 输入逐行检查 —— 提交行（含此前缓冲）+ 后续每一行；
+            // 旧实现只检查首个换行前的内容，第 2 行起的命令不经过名单。
+            val candidates = ArrayList<String>()
+            candidates.add((pendingLine.toString() + before).trim())
+            rest.split('\r', '\n').forEach { candidates.add(it.trim()) }
+            val offending = candidates.firstOrNull { it.isNotBlank() && !isCommandAllowed(it) }
+            if (offending != null) {
+                _notice.value = "⛔ 命令已被黑白名单拦截：${offending.take(40)}（未执行；Ctrl+C 或 Ctrl+U 清除当前行）"
                 return // 不写入（含回车）—— readline 行保持未提交；缓冲保留继续同步追加
             }
-            // 放行：行缓冲重置，回车后的剩余字符属于下一行缓冲
+            // 放行：行缓冲重置；尾部未定行（若有）进入下一轮缓冲
             pendingLine.setLength(0)
-            val rest = text.substring(newlineIdx + 1)
-            if (rest.isNotEmpty()) pendingLine.append(rest)
+            val lastLine = rest.substringAfterLast('\n').substringAfterLast('\r')
+            if (lastLine.isNotEmpty()) pendingLine.append(lastLine)
         } else {
             pendingLine.append(text)
         }
@@ -306,6 +342,16 @@ class TerminalViewModel @Inject constructor(
     }
 
     /**
+     * T85（L5）：无活跃会话时的统一反馈（旧 sendKey/paste 等各自静默 return，
+     * 与 sendInput 行为不一致）。返回 false = 调用方应放弃本次操作。
+     */
+    private fun requireSession(): Long? {
+        val sid = _activeSessionId.value
+        if (sid == null) _notice.value = "没有活跃会话，操作未送达（请新建会话）"
+        return sid
+    }
+
+    /**
      * 发送特殊键：箭头按 DECCKM 编码（ESC O x / ESC [ x），其余经 TerminalKey
      *（InputManager 映射，模式无关）。粘贴按 bracketed-paste 包裹。
      *
@@ -313,7 +359,7 @@ class TerminalViewModel @Inject constructor(
      * 其余特殊键（方向/历史/TAB…）行状态不可知 → 清空行缓冲（下次回车不检查）。
      */
     fun sendKey(key: TerminalKey) {
-        val sid = _activeSessionId.value ?: return
+        val sid = requireSession() ?: return
         viewModelScope.launch {
             when (key) {
                 TerminalKey.ENTER -> {
@@ -333,9 +379,10 @@ class TerminalViewModel @Inject constructor(
                 val bytes = KeySequenceEncoder.encodeKey(
                     key, _renderState.value?.applicationCursor ?: false
                 )
+                // T85（H1）：bytes 直通 —— 不再经 ISO-8859-1 String 往返
+                //（旧路径非 ASCII 粘贴/多字节序列双重编码必乱码）。
                 terminalRuntime.write(
-                    sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
-                    text = String(bytes, Charsets.ISO_8859_1)
+                    sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW, bytes = bytes
                 )
             } else {
                 terminalRuntime.write(
@@ -350,45 +397,48 @@ class TerminalViewModel @Inject constructor(
      * Ctrl+C / Ctrl+U 等会终止/清除 readline 当前行 → 行缓冲同步清空。
      */
     fun sendControlChar(ch: Char) {
-        val sid = _activeSessionId.value ?: return
+        val sid = requireSession() ?: return
         val bytes = KeySequenceEncoder.controlByte(ch) ?: return
         pendingLine.setLength(0)
         viewModelScope.launch {
+            // T85（H1）：bytes 直通（同 sendKey）。
             terminalRuntime.write(
-                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
-                text = String(bytes, Charsets.ISO_8859_1)
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW, bytes = bytes
             )
         }
     }
 
-    /** 粘贴（bracketed-paste 感知）。
+    /**
+     * 粘贴（bracketed-paste 感知，T85 重写）。
      *
-     * 首行命令命中黑白名单 → 拦截整次粘贴（bracketed-paste OFF 时粘贴即执行，
-     * 必须拦在写入前）；首行检查放行后行缓冲清空（多行粘贴行状态不可知）。
+     * - **逐行检查**（S-4）：旧实现只查首行 —— `ls\nrm -rf /` 第二行命令直接执行；
+     *   现在每一行、每一 shell 段都过用户名单。
+     * - **字节真传**（H1）：旧实现 encodePaste 产 UTF-8 字节 → ISO-8859-1 String
+     *   → RAW 再 UTF-8 编码 —— 粘贴中文/emoji 必双重编码乱码。现在传纯文本 +
+     *   WriteKind.PASTE，括号包裹由平台按会话实时 VT 模式完成（InputManager
+     *   sendPaste），字节全程不经 String 往返。
      */
     fun pasteText(text: String) {
-        val sid = _activeSessionId.value ?: return
+        val sid = requireSession() ?: return
         if (text.isEmpty()) return
-        val firstLine = text.lineSequence().firstOrNull()?.trim() ?: ""
-        if (firstLine.isNotBlank() && !isCommandAllowed(firstLine)) {
-            _notice.value = "⛔ 粘贴内容首行命中黑白名单：${firstLine.take(40)}（已拦截）"
+        val offending = text.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotBlank() && !isCommandAllowed(it) }
+        if (offending != null) {
+            _notice.value = "⛔ 粘贴内容命中黑白名单：${offending.take(40)}（已拦截）"
             return
         }
         pendingLine.setLength(0)
         viewModelScope.launch {
-            val bytes = KeySequenceEncoder.encodePaste(
-                text, _renderState.value?.bracketedPaste ?: false
-            )
             terminalRuntime.write(
-                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
-                text = String(bytes, Charsets.ISO_8859_1)
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.PASTE, text = text
             )
         }
     }
 
     /** 视图尺寸变化 → PTY resize（SIGWINCH + VT 同步）。 */
     fun resizeTerminal(rows: Int, cols: Int) {
-        val sid = _activeSessionId.value ?: return
+        val sid = _activeSessionId.value ?: return  // resize 无会话是常态（首帧），不打提示
         if (rows < 2 || cols < 4) return
         viewModelScope.launch {
             terminalRuntime.resize(sid, rows, cols)
@@ -535,22 +585,56 @@ class TerminalViewModel @Inject constructor(
     fun removeWhitelist(cmd: String) = editSet("cmd_whitelist", _whitelist) { remove(normalize(cmd)) }
 
     /**
-     * 交互输入的命令头检查（与 TerminalModule 动态策略同源的 prefs 数据，
-     * 但仅消费用户名单；交互路径的内置默认危险命令拦截由用户自行把条目
-     * 加入黑名单完成 —— 自己敲的命令接 Termux 哲学：不过滤）。
+     * 交互输入的命令头检查（T85（S-4）强化：basename + 逐段）。
      *
-     * 匹配 = 命令头 token 精确等值（与 CommandPolicy 的 token 语义一致，
-     * 消除旧 startsWith 前缀误拦：“rm” 不再误拦 “rmdir...” 的头 token）。
+     * 与 TerminalModule 动态策略同源的 prefs 数据，仅消费用户名单（自己敲的
+     * 命令接 Termux 哲学：不加内置默认拦截）。匹配规则：
+     *  - **basename**：`/bin/rm`、`./rm` 与 `rm` 等值（旧 substringBefore(' ')
+     *   取到 "/bin/rm" 整串 → 绝对路径绕过黑名单）；
+     *  - **逐 shell 段**：`echo a && rm -rf /` 每段头都查（旧只查首段头，
+     *   链式第二段藏黑名单命令直接放行）；复用平台 CommandParser.splitSegments
+     *   （引号内操作符不切段 —— 粘贴 `grep "a|b"` 不误伤）。
      */
     fun isCommandAllowed(command: String): Boolean {
-        val head = command.trim().substringBefore(' ').lowercase()
-        if (head.isEmpty()) return true
-        if (_blacklist.value.any { head == it }) return false
+        val trimmed = command.trim()
+        if (trimmed.isEmpty()) return true
+        for (segment in CommandParser.splitSegments(trimmed)) {
+            var rest = segment.trim()
+            // 剥离前导环境变量赋值（FOO=1 rm → rm）
+            while (true) {
+                val m = envAssignmentPrefix(rest) ?: break
+                rest = m
+            }
+            if (rest.isEmpty()) continue
+            val head = CommandParser.basename(
+                CommandParser.extractFirstToken(rest).text
+            ).lowercase()
+            if (head.isEmpty()) continue
+            if (_blacklist.value.any { head == it }) return false
+        }
         val wl = _whitelist.value
         if (wl.isNotEmpty()) {
-            return head in wl
+            // 白名单模式：每段头（同样剥离环境赋值，REVIEW-W1：与黑名单分支语义一致）
+            // 都必须在名单内。
+            return CommandParser.splitSegments(trimmed).all { segment ->
+                var rest = segment.trim()
+                while (true) {
+                    val m = envAssignmentPrefix(rest) ?: break
+                    rest = m
+                }
+                val head = CommandParser.basename(
+                    CommandParser.extractFirstToken(rest).text
+                ).lowercase()
+                head.isEmpty() || head in wl
+            }
         }
         return true
+    }
+
+    /** 剥离一个前导 `VAR=value ` 前缀；无则返回 null（与平台策略同源逻辑）。 */
+    private fun envAssignmentPrefix(s: String): String? {
+        val m = Regex("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+").find(s) ?: return null
+        return s.substring(m.value.length)
     }
 
     private fun normalize(cmd: String) = cmd.trim().lowercase().substringBefore(' ')

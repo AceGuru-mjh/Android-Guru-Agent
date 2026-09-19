@@ -66,7 +66,13 @@ class InputManagerImpl(
     /** Per-session writer state. */
     private data class SessionWriter(
         val channel: Channel<WriteOp.WriteBytes>,
-        val control: MutableStateFlow<InputControlState>
+        val control: MutableStateFlow<InputControlState>,
+        /**
+         * T85（S-3）：Agent 交互行累积缓冲 —— 镜像 Agent 通过 RAW 滴入的未提交行。
+         * 换行（含 KEY ENTER）时对累积行做分段策略检查；特殊键/控制序列清空
+         * （行状态不可知，宁可漏检不误拦）。封死「先写命令再单发回车」的拆分绕过。
+         */
+        val agentPendingLine: StringBuilder = StringBuilder()
     )
 
     private sealed class WriteOp {
@@ -103,7 +109,7 @@ class InputManagerImpl(
         scope.launch {
             for (op in writer.channel) {
                 try {
-                    val r = doWrite(sessionId, writer.control.value, op)
+                    val r = doWrite(sessionId, writer.control.value, writer, op)
                     op.result.complete(r)
                 } catch (e: Throwable) {
                     op.result.complete(Result.failure(e))
@@ -112,12 +118,80 @@ class InputManagerImpl(
         }
     }
 
-    private suspend fun doWrite(sessionId: Long, control: InputControlState, op: WriteOp.WriteBytes): Result<WriteResult> {
+    /**
+     * T85（S-3）：Agent 交互写入的逐行门禁。
+     *
+     * 按换行切分：每个完整行（含此前累积的未提交前缀）做分段策略检查，
+     * 任一行拒绝 → 整次写入拒绝（字节一个都不落 PTY）；尾部未定行累积到
+     * [SessionWriter.agentPendingLine]。含控制序列（ESC/方向键等）的尾段使
+     * 行状态不可知 → 清空累积（与 UI 侧 pendingLine 同一「宁可漏检不误拦」哲学）。
+     */
+    private fun agentLineGate(writer: SessionWriter, sessionId: Long, text: String): Boolean {
+        var start = 0
+        for (i in text.indices) {
+            val c = text[i]
+            if (c == '\n' || c == '\r') {
+                val line = writer.agentPendingLine.toString() + text.substring(start, i)
+                writer.agentPendingLine.setLength(0)
+                if (line.isNotBlank() && !agentInteractiveAllowed(sessionId, line)) return false
+                start = i + 1
+            }
+        }
+        val tail = text.substring(start)
+        when {
+            tail.isEmpty() -> { /* 行恰好终止，累积已清 */ }
+            tail.any { it < ' ' || it == '\u007F' } ->
+                writer.agentPendingLine.setLength(0)  // 控制序列：行状态不可知
+            else -> {
+                writer.agentPendingLine.append(tail)
+                if (writer.agentPendingLine.length > MAX_AGENT_PENDING_LINE) {
+                    writer.agentPendingLine.setLength(0)  // 有界防护
+                }
+            }
+        }
+        return true
+    }
+
+    /** Agent 交互行检查（interactive=true → 分段策略，见 [TerminalPolicyImpl.check]）。 */
+    private fun agentInteractiveAllowed(sessionId: Long, command: String): Boolean {
+        val req = InputRequest(sessionId, command = command, bytes = null, owner = InputOwner.AGENT, interactive = true)
+        return policy.check(req) !is Decision.Deny
+    }
+
+    private suspend fun doWrite(sessionId: Long, control: InputControlState, writer: SessionWriter, op: WriteOp.WriteBytes): Result<WriteResult> {
         // 1. ControlMode check
         if (op.owner == InputOwner.AGENT && !control.agentCanWrite) {
             return Result.failure(RuntimeException("TerminalError:OwnerBusy"))
         }
-        // 2. Policy check (only for LINE/RAW that look like commands)
+        // 2. T85（S-3）：Agent 交互级门禁 —— 命令执行边界是「换行」。
+        //    旧行为：RAW/PASTE/KEY 完全不过策略，Agent 可用 RAW 直写 `rm -rf /\n`
+        //    或「先写命令再单发回车」绕过 LINE 门禁。现在：
+        //    - RAW/PASTE 含换行 → 逐行（含累积）分段检查，任一行拒即整写拒绝；
+        //    - KEY ENTER → 检查累积行；其他特殊键 → 清空累积（行状态不可知）。
+        if (op.owner == InputOwner.AGENT) {
+            when (op.kind) {
+                InputKind.RAW, InputKind.PASTE -> {
+                    val text = op.text ?: op.bytes?.toString(Charsets.UTF_8) ?: ""
+                    if (!agentLineGate(writer, sessionId, text)) {
+                        return Result.failure(RuntimeException("TerminalError:PermissionDenied"))
+                    }
+                }
+                InputKind.KEY -> {
+                    if (op.key == TerminalKey.ENTER) {
+                        val pending = writer.agentPendingLine.toString()
+                        writer.agentPendingLine.setLength(0)
+                        if (pending.isNotBlank() && !agentInteractiveAllowed(sessionId, pending)) {
+                            return Result.failure(RuntimeException("TerminalError:PermissionDenied"))
+                        }
+                    } else {
+                        writer.agentPendingLine.setLength(0)
+                    }
+                }
+                InputKind.LINE -> writer.agentPendingLine.setLength(0)  // LINE 已按 basis 检查
+                InputKind.SIGNAL -> { /* 信号无命令语义 */ }
+            }
+        }
+        // 3. Policy check (LINE: 命令执行主门禁 —— Agent 保守路径 / 用户与系统分段路径)
         //    T82：检查基准 = policyBasis（marker 包装时为原命令）—— 对 Agent 意图判定。
         if (op.kind == InputKind.LINE && op.text != null) {
             val basis = op.policyBasis ?: op.text
@@ -127,11 +201,11 @@ class InputManagerImpl(
                 Decision.Allow -> {}
             }
         }
-        // 3. Resolve the REAL native session id (P70-4 — never guess via sessionId.toInt()).
+        // 4. Resolve the REAL native session id (P70-4 — never guess via sessionId.toInt()).
         //    Unresolvable = session does not exist / already closed → refuse the write.
         val nativeId = nativeIdResolver(sessionId)
             ?: return Result.failure(RuntimeException("TerminalError:WriteFailed"))
-        // 4. Native write
+        // 5. Native write
         val written: Int = when (op.kind) {
             InputKind.SIGNAL -> {
                 if (op.fgScope) {
@@ -156,7 +230,7 @@ class InputManagerImpl(
         if (written < 0) {
             return Result.failure(RuntimeException("TerminalError:WriteFailed"))
         }
-        // 5. Emit InputWritten event
+        // 6. Emit InputWritten event
         val ev = TerminalEvent.InputWritten(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
             owner = op.owner, kind = op.kind, byteCount = written,
@@ -165,7 +239,7 @@ class InputManagerImpl(
         val id = eventLog.append(ev)
         eventBus.emit(ev.copy(id = id))
 
-        // 6. If signal, also emit SignalSent
+        // 7. If signal, also emit SignalSent
         if (op.kind == InputKind.SIGNAL && op.signal != null) {
             val sev = TerminalEvent.SignalSent(
                 id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
@@ -231,15 +305,13 @@ class InputManagerImpl(
 
     /**
      * T82：括号粘贴（mode 2004）。VT 开启 → 包裹 ESC[200~ … ESC[201~；未开启 →
-     * 原样字节（与 RAW 一致，但**不追加换行** —— 粘贴语义）。策略检查与 LINE
-     * 同口径（粘贴可携带命令文本）。
+     * 原样字节（与 RAW 一致，但**不追加换行** —— 粘贴语义）。
+     *
+     * T85：策略检查移入 doWrite 的 Agent 交互门禁（逐行分段，拒即整写拒绝）——
+     * 旧预检只取前 4096 字符且与写入不串行；USER 粘贴由 UI 层名单把关
+     * （Termux 哲学），平台不再误拦多行文本。
      */
     override suspend fun sendPaste(sessionId: Long, owner: InputOwner, text: String): Result<WriteResult> {
-        val policy = InputRequest(sessionId, command = text.take(4096), bytes = null, owner = owner)
-        when (this.policy.check(policy)) {
-            is Decision.Deny -> return Result.failure(RuntimeException("TerminalError:PermissionDenied"))
-            Decision.Allow -> {}
-        }
         val modes = vtModeProvider(sessionId)
         val payload = if (modes?.bracketedPaste == true) {
             val body = text.toByteArray(Charsets.UTF_8)
@@ -291,8 +363,14 @@ class InputManagerImpl(
         val deferred = kotlinx.coroutines.CompletableDeferred<Result<WriteResult>>()
         val effectiveText = text ?: (if (kind == InputKind.LINE && bytes != null) String(bytes, Charsets.UTF_8) else null)
         val effectiveBytes = bytes ?: text?.toByteArray(Charsets.UTF_8)
-        w.channel.send(WriteOp.WriteBytes(owner, effectiveBytes ?: ByteArray(0), kind, effectiveText, key, signal, fgScope, jobId, policyBasis, deferred))
-        return deferred.await()
+        // T85（R-8）：会话 close 与在途写入竞态时 channel 已关 —— 旧实现裸抛
+        // ClosedSendChannelException 给调用方；统一收敛为 WriteFailed 失败值。
+        return try {
+            w.channel.send(WriteOp.WriteBytes(owner, effectiveBytes ?: ByteArray(0), kind, effectiveText, key, signal, fgScope, jobId, policyBasis, deferred))
+            deferred.await()
+        } catch (e: kotlinx.coroutines.channels.ClosedSendChannelException) {
+            Result.failure(RuntimeException("TerminalError:WriteFailed — session closed"))
+        }
     }
 
     /**
@@ -373,6 +451,9 @@ class InputManagerImpl(
         /** T82：括号粘贴包裹符（xterm 2004 模式）。 */
         internal val PASTE_PREFIX = byteArrayOf(0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E)   // ESC [ 2 0 0 ~
         internal val PASTE_SUFFIX = byteArrayOf(0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E)   // ESC [ 2 0 1 ~
+
+        /** T85（S-3）：Agent 交互行累积上限（有界防护，超限清空 = 下次回车不检查）。 */
+        internal const val MAX_AGENT_PENDING_LINE = 4096
     }
 
     /** Drop writer state for a session (called on Session close). */

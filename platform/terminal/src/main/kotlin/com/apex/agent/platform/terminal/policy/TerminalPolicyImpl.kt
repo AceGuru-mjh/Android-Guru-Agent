@@ -25,9 +25,19 @@ class TerminalPolicyImpl(
 
     override fun check(request: InputRequest): Decision {
         val cmd = request.command ?: return Decision.Allow
-        val parsed = CommandParser.parse(cmd)
         val effective = dynamicPolicy?.invoke() ?: commandPolicy
-        return mapDecision(effective.check(parsed), parsed)
+        // T85：按 owner + 交互上下文分级 ——
+        //  - AGENT 的 LINE 命令执行：保守路径（复杂/不可解析即拒，Spec §6）；
+        //  - 交互输入（interactive=true，含 AGENT 的 RAW/按键回车累积行）：分段检查
+        //    （黑名单逐段拦截，`apt-get update && apt-get install` 这类链式命令与
+        //    REPL 里的 `print("a|b")` 不再被误杀 —— 环境中心依赖安装曾全量被误拒）；
+        //  - USER/SYSTEM：分段检查（用户自有名单 + 内置默认危险命令；交互哲学同 Termux）。
+        val decision = if (request.interactive || request.owner != InputOwner.AGENT) {
+            effective.checkSegments(cmd)
+        } else {
+            effective.check(CommandParser.parse(cmd))
+        }
+        return mapDecision(decision, CommandParser.parse(cmd))
     }
 
     override fun capabilities(): TerminalCapability = TerminalCapability.forLevel(privilege)

@@ -150,7 +150,12 @@ class SessionManagerImpl(
         )
     }
 
-    /** 共享装配：deps 组装 → pump 启动 → READY → SessionCreated → exit watcher。 */
+    /** 共享装配：deps 组装 → pump 启动 → READY → SessionCreated → exit watcher。
+     *
+     * T85（R-2）：装配全程 try/catch —— nativeCreateSession 成功后若 VT 工厂/
+     * pump 启动抛异常，旧实现直接向上冒泡：native session 与 fork 出的 shell
+     * 永不回收（assembly 未登记，close 也找不到它）。现在失败即回滚
+     * nativeCloseSession 并清理登记。 */
     private suspend fun assembleAndStart(
         sessionId: Long, nativeId: Int,
         shell: String, initialCwd: String,
@@ -158,52 +163,75 @@ class SessionManagerImpl(
         backend: com.apex.agent.platform.terminal.runtime.BackendSessionMetadata?
     ): Result<TerminalSession> {
         val pid = native.nativeGetPid(nativeId)
-        // 2. assemble deps
-        val ringBuffer = RingTerminalBuffer()
-        val vt = virtualTerminalFactory(rows, cols)
-        val reducer = SemanticStateReducer(
-            sessionId = sessionId, shell = shell, initialCwd = initialCwd, privilege = privilege,
-            pid = pid, rows = rows, cols = cols,
-            // TM2: feed the reducer the session's recent PTY bytes (last 4 KB from the
-            // RingBuffer) so ErrorClassifier.classify can apply its regex patterns.
-            // Previously classify() was always called with recentOutput=null → every
-            // pattern in ErrorClassifier was dead code in production.
-            recentOutputProvider = { com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(ringBuffer.latest(4096).bytes) }  // T81 (D-6)
-        )
-        val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
-            eventLog, ringBuffer, vt, reducer
-        )
-        val pump = PtyOutputPumpImpl(
-            sessionId = sessionId, nativeSessionId = nativeId, native = native,
-            ringBuffer = ringBuffer, eventLog = eventLog, eventBus = eventBus,
-            virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
-            inputDetector = inputDetector,
-            foregroundCommandProvider = { foregroundCommandFor(sessionId) },
-            onOutput = { observationEngine.refreshScreenState() },  // push screen state (event-driven)
-            scope = scope  // P70: shared session-manager scope (injectable in tests; pump.stop cancels only its own job)
-        )
-        val session = TerminalSession(
-            id = sessionId, shell = shell, initialCwd = initialCwd, pid = pid,
-            rows = rows, cols = cols, privilege = privilege, state = SessionState.STARTING,
-            createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L,
-            backend = backend
-        )
-        assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump, observationEngine)
-        stateFlows[sessionId] = MutableStateFlow(SessionState.STARTING)
-        // 3. start pump
-        pump.start()
-        // 4. transition to READY (S2)
-        transition(sessionId, SessionState.READY)
-        // 5. emit SessionCreated
-        val ev = TerminalEvent.SessionCreated(
-            id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
-            shell = shell, cwd = initialCwd, pid = pid, rows = rows, cols = cols, privilege = privilege
-        )
-        val eid = eventLog.append(ev)
-        eventBus.emit(ev.copy(id = eid))
-        // 6. start exit watcher
-        startExitWatcher(sessionId, nativeId)
-        return Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
+        try {
+            // 2. assemble deps
+            val ringBuffer = RingTerminalBuffer()
+            val vt = virtualTerminalFactory(rows, cols)
+            val reducer = SemanticStateReducer(
+                sessionId = sessionId, shell = shell, initialCwd = initialCwd, privilege = privilege,
+                pid = pid, rows = rows, cols = cols,
+                // TM2: feed the reducer the session's recent PTY bytes (last 4 KB from the
+                // RingBuffer) so ErrorClassifier.classify can apply its regex patterns.
+                // Previously classify() was always called with recentOutput=null → every
+                // pattern in ErrorClassifier was dead code in production.
+                recentOutputProvider = { com.apex.agent.platform.terminal.buffer.Utf8Boundary.decodeWindow(ringBuffer.latest(4096).bytes) }  // T81 (D-6)
+            )
+            val observationEngine = com.apex.agent.platform.terminal.state.ObservationEngine(
+                eventLog, ringBuffer, vt, reducer
+            )
+            val pump = PtyOutputPumpImpl(
+                sessionId = sessionId, nativeSessionId = nativeId, native = native,
+                ringBuffer = ringBuffer, eventLog = eventLog, eventBus = eventBus,
+                virtualTerminal = vt, semanticReducer = reducer, waitEngine = waitEngine,
+                inputDetector = inputDetector,
+                foregroundCommandProvider = { foregroundCommandFor(sessionId) },
+                onOutput = { observationEngine.refreshScreenState() },  // push screen state (event-driven)
+                scope = scope  // P70: shared session-manager scope (injectable in tests; pump.stop cancels only its own job)
+            )
+            // T85：DA1/DA2/DSR（CPR）应答回写通道 —— VT 收到查询序列时经 PTY 输入侧
+            // 回写应答（终端自生应答，非用户/Agent 输入，不过策略门禁）。
+            (vt as? com.apex.agent.platform.terminal.screen.RealVirtualTerminal)?.responseSink =
+                { bytes -> runCatching { native.nativeWrite(nativeId, bytes, 0, bytes.size) } }
+            val session = TerminalSession(
+                id = sessionId, shell = shell, initialCwd = initialCwd, pid = pid,
+                rows = rows, cols = cols, privilege = privilege, state = SessionState.STARTING,
+                createdAt = System.currentTimeMillis(), lastExitCode = null, cursor = 0L,
+                backend = backend
+            )
+            assemblies[sessionId] = SessionAssembly(session, nativeId, ringBuffer, vt, reducer, pump, observationEngine)
+            stateFlows[sessionId] = MutableStateFlow(SessionState.STARTING)
+            // 3. start pump
+            pump.start()
+            // 4. transition to READY (S2)
+            transition(sessionId, SessionState.READY)
+            // 5. emit SessionCreated
+            val ev = TerminalEvent.SessionCreated(
+                id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(), cursor = -1,
+                shell = shell, cwd = initialCwd, pid = pid, rows = rows, cols = cols, privilege = privilege
+            )
+            val eid = eventLog.append(ev)
+            eventBus.emit(ev.copy(id = eid))
+            // 6. start exit watcher
+            startExitWatcher(sessionId, nativeId)
+            return Result.success(assemblies[sessionId]!!.session.copy(state = SessionState.READY))
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            // REVIEW-R4：结构性取消（scope shutdown）不吞 —— 取消不是装配失败，
+            // 吞掉会拿伪失败掩盖取消语义。同样回滚 native 资源后重抛。
+            runCatching { native.nativeCloseSession(nativeId) }
+            assemblies.remove(sessionId)
+            stateFlows.remove(sessionId)
+            transitionLocks.remove(sessionId)
+            throw ce
+        } catch (t: Throwable) {
+            // R-2：装配失败回滚 —— 回收 native PTY 与 fork 的 shell，清理登记。
+            runCatching { native.nativeCloseSession(nativeId) }
+            assemblies.remove(sessionId)
+            stateFlows.remove(sessionId)
+            transitionLocks.remove(sessionId)
+            return Result.failure(
+                RuntimeException("TerminalError:SessionSetupFailed — ${t.message ?: t.javaClass.simpleName}", t)
+            )
+        }
     }
 
     override suspend fun get(id: Long): TerminalSession? {
@@ -266,9 +294,22 @@ class SessionManagerImpl(
     }
 
     // PR #54 §5: stop jobs but keep Session alive
+    /**
+     * T85（R-1）：真实现 —— 旧版只做 STOPPING→delay(100)→READY 两个状态迁移，
+     * 不停 pump、不发信号、不杀 job，还违反自家状态机（STOPPING 只允许
+     * →EXITED/LOST/FAILED）。现在：向控制终端前台作业组发 SIGTSTP（Ctrl+Z 语义
+     * —— 停止前台作业、shell 存活继续交互），无前台作业时幂等成功。
+     */
     override suspend fun stop(id: Long): Result<SessionState> = mutex.withLock {
         val a = assemblies[id] ?: return@withLock Result.failure(RuntimeException("TerminalError:SessionNotFound"))
         transition(id, SessionState.STOPPING)
+        try {
+            // SIGTSTP(20) 前台作业组：作业挂起，shell 回到前台提示符。
+            native.nativeSignalForegroundGroup(a.nativeSessionId, 20)
+        } catch (t: Throwable) {
+            transition(id, SessionState.READY)
+            return@withLock Result.failure(RuntimeException("TerminalError:SignalFailed — ${t.message}"))
+        }
         kotlinx.coroutines.delay(100)
         transition(id, SessionState.READY)
         Result.success(SessionState.READY)

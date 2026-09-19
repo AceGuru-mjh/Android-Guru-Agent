@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
@@ -98,10 +99,13 @@ fun TerminalScreen(
     val ubuntuProgress by viewModel.ubuntuProgress.collectAsStateWithLifecycle()
     val rootfsSize by viewModel.rootfsSize.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val creatingSession by viewModel.creatingSession.collectAsStateWithLifecycle()
 
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showNewSessionDialog by remember { mutableStateOf(false) }
+    // T85（M5）：关闭确认 —— 活会话可能跑着编译/apt，误触直接 SIGKILL 不可挽。
+    var pendingCloseSession by remember { mutableStateOf<TerminalViewModel.SessionTab?>(null) }
 
     // 保持屏幕常亮：看长任务输出（编译 / apt / 训练日志）时不被息屏打断 ——
     // Termux 默认持有 wakelock，这里用等价的 window flag，交给用户开关。
@@ -186,9 +190,22 @@ fun TerminalScreen(
                     sessions = sessions,
                     activeId = activeId,
                     onSelect = viewModel::selectSession,
-                    onClose = viewModel::closeSession,
+                    // T85（M5）：活会话先确认再关（见 pendingCloseSession 对话框）。
+                    onClose = { tab ->
+                        if (tab.isAlive) pendingCloseSession = tab
+                        else viewModel.closeSession(tab.id)
+                    },
+                    onSweepDead = viewModel::closeDeadSessions,
                     onNew = { showNewSessionDialog = true }
                 )
+
+                // T85（M6）：会话创建进行中 —— 轻量进度条代替静默吞请求。
+                if (creatingSession) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(2.dp),
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    )
+                }
 
                 // ── 状态条 ──
                 TerminalStatusBar(
@@ -211,6 +228,31 @@ fun TerminalScreen(
                 )
             }
         }
+    }
+
+    // T85（M5）：关闭活会话确认对话框。
+    pendingCloseSession?.let { tab ->
+        AlertDialog(
+            onDismissRequest = { pendingCloseSession = null },
+            title = { Text("关闭会话 #${tab.id}？") },
+            text = {
+                Text(
+                    if (tab.state == "RUNNING" || tab.state == "WAITING_INPUT")
+                        "该会话正在运行任务，关闭将强制终止其中进程（SIGKILL）。"
+                    else
+                        "关闭将终止该会话的 shell 及其子进程。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.closeSession(tab.id)
+                    pendingCloseSession = null
+                }) { Text("关闭", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCloseSession = null }) { Text("取消") }
+            }
+        )
     }
 
     if (showNewSessionDialog) {
@@ -283,9 +325,11 @@ private fun SessionTabStrip(
     sessions: List<TerminalViewModel.SessionTab>,
     activeId: Long?,
     onSelect: (Long) -> Unit,
-    onClose: (Long) -> Unit,
+    onClose: (TerminalViewModel.SessionTab) -> Unit,
+    onSweepDead: () -> Unit,
     onNew: () -> Unit
 ) {
+    val hasDead = sessions.any { !it.isAlive }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -303,7 +347,23 @@ private fun SessionTabStrip(
                     tab = tab,
                     active = tab.id == activeId,
                     onSelect = { onSelect(tab.id) },
-                    onClose = { onClose(tab.id) }
+                    onClose = { onClose(tab) }
+                )
+            }
+        }
+        // T85（L6）：一键清理已退出的死会话（有死 tab 才显示）。
+        if (hasDead) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onSweepDead),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.DeleteSweep, "清理已退出的会话",
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -372,15 +432,20 @@ private fun SessionTab(
                 maxLines = 1
             )
         }
-        Icon(
-            Icons.Default.Close, "关闭会话",
-            Modifier
-                .size(16.dp)
+        // T85（M5）：关闭钮触摸目标扩到 32dp（旧 16dp+2dp 极易误触相邻 tab）。
+        Box(
+            modifier = Modifier
+                .size(32.dp)
                 .clip(CircleShape)
-                .clickable(onClick = onClose)
-                .padding(2.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+                .clickable(onClick = onClose),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Close, "关闭会话",
+                Modifier.size(15.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -552,7 +617,9 @@ private fun TerminalSettingsDrawer(
 
             // ═══ 1. 终端外观与交互 ═══
             SettingsCard(Icons.Default.Settings, "终端外观") {
-                LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
+                // T85（L1）：与 TerminalSettings.MAX_FONT_SIZE(24) 对齐 —— 旧 8..32
+                // 越界值被 setFontSize 静默钳回 24，设置页与实际生效值自相矛盾。
+                LabeledNumber("字号", settings.fontSize, 8, 24) { onSettings { copy(fontSize = it) } }
                 ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
                 ToggleRow("键盘辅助行（ESC / CTRL / 方向键）", settings.showKeybar) { onSettings { copy(showKeybar = it) } }
             }

@@ -214,6 +214,7 @@ private fun GlassLabContent(mode: GlassLabMode) {
     ) {
         LabHeader(mode)
         BackdropZone(state = backdropState, mode = mode)
+        SamplesSection(state = backdropState, mode = mode)
         if (mode == GlassLabMode.DAY) {
             DaylightRefinementSection()
         }

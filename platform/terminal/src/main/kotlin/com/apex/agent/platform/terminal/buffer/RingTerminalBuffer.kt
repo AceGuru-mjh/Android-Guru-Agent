@@ -35,7 +35,10 @@ class RingTerminalBuffer(
     }
 
     override fun append(chunk: OutputChunk) {
-        require(chunk.endCursor == writePos.get() + 0L || chunk.startCursor == writePos.get()) {
+        // T85（R-5）：只允许 startCursor == writePos —— 旧条件第一个析取项
+        //（endCursor == writePos）会放行「终点对齐」的错位/重复 chunk：随后按当前
+        // 位置写入并 addAndGet(n)，造成数据错位 + totalCursor 虚增而非报错。
+        require(chunk.startCursor == writePos.get()) {
             "cursor discontinuity: chunk=${chunk.startCursor}..${chunk.endCursor}, totalCursor=${writePos.get()}"
         }
         synchronized(lock) {

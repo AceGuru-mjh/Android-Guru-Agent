@@ -319,6 +319,28 @@ class UbuntuAptPackageManager(
         return exec.exitCode == 0 && exec.stdout.contains("install ok installed")
     }
 
+    /**
+     * T84：批量已装探测 —— 单次 `dpkg-query -W -f='${binary:Package}\t${Provides}\t${db:Status-Abbrev}'`
+     * 多包（契约见 [LinuxPackageManager.batchInstalledStatus]）。
+     *
+     * 两个实测要点：
+     *  1. **虚包**：essential 清单含 `awk`（虚包，由 gawk 提供）—— dpkg-query
+     *     按包名查库查不到它（no packages found matching awk → stderr + 退出码 1）。
+     *     故格式带 ${Provides} 列，虚包随已装实体（gawk）一并算已装；
+     *  2. **退出码 1 容忍**：未知/虚包名只触发 warning，其余包的记录仍完整落在
+     *     stdout —— 解析部分输出，缺失包按「未装」处理（安全回退）；null 仅留给
+     *     环境不可用（rootfs 未就绪 / exec 异常）。
+     */
+    override suspend fun batchInstalledStatus(packages: List<String>): Map<String, Boolean>? {
+        if (packages.isEmpty()) return emptyMap()
+        val rootfs = rootfsProvider.current() ?: return null
+        // dpkg-query 模板含 ${...}（dpkg 占位符语法）—— Kotlin 字符串拼接避开模板转义。
+        val format = "-f=" + "$" + "{binary:Package}" + "\t" + "$" + "{Provides}" + "\t" + "$" + "{db:Status-Abbrev}" + "\n"
+        val argv = listOf("dpkg-query", "-W", format) + packages
+        val exec = runAptRead(rootfs, argv, timeoutMs = 30_000) ?: return null
+        return parseBatchInstalledStatus(exec.stdout, packages)
+    }
+
     override suspend fun installedVersion(packageName: String): String? {
         val rootfs = rootfsProvider.current() ?: return null
         // dpkg-query -W -f=${Version} <pkg>
@@ -459,10 +481,21 @@ class UbuntuAptPackageManager(
         try {
             return lock.withLock(rootfs) {
                 currentCoroutineContext().ensureActive()
-                // T81 (U-4)：写操作磁盘 preflight（估算：每包 250MB + 100MB 基线；
-                // REMOVE/REPAIR 走基线）
+                // T81 (U-4) + T84：写操作磁盘 preflight。
+                // T84 修正：INSTALL 的空间需求按**真实缺失包数**估算 —— 旧公式
+                // packages.size × 250MB 对全预装场景（完整 rootfs 的 bootstrap 校验）
+                // 虚报 ~6GB 把正常设备拒之门外。批量探测不可用（null）时回退旧估算。
                 val requiredBytes = when (type) {
-                    PackageOperationType.INSTALL, PackageOperationType.UPGRADE ->
+                    PackageOperationType.INSTALL -> {
+                        val statuses = batchInstalledStatus(packages.map { it.name })
+                        val chargeable = if (statuses != null) {
+                            statuses.values.count { !it }
+                        } else {
+                            packages.size
+                        }
+                        100L * 1024 * 1024 + chargeable * 250L * 1024 * 1024
+                    }
+                    PackageOperationType.UPGRADE ->
                         100L * 1024 * 1024 + packages.size * 250L * 1024 * 1024
                     else -> 100L * 1024 * 1024
                 }
@@ -740,11 +773,48 @@ class UbuntuAptPackageManager(
          * 下普遍不够：apt update 需拉取 InRelease + 索引 20-40MB，bootstrap 的
          * base packages 安装更是 200MB+ 级下载 —— 180s 必超时（TIMEOUT → bootstrap
          * FAILED@APT_UPDATE/BASE_PACKAGES）。提升到 10 分钟与 ensureReady 的
-         * 15 分钟总预算（UbuntuLifecycleCoordinator.DEFAULT_ENSURE_TIMEOUT_MS）对齐；
-         * 超时只惩罚挂死，正常慢速下载不会误杀。
+         * 30 分钟总预算（UbuntuLifecycleCoordinator.DEFAULT_ENSURE_TIMEOUT_MS，T84）
+         * 对齐；超时只惩罚挂死，正常慢速下载不会误杀。
          */
         const val DEFAULT_APT_TIMEOUT_MS: Long = 600_000L
         /** apt 操作的 guest cwd（/root —— 持久 home，可写）。 */
         const val GUEST_APT_CWD = "/root"
+
+        /**
+         * T84：`dpkg-query -W -f='${binary:Package}\t${Provides}\t${db:Status-Abbrev}'`
+         * 输出解析（纯函数，供 [batchInstalledStatus] 与单测直接消费）。
+         *
+         * - status 前缀 `ii` = 已正确安装（T82 基线同判据）；
+         * - **虚包解析**：已装实体 Provides 列里的名字（如 gawk → awk）一并算已装；
+         * - 未出现在输出中的包 = 未装（调用方安全回退，绝不误报已装）。
+         */
+        internal fun parseBatchInstalledStatus(
+            stdout: String,
+            packages: List<String>
+        ): Map<String, Boolean> {
+            // (name, provides, installed)
+            val rows = stdout.lineSequence()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .mapNotNull { line ->
+                    val cols = line.split('\t')
+                    if (cols.size < 3) return@mapNotNull null
+                    Triple(
+                        cols[0].trim(),
+                        cols[1].trim().split(' ', ',').map { it.trim() }.filter { it.isNotEmpty() },
+                        cols.last().trim().startsWith("ii")
+                    )
+                }
+                .toList()
+            val pkgNameShape = Regex("[a-z0-9][a-z0-9.+\\-]*")
+            val installedNames = buildSet {
+                rows.filter { it.third }.forEach { (name, provides, _) ->
+                    add(name)
+                    // 版本化 provides 形如 "awk (= 1:5.2...)" —— 按包名形状过滤碎片
+                    provides.filter { it.matches(pkgNameShape) }.forEach { add(it) }
+                }
+            }
+            return packages.associateWith { it in installedNames }
+        }
     }
 }

@@ -74,6 +74,14 @@ class UbuntuLifecycleCoordinator(
      * 跳过 sources/apt-update/base-packages 引导。
      */
     private val bootstrapResetFn: (suspend () -> Unit)? = null,
+    /**
+     * T84：内置档案注册表指纹端口（生产：BundledRootfsSource 对当前 target 的
+     * 注册表 sha256；null=未接线/非内置源）。warmUp 用它做「已装 rootfs ↔
+     * 当前注册表」新鲜度核对：APK 升级换代内置档案（骨架 → 完整 rootfs）时
+     * 自动迁移（删旧装新），防 AlreadyReady 短路把旧 rootfs 永久钉死 ——
+     * 否则升级用户永远拿不到新环境。
+     */
+    private val bundledChecksumFn: (suspend () -> String?)? = null,
     private val target: RootfsTarget,
     private val defaultTimeoutMs: Long = DEFAULT_ENSURE_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -376,6 +384,53 @@ class UbuntuLifecycleCoordinator(
     }
 
     /**
+     * T84：档案新鲜度迁移 —— 已装 rootfs 的 checksum ≠ 当前内置注册表指纹时，
+     * 说明 APK 升级换了内置档案（v1.2.0 骨架 → v1.3.0 完整 rootfs 等）。
+     * 不处理的话，版本前缀同为 24.04 的旧 rootfs 会被 AlreadyReady 短路永久
+     * 保留，升级用户永远拿不到新环境。
+     *
+     * 语义：删除旧 rootfs + 复位 bootstrap 状态（与 removeRootfs 同收尾）；
+     * 下一次 ensureReady 走全新解包（进度 UI 照常，~2~5 分钟）。用户数据
+     * （guest /root 与 workspace 在 rootfs 目录外）保留。Busy（会话占用/锁）
+     * 时跳过，下次 warmUp 重试。
+     */
+    private suspend fun maybeMigrateStaleRootfs(active: com.apex.agent.platform.terminal.linux.RootfsDescriptor?) {
+        val fn = bundledChecksumFn ?: return
+        if (active == null || active.checksum == null) return
+        val expected = try {
+            fn()
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Exception) {
+            null   // 注册表查询失败 → 不迁移（保守：绝不因端口故障误删环境）
+        } ?: return
+        if (active.checksum == expected) return
+        val removed = try {
+            provisioner.remove()
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            null
+        }
+        when (removed) {
+            is ProvisioningResult.Removed -> {
+                try {
+                    bootstrapResetFn?.invoke()
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: Exception) {
+                    // 复位失败不否定删除事实 —— bootstrap reconcile 会自愈。
+                }
+                lastFailure = null
+                lastReadyAt = null
+            }
+            else -> {
+                // Busy / 失败 —— 保留旧环境（仍可用），下次 warmUp 重试迁移。
+            }
+        }
+    }
+
+    /**
      * App 启动恢复入口：reconcile rootfs 现场 + 派生当前 phase。
      * **绝不下载/安装** —— 只做崩溃后的一致性收敛（stale staging 清理、孤儿 temp
      * 清理、metadata 修复）。产品语义：启动时"知道 Ubuntu 在不在/健康不健康"，
@@ -392,6 +447,9 @@ class UbuntuLifecycleCoordinator(
             lastFailure = Stage.RECOVER to "reconcile failed: ${e.message}"
             null
         }
+        // T84：档案新鲜度迁移（详见 maybeMigrateStaleRootfs KDoc）—— 在
+        // refreshState 派生 NOT_INSTALLED/READY 之前完成，派生结果即迁移后真相。
+        maybeMigrateStaleRootfs(rec?.activeRootfs)
         refreshState()
         return ReconciliationReport(
             action = rec?.action?.name ?: "RECONCILE_FAILED",
@@ -720,8 +778,14 @@ class UbuntuLifecycleCoordinator(
     }
 
     companion object {
-        /** install + bootstrap + probe 全链默认预算（首次安装 ~30MB 下载 + apt update）。 */
-        const val DEFAULT_ENSURE_TIMEOUT_MS: Long = 900_000L
+        /**
+         * install + bootstrap + probe 全链默认预算。
+         * T84：从 15 分钟提到 30 分钟 —— 完整 rootfs（~300MB+ 档）本地拷贝 +
+         * SHA-256 复验 + 1GB+ 解压在慢存储设备上实测可达 5-10 分钟；预算内
+         * 未完成返回 InProgress（证据已持久化，再次调用续跑），不是失败。
+         * 超预算的根因（v1.2.0 时代 ~30MB 下载量级假设）已随内置交付消失。
+         */
+        const val DEFAULT_ENSURE_TIMEOUT_MS: Long = 1_800_000L
 
         /** ProvisioningState 的"安装进行中"集合（合成视图用）。 */
         private val INSTALL_IN_PROGRESS_STATES = setOf(

@@ -45,8 +45,10 @@ class TerminalUbuntuEnsureTool(
     override val description: String = """
         One-shot product entry: bring the BUNDLED Ubuntu Linux environment to READY —
         idempotently provisions the rootfs (OFFLINE local extraction of the APK-bundled
-        archive, ~30s, SHA-256 verified), bootstraps it (sources.list + apt update +
-        base packages: ca-certificates/curl/git/python3/...; needs network), and captures
+        FULL environment archive, ~300MB → ~1GB unpacked, typically 2-5 minutes,
+        SHA-256 verified), bootstraps it (sources.list + apt update +
+        base packages — preinstalled in the full rootfs, so bootstrap completes
+        OFFLINE via dpkg-query verification), and captures
         a capability snapshot. Bootstrap failure (e.g. offline) DEGRADES to READY with a
         bootstrapNote — the environment is still usable, apt operations will fail honestly
         until retried with force=true when network returns. Replaces the 3-step dance
@@ -56,7 +58,7 @@ class TerminalUbuntuEnsureTool(
     """.trimIndent()
 
     override val parametersSchema: String = """
-{"type":"object","properties":{"force":{"type":"boolean","default":false,"description":"Re-run even if READY (version migration / repair)"},"timeoutMs":{"type":"integer","default":900000,"description":"Overall budget before reporting IN_PROGRESS (work continues, resumable)"}},"required":[]}
+{"type":"object","properties":{"force":{"type":"boolean","default":false,"description":"Re-run even if READY (version migration / repair)"},"timeoutMs":{"type":"integer","default":1800000,"description":"Overall budget before reporting IN_PROGRESS (work continues, resumable)"}},"required":[]}
     """.trimIndent()
 
     override suspend fun invoke(arguments: String): String {

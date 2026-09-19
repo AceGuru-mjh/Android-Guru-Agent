@@ -701,7 +701,8 @@ chmod +x gradlew
 - **Shizuku**（[shizuku.rikka.app](https://shizuku.rikka.app/)）：无 root 获得
   ADB 级权限（pm install / settings / input / dumpsys）；
 - **无障碍服务**：UI 自动化（ui_tap / ui_dump）与 cs-mem 屏幕感知；
-- **终端**：首次进入终端屏按引导下载 Ubuntu rootfs（约数百 MB，之后离线）。
+- **终端**：Ubuntu 24.04 完整 CLI 环境随 APK 内置（gcc/python3/git/vim/man，
+  rootfs 档案 ~300MB+，首次使用离线解包约 2~5 分钟；此后只有 apt 装新包才联网）。
 
 ### 三分钟体验路线
 
@@ -886,8 +887,9 @@ Root 只是解锁全系统操作（`/system`、SELinux、ptrace 等）的上限�
 <details>
 <summary><b>4️⃣ 终端的 Ubuntu 会很费流量 / 存储吗？</b></summary>
 
-首次按引导下载官方 Ubuntu 24.04 rootfs（约数百 MB，sha256 锁定 + 断点续传），
-此后完全离线；只有 `apt install` 装新包时才联网。PRoot 是用户态沙箱，
+Ubuntu 24.04 完整 CLI 环境随 APK 内置（rootfs 档案 ~300MB+、解压后 ~1GB，
+构建期 SHA-256 锁定），首次使用离线解包约 2~5 分钟；此后完全离线，
+只有 `apt install` 装新包时才联网。PRoot 是用户态沙箱，
 不修改系统分区。
 
 </details>

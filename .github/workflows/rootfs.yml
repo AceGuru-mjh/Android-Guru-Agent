@@ -1,0 +1,138 @@
+name: Ubuntu Full Rootfs Build (T84)
+
+# 完整 Ubuntu rootfs（~300MB+ 档/架构）的可复现构建流水线。
+#
+# 触发：
+#   - workflow_dispatch：手动（可覆盖构建镜像 —— qemu 下 gnutls TLS 不可靠，
+#     默认走 http 镜像，包完整性由 Ubuntu 签名 Release/Packages 哈希链保证）
+#   - push 到 rootfs-build/** 分支：无 gh CLI 的环境用 git push 直接触发
+#
+# 产物链（与 T83 的可审计指纹链同哲学）：
+#   官方 ubuntu-base（URL+SHA 双固定，build_full_rootfs.sh 内表）
+#     → 真实 chroot + binfmt qemu-user-static（runner root 可用；Ubuntu/Debian
+#       官方跨架构 bootstrap 同路径；无 root 环境自动降级 proot+qemu）
+#     → tar.gz + digest 报告（sha256/size/unpacked，actions artifact 中转）
+#     → 托管 Release（tag ubuntu-rootfs-24.04.4-full，prerelease，永久存放）
+#     → scripts/fetch_rootfs.sh 按钉死的指纹拉取暂存进 APK（三处真值表互验）
+#
+# 时长预期：arm64/armhf 走 qemu 指令翻译（每架构 1-3h），amd64 原生（~15min）；
+# 三架构矩阵并行。绝不在受限沙盒本地跑（磁盘/时长都不允许 —— 产品决策：CI 构建）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mirror:
+        description: '构建期 apt 镜像（http:// 前缀；留空用脚本默认 TUNA）'
+        required: false
+        default: ''
+  push:
+    branches:
+      - 'rootfs-build/**'
+
+concurrency:
+  group: rootfs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build full rootfs (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, armhf, amd64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      # job 级 env 不允许 runner 上下文（GitHub 表格限制），github.workspace 等价可用
+      APEX_WORK_DIR: ${{ github.workspace }}/apex-rootfs-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full rootfs archive (${{ matrix.arch }})
+        env:
+          APEX_BUILD_MIRROR: ${{ github.event.inputs.mirror || 'http://mirrors.tuna.tsinghua.edu.cn' }}
+        # sudo -E：chroot 模式全程真实 root（dpkg 产物/挂载/清理无权限分叉）；-E 保留工作目录 env
+        run: |
+          echo "=== disk before build ==="; df -h / | tail -1
+          sudo -E bash scripts/build_full_rootfs.sh ${{ matrix.arch }}
+          echo "=== disk after build ==="; df -h / | tail -1
+
+      - name: Digest report
+        run: |
+          ls -la "$APEX_WORK_DIR/out/"
+          cat "$APEX_WORK_DIR/out/"*.digest.txt
+          {
+            echo "### Ubuntu full rootfs — ${{ matrix.arch }}"
+            echo '```'
+            cat "$APEX_WORK_DIR/out/"*.digest.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload archive + digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.arch }}
+          path: |
+            ${{ env.APEX_WORK_DIR }}/out/*.tar.gz
+            ${{ env.APEX_WORK_DIR }}/out/*.digest.txt
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish artifacts to hosting release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建/更新托管 Release（prerelease，非用户交付物）
+    steps:
+      - name: Download all arch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: rootfs-artifacts
+          pattern: rootfs-*
+          merge-multiple: true
+
+      - name: Merge + verify digest manifest
+        run: |
+          ls -la rootfs-artifacts/
+          # 三架构 digest 报告归并为单一真值表（fetch_rootfs.sh / Kotlin 注册表 /
+          # rootfs-bundle.sha256 三处钉值的数据源）
+          cat rootfs-artifacts/*.digest.txt > rootfs-digests.txt
+          cat rootfs-digests.txt
+          # 完整性：每架构必须有 digest 报告 + 对应 tarball，且 sha 实测一致
+          for arch in arm64 armhf amd64; do
+            grep -q "^arch=$arch$" rootfs-digests.txt || { echo "❌ missing digest report for $arch"; exit 1; }
+            tb="rootfs-artifacts/apex-ubuntu-full-24.04.4-$arch.tar.gz"
+            [ -f "$tb" ] || { echo "❌ missing tarball for $arch"; exit 1; }
+          done
+          # 逐档精确校验（digest 报告 ↔ 实际 tarball）
+          for arch in arm64 armhf amd64; do
+            expected=$(grep -A1 "^arch=$arch$" rootfs-digests.txt | grep '^sha256=' | cut -d= -f2)
+            tb="rootfs-artifacts/apex-ubuntu-full-24.04.4-$arch.tar.gz"
+            actual=$(sha256sum "$tb" | cut -d' ' -f1)
+            [ "$actual" = "$expected" ] || { echo "❌ digest mismatch for $arch (expected=$expected actual=$actual)"; exit 1; }
+            echo "✅ $arch verified"
+          done
+
+      - name: Create/update hosting release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ubuntu-rootfs-24.04.4-full
+          name: Ubuntu full rootfs 24.04.4（构建产物托管）
+          prerelease: true
+          files: |
+            rootfs-artifacts/*.tar.gz
+            rootfs-digests.txt
+          body: |
+            T84 完整 Ubuntu rootfs 构建产物托管 Release（**prerelease —— 非用户交付物**，
+            供 `scripts/fetch_rootfs.sh` 按指纹拉取暂存进 APK）。
+
+            - 构建链：`.github/workflows/rootfs.yml` → `scripts/build_full_rootfs.sh`
+              （官方 ubuntu-base 24.04.4 + `scripts/rootfs-packages.txt` 清单，
+              真实 chroot + binfmt qemu-user-static 构建（无 root 环境自动降级
+              proot+qemu），全部提交进仓库可审计）
+            - 真值表：`rootfs-digests.txt`（每架构 sha256 / size / unpacked）——
+              钉入 `scripts/fetch_rootfs.sh` ARTIFACTS 表、
+              `platform/terminal/rootfs-bundle.sha256`、`BundledRootfsSource.kt`
+              注册表三处，`BundledRootfsSourceTest` 交叉互验防漂移
+            - 重跑本 workflow 会以同名资产覆盖更新（digest 变化需同步重新钉值）

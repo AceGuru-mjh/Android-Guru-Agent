@@ -217,7 +217,12 @@ class TerminalViewModel @Inject constructor(
         if (backendId == BACKEND_UBUNTU) {
             // Ubuntu 会话：先确保 rootfs + bootstrap 就绪（长时操作，进度经
             // ubuntuLifecycleState 流回横幅）。取消/失败 → 诚实中止。
-            val r = ubuntuLifecycle.ensureReady()
+            // T84：withContext(IO) —— ensureReady 链含 capability 探测（阻塞
+            // proot exec），provisioner/bootstrap 已内嵌 IO，此处兜住协调器自身
+            // 的 probeFn/repairFn 端口（Main.immediate 调用曾直接吃满主线程）。
+            val r = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ubuntuLifecycle.ensureReady()
+            }
             if (r is UbuntuLifecycleCoordinator.EnsureResult.Failed) {
                 _notice.value = "Ubuntu 环境不可用：${r.message.take(120)}"
                 return
@@ -378,7 +383,8 @@ class TerminalViewModel @Inject constructor(
     /** 一键解包 Ubuntu（横幅按钮）—— ensureReady 全链：离线解包 → 配置 → bootstrap（可降级）。 */
     fun installUbuntu() {
         viewModelScope.launch {
-            val r = ubuntuLifecycle.ensureReady()
+            // T84：IO —— 完整 rootfs（~300MB+ 档，解压分钟级）绝不能压 Main。
+            val r = withContext(kotlinx.coroutines.Dispatchers.IO) { ubuntuLifecycle.ensureReady() }
             if (r is UbuntuLifecycleCoordinator.EnsureResult.Failed) {
                 _notice.value = "Ubuntu 解包失败：${r.message.take(160)}"
             }
@@ -396,7 +402,8 @@ class TerminalViewModel @Inject constructor(
     /** 环境中心：产品级修复（不触发大下载；detect → repair → verify）。 */
     fun repairUbuntu() {
         viewModelScope.launch {
-            val r = ubuntuLifecycle.repair()
+            // T84：IO —— repair 链是文件/子进程操作。
+            val r = withContext(kotlinx.coroutines.Dispatchers.IO) { ubuntuLifecycle.repair() }
             _notice.value = if (r.verifiedHealthy) "修复完成：环境已恢复健康" else "修复未收敛：${r.detail ?: r.actions.joinToString().take(120)}"
         }
     }
@@ -404,7 +411,8 @@ class TerminalViewModel @Inject constructor(
     /** 环境中心：删除 Ubuntu rootfs（用户 home/workspace 保留）。 */
     fun removeUbuntu() {
         viewModelScope.launch {
-            val r = ubuntuLifecycle.removeRootfs()
+            // T84：IO —— 删除 1GB+ 版本目录是重 IO。
+            val r = withContext(kotlinx.coroutines.Dispatchers.IO) { ubuntuLifecycle.removeRootfs() }
             _notice.value = r.message
             if (r.removed) refreshRootfsSize()
         }

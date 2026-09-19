@@ -7,11 +7,13 @@ import com.apex.agent.platform.terminal.pkg.LinuxPackageManager
 import com.apex.agent.platform.terminal.pkg.PackageInstallOptions
 import com.apex.agent.platform.terminal.pkg.PackageSpec
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.RandomAccessFile
@@ -132,7 +134,11 @@ class UbuntuBootstrapManager(
                 // P2 fix（审计 6-b / T76 §37）：timeoutMs 实际生效 —— 原实现参数完全
                 // 未使用，超时永不发生（InProgress 结果永不产生，调用方无限等待）。
                 // 超时返回 InProgress：已完成的阶段证据已持久化，重试可续跑。
-                withTimeoutOrNull(timeoutMs) { runBootstrapInternal(force, timeoutMs) }
+                // T84：withContext(IO) —— apt/dpkg 子进程是 ProcessBuilder 阻塞等待，
+                // 协调器 → VM（Main.immediate）路径曾把整个 bootstrap 压在主线程。
+                withTimeoutOrNull(timeoutMs) {
+                    withContext(Dispatchers.IO) { runBootstrapInternal(force, timeoutMs) }
+                }
                     ?: BootstrapResult.InProgress(
                         currentState,
                         "bootstrap timed out after ${timeoutMs}ms — progress persisted, retry to resume"
@@ -222,6 +228,32 @@ class UbuntuBootstrapManager(
                 ))
             }
             stageDone(BootstrapState.NETWORK_CHECK)
+        }
+
+        // ── T84: 完整 rootfs 离线短路 —— essential 全部已预装时跳过 apt 阶段 ──
+        // 完整 rootfs（scripts/build_full_rootfs.sh 构建产物）把 essential 全集
+        // 在构建期装进档案；对已装包再跑 apt update + install 是纯网络仪式，且
+        // BASE_PACKAGES 的磁盘预检（100MB + N×250MB）会对全预装虚报 ~6GB 需求。
+        // dpkg-query 批量探测只读 dpkg 数据库（零网络，单次 exec）；全部已装 →
+        // 两阶段直接记 evidence（诚实标注 skipped-preinstalled），bootstrap 全程
+        // 离线完成 —— 终端开箱即用，不落下「apt 引导未完成」的降级注记。
+        if (force ||
+            (!evidence.containsKey(BootstrapState.APT_UPDATE.name) &&
+             !evidence.containsKey(BootstrapState.BASE_PACKAGES.name))
+        ) {
+            val preinstalled = aptManager.batchInstalledStatus(baseProfile.essential)
+            if (preinstalled != null && preinstalled.values.all { it }) {
+                stageStart(
+                    BootstrapState.APT_UPDATE,
+                    "essential 全部预装于内置完整 rootfs — 跳过 apt update（离线就绪）"
+                )
+                stageDone(BootstrapState.APT_UPDATE)
+                stageStart(
+                    BootstrapState.BASE_PACKAGES,
+                    "基础包校验已预装（${baseProfile.essential.size} 个，无需 apt）"
+                )
+                stageDone(BootstrapState.BASE_PACKAGES)
+            }
         }
 
         // ── 4. APT_UPDATE ──
@@ -397,7 +429,11 @@ class UbuntuBootstrapManager(
     }
 
     companion object {
-        const val DEFAULT_BOOTSTRAP_TIMEOUT_MS: Long = 600_000L  // 10 min
+        /**
+         * T84：从 10 分钟提到 15 分钟 —— 完整 rootfs 的慢网络 apt 引导（本已少见：
+         * essential 预装时被离线短路）+ dpkg 配置队列在低端机的余量。
+         */
+        const val DEFAULT_BOOTSTRAP_TIMEOUT_MS: Long = 900_000L
         const val LOCK_FILENAME = ".bootstrap.lock"
     }
 }

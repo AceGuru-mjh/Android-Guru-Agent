@@ -18,7 +18,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * T72 提供了生产级 provisioner（SHA-256 + 原子解压 + 健康检查），
  * 但 Agent 一直没有触发入口 —— 本工具补上这一环。T83 产品转向后，档案
  * 随 APK 内置（jniLibs 伪 .so），本阶段从"网络下载"变为"本地解包"（离线，
- * ~30 秒）；工具 id 保留不变（Agent 兼容）。
+ * 完整环境解压约 2~5 分钟）；工具 id 保留不变（Agent 兼容）。
  *
  * 行为（幂等、可重复调用）：
  *   1. rootfs 已 READY → 立即返回 ALREADY_READY（不重复解包）
@@ -48,7 +48,8 @@ class TerminalUbuntuInstallTool(
     override val description: String = """
         Provision (or wait for) the BUNDLED Ubuntu 24.04 rootfs required by the linux-ubuntu
         terminal backend. The archive ships inside the APK — this is an OFFLINE local
-        extraction (~30s), not a network download. Idempotent: returns ALREADY_READY if
+        extraction of the FULL environment (~300MB archive → ~1GB unpacked, typically
+        2-5 minutes), not a network download. Idempotent: returns ALREADY_READY if
         already provisioned. SHA-256 verification + extraction + base configuration +
         health check. If the call times out while still extracting, it returns IN_PROGRESS —
         call again to keep waiting (progress is never lost). On success the linux-ubuntu
@@ -57,7 +58,7 @@ class TerminalUbuntuInstallTool(
     """.trimIndent()
 
     override val parametersSchema: String = """
-{"type":"object","properties":{"force":{"type":"boolean","default":false,"description":"Reinstall even if already READY (version migration / repair)"},"timeoutMs":{"type":"integer","default":600000,"description":"How long to wait for completion before reporting IN_PROGRESS (install continues in background)"}},"required":[]}
+{"type":"object","properties":{"force":{"type":"boolean","default":false,"description":"Reinstall even if already READY (version migration / repair)"},"timeoutMs":{"type":"integer","default":900000,"description":"How long to wait for completion before reporting IN_PROGRESS (install continues in background)"}},"required":[]}
     """.trimIndent()
 
     override suspend fun invoke(arguments: String): String {
@@ -122,6 +123,6 @@ class TerminalUbuntuInstallTool(
     }
 
     companion object {
-        const val DEFAULT_TIMEOUT_MS: Long = 600_000L
+        const val DEFAULT_TIMEOUT_MS: Long = 900_000L  // T84：完整 rootfs（~1GB 解压）+ 慢存储余量
     }
 }

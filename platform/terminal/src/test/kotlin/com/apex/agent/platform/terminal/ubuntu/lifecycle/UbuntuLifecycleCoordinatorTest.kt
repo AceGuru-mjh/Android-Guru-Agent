@@ -32,14 +32,14 @@ import org.junit.Test
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator.Phase as P
 
 /** 顶层共享 fixture（嵌套/非 inner 类可达）。 */
-private fun desc() = RootfsDescriptor(
+private fun desc(checksum: String = "abc") = RootfsDescriptor(
     id = "ubuntu-24.04-arm64",
     distribution = LinuxDistribution.UBUNTU,
     version = "24.04",
     architecture = CpuArchitecture.ARM64,
     location = AbsolutePath("/data/rootfs/ubuntu/versions/v1"),
     sizeBytes = 30L * 1024 * 1024,
-    checksum = "abc",
+    checksum = checksum,
     readOnly = false
 )
 
@@ -70,6 +70,7 @@ class UbuntuLifecycleCoordinatorTest {
         var cancelCalls = 0
         var reconcileCalls = 0
         var repairCalls = 0
+        var removeCalls = 0
         /** install 行为脚本：默认返回 Ready。 */
         var installBehavior: suspend (RootfsTarget, Boolean) -> ProvisioningResult = { _, _ ->
             ProvisioningResult.Ready(desc(), 1_000L)
@@ -105,7 +106,12 @@ class UbuntuLifecycleCoordinatorTest {
             return ProvisioningResult.Ready(desc(), 500L)
         }
 
-        override suspend fun remove(): ProvisioningResult = ProvisioningResult.Removed(emptyList())
+        override suspend fun remove(): ProvisioningResult {
+            removeCalls++
+            currentDesc = null   // 与真实现同步：删除后 current() 为 null
+            stateFlowInternal.value = ProvisioningState.REMOVED
+            return ProvisioningResult.Removed(emptyList())
+        }
 
         override suspend fun invalidate(reason: String): ProvisioningResult =
             ProvisioningResult.Invalidated(reason)
@@ -163,7 +169,11 @@ class UbuntuLifecycleCoordinatorTest {
         var repairOutcome: UbuntuLifecycleCoordinator.RepairOutcome? = null,
         val clockValues: ArrayDeque<Long> = ArrayDeque(), // 可编程时钟
         /** 构造参数：repair 端口是否接线（决定 repairFn 非 null）。 */
-        private val repairWired: Boolean = false
+        private val repairWired: Boolean = false,
+        /** T84：注册表指纹端口（null=未接线；实例属性，测试构造后改写）。 */
+        var bundledChecksum: String? = null,
+        var bundledChecksumThrows: Boolean = false,
+        var bootstrapResetCalls: Int = 0
     ) {
         val coordinator = UbuntuLifecycleCoordinator(
             provisioner = provisioner,
@@ -178,6 +188,11 @@ class UbuntuLifecycleCoordinatorTest {
             repairFn = if (repairWired) {
                 { repairCalls++; repairOutcome ?: UbuntuLifecycleCoordinator.RepairOutcome(emptyList(), true) }
             } else null,
+            bootstrapResetFn = { bootstrapResetCalls++ },
+            bundledChecksumFn = {
+                if (bundledChecksumThrows) error("registry lookup failed")
+                bundledChecksum
+            },
             target = testTarget,
             defaultTimeoutMs = 5_000L,
             clock = { clockValues.removeFirstOrNull() ?: System.currentTimeMillis() }
@@ -514,6 +529,68 @@ class UbuntuLifecycleCoordinatorTest {
         val report = env.coordinator.warmUp()
         assertEquals("RECONCILE_FAILED", report.action)
         assertEquals(UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED, report.phaseAfter)
+    }
+
+    // ───────────── T84：warmUp 档案新鲜度迁移（APK 换内置档案 → 删旧装新） ─────────────
+
+    @Test
+    fun `30 warmUp migrates stale rootfs when bundled checksum differs`() = runBlocking {
+        val env = Env()
+        // 已装 rootfs checksum="abc"（旧档案），注册表指纹="def"（新档案）
+        env.provisioner.currentDesc = desc("abc")
+        env.provisioner.stateFlowInternal.value = ProvisioningState.READY
+        env.provisioner.reconcileBehavior = {
+            ReconciliationResult(desc("abc"), ProvisioningState.READY, false, emptyList(), false, ReconciliationAction.NONE)
+        }
+        env.bundledChecksum = "def"
+        val report = env.coordinator.warmUp()
+        assertEquals("迁移必须删除旧 rootfs", 1, env.provisioner.removeCalls)
+        assertEquals("迁移必须复位 bootstrap 状态", 1, env.bootstrapResetCalls)
+        assertEquals("warmUp 绝不下载/解包（下次 ensureReady 才装新）", 0, env.provisioner.installCalls)
+        assertEquals(UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED, report.phaseAfter)
+        // 后续 ensureReady 对新档案走全新安装
+        val r = env.coordinator.ensureReady()
+        assertTrue(r is UbuntuLifecycleCoordinator.EnsureResult.Ready)
+    }
+
+    @Test
+    fun `31 warmUp keeps rootfs when checksum matches registry`() = runBlocking {
+        val env = Env()
+        env.provisioner.currentDesc = desc("abc")
+        env.provisioner.stateFlowInternal.value = ProvisioningState.READY
+        env.provisioner.reconcileBehavior = {
+            ReconciliationResult(desc("abc"), ProvisioningState.READY, false, emptyList(), false, ReconciliationAction.NONE)
+        }
+        env.bundledChecksum = "abc"   // 一致 → 不迁移
+        env.coordinator.warmUp()
+        assertEquals(0, env.provisioner.removeCalls)
+        assertEquals(0, env.bootstrapResetCalls)
+    }
+
+    @Test
+    fun `32 warmUp skips migration when registry port unwired`() = runBlocking {
+        val env = Env()
+        env.provisioner.currentDesc = desc("abc")
+        env.provisioner.stateFlowInternal.value = ProvisioningState.READY
+        env.provisioner.reconcileBehavior = {
+            ReconciliationResult(desc("abc"), ProvisioningState.READY, false, emptyList(), false, ReconciliationAction.NONE)
+        }
+        env.bundledChecksum = null    // 端口未接线/无条目 → 不迁移（保守）
+        env.coordinator.warmUp()
+        assertEquals(0, env.provisioner.removeCalls)
+    }
+
+    @Test
+    fun `33 warmUp skips migration when registry lookup fails`() = runBlocking {
+        val env = Env()
+        env.provisioner.currentDesc = desc("abc")
+        env.provisioner.stateFlowInternal.value = ProvisioningState.READY
+        env.provisioner.reconcileBehavior = {
+            ReconciliationResult(desc("abc"), ProvisioningState.READY, false, emptyList(), false, ReconciliationAction.NONE)
+        }
+        env.bundledChecksumThrows = true   // 查询故障 → 绝不因端口故障误删环境
+        env.coordinator.warmUp()
+        assertEquals(0, env.provisioner.removeCalls)
     }
 
     // ───────────────────────── 状态派生矩阵 ─────────────────────────

@@ -112,7 +112,8 @@ internal fun EnvironmentCenterSheet(
                 Column {
                     Text("环境中心", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "环境随 APK 内置 —— 首次使用离线解包（约 30 秒）；解包与删除均可逆，用户数据（/root、workspace）保留",
+                        "环境随 APK 内置（完整 Ubuntu，rootfs 档案 ~300MB+）—— 首次使用离线解包约 2~5 分钟" +
+                            "（解压后占用 ~1GB 存储，进度实时显示）；解包与删除均可逆，用户数据（/root、workspace）保留",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -202,7 +203,7 @@ internal fun EnvironmentCenterSheet(
             title = { Text("删除 Ubuntu 环境？") },
             text = {
                 Text(
-                    "将删除解包后的 rootfs（数百 MB）与解包缓存，释放存储。内置安装包随 APK 保留，" +
+                    "将删除解包后的 rootfs（约 1GB+）与解包缓存，释放存储。内置安装包随 APK 保留，" +
                         "可随时重新离线解包；用户数据（guest /root 与 workspace）保留。" +
                         "正在运行的 Ubuntu 会话需先全部关闭。"
                 )
@@ -336,7 +337,7 @@ private fun UbuntuEnvironmentCard(
         Spacer(Modifier.height(10.dp))
         when (phase) {
             UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> {
-                ActionButton("解包内置环境（离线，约 30 秒）", loading = false) { onInstall() }
+                ActionButton("解包内置环境（离线，约 2~5 分钟）", loading = false) { onInstall() }
             }
             UbuntuLifecycleCoordinator.Phase.INSTALLING -> {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {

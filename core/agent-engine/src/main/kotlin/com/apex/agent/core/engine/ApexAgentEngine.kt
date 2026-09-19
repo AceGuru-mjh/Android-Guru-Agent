@@ -67,6 +67,14 @@ class ApexAgentEngine(
     private val environmentInfoProvider: EnvironmentInfoProvider? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null,
     /**
+     * 已连接服务提供者（GitHub/连接器等）：非空时系统提示词注入
+     * "## Connected Services" 段，让模型知道这些服务的工具已就绪。
+     *
+     * 根因修复：旧版模型不知道 GitHub 已连接，106 个工具里 7 个
+     * github_* 从不被选中；连接器同理。为空则省略该段（测试兼容）。
+     */
+    private val connectedServicesProvider: ConnectedServicesProvider? = null,
+    /**
      * T72 — 多模型运行时。非空时所有 LLM 调用按 [LlmRequestContext.role] 路由到
      * 对应 Profile / Client，并做能力校验、降级、诊断。
      *
@@ -1037,7 +1045,8 @@ class ApexAgentEngine(
             config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
         },
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
-        environmentSummary = environmentInfoProvider?.environmentSummary()
+        environmentSummary = environmentInfoProvider?.environmentSummary(),
+        connectedServices = connectedServicesProvider?.connectedServicesSummary()
     )
 
     private fun buildPlanPrompt(input: String): String =

@@ -7,12 +7,19 @@ import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.llm.runtime.ModelRuntimeRegistry
 import com.apex.agent.core.llm.runtime.ModelRoleRouter
 import com.apex.agent.core.llm.runtime.ModelRuntimeStore
+import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Singleton
 
 @Module
@@ -28,12 +35,16 @@ object LlmModule {
 
     @Provides
     @Singleton
-    fun provideLlmClient(repo: SettingsRepository): LlmClient {
+    fun provideLlmClient(
+        repo: SettingsRepository,
+        chatToolkit: ChatToolkitStore
+    ): LlmClient {
         // 动态委托：设置页/对话页"小大脑"菜单修改默认模型或采样参数后即时生效，
         // 无需重启 App（内部按 profiles/providers 变化重建真实 client）。
         // T72 之后：引擎已改用 [ModelRuntime] 路由多模型；此 [LlmClient] 单例仍
         // 保留供需要直连的旧消费者（如 SettingsViewModel.testConnection）。
-        return DynamicLlmClient(repo)
+        // 会话级"网络搜索"开关同时贯通（见 DynamicLlmClient 注释）。
+        return DynamicLlmClient(repo, chatToolkit)
     }
 
     /**
@@ -46,10 +57,36 @@ object LlmModule {
      */
     @Provides
     @Singleton
-    fun provideModelRuntimeStore(repo: SettingsRepository): ModelRuntimeStore = object : ModelRuntimeStore {
-        override val profiles get() = repo.profiles
-        override val providers get() = repo.providers
-        override val roles get() = repo.roles
+    fun provideModelRuntimeStore(
+        repo: SettingsRepository,
+        chatToolkit: ChatToolkitStore
+    ): ModelRuntimeStore {
+        // 会话级"网络搜索"开关（输入框工具栏）贯通到多模型运行时：
+        // 开关打开时把所有 Profile 的 webSearch 提升为 AUTO（按 Provider 端点
+        // 自动选择原生搜索策略；未知端点解析为 OFF，永不发送非标准参数）。关闭
+        // 时保持 Profile 自身设置不变。
+        //
+        // 根因修复：旧版开关只注入提示词求模型调 web_search 工具（依赖 DDG
+        // 抓取、经常空结果），模型内置联网能力（OpenAI web_search_options /
+        // DashScope enable_search / Zhipu web_search / OpenRouter :online /
+        // Anthropic web_search）从未被启用。现在开关同时驱动原生搜索。
+        fun applyToggle(profiles: List<ModelProfile>, enabled: Boolean): List<ModelProfile> =
+            if (enabled) profiles.map { it.copy(webSearch = WebSearchMode.AUTO) } else profiles
+
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val effectiveProfiles = combine(repo.profiles, chatToolkit.webSearchEnabled) { list, enabled ->
+            applyToggle(list, enabled)
+        }.stateIn(
+            scope = scope,
+            started = SharingStarted.Eagerly,
+            initialValue = applyToggle(repo.profiles.value, chatToolkit.webSearchEnabled.value)
+        )
+
+        return object : ModelRuntimeStore {
+            override val profiles get() = effectiveProfiles
+            override val providers get() = repo.providers
+            override val roles get() = repo.roles
+        }
     }
 
     /**

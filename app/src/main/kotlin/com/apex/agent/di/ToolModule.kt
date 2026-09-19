@@ -3,6 +3,8 @@ package com.apex.agent.di
 import android.content.Context
 import com.apex.agent.core.tools.*
 import com.apex.agent.core.tools.builtin.*
+import com.apex.agent.core.tools.connector.ConnectorMessenger
+import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.core.tools.skill.SkillToolAdapter
 import com.apex.agent.core.tools.mcp.McpManager
@@ -258,7 +260,9 @@ object ToolModule {
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
         circuitBreaker: ToolCircuitBreaker,
-        shortcutRegistry: ShortcutRegistry
+        shortcutRegistry: ShortcutRegistry,
+        // 消息连接器（微信/飞书/Telegram）：注册表 + 发送器，注册 connector_* 工具
+        connectorRegistry: ConnectorRegistry
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -501,6 +505,18 @@ object ToolModule {
         registry.register(SafeAgentTool(GithubCreateIssueTool(githubApiService)))
         registry.register(SafeAgentTool(GithubListIssuesTool(githubApiService)))
         registry.register(SafeAgentTool(GithubSearchCodeTool(githubApiService)))
+        // 分支列表（写入非默认分支前探查）与仓库搜索（按关键词找仓库）。
+        // 根因修复补齐：searchCode 只能搜代码，找仓库需 /search/repositories。
+        registry.register(SafeAgentTool(GithubListBranchesTool(githubApiService)))
+        registry.register(SafeAgentTool(GithubSearchReposTool(githubApiService)))
+
+        // ═══ 11b. 消息连接器（微信/飞书/Telegram，2 个工具）═══
+        // connector_list：列出启用的连接器与凭据状态；connector_send_message：
+        // 经企业微信机器人/飞书机器人/Telegram Bot 发送文本消息。
+        // 与 Connected Services 段（系统提示词）联动：模型知道已连接后即可主动使用。
+        val connectorMessenger = ConnectorMessenger(httpClient)
+        registry.register(SafeAgentTool(ConnectorListTool(connectorRegistry)))
+        registry.register(SafeAgentTool(ConnectorSendMessageTool(connectorRegistry, connectorMessenger)))
 
         // ═══ MCP 服务器工具 ═══
         // v3+P83 联合收敛：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
@@ -553,8 +569,11 @@ object ToolModule {
         // 总计：44 基础 + 15 v2 + 3 MCP + 2 T73 + 1 T75 + 1 P83 环境闭环 +
         // 4 T76 + 5 Skill 管理 + 3 v3 新工具（wait/json_transform/version_compare）+
         // 4 v3 编排工具（tool_batch_run + shortcut_define/list/run）+
-        // N 已启用技能 composite + 7 GitHub（无条件注册，未连接时返回明确错误引导）。
+        // N 已启用技能 composite + 9 GitHub（无条件注册，未连接时返回明确错误引导）+
+        // 2 消息连接器（connector_list / connector_send_message：微信/飞书/Telegram）。
         // P83 修正：edit_file 补注册（文件工具 7→8）；MCP 重复块移除（计数不变）。
+        // 插件注册：PluginManager 加载插件后动态注册（plugin-web-automation → 15 个 browser_*，
+        // REPLACE 覆盖内置注册；卸载时降级为 HostFallbackTool 宿主直调，不挖空）。
     }
 
     @Provides

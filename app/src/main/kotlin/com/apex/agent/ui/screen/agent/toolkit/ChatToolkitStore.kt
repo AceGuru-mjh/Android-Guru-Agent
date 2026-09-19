@@ -150,8 +150,10 @@ class ChatToolkitStore @Inject constructor(
         }
         if (_webSearchEnabled.value) {
             appendLine("### 网络搜索（强制）")
-            appendLine("用户已开启网络搜索。涉及实时信息、新闻、天气、价格、文档、不确定的事实时，")
-            appendLine("必须先调用 web_search 工具获取最新结果再作答，禁止仅凭训练知识猜测。")
+            appendLine("用户已开启网络搜索（当前 Provider 支持时已同时启用模型内置联网搜索）。")
+            appendLine("若本轮响应已附带模型内置搜索的引用来源（**Sources:** 列表），直接基于其结果作答并保留来源标注；")
+            appendLine("否则，涉及实时信息、新闻、天气、价格、文档、不确定的事实时，必须先调用 web_search 工具")
+            appendLine("获取最新结果（必要时 web_fetch 读取全文）再作答，禁止仅凭训练知识猜测。")
             appendLine("引用搜索结果中的关键信息时，注明来源标题与链接。")
             appendLine()
         }

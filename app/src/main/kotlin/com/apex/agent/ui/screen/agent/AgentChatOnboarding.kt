@@ -26,8 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -103,13 +105,13 @@ internal fun LlmSetupGuideCard(onOpenSettings: () -> Unit) {
                 }
                 Column {
                     Text(
-                        text = "配置你的 AI 大脑",
+                        text = stringResource(R.string.chat_setup_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
-                        text = "3 分钟接入一个大模型，Agent 才能开始思考",
+                        text = stringResource(R.string.chat_setup_subtitle),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
                     )
@@ -118,8 +120,7 @@ internal fun LlmSetupGuideCard(onOpenSettings: () -> Unit) {
 
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "尚未配置可用的模型端点。设置一个 Provider 并填入 API Key，" +
-                    "即可开始对话、执行工具与长任务。",
+                text = stringResource(R.string.chat_setup_body),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
             )
@@ -138,12 +139,12 @@ internal fun LlmSetupGuideCard(onOpenSettings: () -> Unit) {
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.size(6.dp))
-                Text("去配置")
+                Text(stringResource(R.string.chat_go_setup))
             }
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "支持 DeepSeek / OpenRouter / Ollama 等任意 OpenAI 兼容端点",
+                text = stringResource(R.string.chat_setup_supported),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

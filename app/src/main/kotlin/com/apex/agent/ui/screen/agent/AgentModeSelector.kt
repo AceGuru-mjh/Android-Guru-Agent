@@ -34,9 +34,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.AgentMode
+import com.apex.agent.R
 
 /**
  * ═══ 任务模式选择器（顶部模式栏 v3）═══
@@ -58,6 +60,8 @@ internal fun AgentModeSelector(
     onSelect: (AgentMode) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // i18n：semantics 块非组合上下文，无障碍描述在组合内预取
+    val selectorDescription = stringResource(R.string.chat_mode_selector_cd, current.displayName)
 
     Box {
         // ── 触发器：当前模式胶囊 ──
@@ -69,7 +73,7 @@ internal fun AgentModeSelector(
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
             modifier = Modifier
                 .heightIn(min = 36.dp)
-                .semantics { contentDescription = "任务模式：${current.displayName}，点击切换" }
+                .semantics { contentDescription = selectorDescription }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -114,7 +118,8 @@ internal fun AgentModeSelector(
                                 }
                             )
                             Text(
-                                text = mode.description,
+                                // i18n：模式描述 UI 层本地化映射（core 枚举 description 保持引擎侧不动）
+                                text = agentModeDescription(mode),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -160,4 +165,17 @@ internal fun agentModeIcon(mode: AgentMode): ImageVector = when (mode) {
     AgentMode.REFLECTION -> Icons.Default.Psychology
     AgentMode.HUMAN_ASSIST -> Icons.Default.SupportAgent
     AgentMode.CUSTOM -> Icons.Default.Tune
+}
+
+/**
+ * 模式描述映射 —— i18n 同款理由（文案属 UI 层关注点；core 枚举 description 保持引擎侧不动）。
+ */
+@Composable
+internal fun agentModeDescription(mode: AgentMode): String = when (mode) {
+    AgentMode.BUILD -> stringResource(R.string.chat_mode_build_desc)
+    AgentMode.PLAN -> stringResource(R.string.chat_mode_plan_desc)
+    AgentMode.SPEC -> stringResource(R.string.chat_mode_spec_desc)
+    AgentMode.REFLECTION -> stringResource(R.string.chat_mode_reflect_desc)
+    AgentMode.HUMAN_ASSIST -> stringResource(R.string.chat_mode_assist_desc)
+    AgentMode.CUSTOM -> stringResource(R.string.chat_mode_custom_desc)
 }

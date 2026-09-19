@@ -124,21 +124,52 @@ class StreamingOpenAiClient(
         return builder.build()
     }
     
-    private fun buildRequestBody(
+    /**
+     * 构造 /chat/completions 请求体。
+     *
+     * 可见性 internal（非 private）：同模块单测直接断言请求体字段
+     * （哨兵回退 / o-series 兼容 / Provider 差异化思考字段），免起 MockWebServer。
+     */
+    internal fun buildRequestBody(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int,
         stream: Boolean
     ): JsonObject {
+        // ── B1/B2：采样参数哨兵回退（显式传参优先，否则用 Profile 值）──────────
+        // temperature/maxTokens 是方法入参，旧实现直接写入请求体——引擎每处调用
+        // 都显式传 AgentConfig 快照（0.7f/4096），Profile（设置页/小大脑菜单）的
+        // temperature / maxOutputTokens 被永久覆盖（参数死链）。现在：
+        //   effectiveTemperature = 调用方显式传值（>=0） ?: config.temperature
+        //   requestedTokens      = 调用方显式传值（>0） ?: config.maxTokens ?: 4096（旧行为兜底）
+        val effectiveTemperature = if (temperature >= 0f) temperature else config.temperature
+        val requestedTokens = when {
+            maxTokens > 0 -> maxTokens
+            config.maxTokens > 0 -> config.maxTokens
+            else -> 4096
+        }
+
         // 客户侧预校验 maxTokens：超出 contextWindow - reservedOutputTokens 的请求
         // 会被服务端以模糊的 HTTP 400 拒绝，用户难以定位。这里提前裁减并保留安全余量。
         val effectiveMaxTokens = if (config.contextWindow > 0) {
             val cap = (config.contextWindow - config.reservedOutputTokens).coerceAtLeast(256)
-            maxTokens.coerceAtMost(cap)
+            requestedTokens.coerceAtMost(cap)
         } else {
-            maxTokens
+            requestedTokens
         }
+
+        // ── B3/T4：OpenAI 官方严格推理模型识别（o1/o3/o4-mini/gpt-5）──────────
+        // 这些模型的 API 硬性拒绝 temperature 与 max_tokens：
+        //  - 带 temperature → 400 "Unsupported parameter: 'temperature'"
+        //  - 带 max_tokens → 400 "…'max_tokens' is not supported with this model"
+        //    （必须改用 max_completion_tokens）
+        val isStrictOpenAiReasoner = OPENAI_STRICT_REASONER.containsMatchIn(config.model)
+        // T4：OpenAI 官方端点 + 推理模型 → max_tokens 必须换成 max_completion_tokens。
+        // 官方端点判定 = baseUrl 含 "api.openai.com"（第三方 OpenAI 兼容网关大多
+        // 仍接受 max_tokens，不误伤）。
+        val requiresMaxCompletionTokens = config.baseUrl.contains("api.openai.com", ignoreCase = true) &&
+            (config.capabilities.reasoning || isStrictOpenAiReasoner)
 
         // P1-3 修复：max_tokens 与 max_completion_tokens 互斥。旧实现两者同时发送
         //（thinkingBudget 非空或 ReasoningEffort.MAX 时），OpenAI 端点对同时携带
@@ -147,7 +178,9 @@ class StreamingOpenAiClient(
         // max_tokens；未设置思维预算时才发 max_tokens。
         // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准。
         val maxCompletion = config.thinkingBudget ?: run {
-            if (config.reasoningEffort == ReasoningEffort.MAX && config.capabilities.reasoning) maxOf(maxTokens, 8192) else null
+            if (config.reasoningEffort == ReasoningEffort.MAX &&
+                (config.capabilities.reasoning || isStrictOpenAiReasoner)
+            ) maxOf(requestedTokens, 8192) else null
         }
 
         // ── 原生联网搜索（Provider 分支）────────────────────────────
@@ -189,14 +222,16 @@ class StreamingOpenAiClient(
 
         return buildJsonObject {
             put("model", config.model)
-            // P3-c 修复：仅对非推理模型发送 temperature。o-series 等原生推理模型
-            // 不接受 temperature（OpenAI 返回 400），capabilities.reasoning == true
-            // 时省略，让服务端使用模型默认值。
-            if (!config.capabilities.reasoning) {
-                put("temperature", temperature)
+            // B3 修复：仅 OpenAI o-series / gpt-5（API 硬性拒绝）不发 temperature，
+            // 让服务端用模型默认值；其他 reasoning 模型（DeepSeek-R1 / QwQ /
+            // Qwen3-thinking / GLM-Z1 等）的兼容端**接受** temperature，照常发送
+            // ——旧实现只要 capabilities.reasoning=true 就静默丢弃该参数，
+            // 用户在设置页调温对这些模型完全无效。
+            if (!isStrictOpenAiReasoner) {
+                put("temperature", effectiveTemperature)
             }
-            if (maxCompletion != null) {
-                put("max_completion_tokens", maxCompletion)
+            if (maxCompletion != null || requiresMaxCompletionTokens) {
+                put("max_completion_tokens", maxCompletion ?: effectiveMaxTokens)
             } else {
                 put("max_tokens", effectiveMaxTokens)
             }
@@ -218,13 +253,42 @@ class StreamingOpenAiClient(
                 putJsonArray("stop") { config.stopSequences.forEach { s -> add(s) } }
             }
 
-            // ── Reasoning（原生思考强度 + 思维预算）──────────────
-            // T72 §二十二修复：仅当模型声明 reasoning 能力时才发送 reasoning_effort。
-            // 旧实现默认 MEDIUM → 对所有端点（含非推理模型）发 "reasoning_effort":"medium"，
-            // 部分服务端会 400。
-            if (config.capabilities.reasoning) {
-                config.reasoningEffort.apiValue?.let { effort ->
-                    put("reasoning_effort", effort)
+            // ── Reasoning（原生思考强度 + 思维预算，T1/T3 修复）──────────
+            // Provider 差异化思考字段（思考深度档位 → 各家 API 的真实参数）：
+            //  - Anthropic（Claude 3.7+/4，OpenAI 兼容层）：thinking: {type:"enabled", budget_tokens:N}
+            //  - Qwen / DashScope 兼容端：enable_thinking: true/false
+            //  - 其他 OpenAI 兼容端：reasoning_effort（模型声明 reasoning 能力时）
+            val effort = config.reasoningEffort
+            val isAnthropicEndpoint = config.providerId.equals("anthropic", ignoreCase = true) ||
+                config.baseUrl.contains("anthropic", ignoreCase = true)
+            val isQwenEndpoint = config.baseUrl.contains("dashscope", ignoreCase = true) ||
+                config.model.startsWith("qwen", ignoreCase = true)
+            when {
+                isAnthropicEndpoint -> {
+                    // effort 为 NONE（null）时不发 thinking 字段（Claude 默认不思考）。
+                    // budget 优先级：thinkingBudget（>0）> effort 档位映射 > 4096。
+                    if (effort != ReasoningEffort.NONE) {
+                        val budget = config.thinkingBudget?.takeIf { it > 0 }
+                            ?: EFFORT_THINKING_BUDGETS[effort]
+                            ?: 4096
+                        putJsonObject("thinking") {
+                            put("type", "enabled")
+                            put("budget_tokens", budget)
+                        }
+                    }
+                }
+                isQwenEndpoint -> {
+                    // Qwen3 混合思考开关：effort NONE = 关闭思考，其余档位 = 开启。
+                    put("enable_thinking", effort != ReasoningEffort.NONE)
+                }
+                config.capabilities.reasoning || isStrictOpenAiReasoner -> {
+                    // T72 §二十二修复：仅当模型声明 reasoning 能力时才发送
+                    // reasoning_effort。旧实现默认 MEDIUM → 对所有端点（含非推理
+                    // 模型）发 "reasoning_effort":"medium"，部分服务端会 400。
+                    // o-series 正则兜底：存量 Profile 未勾 reasoning 位也能发出。
+                    effort.apiValue?.let { value ->
+                        put("reasoning_effort", value)
+                    }
                 }
             }
             // max_completion_tokens 已在上方请求体开头写入（P1-3：与 max_tokens 互斥）
@@ -583,6 +647,33 @@ class StreamingOpenAiClient(
          */
         val LOCAL_SAMPLING_PROVIDERS: Set<String> = setOf(
             "ollama", "lmstudio", "vllm", "custom_openai"
+        )
+
+        /**
+         * B3/T4：OpenAI 官方"严格"推理模型（硬性拒绝 temperature / max_tokens）。
+         *
+         * 词边界正则（大小写不敏感），单测风格边界示例：
+         *  - 命中："o1"、"o3"、"o3-mini"、"o3-mini-high"、"o1-preview"、
+         *    "o4-mini"、"gpt-5"、"gpt-5-mini"、"gpt-5-chat-latest"、
+         *    "chatgpt-5-latest"、"O3-MINI"
+         *  - 不命中："neo3x"（o3 前是字母，lookbehind 拦截）、"hero1"（同上）、
+         *    "o1abc"（o1 后紧跟字母，lookahead 拦截）、"gpt-4o"、"gpt-4.1"、
+         *    "deepseek-chat"
+         */
+        val OPENAI_STRICT_REASONER: Regex = Regex(
+            "(?<![a-z0-9])o[134](-mini|-preview)?(?![a-z0-9])|gpt-5",
+            RegexOption.IGNORE_CASE
+        )
+
+        /**
+         * T1/T3：Anthropic `thinking.budget_tokens` 的 effort 档位映射
+         * （thinkingBudget 未显式设置时使用）。
+         */
+        val EFFORT_THINKING_BUDGETS: Map<ReasoningEffort, Int> = mapOf(
+            ReasoningEffort.LOW to 2048,
+            ReasoningEffort.MEDIUM to 4096,
+            ReasoningEffort.HIGH to 8192,
+            ReasoningEffort.MAX to 16384
         )
     }
 }

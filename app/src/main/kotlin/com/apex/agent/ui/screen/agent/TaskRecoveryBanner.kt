@@ -20,9 +20,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.core.engine.task.AgentTask
 
 /**
@@ -64,7 +66,7 @@ fun TaskRecoveryBanner(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "发现未完成的任务",
+                            text = stringResource(R.string.chat_recovery_title),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -81,7 +83,11 @@ fun TaskRecoveryBanner(
                     if (task.steps.isNotEmpty()) {
                         val done = task.steps.count { it.status == com.apex.agent.core.engine.task.StepStatus.DONE }
                         Text(
-                            text = "中断于步骤 ${done + 1}/${task.steps.size}",
+                            text = stringResource(
+                                R.string.chat_interrupted_at_step,
+                                done + 1,
+                                task.steps.size
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
                         )
@@ -92,10 +98,10 @@ fun TaskRecoveryBanner(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(onClick = { onResume(task) }) {
-                            Text("继续")
+                            Text(stringResource(R.string.chat_continue))
                         }
                         OutlinedButton(onClick = { onDismiss(task) }) {
-                            Text("取消")
+                            Text(stringResource(R.string.chat_cancel))
                         }
                     }
                 }

@@ -5,20 +5,35 @@ import kotlinx.coroutines.flow.Flow
 /**
  * LLM客户端统一接口
  * 支持OpenAI兼容API（覆盖OpenAI/Claude/Gemini/本地模型）
+ *
+ * 采样参数哨兵回退制（B1/B2 修复）：
+ * - [temperature] / [maxTokens] 的默认值是**哨兵**（< 0 = 未指定），不再硬编码
+ *   0.7f / 4096。实现层（如 [StreamingOpenAiClient]）在哨兵时回退到
+ *   [LlmConfig] 的值（即 Profile 的 temperature / maxOutputTokens），由
+ *   DynamicLlmClient / ModelRuntimeRegistry 监听设置变化即时重建 client——
+ *   这样设置页或"小大脑"菜单改参数后，下一次请求即真实生效。
+ *   旧行为：引擎每处调用都显式传 `temperature = config.temperature`（引擎
+ *   AgentConfig 的快照），Profile 改动被覆盖，参数链路断裂。
+ * - 调用方需要**强制覆盖**（如摘要压缩要低温短输出）时传显式值即可：
+ *   `temperature >= 0` / `maxTokens > 0` 优先于 Profile 值。
  */
 interface LlmClient {
     suspend fun chat(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition> = emptyList(),
-        temperature: Float = 0.7f,
-        maxTokens: Int = 4096
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值；>= 0 = 显式覆盖。 */
+        temperature: Float = -1f,
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值（皆未设置时回退 4096）。 */
+        maxTokens: Int = -1
     ): LlmResponse
 
     fun chatStream(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition> = emptyList(),
-        temperature: Float = 0.7f,
-        maxTokens: Int = 4096
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值；>= 0 = 显式覆盖。 */
+        temperature: Float = -1f,
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值（皆未设置时回退 4096）。 */
+        maxTokens: Int = -1
     ): Flow<LlmStreamChunk>
 }
 

@@ -24,8 +24,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.mcp.McpTransport
 
@@ -37,7 +39,7 @@ import com.apex.agent.core.tools.mcp.McpTransport
  * - Skills：已安装技能的启停 / 卸载；
  * - MCP：已配置工具源的连接 / 断开 / 启停 / 删除；
  * - 连接器：已有连接器的启停 / 删除；
- * - 集成：从魔搭（ms-*）/ GitHub（gh-*）安装的技能管理。
+ * - 集成：从魔搭（ms-*）/ GitHub（gh-*）/ ClawHub（ch-*）安装的技能管理。
  *
  * 所有空态提供「去市场安装」一键跳回发现视图 —— 两个视图互为闭环。
  */
@@ -54,8 +56,8 @@ internal fun InstalledPluginsTab(state: MarketUiState, viewModel: MarketViewMode
 
     if (loaded.isEmpty()) {
         MarketEmptyState(
-            hint = "尚未加载任何插件 —— 到「市场」加载设备上发现的插件 APK",
-            actionLabel = "去市场加载",
+            hint = stringResource(R.string.market_installed_plugins_empty),
+            actionLabel = stringResource(R.string.market_installed_plugins_go),
             onAction = { goToBrowse(viewModel) }
         )
     } else {
@@ -64,7 +66,9 @@ internal fun InstalledPluginsTab(state: MarketUiState, viewModel: MarketViewMode
             key = { it.packageName },
             header = {
                 item {
-                    MarketHeader("已加载 ${loaded.size} 个插件；卸载仅解除服务绑定，APK 仍在设备上，可随时重新加载。")
+                    MarketHeader(
+                        stringResource(R.string.market_installed_plugins_header, loaded.size)
+                    )
                 }
             }
         ) { plugin ->
@@ -77,9 +81,12 @@ internal fun InstalledPluginsTab(state: MarketUiState, viewModel: MarketViewMode
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        MarketStatusChip(text = "已加载", positive = true)
+                        MarketStatusChip(
+                            text = stringResource(R.string.market_status_loaded),
+                            positive = true
+                        )
                         TextButton(onClick = { pendingUnload = plugin }) {
-                            Text("卸载")
+                            Text(stringResource(R.string.market_action_uninstall))
                         }
                     }
                 }
@@ -90,16 +97,20 @@ internal fun InstalledPluginsTab(state: MarketUiState, viewModel: MarketViewMode
     pendingUnload?.let { plugin ->
         AlertDialog(
             onDismissRequest = { pendingUnload = null },
-            title = { Text("卸载插件") },
-            text = { Text("解除与 ${plugin.label} 的绑定？可随时重新加载。") },
+            title = { Text(stringResource(R.string.market_plugins_uninstall_title)) },
+            text = {
+                Text(stringResource(R.string.market_plugins_uninstall_text, plugin.label))
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.unloadPlugin(plugin.packageName)
                     pendingUnload = null
-                }) { Text("卸载", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.market_action_uninstall), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingUnload = null }) { Text("取消") }
+                TextButton(onClick = { pendingUnload = null }) {
+                    Text(stringResource(R.string.market_action_cancel))
+                }
             }
         )
     }
@@ -113,8 +124,8 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
 
     if (state.skills.isEmpty()) {
         MarketEmptyState(
-            hint = "暂无已安装技能 —— 到「市场」从 GitHub / URL / 魔搭安装",
-            actionLabel = "去市场安装",
+            hint = stringResource(R.string.market_installed_skills_empty),
+            actionLabel = stringResource(R.string.market_installed_skills_go),
             onAction = { goToBrowse(viewModel) }
         )
         return
@@ -125,14 +136,12 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
 
     MarketList(
         items = sortedSkills,
-        emptyHint = "暂无已安装技能",
+        emptyHint = stringResource(R.string.market_installed_skills_empty_short),
         key = { it.id },
         header = {
             item {
                 MarketHeader(
-                    "已安装 ${state.skills.size} 个技能（按最近使用排序）；" +
-                        "点击卡片查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）；" +
-                        "开关控制是否注入对话，卸载将删除 manifest 与资源目录。"
+                    stringResource(R.string.market_installed_skills_header, state.skills.size)
                 )
             }
         }
@@ -145,9 +154,12 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
             MarketCard(
                 title = skill.name,
                 subtitle = if (skill.lastUsedAt > 0) {
-                    "${skill.id} · 最近 ${formatRelativeShort(skill.lastUsedAt)}"
+                    "${skill.id} · " + stringResource(
+                        R.string.market_skill_last_used,
+                        formatRelativeTime(skill.lastUsedAt)
+                    )
                 } else {
-                    "${skill.id} · 从未执行"
+                    "${skill.id} · " + stringResource(R.string.market_skill_never_used)
                 },
                 description = skill.description,
                 trailing = {
@@ -167,7 +179,7 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
                         IconButton(onClick = { pendingUninstall = skill }) {
                             Icon(
                                 Icons.Default.Delete,
-                                contentDescription = "卸载技能",
+                                contentDescription = stringResource(R.string.market_cd_uninstall_skill),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -201,31 +213,20 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
     pendingUninstall?.let { skill ->
         AlertDialog(
             onDismissRequest = { pendingUninstall = null },
-            title = { Text("卸载技能") },
-            text = { Text("卸载「${skill.name}」？其 manifest 与资源目录将一并删除。") },
+            title = { Text(stringResource(R.string.market_uninstall_skill_title)) },
+            text = { Text(stringResource(R.string.market_uninstall_skill_text, skill.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.uninstallSkill(skill.id)
                     pendingUninstall = null
-                }) { Text("卸载", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.market_action_uninstall), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingUninstall = null }) { Text("取消") }
+                TextButton(onClick = { pendingUninstall = null }) {
+                    Text(stringResource(R.string.market_action_cancel))
+                }
             }
         )
-    }
-}
-
-/** 相对时间简短格式（"3小时前" / "2天前" / "从未"）。 */
-private fun formatRelativeShort(timestampMs: Long): String {
-    if (timestampMs <= 0) return "从未"
-    val delta = System.currentTimeMillis() - timestampMs
-    return when {
-        delta < 60_000 -> "刚刚"
-        delta < 3_600_000 -> "${delta / 60_000}分钟前"
-        delta < 86_400_000 -> "${delta / 3_600_000}小时前"
-        delta < 30L * 86_400_000 -> "${delta / 86_400_000}天前"
-        else -> "${delta / (30L * 86_400_000)}月前"
     }
 }
 
@@ -237,8 +238,8 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
 
     if (state.mcps.isEmpty()) {
         MarketEmptyState(
-            hint = "未配置 MCP 工具源 —— 到「市场」添加远端 HTTP/SSE 或本地命令 STDIO",
-            actionLabel = "去市场添加",
+            hint = stringResource(R.string.market_installed_mcp_empty),
+            actionLabel = stringResource(R.string.market_installed_go_add),
             onAction = { goToBrowse(viewModel) }
         )
         return
@@ -246,23 +247,29 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
 
     MarketList(
         items = state.mcps,
-        emptyHint = "未配置 MCP 工具源",
+        emptyHint = stringResource(R.string.market_installed_mcp_empty_short),
         key = { it.name },
         header = {
             item {
                 MarketHeader(
-                    "已配置 ${state.mcps.size} 个 MCP 工具源；连接后其工具注入对话，/ 菜单出现 /mcp:<名称>。"
+                    stringResource(R.string.market_installed_mcp_header, state.mcps.size)
                 )
             }
         }
     ) { server ->
         MarketCard(
-            title = server.name,
+            // 内置服务器（进程内 transport，App 预置）加「内置」标记与用户自建区分。
+            title = if (server.builtin) {
+                stringResource(R.string.market_builtin_name, server.name)
+            } else {
+                server.name
+            },
             subtitle = server.endpoint,
-            description = "传输：" + server.transport.name + when (server.transport) {
-                McpTransport.STDIO -> "（本地命令）"
-                McpTransport.SSE -> "（远端 SSE）"
-                McpTransport.HTTP -> "（远端 HTTP）"
+            description = when (server.transport) {
+                McpTransport.STDIO -> stringResource(R.string.market_transport_stdio)
+                McpTransport.SSE -> stringResource(R.string.market_transport_sse)
+                McpTransport.HTTP -> stringResource(R.string.market_transport_http)
+                McpTransport.BUILTIN -> stringResource(R.string.market_transport_builtin)
             },
             trailing = {
                 Row(
@@ -271,9 +278,9 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                 ) {
                     MarketStatusChip(
                         text = when {
-                            server.connected -> "已连接"
-                            server.enabled -> "离线"
-                            else -> "已禁用"
+                            server.connected -> stringResource(R.string.market_status_connected)
+                            server.enabled -> stringResource(R.string.market_status_offline)
+                            else -> stringResource(R.string.market_status_disabled)
                         },
                         positive = server.connected
                     )
@@ -289,12 +296,24 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                             else viewModel.connectMcp(server.name)
                         }
                     ) {
-                        Text(if (server.connected) "断开" else if (state.mcpConnecting == server.name) "连接中…" else "连接")
+                        Text(
+                            when {
+                                server.connected -> stringResource(R.string.market_action_disconnect)
+                                state.mcpConnecting == server.name -> stringResource(R.string.market_connecting)
+                                else -> stringResource(R.string.market_action_connect)
+                            }
+                        )
                     }
                     TextButton(
-                        onClick = { pendingDelete = server }
+                        // 内置服务器随 App 预置/自愈，不提供删除入口
+                        enabled = !server.builtin,
+                        onClick = { if (!server.builtin) pendingDelete = server }
                     ) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(
+                            stringResource(R.string.market_action_delete),
+                            color = if (server.builtin) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            else MaterialTheme.colorScheme.error
+                        )
                     }
                 }
             }
@@ -304,16 +323,18 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
     pendingDelete?.let { server ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除 MCP 服务器") },
-            text = { Text("删除「${server.name}」的配置？活跃连接将被断开。") },
+            title = { Text(stringResource(R.string.market_delete_mcp_title)) },
+            text = { Text(stringResource(R.string.market_delete_mcp_text, server.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.removeMcp(server.name)
                     pendingDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.market_action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.market_action_cancel))
+                }
             }
         )
     }
@@ -327,8 +348,8 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
 
     if (state.connectors.isEmpty()) {
         MarketEmptyState(
-            hint = "无连接器 —— 到「市场」添加外部服务访问配置",
-            actionLabel = "去市场添加",
+            hint = stringResource(R.string.market_installed_connectors_empty),
+            actionLabel = stringResource(R.string.market_installed_go_add),
             onAction = { goToBrowse(viewModel) }
         )
         return
@@ -336,11 +357,11 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
 
     MarketList(
         items = state.connectors,
-        emptyHint = "无连接器",
+        emptyHint = stringResource(R.string.market_installed_connectors_empty_short),
         key = { it.id },
         header = {
             item {
-                MarketHeader("启用的连接器出现在 / 菜单（/connector:<id>）。内置示例删除后重启恢复。")
+                MarketHeader(stringResource(R.string.market_installed_connectors_header))
             }
         }
     ) { connector ->
@@ -354,7 +375,10 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (connector.builtin) {
-                        MarketStatusChip(text = "内置", positive = false)
+                        MarketStatusChip(
+                            text = stringResource(R.string.market_builtin),
+                            positive = false
+                        )
                     }
                     Switch(
                         checked = connector.enabled,
@@ -363,7 +387,7 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
                     TextButton(
                         onClick = { pendingDelete = connector }
                     ) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.market_action_delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -373,35 +397,47 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
     pendingDelete?.let { connector ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除连接器") },
-            text = { Text("删除「${connector.name}」？" + if (connector.builtin) "（内置示例，重启后恢复）" else "") },
+            title = { Text(stringResource(R.string.market_delete_connector_title)) },
+            text = {
+                Text(
+                    stringResource(R.string.market_delete_connector_text, connector.name) +
+                        if (connector.builtin) {
+                            stringResource(R.string.market_delete_connector_builtin_suffix)
+                        } else ""
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.removeConnector(connector.id)
                     pendingDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.market_action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(R.string.market_action_cancel))
+                }
             }
         )
     }
 }
 
-// ═══ 已安装管理 · 集成（魔搭 / GitHub 来源技能）═══
+// ═══ 已安装管理 · 集成（魔搭 / GitHub / ClawHub 来源技能）═══
 
 @Composable
 internal fun InstalledIntegrationsTab(state: MarketUiState, viewModel: MarketViewModel) {
     var pendingUninstall by remember { mutableStateOf<MarketSkillRow?>(null) }
 
-    // 远程来源技能：魔搭安装固定 ms- 前缀，GitHub SKILL.md 转换安装固定 gh- 前缀；
-    // 携带自定义 manifest 的 GitHub 仓库 id 不定，归入「Skills」页统一管理。
-    val remoteSkills = state.skills.filter { it.id.startsWith("ms-") || it.id.startsWith("gh-") }
+    // 远程来源技能：魔搭安装固定 ms- 前缀，GitHub SKILL.md 转换安装固定 gh- 前缀，
+    // ClawHub 仓库安装固定 ch- 前缀；携带自定义 manifest 的 GitHub 仓库 id 不定，
+    // 归入「Skills」页统一管理。
+    val remoteSkills = state.skills.filter {
+        it.id.startsWith("ms-") || it.id.startsWith("gh-") || it.id.startsWith("ch-")
+    }
 
     if (remoteSkills.isEmpty()) {
         MarketEmptyState(
-            hint = "尚未从魔搭 / GitHub 安装技能 —— 到「市场 · 集成」浏览与一键安装",
-            actionLabel = "去市场逛逛",
+            hint = stringResource(R.string.market_installed_integrations_empty),
+            actionLabel = stringResource(R.string.market_installed_integrations_go),
             onAction = { goToBrowse(viewModel) }
         )
         return
@@ -409,13 +445,12 @@ internal fun InstalledIntegrationsTab(state: MarketUiState, viewModel: MarketVie
 
     MarketList(
         items = remoteSkills,
-        emptyHint = "暂无远程来源技能",
+        emptyHint = stringResource(R.string.market_installed_integrations_empty_short),
         key = { it.id },
         header = {
             item {
                 MarketHeader(
-                    "ms- 前缀 = 魔搭 ModelScope 安装；gh- 前缀 = GitHub 仓库转换安装。" +
-                        "自定义 manifest 的 GitHub 技能在「Skills」页管理。"
+                    stringResource(R.string.market_installed_integrations_header)
                 )
             }
         }
@@ -430,7 +465,11 @@ internal fun InstalledIntegrationsTab(state: MarketUiState, viewModel: MarketVie
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     MarketStatusChip(
-                        text = if (skill.id.startsWith("ms-")) "魔搭" else "GitHub",
+                        text = when {
+                            skill.id.startsWith("ms-") -> stringResource(R.string.market_source_modelscope)
+                            skill.id.startsWith("ch-") -> "ClawHub"
+                            else -> "GitHub"
+                        },
                         positive = false
                     )
                     Switch(
@@ -440,7 +479,7 @@ internal fun InstalledIntegrationsTab(state: MarketUiState, viewModel: MarketVie
                     IconButton(onClick = { pendingUninstall = skill }) {
                         Icon(
                             Icons.Default.Delete,
-                            contentDescription = "卸载技能",
+                            contentDescription = stringResource(R.string.market_cd_uninstall_skill),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -452,16 +491,18 @@ internal fun InstalledIntegrationsTab(state: MarketUiState, viewModel: MarketVie
     pendingUninstall?.let { skill ->
         AlertDialog(
             onDismissRequest = { pendingUninstall = null },
-            title = { Text("卸载技能") },
-            text = { Text("卸载「${skill.name}」？其 manifest 与资源目录将一并删除。") },
+            title = { Text(stringResource(R.string.market_uninstall_skill_title)) },
+            text = { Text(stringResource(R.string.market_uninstall_skill_text, skill.name)) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.uninstallSkill(skill.id)
                     pendingUninstall = null
-                }) { Text("卸载", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.market_action_uninstall), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingUninstall = null }) { Text("取消") }
+                TextButton(onClick = { pendingUninstall = null }) {
+                    Text(stringResource(R.string.market_action_cancel))
+                }
             }
         )
     }

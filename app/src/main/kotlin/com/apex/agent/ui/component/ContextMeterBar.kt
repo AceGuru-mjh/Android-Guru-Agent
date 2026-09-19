@@ -19,8 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 
 /**
  * 顶部上下文仪表盘长条。
@@ -148,7 +150,7 @@ fun ContextMeterBar(
             onDismissRequest = { menuExpanded = false }
         ) {
             Text(
-                text = "上下文仪表盘",
+                text = stringResource(R.string.context_dashboard),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -156,15 +158,15 @@ fun ContextMeterBar(
             HorizontalDivider()
 
             // token 详细数据
-            DashboardRow(label = "已用 Token", value = "$usedTokens")
-            DashboardRow(label = "上下文上限", value = "$safeMax")
-            DashboardRow(label = "占用比例", value = "$percent%")
+            DashboardRow(label = stringResource(R.string.context_used_tokens), value = "$usedTokens")
+            DashboardRow(label = stringResource(R.string.context_max_tokens), value = "$safeMax")
+            DashboardRow(label = stringResource(R.string.context_usage_ratio), value = "$percent%")
             DashboardRow(
-                label = "状态",
+                label = stringResource(R.string.context_status),
                 value = when {
-                    percent >= 80 -> "危险"
-                    percent >= 60 -> "警告"
-                    else -> "正常"
+                    percent >= 80 -> stringResource(R.string.context_status_danger)
+                    percent >= 60 -> stringResource(R.string.context_status_warning)
+                    else -> stringResource(R.string.context_status_normal)
                 }
             )
 
@@ -172,7 +174,7 @@ fun ContextMeterBar(
 
             // 主动压缩按钮
             DropdownMenuItem(
-                text = { Text("压缩上下文") },
+                text = { Text(stringResource(R.string.context_compress)) },
                 leadingIcon = {
                     Icon(
                         Icons.Default.Compress,
@@ -186,7 +188,7 @@ fun ContextMeterBar(
                 }
             )
             Text(
-                text = "自动压缩在占用超阈值时由引擎触发",
+                text = stringResource(R.string.context_compress_hint),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)

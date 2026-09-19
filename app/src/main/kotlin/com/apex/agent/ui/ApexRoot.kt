@@ -50,9 +50,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.screen.agent.AgentChatScreen
@@ -70,27 +73,30 @@ import kotlinx.coroutines.launch
 
 /**
  * 抽屉导航目标
+ *
+ * labelRes：目的地名称的字符串资源（i18n，经 stringResource 取词；
+ * 原硬编码中文 label 已迁移 values[-zh]/strings_core.xml 的 drawer_* key）。
  */
 sealed class DrawerDestination(
     val route: String,
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector
 ) {
-    data object Agent : DrawerDestination("agent", "Agent", Icons.Default.SmartToy)
-    data object Terminal : DrawerDestination("terminal", "终端", Icons.Default.Terminal)
+    data object Agent : DrawerDestination("agent", R.string.drawer_agent, Icons.Default.SmartToy)
+    data object Terminal : DrawerDestination("terminal", R.string.drawer_terminal, Icons.Default.Terminal)
     // Skill 屏已移除 —— 技能的安装/启停统一由「市场 · Skills」页承担，
     // 抽屉里再放一个只读列表是重复入口（两者数据源同一份 SkillRegistry）。
-    data object Market : DrawerDestination("market", "市场", Icons.Default.Storefront)
-    data object Memory : DrawerDestination("memory", "记忆", Icons.Default.Storage)
+    data object Market : DrawerDestination("market", R.string.drawer_market, Icons.Default.Storefront)
+    data object Memory : DrawerDestination("memory", R.string.drawer_memory, Icons.Default.Storage)
     // 任务历史（T76 审计 §7：TaskRuntime.loadTaskHistory 首次接线 —— 步骤回放/统计）
-    data object Tasks : DrawerDestination("tasks", "任务", Icons.Default.Checklist)
+    data object Tasks : DrawerDestination("tasks", R.string.drawer_tasks, Icons.Default.Checklist)
     // 存储与数据管理（附件/rootfs 占用/会话历史导出清空 —— 均为真实数据源）
-    data object Storage : DrawerDestination("storage", "存储", Icons.Default.FolderOpen)
-    data object Permissions : DrawerDestination("permissions", "权限", Icons.Default.Security)
-    data object Log : DrawerDestination("log", "运行日志", Icons.Filled.Info)
-    data object Settings : DrawerDestination("settings", "设置", Icons.Default.Settings)
+    data object Storage : DrawerDestination("storage", R.string.drawer_storage, Icons.Default.FolderOpen)
+    data object Permissions : DrawerDestination("permissions", R.string.drawer_permissions, Icons.Default.Security)
+    data object Log : DrawerDestination("log", R.string.drawer_log, Icons.Filled.Info)
+    data object Settings : DrawerDestination("settings", R.string.drawer_settings, Icons.Default.Settings)
     // 玻璃实验室 —— 内部 Liquid Glass 验收页（Spec §20：背景变化/网格/高对比文字/移动元素）
-    data object GlassLab : DrawerDestination("glasslab", "玻璃实验室", Icons.Default.BlurOn)
+    data object GlassLab : DrawerDestination("glasslab", R.string.drawer_glasslab, Icons.Default.BlurOn)
 }
 
 /**
@@ -186,7 +192,7 @@ fun ApexRoot() {
                                 }
                             }
                             Text(
-                                text = currentDestination.label,
+                                text = stringResource(currentDestination.labelRes),
                                 style = MaterialTheme.typography.titleLarge
                             )
                         }
@@ -196,7 +202,7 @@ fun ApexRoot() {
                         // 顶栏无内容可采样，诚实降级为主题薄霜 + 边缘光 + 高光
                         GlassIconButton(
                             icon = Icons.Default.Menu,
-                            contentDescription = "打开导航",
+                            contentDescription = stringResource(R.string.drawer_open_nav),
                             onClick = { scope.launch { drawerState.open() } },
                             tint = MaterialTheme.colorScheme.primary
                         )

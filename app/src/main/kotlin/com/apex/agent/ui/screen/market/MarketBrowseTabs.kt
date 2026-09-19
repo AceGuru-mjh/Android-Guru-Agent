@@ -35,15 +35,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
+import com.apex.agent.core.tools.marketplace.ClawHubSource
 
 /**
  * ═══ 市场 · 发现视图（BROWSE）═══
  *
  * 顶栏「市场」视图下的五个子页签，只放「发现 / 安装」语义的内容：
  * - 插件：设备上发现的可加载插件 APK（本地发现即市场）；
- * - Skills：GitHub / URL / JSON 安装入口 + 内置模板展示；
+ * - Skills：仓库源切换（本地：GitHub / URL / JSON / 本地导入入口 + 内置模板；
+ *   ClawHub：clawhub.ai 技能仓库的浏览 / 搜索 / 真实下载安装）；
  * - MCP：添加工具源 / 导入社区配置两个安装入口；
  * - 连接器：添加连接器入口；
  * - 集成：魔搭 ModelScope + GitHub 仓库搜索。
@@ -59,10 +65,10 @@ internal fun BrowsePluginsTab(state: MarketUiState, viewModel: MarketViewModel) 
     MarketList(
         items = state.plugins,
         key = { it.packageName },
-        emptyHint = "未发现已安装的 Apex 插件（安装包含 PLUGIN intent 服务的插件 APK 后自动出现）",
+        emptyHint = stringResource(R.string.market_plugins_empty_hint),
         header = {
             item {
-                MarketHeader("通过 PLUGIN intent 服务发现的 Apex 插件。加载会验证插件 APK 与服务连通；Agent 工具桥接建设中（暂不能通过 /plugin: 执行工具）。")
+                MarketHeader(stringResource(R.string.market_plugins_header))
             }
         }
     ) { plugin ->
@@ -72,10 +78,10 @@ internal fun BrowsePluginsTab(state: MarketUiState, viewModel: MarketViewModel) 
             description = null,
             trailing = {
                 if (plugin.loaded) {
-                    MarketStatusChip(text = "已加载", positive = true)
+                    MarketStatusChip(text = stringResource(R.string.market_status_loaded), positive = true)
                 } else {
                     TextButton(onClick = { viewModel.loadPlugin(plugin) }) {
-                        Text("加载")
+                        Text(stringResource(R.string.market_action_load))
                     }
                 }
             }
@@ -101,79 +107,83 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ExtendedFloatingActionButton(
-                onClick = { showRepoDialog = true },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("GitHub 获取", style = MaterialTheme.typography.labelMedium)
-            }
-            ExtendedFloatingActionButton(
-                onClick = { showUrlDialog = true },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("URL 安装", style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = { skillFilePicker.launch(arrayOf("*/*")) },
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(
-                    Icons.Default.UploadFile,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("本地导入", style = MaterialTheme.typography.labelMedium)
-            }
-            OutlinedButton(
-                onClick = { showImportDialog = true },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("粘贴 JSON", style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        Text(
-            text = "本地导入支持 .zip 技能包（含 manifest + 资源文件）与 .json manifest，自动识别。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-        )
+        // ── 仓库源切换：本地技能 ⇄ ClawHub 技能仓库 ──
+        SkillSourceChips(state, viewModel)
 
-        // ── v2 认知市场：搜索框 + 分类过滤 + 模糊建议 ──
-        SkillSearchAndFilter(state, viewModel)
-
-        // 过滤后的技能列表（已安装 + 内置模板，按分类与查询过滤）
-        val filtered = rememberFilteredSkills(state, viewModel)
-
-        if (filtered.isEmpty()) {
-            MarketEmptyState(hint = "未找到匹配的技能（试试调整分类或搜索关键词）")
+        if (state.skillSource == SkillRepoSource.CLAWHUB) {
+            ClawHubSection(state, viewModel)
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                item {
-                    MarketHeader(
-                        "内置 = App 自带能力（工具已原生注册，无安装步骤，用 /skill:<id> 直接调用）；" +
-                            "已安装技能点击查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）。"
-                    )
+                ExtendedFloatingActionButton(
+                    onClick = { showRepoDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.market_skills_action_github), style = MaterialTheme.typography.labelMedium)
                 }
-                items(filtered, key = { it.id }) { skill ->
-                    SkillListCard(skill, viewModel)
+                ExtendedFloatingActionButton(
+                    onClick = { showUrlDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.market_skills_action_url), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { skillFilePicker.launch(arrayOf("*/*")) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.UploadFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(stringResource(R.string.market_skills_action_local_import), style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = { showImportDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.market_skills_action_paste_json), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Text(
+                text = stringResource(R.string.market_skills_import_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+
+            // ── v2 认知市场：搜索框 + 分类过滤 + 模糊建议 ──
+            SkillSearchAndFilter(state, viewModel)
+
+            // 过滤后的技能列表（已安装 + 内置模板，按分类与查询过滤）
+            val filtered = rememberFilteredSkills(state, viewModel)
+
+            if (filtered.isEmpty()) {
+                MarketEmptyState(hint = stringResource(R.string.market_skills_no_match))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        MarketHeader(stringResource(R.string.market_skills_builtin_header))
+                    }
+                    items(filtered, key = { it.id }) { skill ->
+                        SkillListCard(skill, viewModel)
+                    }
                 }
             }
         }
@@ -190,8 +200,8 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     }
     if (showUrlDialog) {
         ImportFromUrlDialog(
-            title = "从 URL 安装 Skill",
-            hint = "manifest JSON 直链，如 https://raw.githubusercontent.com/o/r/main/manifest.json",
+            title = stringResource(R.string.market_skills_url_dialog_title),
+            hint = stringResource(R.string.market_skills_url_dialog_hint),
             onDismiss = { showUrlDialog = false },
             onConfirm = { url ->
                 viewModel.importSkillFromUrl(url)
@@ -211,6 +221,253 @@ internal fun BrowseSkillsTab(state: MarketUiState, viewModel: MarketViewModel) {
     }
 }
 
+/** 仓库源切换 chips（本地 ⇄ ClawHub）。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SkillSourceChips(state: MarketUiState, viewModel: MarketViewModel) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SkillRepoSource.entries.forEach { source ->
+            FilterChip(
+                selected = state.skillSource == source,
+                onClick = { viewModel.selectSkillSource(source) },
+                label = {
+                    Text(
+                        stringResource(source.labelRes),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            )
+        }
+    }
+}
+
+// ═══ 市场 · Skills：ClawHub 技能仓库 ═══
+
+/**
+ * ClawHub（clawhub.ai）仓库区块：搜索 + 热门/搜索结果列表 + 加载更多 + 安装。
+ *
+ * 空态 / 错误态全中文文案与市场现有风格一致；加载失败可重试；
+ * 安装中行级 busy（安装期间禁用其它行的安装按钮防并发下载）。
+ */
+@Composable
+private fun ClawHubSection(state: MarketUiState, viewModel: MarketViewModel) {
+    var loadedOnce by rememberSaveable { mutableStateOf(false) }
+
+    // 首次切入自动加载热门列表（已有列表则不重复拉，安装后切回也不闪列表）
+    LaunchedEffect(Unit) {
+        if (!loadedOnce && state.clawHubSkills.isEmpty() && !state.clawHubLoading) {
+            loadedOnce = true
+            viewModel.loadClawHubTrending()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 搜索框 + 搜索按钮（复用市场搜索行样式）
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = state.clawHubQuery,
+                onValueChange = viewModel::updateClawHubQuery,
+                placeholder = {
+                    Text(
+                        stringResource(R.string.market_clawhub_search_hint),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium
+            )
+            TextButton(
+                onClick = viewModel::searchClawHub,
+                enabled = !state.clawHubQueryLoading && state.clawHubQuery.isNotBlank()
+            ) {
+                Text(
+                    if (state.clawHubQueryLoading) {
+                        stringResource(R.string.market_searching)
+                    } else {
+                        stringResource(R.string.market_action_search)
+                    }
+                )
+            }
+        }
+
+        // 搜索结果模式：提示当前查询词 + 返回热门
+        if (state.clawHubSearchActive) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(R.string.market_clawhub_showing_results, state.clawHubQuery.trim()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                TextButton(
+                    onClick = viewModel::loadClawHubTrending,
+                    enabled = !state.clawHubQueryLoading
+                ) { Text(stringResource(R.string.market_clawhub_back_to_trending)) }
+            }
+        }
+
+        Text(
+            text = stringResource(R.string.market_clawhub_header),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
+
+        // 错误横幅（可重试；追加加载失败时保留已有列表，横幅叠在其上）
+        state.clawHubError?.let { error ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(R.string.market_load_failed_with_reason, error),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                TextButton(
+                    onClick = viewModel::retryClawHub,
+                    enabled = !state.clawHubLoading && !state.clawHubQueryLoading
+                ) { Text(stringResource(R.string.market_action_retry)) }
+            }
+        }
+
+        when {
+            state.clawHubLoading && state.clawHubSkills.isEmpty() -> {
+                MarketEmptyState(hint = stringResource(R.string.market_clawhub_loading))
+            }
+            state.clawHubSkills.isEmpty() && state.clawHubError == null -> {
+                MarketEmptyState(
+                    hint = if (state.clawHubSearchActive) {
+                        stringResource(R.string.market_clawhub_no_results, state.clawHubQuery.trim())
+                    } else {
+                        stringResource(R.string.market_clawhub_empty_trending)
+                    }
+                )
+            }
+            state.clawHubSkills.isNotEmpty() -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(state.clawHubSkills, key = { it.key }) { entry ->
+                        ClawHubSkillCard(entry, state, viewModel)
+                    }
+                    if (state.clawHubHasMore) {
+                        item(key = "clawhub-load-more") {
+                            OutlinedButton(
+                                onClick = viewModel::loadMoreClawHub,
+                                enabled = !state.clawHubLoading,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (state.clawHubLoading) {
+                                        stringResource(R.string.market_loading)
+                                    } else {
+                                        stringResource(R.string.market_clawhub_load_more)
+                                    },
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            // 空列表 + 已有错误横幅：横幅已含重试入口，不再重复空态
+        }
+    }
+}
+
+/** ClawHub 技能行：displayName + owner + 下载数 + summary 两行截断 + 徽章 + 安装按钮。 */
+@Composable
+private fun ClawHubSkillCard(
+    entry: ClawHubSource.ClawHubSkillEntry,
+    state: MarketUiState,
+    viewModel: MarketViewModel
+) {
+    val installed = state.skills.any { it.id == entry.installId }
+    val installing = state.clawHubInstallingSlug == entry.slug
+    // 计数短格式按当前显示语言分支（中文 万/亿，英文 K/M/B）
+    val lang = LocalConfiguration.current.locales[0].language
+    val downloadsText = stringResource(
+        R.string.market_clawhub_downloads,
+        formatDownloads(entry.downloads, lang)
+    )
+
+    Column {
+        MarketCard(
+            title = entry.displayName,
+            subtitle = buildString {
+                append("@${entry.owner}")
+                append(" · ").append(downloadsText)
+                if (entry.stars > 0) append(" · ★${formatDownloads(entry.stars, lang)}")
+            },
+            description = entry.summary,
+            descriptionMaxLines = 2,
+            trailing = {
+                if (installed) {
+                    MarketStatusChip(text = stringResource(R.string.market_status_installed), positive = true)
+                } else {
+                    TextButton(
+                        onClick = { viewModel.installClawHub(entry) },
+                        // 安装期间禁用所有行的安装按钮，防并发下载
+                        enabled = state.clawHubInstallingSlug == null
+                    ) {
+                        Text(
+                            if (installing) {
+                                stringResource(R.string.market_installing)
+                            } else {
+                                stringResource(R.string.market_action_install)
+                            }
+                        )
+                    }
+                }
+            }
+        )
+        if (entry.featured || entry.official) {
+            Row(
+                modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (entry.featured) {
+                    MarketStatusChip(
+                        text = stringResource(R.string.market_clawhub_featured),
+                        positive = false
+                    )
+                }
+                if (entry.official) {
+                    MarketStatusChip(
+                        text = stringResource(R.string.market_clawhub_official),
+                        positive = true
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** 搜索框 + 分类过滤 chips + 模糊建议。 */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -219,7 +476,12 @@ private fun SkillSearchAndFilter(state: MarketUiState, viewModel: MarketViewMode
         OutlinedTextField(
             value = state.skillQuery,
             onValueChange = { viewModel.setSkillQuery(it) },
-            placeholder = { Text("搜索技能 / 标签 / 描述（支持模糊匹配）", style = MaterialTheme.typography.labelMedium) },
+            placeholder = {
+                Text(
+                    stringResource(R.string.market_skills_search_hint),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium
@@ -232,7 +494,7 @@ private fun SkillSearchAndFilter(state: MarketUiState, viewModel: MarketViewMode
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    "你是不是要找：",
+                    stringResource(R.string.market_skills_suggestions),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -260,16 +522,16 @@ private fun CategoryFilterChips(
     viewModel: MarketViewModel
 ) {
     val categories = listOf(
-        "SHELL" to "Shell",
-        "FILE" to "文件",
-        "WEB" to "网络",
-        "BROWSER" to "浏览器",
-        "MEMORY" to "记忆",
-        "SYSTEM" to "系统",
-        "UI" to "UI",
-        "AGENT" to "Agent",
-        "UTILITY" to "工具",
-        "MCP" to "MCP"
+        "SHELL" to null,
+        "FILE" to R.string.market_cat_file,
+        "WEB" to R.string.market_cat_web,
+        "BROWSER" to R.string.market_cat_browser,
+        "MEMORY" to R.string.market_cat_memory,
+        "SYSTEM" to R.string.market_cat_system,
+        "UI" to null,
+        "AGENT" to null,
+        "UTILITY" to R.string.market_cat_utility,
+        "MCP" to null
     )
     androidx.compose.foundation.layout.FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -279,13 +541,18 @@ private fun CategoryFilterChips(
         FilterChip(
             selected = selected == null,
             onClick = { viewModel.setCategoryFilter(null) },
-            label = { Text("全部", style = MaterialTheme.typography.labelSmall) }
+            label = { Text(stringResource(R.string.market_cat_all), style = MaterialTheme.typography.labelSmall) }
         )
-        categories.forEach { (name, label) ->
+        categories.forEach { (name, labelRes) ->
             FilterChip(
                 selected = selected == name,
                 onClick = { viewModel.setCategoryFilter(if (selected == name) null else name) },
-                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                label = {
+                    Text(
+                        labelRes?.let { stringResource(it) } ?: name,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             )
         }
     }
@@ -308,7 +575,7 @@ private fun SkillListCard(skill: MarketSkillRow, viewModel: MarketViewModel) {
             description = skill.description,
             trailing = {
                 if (skill.builtin) {
-                    MarketStatusChip(text = "内置", positive = false)
+                    MarketStatusChip(text = stringResource(R.string.market_builtin), positive = false)
                 } else if (skill.isCrystallized) {
                     MarketCrystallizedBadge()
                 } else if (skill.isLowEnergy) {
@@ -350,37 +617,40 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            MarketHeader(
-                "MCP 不一定是服务器：STDIO 型就是一条本地命令（如 npx -y @modelcontextprotocol/server-memory），" +
-                    "由 App 拉起子进程通过 stdin/stdout 通信。添加的工具源启用后出现在 / 菜单（/mcp:<名称>）。"
-            )
+            MarketHeader(stringResource(R.string.market_mcp_header))
         }
         item {
             MarketInstallActionCard(
-                title = "添加工具源",
-                description = "远端 HTTP / SSE 或本地命令 STDIO，含 apiKey 支持；添加后自动尝试连接。"
+                title = stringResource(R.string.market_mcp_add_title),
+                description = stringResource(R.string.market_mcp_add_desc)
             ) {
-                TextButton(onClick = { showAddDialog = true }) { Text("添加") }
+                TextButton(onClick = { showAddDialog = true }) {
+                    Text(stringResource(R.string.market_action_add))
+                }
             }
         }
         item {
             MarketInstallActionCard(
-                title = "导入配置",
-                description = "粘贴社区通用 MCP 配置 JSON（{\"mcpServers\": {...}}），支持 command/args/env 与 url 两种形态。"
+                title = stringResource(R.string.market_mcp_import_card_title),
+                description = stringResource(R.string.market_mcp_import_desc)
             ) {
-                TextButton(onClick = { showImportDialog = true }) { Text("导入") }
+                TextButton(onClick = { showImportDialog = true }) {
+                    Text(stringResource(R.string.market_action_import))
+                }
             }
         }
         item {
             MarketInstallActionCard(
-                title = "从本地文件导入",
-                description = "选择设备上的 MCP 配置文件（.json，如从桌面端 Claude/Cursor 导出的 mcp.json），解析失败的条目会逐条报出原因。"
+                title = stringResource(R.string.market_mcp_import_file_title),
+                description = stringResource(R.string.market_mcp_import_file_desc)
             ) {
-                TextButton(onClick = { mcpFilePicker.launch(arrayOf("*/*")) }) { Text("选择文件") }
+                TextButton(onClick = { mcpFilePicker.launch(arrayOf("*/*")) }) {
+                    Text(stringResource(R.string.market_mcp_choose_file))
+                }
             }
         }
         item {
-            MarketHint("已添加的 MCP 工具源在「已安装管理 · MCP」中连接 / 断开 / 启停 / 删除。")
+            MarketHint(stringResource(R.string.market_mcp_manage_hint))
         }
     }
 
@@ -416,18 +686,20 @@ internal fun BrowseConnectorsTab(state: MarketUiState, viewModel: MarketViewMode
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            MarketHeader("连接器 = 对外部服务（API/SSH/数据库/网盘）的访问配置。启用的连接器出现在 / 菜单（/connector:<id>）。")
+            MarketHeader(stringResource(R.string.market_connectors_header))
         }
         item {
             MarketInstallActionCard(
-                title = "添加连接器",
-                description = "登记 id / 名称 / 类型 / 端点，保存后即可在对话中以 /connector:<id> 调用。"
+                title = stringResource(R.string.market_connectors_add_title),
+                description = stringResource(R.string.market_connectors_add_desc)
             ) {
-                TextButton(onClick = { showAddDialog = true }) { Text("添加") }
+                TextButton(onClick = { showAddDialog = true }) {
+                    Text(stringResource(R.string.market_action_add))
+                }
             }
         }
         item {
-            MarketHint("已有连接器的启停与删除在「已安装管理 · 连接器」。")
+            MarketHint(stringResource(R.string.market_connectors_manage_hint))
         }
     }
 
@@ -463,7 +735,7 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
     ) {
         // ── 魔搭源 ──
         item {
-            MarketSectionTitle("魔搭 ModelScope Skills（官方 modelscope-skills 仓库）")
+            MarketSectionTitle(stringResource(R.string.market_modelscope_title))
         }
         item {
             Row(
@@ -473,22 +745,33 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
                 OutlinedTextField(
                     value = state.modelScopeQuery,
                     onValueChange = viewModel::filterModelScope,
-                    label = { Text("过滤技能") },
+                    label = { Text(stringResource(R.string.market_modelscope_filter)) },
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )
                 TextButton(onClick = viewModel::loadModelScopeSkills) {
-                    Text(if (state.modelScopeLoading) "加载中…" else "刷新")
+                    Text(
+                        if (state.modelScopeLoading) {
+                            stringResource(R.string.market_loading)
+                        } else {
+                            stringResource(R.string.market_action_refresh)
+                        }
+                    )
                 }
             }
         }
         state.modelScopeError?.let { error ->
             item {
-                MarketCard(title = "魔搭加载失败", subtitle = null, description = error, trailing = null)
+                MarketCard(
+                    title = stringResource(R.string.market_modelscope_error_title),
+                    subtitle = null,
+                    description = error,
+                    trailing = null
+                )
             }
         }
         if (state.modelScopeLoading && state.modelScopeSkills.isEmpty()) {
-            item { MarketHint("正在拉取仓库技能目录（GitHub API）…") }
+            item { MarketHint(stringResource(R.string.market_modelscope_loading)) }
         }
         items(
             state.modelScopeSkills,
@@ -501,12 +784,15 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
                 description = skill.description,
                 trailing = {
                     if (installed) {
-                        MarketStatusChip(text = "已安装", positive = true)
+                        MarketStatusChip(
+                            text = stringResource(R.string.market_status_installed),
+                            positive = true
+                        )
                     } else {
                         TextButton(
                             onClick = { viewModel.installModelScopeSkill(skill) },
                             enabled = !state.busy
-                        ) { Text("安装") }
+                        ) { Text(stringResource(R.string.market_action_install)) }
                     }
                 }
             )
@@ -514,7 +800,7 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
 
         // ── GitHub 源 ──
         item {
-            MarketSectionTitle("GitHub 仓库搜索（含 apex-skill-v1 manifest 的仓库可一键安装）")
+            MarketSectionTitle(stringResource(R.string.market_github_title))
         }
         item {
             Row(
@@ -524,7 +810,7 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
                 OutlinedTextField(
                     value = state.githubQuery,
                     onValueChange = viewModel::updateGithubQuery,
-                    label = { Text("仓库名 / 关键词") },
+                    label = { Text(stringResource(R.string.market_github_query_label)) },
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )
@@ -532,13 +818,24 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
                     onClick = viewModel::searchGithub,
                     enabled = !state.githubSearching && state.githubQuery.isNotBlank()
                 ) {
-                    Text(if (state.githubSearching) "搜索中…" else "搜索")
+                    Text(
+                        if (state.githubSearching) {
+                            stringResource(R.string.market_searching)
+                        } else {
+                            stringResource(R.string.market_action_search)
+                        }
+                    )
                 }
             }
         }
         state.githubError?.let { error ->
             item {
-                MarketCard(title = "GitHub 搜索失败", subtitle = null, description = error, trailing = null)
+                MarketCard(
+                    title = stringResource(R.string.market_github_error_title),
+                    subtitle = null,
+                    description = error,
+                    trailing = null
+                )
             }
         }
         items(
@@ -553,7 +850,7 @@ internal fun BrowseIntegrationsTab(state: MarketUiState, viewModel: MarketViewMo
                     TextButton(
                         onClick = { viewModel.installGithubRepo(hit.fullName) },
                         enabled = !state.busy
-                    ) { Text("安装") }
+                    ) { Text(stringResource(R.string.market_action_install)) }
                 }
             )
         }

@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.market
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.tools.ToolCircuitBreaker
@@ -7,6 +8,7 @@ import com.apex.agent.core.tools.ToolTraceRecorder
 import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.connector.ConnectorRegistry
+import com.apex.agent.core.tools.marketplace.ClawHubSource
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
 import com.apex.agent.core.tools.mcp.McpConfigImport
 import com.apex.agent.core.tools.mcp.McpManager
@@ -17,6 +19,8 @@ import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.marketplace.MarketInstallManager
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
 import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.ui.language.LanguageManager
+import com.apex.agent.R
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -29,13 +33,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-/** 市场五个页签（两个顶栏视图共享同一套子导航） */
-enum class MarketTab(val label: String) {
-    PLUGINS("插件"),
-    SKILLS("Skills"),
-    MCP("MCP"),
-    CONNECTORS("连接器"),
-    INTEGRATIONS("集成")
+/** 市场五个页签（两个顶栏视图共享同一套子导航）—— label 为资源 id，composable 侧 stringResource 取词。 */
+enum class MarketTab(@StringRes val labelRes: Int) {
+    PLUGINS(R.string.market_tab_plugins),
+    SKILLS(R.string.market_tab_skills),
+    MCP(R.string.market_tab_mcp),
+    CONNECTORS(R.string.market_tab_connectors),
+    INTEGRATIONS(R.string.market_tab_integrations)
 }
 
 /**
@@ -47,9 +51,19 @@ enum class MarketTab(val label: String) {
  * 切换视图不重置子页签 —— 用户在「Skills · 市场」看完安装源，切到
  * 「已安装管理」还在 Skills 分类下，上下文不断裂。
  */
-enum class MarketScope(val label: String) {
-    BROWSE("市场"),
-    INSTALLED("已安装管理")
+enum class MarketScope(@StringRes val labelRes: Int) {
+    BROWSE(R.string.market_scope_browse),
+    INSTALLED(R.string.market_scope_installed)
+}
+
+/**
+ * 市场 · Skills 页签的仓库源切换：
+ * - [LOCAL] —— 本地技能（已安装 + 内置模板 + 四个本地安装入口）；
+ * - [CLAWHUB] —— ClawHub 技能仓库（clawhub.ai：浏览热门 / 搜索 / 真实下载安装）。
+ */
+enum class SkillRepoSource(@StringRes val labelRes: Int) {
+    LOCAL(R.string.market_skill_source_local),
+    CLAWHUB(R.string.market_skill_source_clawhub)
 }
 
 // ═══ UI 行数据（避免界面直接依赖各注册表内部类型）═══
@@ -98,7 +112,9 @@ data class MarketMcpRow(
     val endpoint: String,
     val transport: McpTransport,
     val enabled: Boolean,
-    val connected: Boolean
+    val connected: Boolean,
+    /** 内置服务器（BUILTIN 进程内 transport，如内置 GitHub）：不可删除。 */
+    val builtin: Boolean = false
 )
 
 data class MarketPluginRow(
@@ -130,6 +146,21 @@ data class MarketUiState(
     val githubHits: List<MarketInstallManager.GitHubRepoHit> = emptyList(),
     val githubSearching: Boolean = false,
     val githubError: String? = null,
+    // Skills：ClawHub 技能仓库（源切换 + 列表/搜索/安装状态）
+    val skillSource: SkillRepoSource = SkillRepoSource.LOCAL,
+    val clawHubSkills: List<ClawHubSource.ClawHubSkillEntry> = emptyList(),
+    /** 首次/刷新加载中（trending 或翻页）。 */
+    val clawHubLoading: Boolean = false,
+    val clawHubError: String? = null,
+    val clawHubQuery: String = "",
+    /** 关键词搜索请求中（与列表加载区分，避免双重 loading）。 */
+    val clawHubQueryLoading: Boolean = false,
+    /** 正在安装的技能 slug（行级 busy；null = 空闲，非 null 时禁用其它安装按钮防并发）。 */
+    val clawHubInstallingSlug: String? = null,
+    /** 是否还有下一页（「加载更多」按钮可见性）。 */
+    val clawHubHasMore: Boolean = false,
+    /** 当前列表是否为搜索结果（控制「返回热门」提示）。 */
+    val clawHubSearchActive: Boolean = false,
     // ── v2 认知市场增强 ──
     /** 当前选中分类过滤（null = 全部）。镜像 ToolCategory 枚举名。 */
     val categoryFilter: String? = null,
@@ -172,6 +203,9 @@ class MarketViewModel @Inject constructor(
     private val pluginManager: PluginManager,
     private val installManager: MarketInstallManager,
     private val modelScopeSource: ModelScopeSource,
+    private val clawHubSource: ClawHubSource,
+    // 语言切换：VM 侧消息（snackbar）按当前语言取词
+    private val languageManager: LanguageManager,
     // ── v2 认知市场：注入 cs-mem + 工具分析四件套（均为 @Singleton）──
     private val memoryGraphStore: MemoryGraphStore,
     private val usageTracker: ToolUsageTracker,
@@ -190,6 +224,15 @@ class MarketViewModel @Inject constructor(
     /** 魔搭全量列表（过滤基于全量，避免在已过滤结果上二次过滤后无法还原）。 */
     private var allModelScopeSkills: List<ModelScopeSource.ModelScopeSkill> = emptyList()
 
+    /** ClawHub 当前页偏移（加载更多时 offset += 一页）。 */
+    private var clawHubOffset = 0
+
+    /** ClawHub 当前是否处于搜索结果模式（重试时区分走搜索还是热门）。 */
+    private var clawHubSearchMode = false
+
+    /** 当前搜索结果集对应的查询词（翻页/重试用，避免用户改了输入框但未点搜索时错页）。 */
+    private var clawHubSearchQuery = ""
+
     init { refresh() }
 
     /** 全量刷新（IO 线程）：技能/MCP/连接器/插件快照 + cs-mem 健康数据。保留集成源列表避免安装后列表闪失。 */
@@ -206,6 +249,15 @@ class MarketViewModel @Inject constructor(
                 githubHits = state.githubHits,
                 githubSearching = state.githubSearching,
                 githubError = state.githubError,
+                skillSource = state.skillSource,
+                clawHubSkills = state.clawHubSkills,
+                clawHubLoading = state.clawHubLoading,
+                clawHubError = state.clawHubError,
+                clawHubQuery = state.clawHubQuery,
+                clawHubQueryLoading = state.clawHubQueryLoading,
+                clawHubInstallingSlug = state.clawHubInstallingSlug,
+                clawHubHasMore = state.clawHubHasMore,
+                clawHubSearchActive = state.clawHubSearchActive,
                 categoryFilter = state.categoryFilter,
                 skillQuery = state.skillQuery,
                 skillSuggestions = state.skillSuggestions,
@@ -262,7 +314,8 @@ class MarketViewModel @Inject constructor(
                     endpoint = it.endpointSummary(),
                     transport = it.transport,
                     enabled = it.enabled,
-                    connected = it.name in connected
+                    connected = it.name in connected,
+                    builtin = it.transport == McpTransport.BUILTIN
                 )
             }
             val connectors = connectorRegistry.getAll()
@@ -302,7 +355,13 @@ class MarketViewModel @Inject constructor(
     fun uninstallSkill(skillId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val ok = skillRegistry.uninstall(skillId)
-            message(if (ok) "已卸载技能：$skillId" else "未找到技能：$skillId")
+            message(
+                if (ok) {
+                    languageManager.getString(R.string.market_skill_uninstalled).format(skillId)
+                } else {
+                    languageManager.getString(R.string.market_skill_not_found).format(skillId)
+                }
+            )
             refresh()
         }
     }
@@ -311,7 +370,9 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             installManager.installSkillTemplate(templateId).fold(
                 onSuccess = { message(it) },
-                onFailure = { message("安装失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_install_failed).format(it.message ?: ""))
+                }
             )
             refresh()
         }
@@ -322,7 +383,9 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             installManager.installSkillFromJson(content).fold(
                 onSuccess = { message(it) },
-                onFailure = { message("导入失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_import_failed).format(it.message ?: ""))
+                }
             )
             refresh()
         }
@@ -333,7 +396,9 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             installManager.installSkillFromUrl(url).fold(
                 onSuccess = { message(it) },
-                onFailure = { message("导入失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_import_failed).format(it.message ?: ""))
+                }
             )
             refresh()
         }
@@ -349,7 +414,9 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             installManager.installSkillFromFile(uri).fold(
                 onSuccess = { message(it) },
-                onFailure = { message(it.message ?: "本地导入失败") }
+                onFailure = {
+                    message(it.message ?: languageManager.getString(R.string.market_local_import_failed))
+                }
             )
             refresh()
         }
@@ -363,7 +430,12 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             installManager.readTextFile(uri).fold(
                 onSuccess = { text -> importMcpConfig(text) },
-                onFailure = { message("读取文件失败：${it.message}") }
+                onFailure = {
+                    message(
+                        languageManager.getString(R.string.market_read_file_failed)
+                            .format(it.message ?: "")
+                    )
+                }
             )
         }
     }
@@ -381,11 +453,13 @@ class MarketViewModel @Inject constructor(
             val name = config.name.trim()
             mcpManager.addServer(config.copy(name = name)).fold(
                 onSuccess = {
-                    message("已添加 MCP 工具源：$name（连接后其工具注入对话）")
+                    message(languageManager.getString(R.string.market_mcp_added).format(name))
                     mcpManager.connect(name)   // 添加后立即尝试连接
                     refresh()
                 },
-                onFailure = { message("添加失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
             )
         }
     }
@@ -399,11 +473,15 @@ class MarketViewModel @Inject constructor(
     fun importMcpConfig(text: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val parsed = McpConfigImport.parse(text)
+            // 分隔符 / “名称：原因”模板按语言取（en 用 "; " 与 ": "）
+            val sep = languageManager.getString(R.string.market_list_sep)
+            val nameReason = { serverName: String, reason: String ->
+                languageManager.getString(R.string.market_name_reason).format(serverName, reason)
+            }
             if (parsed.configs.isEmpty()) {
-                message(
-                    "未导入任何条目：" + parsed.errors.joinToString("；") { "${it.serverName}：${it.reason}" }
-                        .ifBlank { "配置为空" }
-                )
+                val detail = parsed.errors.joinToString(sep) { nameReason(it.serverName, it.reason) }
+                    .ifBlank { languageManager.getString(R.string.market_mcp_import_empty) }
+                message(languageManager.getString(R.string.market_mcp_import_none).format(detail))
                 return@launch
             }
             val added = mutableListOf<String>()
@@ -413,15 +491,24 @@ class MarketViewModel @Inject constructor(
                 val unique = if (exists) config.copy(name = "${config.name}-${System.currentTimeMillis()}") else config
                 mcpManager.addServer(unique).fold(
                     onSuccess = { added += unique.name },
-                    onFailure = { failed += "${unique.name}（${it.message}）" }
+                    onFailure = { failed += nameReason(unique.name, it.message ?: "") }
                 )
             }
             val summary = buildString {
-                append("已导入 ${added.size} 个 MCP 工具源")
-                if (failed.isNotEmpty()) append("，失败 ${failed.size}：${failed.joinToString("；")}")
+                append(languageManager.getString(R.string.market_mcp_imported_count).format(added.size))
+                if (failed.isNotEmpty()) {
+                    append(
+                        languageManager.getString(R.string.market_mcp_import_failed_part)
+                            .format(failed.size, failed.joinToString(sep))
+                    )
+                }
                 if (parsed.errors.isNotEmpty()) {
-                    append("；跳过 ${parsed.errors.size}：")
-                    append(parsed.errors.joinToString("；") { "${it.serverName}：${it.reason}" })
+                    append(
+                        languageManager.getString(R.string.market_mcp_import_skipped_part).format(
+                            parsed.errors.size,
+                            parsed.errors.joinToString(sep) { nameReason(it.serverName, it.reason) }
+                        )
+                    )
                 }
             }
             message(summary)
@@ -433,10 +520,18 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             mcpManager.setEnabled(name, enabled).fold(
                 onSuccess = {
-                    message(if (enabled) "已启用 $name" else "已禁用并断开 $name")
+                    message(
+                        if (enabled) {
+                            languageManager.getString(R.string.market_mcp_enabled).format(name)
+                        } else {
+                            languageManager.getString(R.string.market_mcp_disabled_disconnected).format(name)
+                        }
+                    )
                     refresh()
                 },
-                onFailure = { message("操作失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_action_failed).format(it.message ?: ""))
+                }
             )
         }
     }
@@ -446,8 +541,12 @@ class MarketViewModel @Inject constructor(
             _uiState.update { it.copy(mcpConnecting = name) }
             try {
                 mcpManager.connect(name).fold(
-                    onSuccess = { message("MCP 已连接：$name") },
-                    onFailure = { message("连接失败：${it.message}") }
+                    onSuccess = {
+                        message(languageManager.getString(R.string.market_mcp_connected).format(name))
+                    },
+                    onFailure = {
+                        message(languageManager.getString(R.string.market_connect_failed).format(it.message ?: ""))
+                    }
                 )
             } finally {
                 _uiState.update { it.copy(mcpConnecting = null) }
@@ -459,7 +558,7 @@ class MarketViewModel @Inject constructor(
     fun disconnectMcp(name: String) {
         viewModelScope.launch {
             mcpManager.disconnect(name)
-            message("已断开：$name")
+            message(languageManager.getString(R.string.market_mcp_disconnected).format(name))
             refresh()
         }
     }
@@ -467,7 +566,7 @@ class MarketViewModel @Inject constructor(
     fun removeMcp(name: String) {
         viewModelScope.launch {
             mcpManager.removeServer(name)
-            message("已删除 MCP 服务器：$name")
+            message(languageManager.getString(R.string.market_mcp_removed).format(name))
             refresh()
         }
     }
@@ -480,8 +579,12 @@ class MarketViewModel @Inject constructor(
             connectorRegistry.add(
                 ConnectorDef(id = trimmedId, name = name.trim(), type = type, endpoint = endpoint.trim())
             ).fold(
-                onSuccess = { message("已添加连接器：$trimmedId（/ 菜单与 /connector:$trimmedId 可用）") },
-                onFailure = { message("添加失败：${it.message}") }
+                onSuccess = {
+                    message(languageManager.getString(R.string.market_connector_added).format(trimmedId))
+                },
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
             )
             refresh()
         }
@@ -497,7 +600,7 @@ class MarketViewModel @Inject constructor(
     fun removeConnector(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             connectorRegistry.remove(id)
-            message("已删除连接器：$id")
+            message(languageManager.getString(R.string.market_connector_removed).format(id))
             refresh()
         }
     }
@@ -511,7 +614,7 @@ class MarketViewModel @Inject constructor(
             } ?: return@launch
             // bindService 需在 Looper 线程调用（Context 契约），回调本身回主线程
             withContext(Dispatchers.Main) { pluginManager.loadPlugin(info) }
-            message("插件加载请求已发出：${info.label}")
+            message(languageManager.getString(R.string.market_plugin_load_requested).format(info.label))
             refresh()
         }
     }
@@ -520,7 +623,7 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             // unbindService 同样需在主线程执行
             withContext(Dispatchers.Main) { pluginManager.unloadPlugin(packageName) }
-            message("已卸载插件：$packageName")
+            message(languageManager.getString(R.string.market_plugin_unloaded).format(packageName))
             refresh()
         }
     }
@@ -563,7 +666,12 @@ class MarketViewModel @Inject constructor(
             _uiState.update { it.copy(busy = true) }
             installManager.installModelScopeSkill(skill).fold(
                 onSuccess = { message(it) },
-                onFailure = { message("魔搭安装失败：${it.message}") }
+                onFailure = {
+                    message(
+                        languageManager.getString(R.string.market_modelscope_install_failed)
+                            .format(it.message ?: "")
+                    )
+                }
             )
             _uiState.update { it.copy(busy = false) }
             refresh()
@@ -598,10 +706,155 @@ class MarketViewModel @Inject constructor(
             _uiState.update { it.copy(busy = true) }
             installManager.installSkillFromRepoInput(input).fold(
                 onSuccess = { message(it) },
-                onFailure = { message("安装失败：${it.message}") }
+                onFailure = {
+                    message(languageManager.getString(R.string.market_install_failed).format(it.message ?: ""))
+                }
             )
             _uiState.update { it.copy(busy = false) }
             refresh()
+        }
+    }
+
+    // ═══ Skills 页签：ClawHub 技能仓库 ═══
+
+    /** 切换 Skills 页签的仓库源（本地 ⇄ ClawHub）。 */
+    fun selectSkillSource(source: SkillRepoSource) =
+        _uiState.update { it.copy(skillSource = source) }
+
+    fun updateClawHubQuery(query: String) =
+        _uiState.update { it.copy(clawHubQuery = query) }
+
+    /** 加载 ClawHub 热门列表（第一页；也用作「返回热门」）。 */
+    fun loadClawHubTrending() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(clawHubLoading = true, clawHubError = null) }
+            clawHubSearchMode = false
+            clawHubOffset = 0
+            clawHubSource.listTrending(limit = ClawHubSource.TRENDING_PAGE_SIZE, offset = 0).fold(
+                onSuccess = { page ->
+                    clawHubOffset = ClawHubSource.TRENDING_PAGE_SIZE
+                    _uiState.update {
+                        it.copy(
+                            clawHubSkills = page.entries,
+                            clawHubHasMore = page.hasMore,
+                            clawHubSearchActive = false
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(clawHubSkills = emptyList(), clawHubError = e.message) }
+                }
+            )
+            _uiState.update { it.copy(clawHubLoading = false) }
+        }
+    }
+
+    /** 关键词搜索（空关键词退回热门列表，与搜索端点「必须有关键词」的行为对齐）。 */
+    fun searchClawHub() {
+        val query = _uiState.value.clawHubQuery.trim()
+        if (query.isEmpty()) {
+            loadClawHubTrending()
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(clawHubQueryLoading = true, clawHubError = null) }
+            clawHubSearchMode = true
+            clawHubSearchQuery = query
+            clawHubOffset = 0
+            clawHubSource.search(query, limit = ClawHubSource.DEFAULT_PAGE_SIZE, offset = 0).fold(
+                onSuccess = { page ->
+                    clawHubOffset = ClawHubSource.DEFAULT_PAGE_SIZE
+                    _uiState.update {
+                        it.copy(
+                            clawHubSkills = page.entries,
+                            clawHubHasMore = page.hasMore,
+                            clawHubSearchActive = true
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(clawHubSkills = emptyList(), clawHubError = e.message) }
+                }
+            )
+            _uiState.update { it.copy(clawHubQueryLoading = false) }
+        }
+    }
+
+    /**
+     * 加载下一页（追加并按 owner/slug 去重；热门与搜索模式共用）。
+     *
+     * 服务端 offset 翻页实测暂不生效（返回重复页）：去重后 0 新条目时
+     * 自动收起「加载更多」，避免无限空点；若服务端将来修复 offset，
+     * 本逻辑无需改动即自动恢复真分页。
+     */
+    fun loadMoreClawHub() {
+        val current = _uiState.value
+        if (current.clawHubLoading || current.clawHubQueryLoading || !current.clawHubHasMore) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(clawHubLoading = true) }
+            val pageSize = if (clawHubSearchMode) {
+                ClawHubSource.DEFAULT_PAGE_SIZE
+            } else {
+                ClawHubSource.TRENDING_PAGE_SIZE
+            }
+            val result = if (clawHubSearchMode) {
+                clawHubSource.search(
+                    clawHubSearchQuery,
+                    limit = pageSize,
+                    offset = clawHubOffset
+                )
+            } else {
+                clawHubSource.listTrending(
+                    limit = pageSize,
+                    offset = clawHubOffset
+                )
+            }
+            result.fold(
+                onSuccess = { page ->
+                    clawHubOffset += pageSize
+                    _uiState.update { state ->
+                        val seen = state.clawHubSkills.map { it.key }.toHashSet()
+                        val fresh = page.entries.filter { it.key !in seen }
+                        state.copy(
+                            clawHubSkills = state.clawHubSkills + fresh,
+                            // 全重复页（服务端 offset 未生效）→ 收起加载更多
+                            clawHubHasMore = page.hasMore && fresh.isNotEmpty()
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    // 追加失败：保留已有列表，仅提示错误，不动页码
+                    _uiState.update { it.copy(clawHubError = e.message) }
+                }
+            )
+            _uiState.update { it.copy(clawHubLoading = false) }
+        }
+    }
+
+    /** 失败重试（按当前模式走热门或搜索）。 */
+    fun retryClawHub() {
+        if (clawHubSearchMode) searchClawHub() else loadClawHubTrending()
+    }
+
+    /** 从 ClawHub 安装（下载 ZIP → 转 prompt 型技能 → SkillRegistry）。 */
+    fun installClawHub(entry: ClawHubSource.ClawHubSkillEntry) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(clawHubInstallingSlug = entry.slug) }
+            try {
+                installManager.installClawHubSkill(entry).fold(
+                    onSuccess = { message(it) },
+                    onFailure = {
+                        message(
+                            languageManager.getString(R.string.market_clawhub_install_failed)
+                                .format(it.message ?: "")
+                        )
+                    }
+                )
+            } finally {
+                // 无论成败都复位行级 busy 并刷新已安装列表（「已安装」Chip 依据 skills 快照）
+                _uiState.update { it.copy(clawHubInstallingSlug = null) }
+                refresh()
+            }
         }
     }
 

@@ -21,12 +21,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.task.AgentTask
 import com.apex.agent.core.engine.task.TaskStatus
+import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassStyle
 
@@ -43,7 +45,9 @@ import com.apex.agent.ui.glass.GlassStyle
 @Composable
 fun TaskStatusCard(
     task: AgentTask,
-    statusLabel: (TaskStatus) -> String,
+    // i18n：状态文案改为 @StringRes 映射，组合内 stringResource 取词
+    //（调用方 AgentChatScreen.statusLabelResOf 提供资源 id）。
+    statusLabelRes: (TaskStatus) -> Int,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
@@ -74,7 +78,7 @@ fun TaskStatusCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = statusLabel(task.status),
+                    text = stringResource(statusLabelRes(task.status)),
                     style = MaterialTheme.typography.labelMedium,
                     color = statusColor(task.status),
                     fontWeight = FontWeight.Medium
@@ -104,7 +108,7 @@ fun TaskStatusCard(
             if (task.retryCount > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "已重试 ${task.retryCount} 次",
+                    text = stringResource(R.string.chat_retried_n, task.retryCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -130,28 +134,28 @@ fun TaskStatusCard(
                     // 执行中：暂停 + 取消
                     TaskStatus.RUNNING, TaskStatus.PLANNING, TaskStatus.WAITING_USER -> {
                         IconButton(onClick = onPause) {
-                            Icon(Icons.Filled.Pause, contentDescription = "暂停任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.Pause, contentDescription = stringResource(R.string.chat_cd_pause_task), modifier = Modifier.width(18.dp))
                         }
                         IconButton(onClick = onCancel) {
-                            Icon(Icons.Filled.Stop, contentDescription = "取消任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.Stop, contentDescription = stringResource(R.string.chat_cd_cancel_task), modifier = Modifier.width(18.dp))
                         }
                     }
                     // 暂停：继续 + 取消
                     TaskStatus.PAUSED, TaskStatus.RECOVERING -> {
                         IconButton(onClick = onResume) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = "继续任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.chat_cd_resume_task), modifier = Modifier.width(18.dp))
                         }
                         IconButton(onClick = onCancel) {
-                            Icon(Icons.Filled.Stop, contentDescription = "取消任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.Stop, contentDescription = stringResource(R.string.chat_cd_cancel_task), modifier = Modifier.width(18.dp))
                         }
                     }
                     // 失败：重试 + 取消（放弃）
                     TaskStatus.FAILED -> {
                         IconButton(onClick = onRetry) {
-                            Icon(Icons.Filled.Refresh, contentDescription = "重试任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.chat_cd_retry_task), modifier = Modifier.width(18.dp))
                         }
                         IconButton(onClick = onCancel) {
-                            Icon(Icons.Filled.Stop, contentDescription = "放弃任务", modifier = Modifier.width(18.dp))
+                            Icon(Icons.Filled.Stop, contentDescription = stringResource(R.string.chat_cd_abandon_task), modifier = Modifier.width(18.dp))
                         }
                     }
                     else -> Unit // 终态无按钮（卡片本身也不渲染）

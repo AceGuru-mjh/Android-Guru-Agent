@@ -8,6 +8,7 @@ import com.apex.agent.core.llm.LlmResponse
 import com.apex.agent.core.llm.LlmStreamChunk
 import com.apex.agent.core.llm.ToolDefinition
 import com.apex.agent.core.llm.WebSearchMode
+import com.apex.agent.ui.language.LanguageManager
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -40,7 +41,8 @@ import kotlinx.coroutines.launch
  */
 class DynamicLlmClient(
     private val repo: SettingsRepository,
-    private val chatToolkit: ChatToolkitStore? = null
+    private val chatToolkit: ChatToolkitStore? = null,
+    private val lang: LanguageManager? = null
 ) : LlmClient {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -78,7 +80,7 @@ class DynamicLlmClient(
     }
 
     private fun buildDelegate(config: LlmConfig): LlmClient =
-        if (config.isValid) LlmClientFactory.create(config) else NoOpLlmClient()
+        if (config.isValid) LlmClientFactory.create(config) else NoOpLlmClient(lang)
 
     override suspend fun chat(
         messages: List<LlmMessage>,

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 终端屏字符串（中文）—— 英文默认在 values/strings_terminal.xml；
+     语言切换经 LanguageManager + MainActivity attachBaseContext/recreate 生效。 -->
+<resources>
+
+    <!-- ═══ TerminalScreen ═══ -->
+    <string name="term_title">终端</string>
+    <string name="term_cd_nav">打开导航</string>
+    <string name="term_cd_env_center">环境中心</string>
+    <string name="term_cd_settings">终端设置</string>
+    <string name="term_new_session_title">新建终端会话</string>
+    <string name="term_new_session_ubuntu_desc">Ubuntu 会话提供完整 Linux 开发环境（apt / bash / 工具链）；rootfs 随 APK 内置（完整 Ubuntu，~300MB+ 档案），首次使用离线解包约 2~5 分钟，进度在横幅显示。</string>
+    <string name="term_ubuntu_session">Ubuntu 会话</string>
+    <string name="term_cd_new_session">新建会话</string>
+    <string name="term_cd_close_session">关闭会话</string>
+    <string name="term_no_session">未连接会话</string>
+    <string name="term_waiting_input">⌨ 等待输入</string>
+    <string name="term_banner_failed_title">Ubuntu 环境异常</string>
+    <string name="term_banner_not_installed_title">Ubuntu 开发环境未解包</string>
+    <string name="term_banner_failed_desc">上次解包/引导失败，可重试</string>
+    <string name="term_banner_not_installed_desc">完整的 Linux 环境：gcc / python3 / git / vim / man 开箱即用（内置离线解包，约 2~5 分钟）</string>
+    <string name="term_retry">重试</string>
+    <string name="term_unpack">解包</string>
+    <string name="term_env_center">环境中心</string>
+    <string name="term_installing_banner">Ubuntu rootfs 离线解包中…（约 2~5 分钟，可后台等待）</string>
+    <string name="term_bootstrapping_banner">Ubuntu 初始化：apt 源 / 网络 / 基础包…（离线时自动降级可用）</string>
+    <string name="term_converging_banner">Ubuntu 环境收敛中…</string>
+    <string name="term_settings_title">终端设置</string>
+    <string name="term_appearance">终端外观</string>
+    <string name="term_font_size">字号</string>
+    <string name="term_monochrome">单色模式</string>
+    <string name="term_keybar">键盘辅助行（ESC / CTRL / 方向键）</string>
+    <string name="term_feedback">反馈</string>
+    <string name="term_vibrate_on_bell">响铃时振动（BEL）</string>
+    <string name="term_vibrate_desc">shell 发出 BEL（补全失败、Ctrl+G、命令报错）时振动一下。</string>
+    <string name="term_keep_screen_on">保持屏幕常亮</string>
+    <string name="term_keep_screen_on_desc">看长任务输出（编译 / apt / 日志）时不被息屏打断。</string>
+    <string name="term_blacklist_title">命令黑名单 / 白名单</string>
+    <string name="term_blacklist_desc">白名单非空时仅允许其中命令；黑名单中的命令始终禁止。按命令首段（如 rm / adb）匹配。</string>
+    <string name="term_blacklist">黑名单</string>
+    <string name="term_whitelist">白名单</string>
+    <string name="term_env_hint">环境解包与管理（内置 Ubuntu / 依赖工具链）在顶栏图层图标的环境中心。</string>
+    <string name="term_close">关闭</string>
+    <string name="term_cmd_hint">如 rm / adb / format</string>
+    <string name="term_add">添加</string>
+    <string name="term_remove">移除</string>
+
+    <!-- ═══ EnvironmentCenterSheet ═══ -->
+    <string name="term_env_center_title">环境中心</string>
+    <string name="term_env_center_desc">环境随 APK 内置（完整 Ubuntu，rootfs 档案 ~300MB+）—— 首次使用离线解包约 2~5 分钟（解压后占用 ~1GB 存储，进度实时显示）；解包与删除均可逆，用户数据（/root、workspace）保留。</string>
+    <string name="term_android_shell_desc">设备自带命令行环境（mksh / toybox：ls、grep、am、pm 等）。无需下载，随时可用；不含 apt / bash 完整工具链。</string>
+    <string name="term_builtin">内置</string>
+    <string name="term_deps_title">环境依赖（Ubuntu 内）</string>
+    <string name="term_use_mirror">使用镜像源</string>
+    <string name="term_mirror_desc">国内镜像加速（清华源）</string>
+    <string name="term_install_all">一键安装全部</string>
+    <string name="term_android_deps">Android 依赖</string>
+    <string name="term_install_individually">可独立安装：</string>
+    <string name="term_remove_ubuntu_title">删除 Ubuntu 环境？</string>
+    <string name="term_remove_ubuntu_text">将删除解包后的 rootfs（约 1GB+）与解包缓存，释放存储。内置安装包随 APK 保留，可随时重新离线解包；用户数据（guest /root 与 workspace）保留。正在运行的 Ubuntu 会话需先全部关闭。</string>
+    <string name="term_delete">删除</string>
+    <string name="term_cancel">取消</string>
+    <string name="term_ubuntu_card_title">Ubuntu 24.04 LTS（内置）</string>
+    <string name="term_ubuntu_card_desc">完整 Linux 开发环境（apt / bash / python / 构建工具链），PRoot 免 root 运行。官方 rootfs 随 APK 内置（构建期 SHA256 校验），首次使用离线解包；apt 引导需网络，离线时自动降级可用。</string>
+    <string name="term_disk_usage">占用 %1$s</string>
+    <string name="term_progress_bytes">  （%1$s / %2$s）</string>
+    <string name="term_last_error">上次错误：%1$s</string>
+    <string name="term_bootstrap_note">apt 引导未完成（%1$s）—— 环境可用，apt 操作将在使用时真实报错；网络恢复后可修复。</string>
+    <string name="term_unpack_built_in">解包内置环境（离线，约 2~5 分钟）</string>
+    <string name="term_unpacking">rootfs 解包/校验中…</string>
+    <string name="term_bootstrapping">初始化：apt 源 / 网络 / 基础包…</string>
+    <string name="term_converging">状态收敛中…</string>
+    <string name="term_finish_bootstrap">完成初始化（apt 引导）</string>
+    <string name="term_new_ubuntu_session">新建 Ubuntu 会话</string>
+    <string name="term_repair">修复</string>
+    <string name="term_retry_install">重试安装</string>
+    <string name="term_phase_not_installed">未解包</string>
+    <string name="term_phase_installing">解包/校验中</string>
+    <string name="term_phase_rootfs_ready">待初始化</string>
+    <string name="term_phase_bootstrapping">初始化中</string>
+    <string name="term_phase_ready">已就绪</string>
+    <string name="term_phase_recovering">恢复中</string>
+    <string name="term_phase_failed">异常</string>
+    <string name="term_installing">安装中…</string>
+    <string name="term_install">安装</string>
+
+    <!-- ═══ T85 Console: top bar subtitle / env panel / busy strip / session dialog ═══ -->
+    <string name="term_env_preparing">环境准备中 %1$d%%</string>
+    <string name="term_env_error_short">环境异常</string>
+    <string name="term_waiting_session">等待会话</string>
+    <string name="term_env_prep_title">Ubuntu 环境准备中</string>
+    <string name="term_env_prep_desc">完整 Linux 开发环境随应用内置 · 离线解包，无需下载</string>
+    <string name="term_step_unpack">解压内置 Ubuntu 档案</string>
+    <string name="term_step_configure">配置系统环境</string>
+    <string name="term_step_toolchain">初始化工具链</string>
+    <string name="term_starting">启动中…</string>
+    <string name="term_prep_footnote">首次准备约 2~5 分钟（约 1GB 磁盘）· 完成后自动进入终端</string>
+    <string name="term_use_android_first">先用 Android Shell</string>
+    <string name="term_env_failed_title">环境准备失败</string>
+    <string name="term_open_env_center_diag">打开环境中心诊断</string>
+    <string name="term_no_terminal_session">当前没有终端会话</string>
+    <string name="term_env_ready_hint">Ubuntu 环境已就绪 · bash / gcc / python3 / git 开箱即用</string>
+    <string name="term_busy_unpacking">Ubuntu 环境解包中 %1$d%% · 完成后可新建 Ubuntu 会话</string>
+    <string name="term_busy_bootstrap">Ubuntu 工具链初始化中…</string>
+    <string name="term_session_ubuntu_desc">完整 Linux 环境 · bash / gcc / python3 / git（推荐）</string>
+    <string name="term_session_android_desc">系统 toybox 环境 · 适合快查设备（无完整工具链）</string>
+
+    <!-- ═══ Renderer: selection toolbar / placeholders ═══ -->
+    <string name="term_not_started">终端未启动</string>
+    <string name="term_copy">复制</string>
+    <string name="term_jump_latest">↓ 跳到最新</string>
+    <string name="term_paste">粘贴</string>
+
+    <!-- ═══ ViewModel notices (LanguageManager.getString) ═══ -->
+    <string name="term_notice_ubuntu_unavailable">Ubuntu 环境不可用：%1$s</string>
+    <string name="term_notice_create_failed">会话创建失败：%1$s</string>
+    <string name="term_notice_no_session_input">没有活跃会话，输入未送达（请新建会话）</string>
+    <string name="term_notice_blocked">⛔ 命令已被黑白名单拦截：%1$s（未执行；Ctrl+C 或 Ctrl+U 清除当前行）</string>
+    <string name="term_notice_input_failed">输入失败：%1$s</string>
+    <string name="term_notice_paste_blocked">⛔ 粘贴内容首行命中黑白名单：%1$s（已拦截）</string>
+    <string name="term_notice_unpack_failed">Ubuntu 解包失败：%1$s</string>
+    <string name="term_notice_repair_ok">修复完成：环境已恢复健康</string>
+    <string name="term_notice_repair_unresolved">修复未收敛：%1$s</string>
+    <string name="term_notice_install_all_start">▶ 开始安装全部环境依赖（镜像=%1$s）…\n</string>
+    <string name="term_notice_install_all_done">\n✅ 全部依赖安装命令已执行完毕。请查看上方输出确认结果。\n</string>
+    <string name="term_notice_install_android_start">▶ 开始安装 Android 开发依赖（镜像=%1$s）…\n</string>
+    <string name="term_notice_install_android_done">\n✅ Android 开发依赖安装命令已执行完毕。\n</string>
+    <string name="term_notice_no_pty">❌ 无法创建终端会话（设备不支持 PTY）\n</string>
+    <string name="term_notice_run_failed">❌ run 失败: %1$s\n</string>
+    <string name="term_notice_wait_failed">❌ wait 失败: %1$s\n</string>
+    <string name="term_notice_wait_timeout">⚠️ 超时（120s），可能仍在后台进行。\n</string>
+    <string name="term_notice_session_gone">❌ 会话已关闭\n</string>
+    <string name="term_notice_truncated">…(已截断)\n</string>
+    <string name="term_notice_fallback_android">⚠️ Ubuntu 会话不可用 — 降级 Android shell（apt 命令可能失败）\n</string>
+</resources>

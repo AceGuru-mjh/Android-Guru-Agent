@@ -415,11 +415,17 @@ data class AgentSettings(
     // ── 界面 ──
     val themeMode: String = "system",         // system | dark | light
     val dynamicColor: Boolean = false,
-    // 预设主题配色（mint | amber | coral | violet | ocean | rose | forest）；
-    // Dynamic Color 开启时被壁纸取色覆盖。见 ui/theme/ThemePalettes.kt。
+    // 预设主题配色（mint | amber | coral | violet | ocean | rose | forest |
+    // cyan | sunset | gold | crimson）；Dynamic Color 开启时被壁纸取色覆盖。
+    // 见 ui/theme/ThemePalettes.kt。
     val accentPalette: String = "mint",
     val fontScale: Float = 1.0f,              // 0.8..1.4
     val showTimestamps: Boolean = true,
+
+    // ── 语言 / 输入行为（界面层即时消费；语言切换由 MainActivity recreate 生效）──
+    val language: String = "system",          // system | zh | en
+    val sendKeyBehavior: String = "send",      // send | newline（聊天输入框 IME 行为）
+    val showRunSummary: Boolean = false,       // 任务总结卡默认隐藏
 
     // ── 新手引导 ──
     // 首次启动展示 Onboarding（欢迎/能力/权限/模型配置四页）；

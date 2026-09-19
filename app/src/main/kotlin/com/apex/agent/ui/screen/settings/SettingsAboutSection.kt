@@ -26,8 +26,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 
 /** 项目仓库地址 —— About 区唯一对外跳转目标。 */
 private const val REPO_URL = "https://github.com/AceGuru-mjh/Android-Guru-Agent"
@@ -44,27 +46,27 @@ private val StarAmber = Color(0xFFF59E0B)
 @Composable
 internal fun AboutSection() {
     val context = LocalContext.current
+    // Toast 在非 Compose lambda 中触发：字符串上提到组合层取词
+    val noBrowserHint = stringResource(R.string.settings_about_no_browser)
     SectionCard(
-        title = "关于",
+        title = stringResource(R.string.settings_about_title),
         icon = Icons.Default.Info,
-        subtitle = "版本 / 开源组件 / 仓库",
+        subtitle = stringResource(R.string.settings_about_subtitle),
         initiallyExpanded = false
     ) {
         // 版本（BuildConfig 真实值）
-        SettingInfoRow("版本", "${com.apex.agent.BuildConfig.VERSION_NAME} (${com.apex.agent.BuildConfig.VERSION_CODE})")
-        SettingInfoRow("应用包名", com.apex.agent.BuildConfig.APPLICATION_ID)
-        SettingInfoRow("构建类型", com.apex.agent.BuildConfig.BUILD_TYPE)
+        SettingInfoRow(stringResource(R.string.settings_about_version), "${com.apex.agent.BuildConfig.VERSION_NAME} (${com.apex.agent.BuildConfig.VERSION_CODE})")
+        SettingInfoRow(stringResource(R.string.settings_about_package), com.apex.agent.BuildConfig.APPLICATION_ID)
+        SettingInfoRow(stringResource(R.string.settings_about_build_type), com.apex.agent.BuildConfig.BUILD_TYPE)
 
         // 开源组件（本项目直接引入的运行时依赖 —— 真实清单，非装饰）
         Text(
-            "开源组件",
+            stringResource(R.string.settings_about_components),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary
         )
         Text(
-            "Jetpack Compose · Hilt (Dagger) · Room · OkHttp · kotlinx.serialization · " +
-                "kotlinx.coroutines · Coil · Shizuku API · WorkManager · androidx.security " +
-                "· Haze (Liquid Glass) · Vico (图表) · EasyFloat",
+            stringResource(R.string.settings_about_components_list),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline
         )
@@ -75,7 +77,7 @@ internal fun AboutSection() {
             runCatching {
                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO_URL)))
             }.onFailure {
-                Toast.makeText(context, "未找到可打开链接的应用", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, noBrowserHint, Toast.LENGTH_SHORT).show()
             }
         }
         Button(
@@ -84,7 +86,7 @@ internal fun AboutSection() {
         ) {
             Icon(Icons.Outlined.OpenInNew, contentDescription = null)
             Spacer(Modifier.width(6.dp))
-            Text("查看 GitHub 仓库")
+            Text(stringResource(R.string.settings_about_view_repo))
         }
 
         // Star 引导小卡：整行可点击，同样跳到仓库页 —— 让用户顺手就能点 Star
@@ -104,14 +106,14 @@ internal fun AboutSection() {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "请给我项目来一个 Star，谢谢！",
+                stringResource(R.string.settings_about_star),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
 
         Text(
-            "本项目大量架构受益于开源社区（Termux、proot、Operit 等），致敬所有贡献者。",
+            stringResource(R.string.settings_about_credits),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline
         )

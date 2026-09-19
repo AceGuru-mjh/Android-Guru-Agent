@@ -26,11 +26,14 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * **"外部工具源"不一定是服务器**：MCP 官方配置里绝大多数 server 是本地命令
  * （`command` + `args` + `env`，如 `npx -y @modelcontextprotocol/server-memory`），
- * 双方通过 stdin/stdout 的换行分隔 JSON-RPC 通信。本项目因此支持三种传输：
+ * 双方通过 stdin/stdout 的换行分隔 JSON-RPC 通信。本项目因此支持四种传输：
  * - STDIO：本地子进程（见 [McpStdioTransport]）—— "MCP 不需要服务器形态"
  * - HTTP / SSE：远端端点 POST JSON-RPC（见 [McpHttpTransport]）
+ * - BUILTIN：**进程内** transport —— 宿主注入的工厂函数（见构造器
+ *   [builtinTransportFactory]），把 App 已有的能力（如 GitHub REST 直连）包装成
+ *   真 MCP 服务器，与远端/子进程走完全相同的 JSON-RPC 报文。
  *
- * 三者共用同一套 [McpTransportHandle]，上层 [McpClient] 不关心对面是进程还是服务。
+ * 四者共用同一套 [McpTransportHandle]，上层 [McpClient] 不关心对面是进程还是服务。
  *
  * 协议流程：
  * 1. initialize → 握手，交换能力信息
@@ -41,7 +44,16 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class McpClient(
     private val config: McpServerConfig,
-    private val httpClient: OkHttpClient = defaultClient()
+    private val httpClient: OkHttpClient = defaultClient(),
+    /**
+     * BUILTIN 传输的 transport 工厂（每次连接构造一个新实例）。
+     *
+     * core 模块不能依赖 app 层的具体实现（如内置 GitHub 的 GithubApiService），
+     * 因此内置服务器由宿主在构造 [McpManager] 时经 `builtinTransports` 注册，
+     * 再在 connect 时传递到这里。`null` 时 BUILTIN 配置会在首次握手报
+     * 「未注册工厂」的明确错误。其他传输形态不受影响。
+     */
+    private val builtinTransportFactory: (() -> McpTransportHandle)? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val requestId = AtomicInteger(0)
@@ -71,6 +83,11 @@ class McpClient(
     }
 
     private fun createTransport(): McpTransportHandle = when (config.transport) {
+        McpTransport.BUILTIN -> {
+            // 惰性构建：握手时才调工厂；未注册则给出明确错误而不是空指针。
+            builtinTransportFactory?.invoke()
+                ?: throw McpException("内置 MCP 服务器 '${config.name}' 未注册 transport 工厂（仅 App 预置的内置服务器可连接）")
+        }
         McpTransport.STDIO -> {
             val cmdLine = buildCommandLine()
             if (cmdLine.isEmpty()) {
@@ -379,11 +396,13 @@ data class McpServerConfig(
             .trim()
             .ifEmpty { UNCONFIGURED_COMMAND }
         McpTransport.HTTP, McpTransport.SSE -> url.ifBlank { UNCONFIGURED_URL }
+        McpTransport.BUILTIN -> BUILTIN_SUMMARY
     }
 }
 
 private const val UNCONFIGURED_COMMAND = "(未配置命令)"
 private const val UNCONFIGURED_URL = "(未配置 URL)"
+private const val BUILTIN_SUMMARY = "内置（进程内，无需配置）"
 
 /**
  * MCP 传输形态。
@@ -392,9 +411,12 @@ private const val UNCONFIGURED_URL = "(未配置 URL)"
  * - [SSE]：同端点 POST，服务端可用 `text/event-stream` 分帧回（两种分帧都兼容）；
  * - [STDIO]：**本地子进程**，双方通过 stdin/stdout 的换行分隔 JSON-RPC 通信。
  *   MCP 官方配置里绝大多数 server 其实是这种形态 —— 并不需要一个"服务器"。
+ * - [BUILTIN]：**进程内** transport —— 不 fork 进程也不走网络，由宿主注入的
+ *   工厂函数直接在 App 进程里应答 JSON-RPC（如内置 GitHub MCP 服务器）。
+ *   仅由 App 预置，用户不可自建（工厂未注册的 BUILTIN 配置会在握手时报错）。
  */
 @Serializable
-enum class McpTransport { HTTP, SSE, STDIO }
+enum class McpTransport { HTTP, SSE, STDIO, BUILTIN }
 
 data class McpCapabilities(
     val tools: Boolean = false,

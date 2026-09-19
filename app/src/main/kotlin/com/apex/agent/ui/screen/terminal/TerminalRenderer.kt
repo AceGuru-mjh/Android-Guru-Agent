@@ -52,6 +52,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.terminalemulator.RenderCell
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
@@ -385,7 +387,7 @@ fun TerminalGrid(
             if (render == null || totalRows == 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        "终端未启动",
+                        stringResource(R.string.term_not_started),
                         color = Color(0xFF5A6270),
                         fontSize = 13.sp,
                         fontFamily = FontFamily.Monospace
@@ -453,10 +455,10 @@ fun TerminalGrid(
                         TextButton(onClick = {
                             clipboard.setText(AnnotatedString(selectedText()))
                             selectionAnchor = null; selectionHead = null
-                        }) { Text("复制", fontSize = 12.sp) }
+                        }) { Text(stringResource(R.string.term_copy), fontSize = 12.sp) }
                         TextButton(onClick = {
                             selectionAnchor = null; selectionHead = null
-                        }) { Text("取消", fontSize = 12.sp, color = Color(0xFF8A93A3)) }
+                        }) { Text(stringResource(R.string.term_cancel), fontSize = 12.sp, color = Color(0xFF8A93A3)) }
                     }
                 }
 
@@ -474,7 +476,7 @@ fun TerminalGrid(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "↓ 跳到最新",
+                            stringResource(R.string.term_jump_latest),
                             fontSize = 12.sp,
                             color = TerminalTheme.cursor,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
@@ -789,7 +791,7 @@ private fun KeyToolbar(
         ToolbarKey("END") { onKey(TerminalKey.END) }
         ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
         ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
-        ToolbarKey("粘贴") { onPaste() }
+        ToolbarKey(stringResource(R.string.term_paste)) { onPaste() }
     }
 }
 

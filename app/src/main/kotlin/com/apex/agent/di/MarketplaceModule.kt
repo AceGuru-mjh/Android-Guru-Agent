@@ -1,6 +1,7 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.core.tools.marketplace.ClawHubSource
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
 import com.apex.agent.github.GithubTokenManager
 import dagger.Module
@@ -26,5 +27,15 @@ object MarketplaceModule {
         githubTokenManager: GithubTokenManager
     ): ModelScopeSource {
         return ModelScopeSource(httpClient, gitHubToken = githubTokenManager.getToken())
+    }
+
+    /**
+     * ClawHub（clawhub.ai）技能仓库源：公开只读 API，无需认证。
+     * 供市场 Skills 页签（浏览/搜索/下载安装）与 [com.apex.agent.marketplace.MarketInstallManager] 使用。
+     */
+    @Provides
+    @Singleton
+    fun provideClawHubSource(httpClient: OkHttpClient): ClawHubSource {
+        return ClawHubSource(httpClient)
     }
 }

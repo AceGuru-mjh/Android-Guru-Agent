@@ -49,10 +49,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.R
 import kotlin.math.roundToInt
 import java.util.Locale
 
@@ -83,6 +85,8 @@ fun BrainMenuButton(
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
     var modelListOpen by remember { mutableStateOf(false) }
+    // i18n：Toast 文案在组合内预取（onClick 非组合上下文）
+    val onlyOneModelToast = stringResource(R.string.chat_only_one_model)
 
     val current = profiles.firstOrNull { it.id == currentProfileId } ?: profiles.firstOrNull()
     val arrowRotation by animateFloatAsState(
@@ -95,7 +99,7 @@ fun BrainMenuButton(
         IconButton(onClick = { menuOpen = !menuOpen }, modifier = Modifier.size(40.dp)) { // 对齐修复：与 Attach/Github/Send 统一 40dp（原 36dp）
             Icon(
                 Icons.Default.Psychology,
-                contentDescription = "小大脑",
+                contentDescription = stringResource(R.string.chat_cd_brain),
                 tint = if (menuOpen) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp)
@@ -124,7 +128,7 @@ fun BrainMenuButton(
             ) {
                 // ── 第一项：当前模型选择器 ─────────────────────
                 Text(
-                    "当前模型",
+                    stringResource(R.string.chat_current_model),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -146,7 +150,7 @@ fun BrainMenuButton(
                                 .weight(1f)
                                 .clickable {
                                     if (profiles.size <= 1) {
-                                        Toast.makeText(context, "仅有一个模型", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, onlyOneModelToast, Toast.LENGTH_SHORT).show()
                                     } else {
                                         modelListOpen = !modelListOpen
                                     }
@@ -155,7 +159,7 @@ fun BrainMenuButton(
                         ) {
                             Column {
                                 Text(
-                                    current?.name ?: "未配置",
+                                    current?.name ?: stringResource(R.string.chat_not_configured),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -176,7 +180,8 @@ fun BrainMenuButton(
                         IconButton(onClick = { modelListOpen = !modelListOpen }) {
                             Icon(
                                 Icons.Default.KeyboardArrowUp,
-                                contentDescription = if (modelListOpen) "收起模型列表" else "展开模型列表",
+                                contentDescription = if (modelListOpen) stringResource(R.string.chat_cd_collapse_models)
+                                else stringResource(R.string.chat_cd_expand_models),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.rotate(arrowRotation)
                             )
@@ -229,7 +234,7 @@ fun BrainMenuButton(
                                     if (profile.id == current?.id) {
                                         Icon(
                                             Icons.Default.Check,
-                                            contentDescription = "当前模型",
+                                            contentDescription = stringResource(R.string.chat_current_model),
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )
@@ -261,7 +266,7 @@ fun BrainMenuButton(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("配置模型", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.chat_configure_model), style = MaterialTheme.typography.bodyMedium)
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
@@ -309,7 +314,7 @@ private fun BrainParamSliders(
 
     Column(modifier = modifier) {
         Text(
-            "模型参数",
+            stringResource(R.string.chat_model_params),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

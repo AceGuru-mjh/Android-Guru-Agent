@@ -3,9 +3,11 @@ package com.apex.agent.marketplace
 import com.apex.agent.core.tools.builtin.SkillInstallTool
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.connector.ConnectorRegistry
+import com.apex.agent.core.tools.marketplace.ClawHubSource
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.mcp.McpServerConfig
+import com.apex.agent.core.tools.skill.SafeZipExtractor
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.github.GithubTokenManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,7 +28,7 @@ import javax.inject.Singleton
 /**
  * 市场统一安装管道
  *
- * 把来自不同来源（内置模板 / URL / JSON 内容 / 魔搭 / GitHub）的安装请求
+ * 把来自不同来源（内置模板 / URL / JSON 内容 / 魔搭 / GitHub / ClawHub）的安装请求
  * 分发到对应的注册表：
  * - Skill      → [SkillRegistry]（`<id>.json` manifest + `<id>/` 资源目录）
  * - MCP        → [McpManager]（mcp_servers.json）
@@ -45,6 +47,7 @@ class MarketInstallManager @Inject constructor(
     private val connectorRegistry: ConnectorRegistry,
     private val httpClient: OkHttpClient,
     private val modelScopeSource: ModelScopeSource,
+    private val clawHubSource: ClawHubSource,
     private val githubTokenManager: GithubTokenManager
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -257,6 +260,110 @@ class MarketInstallManager @Inject constructor(
         }
     }
 
+    // ═══ Skill：ClawHub 仓库 ZIP → apex-skill-v1（prompt 型）═══
+
+    /**
+     * 从 ClawHub（clawhub.ai）安装技能。
+     *
+     * 流程（参照 [installModelScopeSkill] 的「源负责网络、本类负责编排」分层）：
+     * 1. 下载技能 ZIP（[ClawHubSource.downloadSkillZip]，20MB 上限）；
+     * 2. SafeZipExtractor 解压到临时目录（路径穿越 / zip bomb 防御）；
+     * 3. 解析 SKILL.md frontmatter（name / description / license）；
+     * 4. references/scripts 等资源复制到 skillsDir/ch-<id>/ 资源目录
+     *    （SkillRegistry.uninstall 会连该目录一并清理）；
+     * 5. 构建 prompt 型 manifest（promptInjection = SKILL.md 全文）并安装。
+     */
+    suspend fun installClawHubSkill(entry: ClawHubSource.ClawHubSkillEntry): Result<String> =
+        withContext(Dispatchers.IO) {
+            val installId = ClawHubSource.installIdFor(entry.slug)
+
+            // 重复安装友好拦截（SkillRegistry.install 会静默覆盖，不能依赖它报错）
+            val alreadyInstalled = skillRegistry.getInstalled().any { it.manifest.id == installId }
+            if (alreadyInstalled) {
+                return@withContext Result.failure(
+                    Exception("该技能已安装（$installId）；如需重新安装，请先在「已安装管理」中卸载")
+                )
+            }
+
+            // 1. 下载 ZIP
+            val zipBytes = clawHubSource.downloadSkillZip(entry).getOrElse {
+                return@withContext Result.failure(Exception("ClawHub 安装包下载失败：${it.message}"))
+            }
+
+            // 2. 解压到临时目录
+            val tmpZip = File(context.cacheDir, "clawhub-${System.nanoTime()}.zip")
+            val extractDir = File(context.cacheDir, "clawhub-extract-${System.nanoTime()}")
+            try {
+                tmpZip.writeBytes(zipBytes)
+                try {
+                    SafeZipExtractor.extract(tmpZip, extractDir)
+                } catch (e: Exception) {
+                    return@withContext Result.failure(Exception("安装包解压失败：${e.message}"))
+                }
+
+                // 3. 定位 SKILL.md（ZIP 内通常嵌套在 <slug>/ 顶层目录下，多候选时取最浅层）
+                val skillMd = extractDir.walkTopDown()
+                    .filter { it.isFile && it.name.equals("SKILL.md", ignoreCase = true) }
+                    .minByOrNull { it.canonicalPath.count { c -> c == File.separatorChar } }
+                    ?: return@withContext Result.failure(
+                        Exception("安装包中未找到 SKILL.md（该技能可能不符合 Agent Skills 格式）")
+                    )
+                val markdown = try {
+                    skillMd.readText(Charsets.UTF_8)
+                } catch (e: Exception) {
+                    return@withContext Result.failure(Exception("SKILL.md 读取失败：${e.message}"))
+                }
+                val frontmatter = parseSkillFrontmatter(markdown)
+
+                // 4. 资源落盘：SKILL.md 所在目录视为技能根，其余文件保持相对路径复制
+                val skillRoot = skillMd.parentFile ?: extractDir
+                val rootPrefix = skillRoot.canonicalPath + File.separator
+                val skillHome = File(skillHomeDir(), installId).apply { mkdirs() }
+                val skillMdCanonical = skillMd.canonicalPath
+                extractDir.walkTopDown()
+                    .filter { it.isFile && it.canonicalPath != skillMdCanonical }
+                    .forEach { file ->
+                        val canonical = file.canonicalPath
+                        if (!canonical.startsWith(rootPrefix)) return@forEach
+                        val rel = canonical.removePrefix(rootPrefix)
+                        if (rel.isBlank()) return@forEach
+                        val target = File(skillHome, rel)
+                        // 路径穿越防御：目标必须仍在资源目录内
+                        if (!target.canonicalPath.startsWith(skillHome.canonicalPath + File.separator)) return@forEach
+                        target.parentFile?.mkdirs()
+                        runCatching { file.copyTo(target, overwrite = true) }
+                    }
+
+                // 5. prompt 型 manifest（SKILL.md 全文注入）
+                val manifest = promptManifest(
+                    id = installId,
+                    name = entry.displayName.ifBlank { frontmatter.first ?: entry.slug },
+                    description = entry.summary.ifBlank { frontmatter.second.orEmpty() }
+                        .ifBlank { "ClawHub 技能 ${entry.slug}（来自 clawhub.ai）" },
+                    author = "clawhub:${entry.owner}",
+                    markdown = markdown,
+                    homepage = entry.homepage,
+                    license = frontmatter.third,
+                    trustLevel = if (entry.official) "verified" else "community",
+                    tags = entry.categories
+                )
+
+                // 6. 安装；失败时回收资源目录，避免孤儿文件
+                installSkillFromJson(manifest).also { result ->
+                    if (result.isFailure) runCatching { skillHome.deleteRecursively() }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 取消不吞（结构化并发语义）
+                throw e
+            } catch (e: Exception) {
+                // 磁盘 IO 等意外异常统一转友好失败，不向调用协程抛出
+                Result.failure(Exception("ClawHub 安装失败：${e.message}"))
+            } finally {
+                runCatching { tmpZip.delete() }
+                runCatching { extractDir.deleteRecursively() }
+            }
+        }
+
     // ═══ Skill：GitHub 仓库安装（真实联网，多用形态兜底）═══
 
     /**
@@ -352,6 +459,46 @@ class MarketInstallManager @Inject constructor(
         }
     }.getOrNull()
 
+    /**
+     * 解析 SKILL.md 的 YAML frontmatter（name / description / license）。
+     *
+     * 只做简单键值行解析（与 ModelScopeSource.fetchFrontmatter 同风格），
+     * 只匹配顶格键（列 0）——避免误抓 metadata 等嵌套块内的同名字段；
+     * 值两侧的成对引号（"…" / '…'）会被剥掉。
+     */
+    private fun parseSkillFrontmatter(markdown: String): Triple<String?, String?, String?> {
+        val lines = markdown.lines()
+        if (lines.isEmpty() || lines.first().trim() != "---") {
+            return Triple(null, null, null)
+        }
+        val end = lines.drop(1).indexOfFirst { it.trim() == "---" }
+        val front = if (end >= 0) lines.subList(1, 1 + end) else lines.drop(1)
+        var name: String? = null
+        var description: String? = null
+        var license: String? = null
+        for (line in front) {
+            when {
+                name == null && line.startsWith("name:") ->
+                    name = stripQuotes(line.removePrefix("name:"))
+                description == null && line.startsWith("description:") ->
+                    description = stripQuotes(line.removePrefix("description:"))
+                license == null && line.startsWith("license:") ->
+                    license = stripQuotes(line.removePrefix("license:"))
+            }
+        }
+        return Triple(name, description, license)
+    }
+
+    /** 剥掉值两侧的成对引号。 */
+    private fun stripQuotes(value: String): String {
+        val t = value.trim()
+        return when {
+            t.length >= 2 && t.startsWith("\"") && t.endsWith("\"") -> t.substring(1, t.length - 1)
+            t.length >= 2 && t.startsWith("'") && t.endsWith("'") -> t.substring(1, t.length - 1)
+            else -> t
+        }
+    }
+
     /** 从 markdown 里取首个一级标题当名字，紧跟的第一段非空文字当描述。 */
     private fun parseMarkdownHeading(markdown: String, fallbackName: String): Pair<String, String> {
         val lines = markdown.lineSequence().map { it.trim() }.toList()
@@ -370,13 +517,17 @@ class MarketInstallManager @Inject constructor(
         return heading to description.ifBlank { "$fallbackName（GitHub 仓库转换）" }
     }
 
-    /** 构造 prompt 型 apex-skill-v1 manifest（SKILL.md 全量注入）。 */
+    /** 构造 prompt 型 apex-skill-v1 manifest（SKILL.md 全量注入；可选市场元数据）。 */
     private fun promptManifest(
         id: String,
         name: String,
         description: String,
         author: String,
-        markdown: String
+        markdown: String,
+        homepage: String? = null,
+        license: String? = null,
+        trustLevel: String? = null,
+        tags: List<String> = emptyList()
     ): String = buildString {
         append("{\n")
         append("\"schema\":\"apex-skill-v1\",\n")
@@ -385,6 +536,14 @@ class MarketInstallManager @Inject constructor(
         append("\"version\":\"1.0.0\",\n")
         append("\"description\":\"${escapeJson(description)}\",\n")
         append("\"author\":\"${escapeJson(author)}\",\n")
+        if (license != null) append("\"license\":\"${escapeJson(license)}\",\n")
+        if (homepage != null) append("\"homepage\":\"${escapeJson(homepage)}\",\n")
+        if (trustLevel != null) append("\"trustLevel\":\"${escapeJson(trustLevel)}\",\n")
+        if (tags.isNotEmpty()) {
+            append("\"tags\":[")
+            append(tags.joinToString(",") { "\"${escapeJson(it)}\"" })
+            append("],\n")
+        }
         append("\"promptInjection\":\"${escapeJson(markdown)}\",\n")
         append("\"tools\":[],\n")
         append("\"configuration\":{\"autoSetup\":[]}\n")

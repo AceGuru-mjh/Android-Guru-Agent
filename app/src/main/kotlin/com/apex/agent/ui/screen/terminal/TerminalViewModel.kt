@@ -83,6 +83,16 @@ class TerminalViewModel @Inject constructor(
     /** VM 自己创建的会话的 backend 记录（agent 创建的会话以 "agent" 展示）。 */
     private val sessionBackends = LinkedHashMap<Long, Pair<String, String>>()
 
+    /**
+     * 各会话最近一次由 shell 设置的窗口标题（OSC 0/1/2 —— `PS1` 里的 `\[\e]0;…\a\]`、
+     * vim/tmux 也会设）。
+     *
+     * Termux / JuiceSSH / ConnectBot 都把标题显示在会话标签上：跑 `ssh host` 或
+     * `vim file` 时标签会跟着变，多会话下不用靠猜。此前 `SessionTab.title` 恒为
+     * null —— VT 层早就解析出标题了，只是没人往 UI 上接。
+     */
+    private val sessionTitles = LinkedHashMap<Long, String>()
+
     /** 活跃会话的 styled 屏（颜色/光标/scrollback；null = 未启动）。 */
     private val _renderState = MutableStateFlow<TerminalRenderSnapshot?>(null)
     val renderState: StateFlow<TerminalRenderSnapshot?> = _renderState.asStateFlow()
@@ -147,7 +157,7 @@ class TerminalViewModel @Inject constructor(
                 runtimeType = backend.second,
                 state = s.session.state.name,
                 isAlive = s.session.state in ALIVE_STATES,
-                title = null
+                title = sessionTitles[s.session.id]
             )
         }
         _sessions.value = alive
@@ -192,6 +202,12 @@ class TerminalViewModel @Inject constructor(
             // 33ms sample 把 feed 洪泛（cat 大文件 / gradle 日志）折叠到 ~30fps。
             terminalRuntime.styledScreenFlow(sid)?.sample(33)?.collect { snap ->
                 _renderState.value = snap
+                // 标题变了才回写并刷新 tab（避免每帧触发一次列表重组）
+                val t = snap?.title?.trim().takeUnless { it.isNullOrEmpty() }
+                if (t != null && t != sessionTitles[sid]) {
+                    sessionTitles[sid] = t
+                    refreshSessionsInternal()
+                }
             }
         }
         semanticJob = viewModelScope.launch {
@@ -242,6 +258,7 @@ class TerminalViewModel @Inject constructor(
         viewModelScope.launch {
             terminalRuntime.close(id, force = true)
             sessionBackends.remove(id)
+            sessionTitles.remove(id)
             refreshSessionsInternal()
             if (_activeSessionId.value == id) {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
@@ -456,8 +473,24 @@ class TerminalViewModel @Inject constructor(
         val fontSize: Int = 13,
         val monochrome: Boolean = false,
         /** 键盘辅助行（ESC/TAB/CTRL/箭头…）显隐 —— 小屏手机可隐藏换取显示区。 */
-        val showKeybar: Boolean = true
-    )
+        val showKeybar: Boolean = true,
+        /**
+         * 响铃（BEL 0x07）时振动一下 —— Termux/ConnectBot 的常规反馈，
+         * tab 补全失败、Ctrl+G、命令报错都会发 BEL。默认开。
+         */
+        val vibrateOnBell: Boolean = true,
+        /**
+         * 终端页保持屏幕常亮 —— 看长任务输出（编译 / apt / 训练日志）时不会被息屏打断。
+         * Termux 默认持有 wakelock，此项对齐该行为（默认关，交用户选择）。
+         */
+        val keepScreenOn: Boolean = false
+    ) {
+        /** 字号合法区间（双指捏合缩放也走这个钳制）。 */
+        companion object {
+            const val MIN_FONT_SIZE = 8
+            const val MAX_FONT_SIZE = 24
+        }
+    }
 
     private val _settings = MutableStateFlow(loadSettings())
     val settings: StateFlow<TerminalSettings> = _settings.asStateFlow()
@@ -468,6 +501,8 @@ class TerminalViewModel @Inject constructor(
             .putInt("term_font_size", next.fontSize)
             .putBoolean("term_monochrome", next.monochrome)
             .putBoolean("term_show_keybar", next.showKeybar)
+            .putBoolean("term_vibrate_bell", next.vibrateOnBell)
+            .putBoolean("term_keep_screen_on", next.keepScreenOn)
             .apply()
         _settings.value = next
     }
@@ -475,8 +510,17 @@ class TerminalViewModel @Inject constructor(
     private fun loadSettings() = TerminalSettings(
         fontSize = prefs.getInt("term_font_size", 13),
         monochrome = prefs.getBoolean("term_monochrome", false),
-        showKeybar = prefs.getBoolean("term_show_keybar", true)
+        showKeybar = prefs.getBoolean("term_show_keybar", true),
+        vibrateOnBell = prefs.getBoolean("term_vibrate_bell", true),
+        keepScreenOn = prefs.getBoolean("term_keep_screen_on", false)
     )
+
+    /** 字号调整（钳制在 [TerminalSettings.MIN_FONT_SIZE]..[TerminalSettings.MAX_FONT_SIZE]）。 */
+    fun setFontSize(size: Int) {
+        val clamped = size.coerceIn(TerminalSettings.MIN_FONT_SIZE, TerminalSettings.MAX_FONT_SIZE)
+        if (clamped == _settings.value.fontSize) return
+        updateSettings { copy(fontSize = clamped) }
+    }
 
     // ═══ 黑名单 / 白名单命令 ═══
     private val _blacklist = MutableStateFlow(loadSet("cmd_blacklist"))

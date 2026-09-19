@@ -34,12 +34,15 @@
 | 1.9 | OSC 8 hyperlinks | ✅ | ❌ ignored | 📋 DEFERRED (rendering-level nicety) |
 | 1.10 | OSC 52 clipboard | ✅ | ❌ ignored | 🏗️ T82: parse + drain API (host can honor into Android clipboard) |
 | 1.11 | DCS (sixel/tmux passthrough) | ✅ | ❌ DCS ignored | 📋 DEFERRED (no sixel consumers on our stack) |
-| 1.12 | Bell event | ✅ (sound/vibrate hook) | ❌ BEL ignored | 📋 DEFERRED (UI notification nicety) |
+| 1.12 | Bell event | ✅ (sound/vibrate hook) | ❌ BEL ignored → ✅ 已实现：`TerminalCore.handleC0(0x07)` 置位 + `drainBell()` 序号（只增，连续多声不丢），`TerminalRenderSnapshot.bellSeq` 透出，UI 振动 30ms（设置项 `vibrateOnBell`，默认开） | 已交付 |
 | 1.13 | Resize + SIGWINCH | ✅ | ✅ native `TIOCSWINSZ` → kernel SIGWINCH; `terminal.resize` tool | — |
 | 1.14 | Bracketed paste (mode 2004) | ✅ both directions | 🟡 parsed only; **input never sends 200~ wrappers** | 🏗️ T82: PASTE write kind |
 | 1.15 | Application cursor keys (DECCKM) input | ✅ arrows switch CSI/SS3 | ❌ input always CSI — arrows break in DECCKM apps | 🏗️ T82: DECCKM-aware key translation |
 | 1.16 | Key input coverage F1–F12 | ✅ (+ volume-key/extra-keys row) | ❌ F1–F12 unmapped → send nothing + warn | 🏗️ T82: full F-key map |
 | 1.17 | Termux is a *library* consumable by other apps (terminal-emulator view) | ✅ | 🟡 our `terminal-emulator` module is pure JVM & consumed by `platform/terminal`; but 3 test-fakes ship in src/main, unused Android deps in build file | 🏗️ T82: fake relocation + dep pruning + `docs/terminal/TERMINAL_SDK_BOUNDARY.md` |
+| 1.18 | 窗口标题上屏（OSC 0/1/2 → 会话标签） | ✅ (tab 显示 shell 标题 / vim / ssh 目标) | ❌ VT 层已解析 `title` 但 `SessionTab.title` 硬编码 `null` → ✅ 已实现：`TerminalViewModel.sessionTitles` 按会话记录（标题变化才刷新，避免每帧重组），tab 优先显示标题、次行显示 `#id 后端` | 已交付 |
+| 1.19 | 双击选词 | ✅ (双击选中单词) | ❌ 只有长按拖动框选 → ✅ 已实现：`TerminalGrid.wordRangeAt()` 以命中列为中心扩到分隔符（含 `-_. /:~`，可一次选中路径片段），双击即进入选择态复用既有「复制 / 取消」浮标 | 已交付 |
+| 1.20 | 保持屏幕常亮 | ✅ (持有 wakelock) | ❌ → ✅ 已实现：终端页按设置项 `keepScreenOn`（默认关）加/清 `FLAG_KEEP_SCREEN_ON`，`DisposableEffect` 离屏必还原 | 已交付 |
 
 ## 2. PTY / Process / Signals
 

@@ -102,6 +102,22 @@ fun TerminalScreen(
     val drawerState = rememberDrawerState(initialValue = androidx.compose.material3.DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showNewSessionDialog by remember { mutableStateOf(false) }
+
+    // 保持屏幕常亮：看长任务输出（编译 / apt / 训练日志）时不被息屏打断 ——
+    // Termux 默认持有 wakelock，这里用等价的 window flag，交给用户开关。
+    val keepScreenOn = settings.keepScreenOn
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(keepScreenOn) {
+        val window = (view.context as? android.app.Activity)?.window
+        if (window != null) {
+            if (keepScreenOn) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            // 离屏必须还原：否则终端页退出后整 App 一直亮屏耗电
+            window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
     var showEnvironmentCenter by remember { mutableStateOf(false) }
     // 环境中心打开时刷新一次占用（安装/删除后状态驱动刷新，这里兑底）
     LaunchedEffect(showEnvironmentCenter) {
@@ -309,6 +325,9 @@ private fun SessionTabStrip(
     }
 }
 
+/** 会话 tab 标题的最大字符数 —— shell 标题（tmux/ssh）可能很长，UI 只取前若干字符 + 省略号。 */
+private const val MAX_TAB_TITLE = 24
+
 @Composable
 private fun SessionTab(
     tab: TerminalViewModel.SessionTab,
@@ -334,17 +353,23 @@ private fun SessionTab(
             tint = if (tab.isUbuntu) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
         )
         Column {
+            // 标题优先显示 shell 自己设的窗口名（OSC 0/1/2 —— PS1 里的 \[\e]0;…\a\]、
+            // vim/tmux/ssh 都会设），没有才退回 "#id 后端"。
+            // 对齐 Termux / JuiceSSH / ConnectBot：多会话时靠标题分辨在跑什么。
             Text(
-                "#${tab.id} ${if (tab.isUbuntu) "Ubuntu" else "Android"}",
+                tab.title?.take(MAX_TAB_TITLE) ?: "#${tab.id} ${if (tab.isUbuntu) "Ubuntu" else "Android"}",
                 fontSize = 11.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                tab.state,
+                if (tab.title != null) "#${tab.id} ${if (tab.isUbuntu) "Ubuntu" else "Android"}" else tab.state,
                 fontSize = 9.sp,
                 color = if (tab.isAlive) Color(0xFF3E9C51) else Color(0xFFB06055),
-                fontFamily = FontFamily.Monospace
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1
             )
         }
         Icon(
@@ -530,6 +555,26 @@ private fun TerminalSettingsDrawer(
                 LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
                 ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
                 ToggleRow("键盘辅助行（ESC / CTRL / 方向键）", settings.showKeybar) { onSettings { copy(showKeybar = it) } }
+            }
+
+            // ═══ 1b. 反馈（对齐 Termux / ConnectBot 的终端反馈习惯）═══
+            SettingsCard(Icons.Default.Settings, "反馈") {
+                ToggleRow("响铃时振动（BEL）", settings.vibrateOnBell) {
+                    onSettings { copy(vibrateOnBell = it) }
+                }
+                Text(
+                    "shell 发出 BEL（补全失败、Ctrl+G、命令报错）时振动一下。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ToggleRow("保持屏幕常亮", settings.keepScreenOn) {
+                    onSettings { copy(keepScreenOn = it) }
+                }
+                Text(
+                    "看长任务输出（编译 / apt / 日志）时不被息屏打断。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // ═══ 2. 黑名单 / 白名单 ═══

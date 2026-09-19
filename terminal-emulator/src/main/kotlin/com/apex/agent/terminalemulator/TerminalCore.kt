@@ -64,6 +64,10 @@ class TerminalCore(
     // Bounded (a stuck guest loop must not grow memory).
     private val pendingClipboardRequests = ArrayDeque<String>()
 
+    // 响铃（BEL）：待消费标志 + 单调递增序号（宿主按序号变化判定"又响了一声"）。
+    private var bellPending = false
+    private var bellSeq = 0L
+
     // Anchor of the last placed printable's base cell — combining marks attach here (§10/§11).
     private var lastBaseRow = 0
     private var lastBaseCol = 0
@@ -181,7 +185,12 @@ class TerminalCore(
     // ─── C0 controls (§4) ───
     private fun handleC0(byte: Int) {
         when (byte) {
-            0x07 -> { /* BEL — could ring bell; ignored */ }
+            0x07 -> {
+                // BEL（响铃）：Termux/ConnectBot 等都以振动或提示反馈给使用者
+                //（例如 tab 补全失败、Ctrl+G、命令报错）。此前被直接丢弃。
+                // 这里只置位，由 [drainBell] 消费式读出，避免同一声铃被重复渲染触发。
+                bellPending = true
+            }
             0x08 -> { if (cursor.column > 0) cursor.column--; cursor.wrapPending = false }  // BS
             0x09 -> { cursor.column = tabStops.nextTab(cursor.column); cursor.wrapPending = false }  // HT
             0x0A, 0x0B, 0x0C -> {  // LF/VT/FF
@@ -574,7 +583,8 @@ class TerminalCore(
             title = title,
             lines = visible,
             scrollback = sb,
-            scrollbackTotal = mainBuffer.scrollbackLineCount
+            scrollbackTotal = mainBuffer.scrollbackLineCount,
+            bellSeq = drainBell()
         )
     }
 
@@ -645,6 +655,19 @@ class TerminalCore(
 
     /** The last [maxLines] scrollback lines, oldest first (main screen only). */
     fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
+
+    /**
+     * 消费式读出"刚响过铃"（BEL）。
+     *
+     * 每次调用返回一个新的序号 —— 宿主据此判断"这一帧有新铃"，
+     * 而不是靠布尔值去重（连续两声铃必须都能被感知）。
+     */
+    fun drainBell(): Long {
+        if (!bellPending) return bellSeq
+        bellPending = false
+        bellSeq += 1
+        return bellSeq
+    }
 
     /** Drain OSC 52 clipboard-write requests (host may apply to platform clipboard). */
     fun drainClipboardRequests(): List<String> {
@@ -756,5 +779,12 @@ data class TerminalRenderSnapshot(
     /** The [maxScrollbackLines] most recent scrollback rows, oldest first (main screen only). */
     val scrollback: List<List<RenderCell>>,
     /** Total scrollback lines held (may exceed [scrollback].size). */
-    val scrollbackTotal: Int
+    val scrollbackTotal: Int,
+    /**
+     * 响铃序号（BEL）：**只增不减**，宿主用「序号变了」判定刚响了一声。
+     *
+     * 用序号而不是布尔值，是因为 `yes`-类输出可能短时间连续发 BEL，
+     * 布尔去重会让第二声石沉大海；同时纯 JVM，不含任何 Android 依赖。
+     */
+    val bellSeq: Long = 0L
 )

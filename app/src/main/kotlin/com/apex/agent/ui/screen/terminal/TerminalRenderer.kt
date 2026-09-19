@@ -109,6 +109,7 @@ fun TerminalRenderer(
 ) {
     val render by viewModel.renderState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     TerminalGrid(
         render = render,
         fontSize = settings.fontSize,
@@ -119,7 +120,22 @@ fun TerminalRenderer(
         onControl = viewModel::sendControlChar,
         onPaste = viewModel::pasteText,
         onResize = viewModel::resizeTerminal,
+        // 响铃（BEL）反馈：对齐 Termux/ConnectBot —— 补全失败、命令报错时给一下振动
+        onBell = {
+            if (settings.vibrateOnBell) runCatching { vibrateOnce(context) }
+        },
         modifier = modifier
+    )
+}
+
+/** 单次轻振动（30ms）。失败静默 —— 没有振动硬件/权限不该崩 UI。 */
+private fun vibrateOnce(context: android.content.Context) {
+    val vibrator = androidx.core.content.ContextCompat.getSystemService(
+        context, android.os.Vibrator::class.java
+    ) ?: return
+    if (!vibrator.hasVibrator()) return
+    vibrator.vibrate(
+        android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
     )
 }
 
@@ -147,6 +163,8 @@ fun TerminalGrid(
     onControl: (Char) -> Unit,
     onPaste: (String) -> Unit,
     onResize: (rows: Int, cols: Int) -> Unit,
+    /** 响铃（BEL 0x07）回调 —— 序号变化即触发，宿主决定振动/提示/忽略。 */
+    onBell: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -241,6 +259,32 @@ fun TerminalGrid(
         return row to col
     }
 
+    /**
+     * 双击选词：以命中列为中心向两侧扩到分隔符为止。
+     *
+     * 词内字符 = 字母数字 + 路径/标识符常见符号（`-_. /:`），因此双击能一次选中
+     * `/sdcard/Download/a b.txt` 里的一段路径，而不是单个字符。
+     * 返回 (anchor, head)，列区间左闭右开。
+     */
+    fun wordRangeAt(row: Int, col: Int): Pair<Pair<Int, Int>, Pair<Int, Int>>? {
+        val rows = rowsState.value
+        val cells = rows.getOrNull(row) ?: return null
+        if (col < 0 || col >= cells.size) return null
+
+        fun isWordChar(text: String): Boolean {
+            val ch = text.firstOrNull() ?: return false
+            return ch.isLetterOrDigit() || ch == '_' || ch == '-' || ch == '.' ||
+                ch == '/' || ch == ':' || ch == '~'
+        }
+
+        var start = col
+        while (start > 0 && isWordChar(cells[start - 1].text)) start--
+        var end = col
+        while (end < cells.size && isWordChar(cells[end].text)) end++
+        if (start >= end) return null
+        return (row to start) to (row to end)
+    }
+
     fun selRange(): SelRange? {
         val a = selectionAnchor ?: return null
         val h = selectionHead ?: return null
@@ -302,6 +346,12 @@ fun TerminalGrid(
         if (rows != currentRows || cols != currentCols) onResize(rows, cols)
     }
 
+    // ── 响铃（BEL）：序号单调增，变化即"又响了一声"，交给宿主反馈 ──
+    val bellSeq = render?.bellSeq ?: 0L
+    LaunchedEffect(bellSeq) {
+        if (bellSeq > 0L) onBell()
+    }
+
     Column(modifier = modifier.fillMaxSize().background(TerminalTheme.background)) {
         Box(
             modifier = Modifier
@@ -318,6 +368,14 @@ fun TerminalGrid(
                                 selectionAnchor = null; selectionHead = null
                             }
                             showKeyboard()
+                        },
+                        // 双击选词 —— 主流 Android 终端（Termux/JuiceSSH/ConnectBot）的
+                        // 标准交互：选一个路径/标识符去复制，比拖动框选快得多。
+                        onDoubleTap = { offset ->
+                            val at = cellAt(offset) ?: return@detectTapGestures
+                            val word = wordRangeAt(at.first, at.second) ?: return@detectTapGestures
+                            selectionAnchor = word.first
+                            selectionHead = word.second
                         }
                     )
                 }

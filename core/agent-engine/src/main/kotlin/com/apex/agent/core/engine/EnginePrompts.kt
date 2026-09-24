@@ -32,7 +32,7 @@ internal object EnginePrompts {
      *
      * @param privilegeLevel current privilege ("ROOT" / "SHIZUKU" / anything
      *   else → normal shell guidance)
-     * @param visibleTools tool list AFTER the enabledToolIds whitelist filter
+     * @param visibleTools v4 请求计划内的工具（CORE+激活/强制；与请求 tools 数组同源）
      * @param skillPrompts active skill prompt injections (may be empty)
      * @param environmentSummary v3 live capability snapshot (null → section
      *   omitted; same source the environment gate enforces)
@@ -43,9 +43,19 @@ internal object EnginePrompts {
         config: AgentConfig,
         privilegeLevel: String,
         visibleTools: List<AgentTool>,
-        skillPrompts: List<String>,
+        skillPrompts: List<String> = emptyList(),
         environmentSummary: String? = null,
-        connectedServices: String? = null
+        connectedServices: String? = null,
+        /**
+         * Tool System v4 — 目录总览（全部非 legacy 工具）。
+         * 非空时渲染 "## Tool Catalog" 段：类别计数 + tool_search/tool_open
+         * 用法。空则省略（兼容旧调用方/测试）。
+         */
+        catalogTools: List<AgentTool> = emptyList(),
+        /** v4 — registry id → provider 名（工具清单与请求 tools 数组同名）。 */
+        toolNameMap: Map<String, String> = emptyMap(),
+        /** v4 — 降级到无工具时告知模型本轮纯文本作答。 */
+        toolsUnavailable: Boolean = false
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
@@ -73,6 +83,8 @@ internal object EnginePrompts {
             appendLine("   Do not give up after one failure; do not blindly retry the identical call.")
             appendLine("7. Prefer specific tools (read_file, github_read_file, browser_*) over raw shell when both work;")
             appendLine("   use shell when no dedicated tool fits. Prefer parallel tool calls for independent reads.")
+            appendLine("8. Not every capability is pre-loaded: when no listed tool fits, call tool_search to find")
+            appendLine("   the right tool in the catalog, then tool_open to load it — it becomes callable immediately.")
             appendLine()
 
             // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
@@ -175,6 +187,11 @@ internal object EnginePrompts {
             // Tool System v2：按类别分组 + 高风险 ⚠ 标记 —— 40+ 工具的字母序长列表
             // 对模型只是噪音；分组清单让模型更快定位"这类任务该用哪类工具"。
             appendLine()
+            if (toolsUnavailable) {
+                appendLine("## Tools Unavailable This Turn")
+                appendLine("The provider rejected the tool payload for this request. Answer directly")
+                appendLine("in plain text; do not attempt tool calls this turn.")
+            } else {
             appendLine("## Available Tools (${visibleTools.size})")
             val byCategory = visibleTools.groupBy { it.metadata.category }
                 .toSortedMap(compareBy { it.order })
@@ -188,7 +205,10 @@ internal object EnginePrompts {
                         ?.take(160)
                         ?: ""
                     val riskMark = if (tool.metadata.risk == ToolRisk.HIGH) " ⚠️HIGH-RISK" else ""
-                    appendLine("- ${tool.id}: $firstLine$riskMark")
+                    // v4：展示 provider 名（与请求 tools 数组同名）——模型看到什么
+                    // 名字就调用什么名字，与函数 schema 零歧义。
+                    val callName = toolNameMap[tool.id] ?: tool.id
+                    appendLine("- $callName: $firstLine$riskMark")
                 }
             }
             if (visibleTools.any { it.metadata.risk == ToolRisk.HIGH }) {
@@ -196,6 +216,41 @@ internal object EnginePrompts {
                 appendLine("Tools marked ⚠️HIGH-RISK are destructive or irreversible. The user will be")
                 appendLine("asked to confirm before their first execution this session; after a denial,")
                 appendLine("do NOT retry the same tool — propose an alternative approach instead.")
+            }
+
+            // ═══ Tool System v4：强制函数调用（「调用函数」选中集）═══
+            if (config.forcedToolIds.isNotEmpty()) {
+                appendLine()
+                appendLine("## Forced Function Calls")
+                appendLine("The user pinned specific functions for this task; ONLY those are exposed")
+                appendLine("and tool_choice is set to force their invocation. You MUST call:")
+                config.forcedToolIds.sorted().forEach { id ->
+                    val name = toolNameMap[id] ?: id
+                    appendLine("- $name")
+                }
+                appendLine("Call them as required by the task; do not answer without using them")
+                appendLine("unless they error out.")
+            }
+
+            // ═══ Tool System v4：工具目录（渐进披露——超过 CORE 集的能力在此检索）═══
+            if (catalogTools.isNotEmpty()) {
+                val visibleIds = visibleTools.map { it.id }.toSet()
+                val notLoaded = catalogTools.count { it.id !in visibleIds }
+                if (notLoaded > 0) {
+                    appendLine()
+                    appendLine("## Tool Catalog ($notLoaded more available)")
+                    appendLine("Beyond the tools above, ${notLoaded} more capabilities are installed")
+                    appendLine("but not pre-loaded (keeps this request fast and small). Discover them:")
+                    appendLine("- tool_search(query) — find tools by keywords (e.g. 'github issue', 'browser')")
+                    appendLine("- tool_open(tool_name) — load a tool; it becomes callable on your next turn")
+                    appendLine("- tool_list() — category overview with counts")
+                    val byCat = catalogTools.groupBy { it.metadata.category }
+                        .toSortedMap(compareBy { it.order })
+                    appendLine("Categories: " + byCat.entries.joinToString(" / ") { (cat, list) ->
+                        "${cat.label} ${list.size}"
+                    })
+                }
+            }
             }
 
             // Skill prompt 注入

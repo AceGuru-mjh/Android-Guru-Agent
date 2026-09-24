@@ -38,10 +38,16 @@ data class ChatRule(
 /**
  * 对话输入框"迷你小圆环"工具菜单的单一可信状态源（SharedPreferences 持久化）。
  *
- * 五项能力：网络搜索 / 时间感知 / 函数调用白名单 / 结构化输出 / 用户规则。
+ * 五项能力：网络搜索 / 时间感知 / **强制函数调用（v4）** / 结构化输出 / 用户规则。
  * 每次发送消息前由 ViewModel 调 [buildSessionContext] 组装注入 system prompt
- * （经 `AgentConfig.additionalSystemContext`），并调 [effectiveToolWhitelist]
- * 收窄下发给模型的工具列表——全部为真实生效，非 UI 开关摆设。
+ * （经 `AgentConfig.additionalSystemContext`），并调 [forcedToolIds] +
+ * [exposeAllTools] 驱动引擎的 v4 工具计划。
+ *
+ * v4 语义变更（根因修复）：旧版「函数调用」是**白名单**（不选=发全部~110个
+ * 工具 schema，直接把请求撑爆→「直接发送就报错」；选了=只有这几个能用）。
+ * 新版不选 = 默认 CORE 工具集 + 目录（全部能力可 tool_search/tool_open 按需
+ * 加载）；选中 = **强制调用**（tool_choice=required/具体函数，被选中的函数
+ * 必须被模型调用）。存续同一 SharedPreferences key，旧数据无缝升级。
  */
 @Singleton
 class ChatToolkitStore @Inject constructor(
@@ -86,7 +92,7 @@ class ChatToolkitStore @Inject constructor(
         prefs.edit().putBoolean(KEY_TIME, enabled).apply()
     }
 
-    /** 函数调用：圈选工具子集；空集 = 功能关闭（向模型暴露全部工具）。 */
+    /** 函数调用（v4：强制语义）：圈选的工具本轮**必须**被调用（tool_choice）。 */
     fun setSelectedFunctionIds(ids: Set<String>) {
         _selectedFunctionIds.value = ids
         prefs.edit().putStringSet(KEY_FUNCTIONS, ids).apply()
@@ -98,6 +104,15 @@ class ChatToolkitStore @Inject constructor(
     }
 
     fun clearFunctions() = setSelectedFunctionIds(emptySet())
+
+    /** v4 — 全量工具模式（电源用户：暴露全部非 legacy 工具，仍受预算钳制）。 */
+    private val _exposeAllTools = MutableStateFlow(prefs.getBoolean(KEY_EXPOSE_ALL, false))
+    val exposeAllTools: StateFlow<Boolean> = _exposeAllTools.asStateFlow()
+
+    fun setExposeAllTools(enabled: Boolean) {
+        _exposeAllTools.value = enabled
+        prefs.edit().putBoolean(KEY_EXPOSE_ALL, enabled).apply()
+    }
 
     fun setOutputFormat(format: OutputFormat) {
         _outputFormat.value = format
@@ -157,6 +172,15 @@ class ChatToolkitStore @Inject constructor(
             appendLine("引用搜索结果中的关键信息时，注明来源标题与链接。")
             appendLine()
         }
+        // v4：强制函数调用说明（引擎会同步发 tool_choice=required/具体函数）
+        val forced = _selectedFunctionIds.value
+        if (forced.isNotEmpty()) {
+            appendLine("### 强制函数调用（用户指定）")
+            appendLine("用户本轮指定了必须使用的函数（tool_choice 已设为强制）：")
+            forced.sorted().forEach { appendLine("- $it") }
+            appendLine("必须按任务需要调用上述函数；仅当它们执行失败时才说明原因并结束。")
+            appendLine()
+        }
         val enabled = enabledRules()
         if (enabled.isNotEmpty()) {
             appendLine("### 全局规则（必须遵守）")
@@ -196,16 +220,12 @@ class ChatToolkitStore @Inject constructor(
     }.trim()
 
     /**
-     * 计算下发给模型的工具白名单（null = 不过滤，全部工具）。
-     *
-     * 规则：仅"函数调用"圈选非空时才收窄工具集；网络搜索开启时确保
-     * web_search 在白名单内（搜索本身不收窄工具集，避免误摘其他工具）。
+     * v4 — 强制调用的工具 id 集（空 = 默认模式：CORE + 会话激活，无强制）。
      */
-    fun effectiveToolWhitelist(): Set<String>? {
-        val selected = _selectedFunctionIds.value
-        if (selected.isEmpty()) return null
-        return if (_webSearchEnabled.value) selected + "web_search" else selected
-    }
+    fun forcedToolIds(): Set<String> = _selectedFunctionIds.value
+
+    /** v4 — 全量工具模式。 */
+    fun exposeAllToolsEnabled(): Boolean = _exposeAllTools.value
 
     // ── 持久化 ───────────────────────────────────────────────
     private fun persistRules() =
@@ -223,6 +243,7 @@ class ChatToolkitStore @Inject constructor(
         private const val KEY_FORMAT = "toolkit_output_format"
         private const val KEY_SCHEMA = "toolkit_custom_schema"
         private const val KEY_RULES = "toolkit_rules"
+        private const val KEY_EXPOSE_ALL = "toolkit_expose_all"
     }
 }
 

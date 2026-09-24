@@ -86,8 +86,9 @@ sealed class ModelRuntimeException(
     /** 请求被拒绝（400/404 等请求级错误）。不可降级（换模型仍是同一请求体）。 */
     class ModelRequestRejected(
         message: String,
-        val profileId: String
-    ) : ModelRuntimeException(message)
+        val profileId: String,
+        cause: Throwable? = null
+    ) : ModelRuntimeException(message, cause)
 
     /** 响应无效（空响应 / 解析失败）。不可降级。 */
     class ModelResponseInvalid(

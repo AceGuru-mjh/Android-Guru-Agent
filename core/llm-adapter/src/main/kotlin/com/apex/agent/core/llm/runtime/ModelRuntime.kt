@@ -6,6 +6,7 @@ import com.apex.agent.core.llm.LlmResponse
 import com.apex.agent.core.llm.LlmStreamChunk
 import com.apex.agent.core.llm.ModelCapabilities
 import com.apex.agent.core.llm.ModelRole
+import com.apex.agent.core.llm.ToolChoiceSpec
 import com.apex.agent.core.llm.ToolDefinition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -57,6 +58,27 @@ interface ModelRuntime {
         maxTokens: Int = -1
     ): Flow<LlmStreamChunk>
 
+    // ═══ Tool System v4 — per-request tool choice overloads ═══
+    // 默认实现透传 legacy 路径（无 tool_choice 覆盖）。
+
+    suspend fun chat(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): LlmResponse = chat(context, messages, tools, temperature, maxTokens)
+
+    fun chatStream(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): Flow<LlmStreamChunk> = chatStream(context, messages, tools, temperature, maxTokens)
+
     /** 当前全部 Profile 的运行时快照（§十五），不含 API Key。 */
     fun snapshot(): List<ModelRuntimeDiagnostics.ModelRuntimeSnapshot>
 
@@ -100,6 +122,27 @@ class SingleClientModelRuntime(
         temperature: Float,
         maxTokens: Int
     ): Flow<LlmStreamChunk> = client.chatStream(messages, tools, temperature, maxTokens)
+
+    // v4：强制函数调用透传（否则 legacy 单 client 路径会丢失 tool_choice）。
+
+    override suspend fun chat(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): LlmResponse = client.chat(messages, tools, temperature, maxTokens, toolChoice)
+
+    override fun chatStream(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): Flow<LlmStreamChunk> =
+        client.chatStream(messages, tools, temperature, maxTokens, toolChoice)
 
     override fun snapshot(): List<ModelRuntimeDiagnostics.ModelRuntimeSnapshot> = emptyList()
 

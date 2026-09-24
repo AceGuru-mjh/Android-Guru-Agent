@@ -184,9 +184,9 @@ data class AgentTask(
 /**
  * 任务级配置快照（任务书 §20）。
  *
- * 只快照影响执行语义的字段；非执行字段（如 enabledToolIds 白名单）亦纳入，
- * 保证恢复/重试时执行环境与创建时刻一致。完整 AgentConfig 中 UI 展示类
- * 字段（displayName 等）不入快照。
+ * 只快照影响执行语义的字段；非执行字段（如 v4 强制函数圈选 forcedToolIds）
+ * 亦纳入，保证恢复/重试时执行环境与创建时刻一致。完整 AgentConfig 中 UI
+ * 展示类字段（displayName 等）不入快照。
  */
 @Serializable
 data class TaskConfigSnapshot(
@@ -199,7 +199,10 @@ data class TaskConfigSnapshot(
     val maxToolOutputLength: Int = 2000,
     val temperature: Float = 0.7f,
     val reflectionRounds: Int = 1,
-    val enabledToolIds: List<String> = emptyList()
+    /** v4：强制函数调用（旧 enabledToolIds 白名单已废弃）。 */
+    val forcedToolIds: List<String> = emptyList(),
+    /** v4：全量工具模式。 */
+    val exposeAllTools: Boolean = false
 )
 
 /** 持久层计划步骤（基于引擎 `PlanStep` 增加 status / stepId / 次数）。 */

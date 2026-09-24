@@ -168,6 +168,10 @@
     <string name="chat_time">Time</string>
     <string name="chat_function_calls">Function calls</string>
     <string name="chat_function_calls_n">Function calls (%1$d)</string>
+    <string name="chat_function_forced">Force function calls</string>
+    <string name="chat_function_forced_n">Forced calls (%1$d)</string>
+    <string name="chat_function_forced_hint">Checked functions MUST be invoked this turn (tool_choice forced). Leave empty to use the default tool set (full catalog stays discoverable).</string>
+    <string name="chat_expose_all_tools">Send all tools</string>
     <string name="chat_category_other">Other</string>
     <string name="chat_structured_output_fmt">Structured output: %1$s</string>
     <string name="chat_rules">Rules</string>

@@ -168,6 +168,10 @@
     <string name="chat_time">时间</string>
     <string name="chat_function_calls">函数调用</string>
     <string name="chat_function_calls_n">函数调用 (%1$d)</string>
+    <string name="chat_function_forced">强制函数调用</string>
+    <string name="chat_function_forced_n">强制调用 (%1$d)</string>
+    <string name="chat_function_forced_hint">勾选的函数本轮必须被调用（tool_choice 强制）；不勾选则使用默认工具集（全部能力仍可经目录检索）。</string>
+    <string name="chat_expose_all_tools">全量工具模式</string>
     <string name="chat_category_other">其他</string>
     <string name="chat_structured_output_fmt">结构化输出: %1$s</string>
     <string name="chat_rules">规则</string>

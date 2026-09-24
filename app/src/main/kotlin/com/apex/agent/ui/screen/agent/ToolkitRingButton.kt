@@ -99,9 +99,11 @@ fun ToolkitRingButton(
     outputFormat: OutputFormat,
     customSchema: String,
     rules: List<ChatRule>,
+    exposeAllTools: Boolean = false,
     onToggleWebSearch: (Boolean) -> Unit,
     onToggleTime: (Boolean) -> Unit,
     onToggleFunction: (String) -> Unit,
+    onToggleExposeAllTools: (Boolean) -> Unit = {},
     onSelectFormat: (OutputFormat) -> Unit,
     onSetCustomSchema: (String) -> Unit,
     onUpsertRule: (ChatRule) -> Unit,
@@ -163,11 +165,11 @@ fun ToolkitRingButton(
                     checked = timeEnabled,
                     onClick = { onToggleTime(!timeEnabled) }
                 )
-                // 3. 函数调用（二级：工具多选）
+                // 3. 函数调用（v4：强制语义 + 全量开关；二级：工具多选）
                 ToolkitExpandableItem(
                     icon = Icons.Default.Extension,
-                    label = if (selectedFunctionIds.isEmpty()) stringResource(R.string.chat_function_calls)
-                    else stringResource(R.string.chat_function_calls_n, selectedFunctionIds.size),
+                    label = if (selectedFunctionIds.isEmpty()) stringResource(R.string.chat_function_forced)
+                    else stringResource(R.string.chat_function_forced_n, selectedFunctionIds.size),
                     expanded = functionsExpanded,
                     onClick = { functionsExpanded = !functionsExpanded }
                 )
@@ -178,9 +180,34 @@ fun ToolkitRingButton(
                 ) {
                     Column(
                         modifier = Modifier
-                            .heightIn(max = 220.dp)
+                            .heightIn(max = 260.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
+                        // v4 语义提示：勾选=强制调用；不选=默认 CORE 集+目录。
+                        Text(
+                            text = stringResource(R.string.chat_function_forced_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                        // v4：全量工具模式（电源用户）
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.chat_expose_all_tools),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = exposeAllTools,
+                                onCheckedChange = onToggleExposeAllTools
+                            )
+                        }
                         // v2：按类别分组展示（类别标题行 + 工具行），
                         // 高风险工具带 ⚠ 徽标 —— 40+ 扁平列表找不到工具，
                         // 分组让用户按任务类型快速定位。

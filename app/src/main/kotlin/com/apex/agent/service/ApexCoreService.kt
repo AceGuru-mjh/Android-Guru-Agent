@@ -43,6 +43,16 @@ class ApexCoreService : LifecycleService() {
     @Inject
     lateinit var pluginManager: PluginManager
 
+    // v4 — MCP 会话引导：注入 McpToolRegistrar（构造时已挂到 McpManager 的
+    // 会话监听）+ McpManager（启动自动连接 enabled 服务器，连接成功后远程工具
+    // 以 mcp__server__tool 一等函数注册进 ToolRegistry）。注入 registrar 仅
+    // 为触发 Hilt 创建单例（挂监听），不直接调用它。
+    @Inject
+    lateinit var mcpToolRegistrar: com.apex.agent.core.tools.catalog.McpToolRegistrar
+
+    @Inject
+    lateinit var mcpManager: com.apex.agent.core.tools.mcp.McpManager
+
     // i18n：前台通知文案按当前语言取词（LanguageManager 维护 resolvedContext）
     @Inject
     lateinit var lang: LanguageManager
@@ -64,6 +74,21 @@ class ApexCoreService : LifecycleService() {
             runCatching {
                 pluginManager.discoverPlugins().forEach(pluginManager::loadPlugin)
             }.onFailure { android.util.Log.w("ApexCoreService", "auto-load plugins failed: ${it.message}") }
+        }
+        // v4 — 自动连接已启用的 MCP 服务器：连接成功 → McpManager 会话监听 →
+        // McpToolRegistrar 把远程工具注册为一等函数（"配置即生效"，与插件同一
+        // 哲学）。连接失败不阻断启动（模型仍可用 mcp_connect 重试）。
+        mcpToolRegistrar.hashCode() // 触发 Hilt 创建（构造即挂监听）
+        scope.launch(Dispatchers.IO) {
+            mcpManager.getEnabledConfigs().forEach { cfg ->
+                runCatching { mcpManager.connect(cfg.name) }
+                    .onFailure {
+                        android.util.Log.w(
+                            "ApexCoreService",
+                            "auto-connect MCP '${cfg.name}' failed: ${it.message}"
+                        )
+                    }
+            }
         }
     }
 

@@ -6,6 +6,7 @@ import com.apex.agent.core.llm.LlmResponse
 import com.apex.agent.core.llm.LlmStreamChunk
 import com.apex.agent.core.llm.ModelCapabilities
 import com.apex.agent.core.llm.ModelRole
+import com.apex.agent.core.llm.ToolChoiceSpec
 import com.apex.agent.core.llm.ToolDefinition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -48,6 +49,24 @@ class DefaultModelRuntime(
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int
+    ): LlmResponse = executeChat(context, messages, tools, temperature, maxTokens, null)
+
+    override suspend fun chat(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): LlmResponse = executeChat(context, messages, tools, temperature, maxTokens, toolChoice)
+
+    private suspend fun executeChat(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
     ): LlmResponse {
         val chain = resolveChain(context)
         val effectiveMessages = applySystemPromptPrefix(chain, messages)
@@ -60,7 +79,7 @@ class DefaultModelRuntime(
             val client = registry.get(resolved.profile, resolved.provider)
             val start = System.currentTimeMillis()
             try {
-                val resp = client.chat(effectiveMessages, tools, temperature, maxTokens)
+                val resp = client.chat(effectiveMessages, tools, temperature, maxTokens, toolChoice)
                 diagnostics.recordAttempt(
                     profileId = resolved.profile.id,
                     providerId = resolved.provider?.id ?: "",
@@ -101,6 +120,26 @@ class DefaultModelRuntime(
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int
+    ): Flow<LlmStreamChunk> =
+        executeStream(context, messages, tools, temperature, maxTokens, null)
+
+    override fun chatStream(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): Flow<LlmStreamChunk> =
+        executeStream(context, messages, tools, temperature, maxTokens, toolChoice)
+
+    private fun executeStream(
+        context: LlmRequestContext,
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
     ): Flow<LlmStreamChunk> = flow {
         val chain = resolveChain(context)
         val effectiveMessages = applySystemPromptPrefix(chain, messages)
@@ -114,7 +153,7 @@ class DefaultModelRuntime(
             val start = System.currentTimeMillis()
             var streamedAny = false
             try {
-                val stream = client.chatStream(effectiveMessages, tools, temperature, maxTokens)
+                val stream = client.chatStream(effectiveMessages, tools, temperature, maxTokens, toolChoice)
                 stream.collect { chunk ->
                     streamedAny = true
                     emit(chunk)
@@ -228,7 +267,12 @@ internal object ErrorClassifier {
                 e.code in 500..599 ->
                     ModelRuntimeException.ModelUnavailable("服务端错误 (${e.code})", profileId, e)
                 else ->
-                    ModelRuntimeException.ModelRequestRejected("请求被拒绝 (${e.code})", profileId)
+                    // v4：把响应体摘要带上（截 200 字符）——工具请求被拒时的关键
+                    // 诊断信息（函数名非法 / schema 关键字不支持 / tool_choice 形态
+                    // 不支持），引擎降级判定也依赖这些关键字。
+                    ModelRuntimeException.ModelRequestRejected(
+                        "请求被拒绝 (${e.code}): ${e.body.take(200)}", profileId, e
+                    )
             }
             is LlmException.EmptyResponse ->
                 ModelRuntimeException.ModelResponseInvalid("空响应", profileId)

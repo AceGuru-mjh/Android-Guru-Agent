@@ -558,6 +558,10 @@ object ToolModule {
         registry.register(SafeAgentTool(McpCallTool(mcpManager)))
         registry.register(SafeAgentTool(McpListTool(mcpManager)))
         registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
+        // v4.1：MCP 服务器生命周期管理（remove=HIGH 风险过用户确认门；
+        // toggle 可逆）。目录层工具——模型需要时经 tool_open 加载。
+        registry.register(SafeAgentTool(McpRemoveServerTool(mcpManager)))
+        registry.register(SafeAgentTool(McpToggleServerTool(mcpManager)))
 
         // ═══ 12. Tool System v4 — 工具目录元工具（渐进披露）═══
         // 注册表 ~110 工具不再全量随请求发送（根因：请求体撑爆 + 非法函数名

@@ -55,7 +55,9 @@ internal object EnginePrompts {
         /** v4 — registry id → provider 名（工具清单与请求 tools 数组同名）。 */
         toolNameMap: Map<String, String> = emptyMap(),
         /** v4 — 降级到无工具时告知模型本轮纯文本作答。 */
-        toolsUnavailable: Boolean = false
+        toolsUnavailable: Boolean = false,
+        /** v4.1 — 用户输入匹配到的已安装技能建议（空则省略该段）。 */
+        skillSuggestions: List<String> = emptyList()
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
@@ -261,6 +263,17 @@ internal object EnginePrompts {
                     appendLine(prompt)
                     appendLine()
                 }
+            }
+
+            // ═══ Tool System v4.1：技能建议（用户输入匹配，未启用）═══
+            if (skillSuggestions.isNotEmpty()) {
+                appendLine()
+                appendLine("## Skill Suggestions (installed, not yet active)")
+                appendLine("The user's request may match these installed skills:")
+                skillSuggestions.forEach { appendLine("- $it") }
+                appendLine("Call skill_list for details. If one clearly fits the task,")
+                appendLine("tell the user and use its tools (skill prompt injection applies")
+                appendLine("once enabled).")
             }
 
             // 会话级动态上下文（当前时间 / 用户规则 / 结构化输出 / 联网搜索指令等），

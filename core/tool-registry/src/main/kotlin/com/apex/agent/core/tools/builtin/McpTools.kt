@@ -1,6 +1,10 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.ToolAnnotations
+import com.apex.agent.core.tools.ToolCategory
+import com.apex.agent.core.tools.ToolMetadata
+import com.apex.agent.core.tools.ToolRisk
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -104,7 +108,9 @@ class McpConnectTool(
     override val id = "mcp_connect"
     override val name = "Connect MCP Server"
     override val description = """
-        Connect to an MCP tool source. Once connected, its tools become available via mcp_call.
+        Connect to an MCP tool source. Once connected, its remote tools are registered
+        as first-class functions (mcp__<name>__<tool>) you can call directly, and are
+        also reachable via mcp_call.
 
         MCP is NOT always a server: the most common form in the wild is a LOCAL COMMAND
         (stdio transport) that speaks JSON-RPC over stdin/stdout. Give `command` for that
@@ -193,4 +199,125 @@ class McpConnectTool(
             onFailure = { e -> "❌ Connection failed: ${e.message}" }
         )
     }
+}
+
+
+/**
+ * # Tool System v4.1 — MCP server removal
+ *
+ * Complements `mcp_connect` (which adds + connects): disconnects the server and
+ * deletes its persisted config. HIGH risk on purpose — removing a server is a
+ * destructive config change (rikkahub-agent's NO_ALWAYS_ALLOW class: MCP config
+ * is a privilege-escalation surface), so the v3 risk gate asks the user before
+ * the first execution.
+ */
+class McpRemoveServerTool(
+    private val mcpManager: McpManager
+) : AgentTool {
+
+    override val id = "mcp_remove_server"
+    override val name = "Remove MCP Server"
+    override val description = """
+        Remove an MCP server: disconnect it and delete its saved configuration.
+        Its mcp__<name>__* tools are unregistered immediately. Destructive —
+        the user is asked to confirm. Use mcp_list to see configured servers.
+
+        Examples:
+        - {"name": "github"}
+    """.trimIndent()
+
+    override val parametersSchema = """
+        {"type":"object","properties":{"name":{"type":"string","description":"Server name to remove"}},"required":["name"]}
+    """.trimIndent()
+
+    override val metadata: ToolMetadata = ToolMetadata.meta(id) {
+        category(ToolCategory.MCP)
+        risk(ToolRisk.HIGH)
+        tag("mcp", "server", "remove", "destructive")
+        annotations(
+            ToolAnnotations(
+                readOnlyHint = false,
+                destructiveHint = true,
+                idempotentHint = false,
+                openWorldHint = false
+            )
+        )
+    }
+
+    override suspend fun execute(arguments: String): String {
+        val json = runCatching { Json.parseToJsonElement(arguments).jsonObject }
+            .getOrElse { return "Error: invalid JSON arguments" }
+        val name = json["name"]?.jsonPrimitive?.content ?: return "Error: 'name' required"
+        val known = mcpManager.getConfigs().any { it.name == name }
+        if (!known) {
+            return "Error: no MCP server named '$name' is configured. Call mcp_list to see them."
+        }
+        mcpManager.removeServer(name)
+        return "✅ Removed MCP server '$name' (disconnected, config deleted, tools unregistered)."
+    }
+
+}
+
+/**
+ * # Tool System v4.1 — MCP server enable/disable toggle
+ *
+ * Disable keeps the config but drops the connection (tools unregistered);
+ * enable persists the flag for the next startup auto-connect. Cheaper and
+ * reversible compared to [McpRemoveServerTool].
+ */
+class McpToggleServerTool(
+    private val mcpManager: McpManager
+) : AgentTool {
+
+    override val id = "mcp_toggle_server"
+    override val name = "Toggle MCP Server"
+    override val description = """
+        Enable or disable an MCP server without deleting it. Disabling drops the
+        active connection (its mcp__<name>__* tools become unavailable); enabling
+        persists the preference (auto-connected on next app start). Use
+        mcp_connect to reconnect immediately after enabling.
+
+        Examples:
+        - {"name": "github", "enabled": false}
+        - {"name": "github", "enabled": true}
+    """.trimIndent()
+
+    override val parametersSchema = """
+        {"type":"object","properties":{"name":{"type":"string","description":"Server name"},"enabled":{"type":"boolean","description":"true=enable, false=disable"}},"required":["name","enabled"]}
+    """.trimIndent()
+
+    override val metadata: ToolMetadata = ToolMetadata.meta(id) {
+        category(ToolCategory.MCP)
+        risk(ToolRisk.MEDIUM)
+        tag("mcp", "server", "toggle")
+        annotations(
+            ToolAnnotations(
+                readOnlyHint = false,
+                destructiveHint = false,
+                idempotentHint = true,
+                openWorldHint = false
+            )
+        )
+    }
+
+    override suspend fun execute(arguments: String): String {
+        val json = runCatching { Json.parseToJsonElement(arguments).jsonObject }
+            .getOrElse { return "Error: invalid JSON arguments" }
+        val name = json["name"]?.jsonPrimitive?.content ?: return "Error: 'name' required"
+        val enabled = json["enabled"]?.jsonPrimitive?.content
+            ?: return "Error: 'enabled' required (true/false)"
+        val result = mcpManager.setEnabled(name, enabled == "true")
+        return result.fold(
+            onSuccess = {
+                if (enabled == "true") {
+                    "✅ MCP server '$name' enabled. It will auto-connect on next app start; " +
+                        "call mcp_connect('$name') to connect right now."
+                } else {
+                    "✅ MCP server '$name' disabled (connection dropped, config kept)."
+                }
+            },
+            onFailure = { e -> "Error: ${e.message}" }
+        )
+    }
+
 }

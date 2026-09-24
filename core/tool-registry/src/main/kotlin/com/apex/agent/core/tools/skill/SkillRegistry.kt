@@ -387,4 +387,37 @@ class SkillRegistry(
     private fun notifyChanged() {
         _changes.tryEmit(Unit)
     }
+
+    companion object {
+        /**
+         * v4.1 — 用户输入 → 已安装技能建议（纯函数，可单测）。
+         *
+         * 匹配：技能 name / description / id 的分词与用户输入词交集计分；
+         * 返回前 3 条“id — name：描述首行”。只建议**未启用**技能（已启用的
+         * promptInjection 已在 system prompt 的 Active Skills 段）。
+         */
+        fun suggestSkills(userText: String, installed: List<InstalledSkill>): List<String> {
+            val terms = userText.lowercase()
+                .split(Regex("""[^\p{L}\p{N}]+"""))
+                .filter { it.length >= 2 }
+                .toSet()
+            if (terms.isEmpty()) return emptyList()
+            val scored = installed.asSequence()
+                .filter { !it.enabled }
+                .map { skill ->
+                    val hay = (skill.manifest.name + " " + skill.manifest.description + " " +
+                        skill.manifest.id).lowercase()
+                    val score = terms.count { term -> hay.contains(term) }
+                    skill to score
+                }
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+                .take(3)
+                .toList()
+            return scored.map { (skill, score) ->
+                val first = skill.manifest.description.lineSequence().firstOrNull()?.trim() ?: ""
+                skill.manifest.id + " — " + skill.manifest.name + " (match " + score + "): " + first
+            }
+        }
+    }
 }

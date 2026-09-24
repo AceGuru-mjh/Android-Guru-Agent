@@ -60,14 +60,14 @@ import kotlinx.serialization.json.jsonPrimitive
 class ApexAgentEngine(
     private val llmClient: LlmClient,
     private val toolRegistry: ToolRegistry,
-    private val toolExecutor: ToolExecutor,
-    private var config: AgentConfig = AgentConfig.STANDARD,
+    internal val toolExecutor: ToolExecutor,
+    internal var config: AgentConfig = AgentConfig.STANDARD,
     private val memory: ConversationMemory? = null,
     private val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
     private val environmentInfoProvider: EnvironmentInfoProvider? = null,
-    private val memoryObserver: ExecutionMemoryObserver? = null,
+    internal val memoryObserver: ExecutionMemoryObserver? = null,
     /**
      * 已连接服务提供者（GitHub/连接器等）：非空时系统提示词注入
      * "## Connected Services" 段，让模型知道这些服务的工具已就绪。
@@ -100,7 +100,7 @@ class ApexAgentEngine(
      * 实际执行 LLM 调用的运行时。null [modelRuntime] 时回退到单 client，
      * 保留旧行为；非空时使用多模型路由。
      */
-    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
+    internal val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     /**
      * T76 — 当前执行的诊断标签（taskId/stepId → LlmRequestContext 四元 ID）。
@@ -123,7 +123,7 @@ class ApexAgentEngine(
     }
 
     /** 工具输出截断器（始终生效，不依赖 contextCompressor 是否注入） */
-    private val toolTruncator = ToolOutputTruncator(
+    internal val toolTruncator = ToolOutputTruncator(
         maxChars = config.maxToolOutputLength
     )
 
@@ -135,7 +135,7 @@ class ApexAgentEngine(
      * providerNameToId 把模型回显的工具名映射回注册表 id。
      */
     @Volatile
-    private var currentToolPlan: ToolRequestBudget.RequestToolPlan? = null
+    internal var currentToolPlan: ToolRequestBudget.RequestToolPlan? = null
 
     /**
      * 工具请求降级等级（0=正常 / 1=纯 CORE 无强制 / 2=无工具）。
@@ -143,6 +143,17 @@ class ApexAgentEngine(
      * 保证“直接发送对话”永远有响应而非直接报错。
      */
     private var toolDegradationLevel = 0
+
+    // ═══ Tool System v4.1 — 循环守卫 / 技能建议 ═══
+
+    /** 同工具+同参数重复调用守卫（第 3 次起拦截，返回自修复指引）。 */
+    internal val loopGuard = EngineLoopGuard()
+
+    /** 循环守卫累计触发次数（观测用；任务内累计）。 */
+    internal var loopGuardTrips = 0
+
+    /** v4.1 — 用户输入匹配到的已安装技能建议（system prompt 注入）。 */
+    private var skillSuggestions: List<String> = emptyList()
 
     private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
         memory?.load()?.let { addAll(it) }
@@ -153,14 +164,14 @@ class ApexAgentEngine(
     // tagsSetter 钩子从其他线程裸写，当前只能靠调用方自律；后续应改为注入
     // 显式消息队列（Channel）或统一在引擎调度器内串行化所有历史变更。
     @Volatile
-    private var isRunning = false
+    internal var isRunning = false
 
     /**
      * 任务内是否有任何工具动作失败（跨 [executeToolCallStreaming] 调用累计）。
      * 因为流式工具执行是独立成员函数，无法访问 [execute] 内的局部变量，
      * 故用实例字段累计，并在每次 [execute] 入口重置。
      */
-    private var anyActionFailed = false
+    internal var anyActionFailed = false
 
     /**
      * Channel for the UI to deliver plan-confirmation decisions back to the engine
@@ -304,6 +315,9 @@ class ApexAgentEngine(
         // v4：新任务开始 —— 会话激活的工具不跨任务泄漏；降级状态复位。
         toolActivation.reset()
         toolDegradationLevel = 0
+        // v4.1：循环守卫与技能建议按任务重置。
+        loopGuard.reset()
+        loopGuardTrips = 0
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
@@ -324,6 +338,10 @@ class ApexAgentEngine(
             }
 
             val userText = buildUserText(input)
+            // v4.1：用户输入 → 已安装技能建议（同任务内注入 system prompt）。
+            skillSuggestions = skillRegistry?.let {
+                com.apex.agent.core.tools.skill.SkillRegistry.suggestSkills(userText, it.getInstalled())
+            } ?: emptyList()
             val userMessage = LlmMessage.User(content = userText, images = input.images)
 
             // 内存历史保留完整图片（当前会话后续轮次需要 Vision 上下文）。
@@ -839,6 +857,15 @@ class ApexAgentEngine(
                 }
 
                 else -> {
+                    // ═══ v4.1 终答回收：空终稿 ≠ 失败 ═══
+                    // 模型跑完工具却没产出最终文本（截断/怪异收尾）时，用
+                    // 「去工具 + FinalAnswerReminder」再试（≤2 次），仍空才报错。
+                    val recovered = recoverFinalAnswer(emit)
+                    if (recovered != null) {
+                        addMessage(LlmMessage.Assistant(recovered))
+                        emit(AgentEvent.ResponseComplete(recovered))
+                        return iteration
+                    }
                     emit(AgentEvent.Error("Empty response from LLM"))
                     return iteration
                 }
@@ -856,147 +883,11 @@ class ApexAgentEngine(
         return iteration
     }
 
-    /**
-     * 流式执行单个工具调用。
-     *
-     * 取代旧的 `toolExecutor.execute(...)` 一次性调用。收集
-     * [ToolExecutor.executeStream] 的事件流：
-     * - [ToolStreamEvent.Output] → 追加到 [outputBuilder] 并即时发射
-     *   [AgentEvent.ToolOutputChunk]，让 UI 在工具执行期间就能看到实时输出
-     *   （如 shell 的逐行输出）。
-     * - [ToolStreamEvent.Progress] → 发射 [AgentEvent.ToolProgress]，UI 显示进度条。
-     * - [ToolStreamEvent.Complete] → 仅当此前没有任何 Output（非典型）时才把
-     *   `output` 补发一次，保证 UI 不空；否则忽略（以累积值为准）。
-     * - [ToolStreamEvent.Error] → 追加到 [outputBuilder] 并发射一条 ToolOutputChunk，
-     *   使失败信息也实时可见。
-     *
-     * 收集结束后（或捕获到异常），[outputBuilder] 即为 `rawOutput`，沿用原有的
-     * P7 截断 + ToolCallComplete + 写入 LlmMessage.ToolResult 流程 —— 因此成功
-     * 判定（`!result.startsWith("Error")`）与历史持久化行为与旧实现完全一致。
-     *
-     * [CancellationException] 重抛，使 `abort()` 能沿 `collect` → 工具 Flow →
-     * 底层进程（如 `Process.destroy()`）传播。
-     */
-    private suspend fun executeToolCallStreaming(
-        toolCall: ToolCall,
-        emit: suspend (AgentEvent) -> Unit
-    ) {
-        // v4：模型回显的是 provider 安全名（terminal_exec）；执行器/截断策略
-        // 需要注册表 id（terminal.exec）——经当前计划的反向映射解析。
-        // 无映射时（旧会话回放/模型直呼 registry id）原样直查，两条路都通。
-        val registryToolId = EngineToolPlanner.registryIdOf(currentToolPlan, toolCall.name)
-
-        emit(
-            AgentEvent.ToolCallStart(
-                callId = toolCall.id,
-                toolName = toolCall.name,
-                arguments = toolCall.arguments
-            )
-        )
-
-        val toolStart = System.currentTimeMillis()
-        val outputBuilder = StringBuilder()
-
-        // 以流式事件信号为主判定成败：收到 ToolStreamEvent.Error 或捕获异常
-        // 即视为失败。这样工具合法输出以 "Error" 开头（如 "Error: foo not found" 这类
-        // 真实数据）也不会被误判为执行失败。
-        var hadStreamError = false
-        try {
-            toolExecutor.executeStream(registryToolId, toolCall.arguments).collect { event ->
-                when (event) {
-                    is ToolStreamEvent.Output -> {
-                        outputBuilder.append(event.chunk)
-                        emit(
-                            AgentEvent.ToolOutputChunk(
-                                callId = toolCall.id,
-                                chunk = event.chunk
-                            )
-                        )
-                    }
-                    is ToolStreamEvent.Progress -> {
-                        emit(
-                            AgentEvent.ToolProgress(
-                                callId = toolCall.id,
-                                percent = event.percent,
-                                message = event.message
-                            )
-                        )
-                    }
-                    is ToolStreamEvent.Complete -> {
-                        // 防御：仅当工具只发 Complete 没发 Output（非典型）时补发。
-                        if (outputBuilder.isEmpty() && event.output.isNotEmpty()) {
-                            outputBuilder.append(event.output)
-                            emit(
-                                AgentEvent.ToolOutputChunk(
-                                    callId = toolCall.id,
-                                    chunk = event.output
-                                )
-                            )
-                        }
-                    }
-                    is ToolStreamEvent.Error -> {
-                        hadStreamError = true
-                        outputBuilder.append(event.message)
-                        emit(
-                            AgentEvent.ToolOutputChunk(
-                                callId = toolCall.id,
-                                chunk = event.message
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            hadStreamError = true
-            outputBuilder.append("Error: ${e.message ?: "tool execution failed"}")
-        }
-
-        val duration = System.currentTimeMillis() - toolStart
-
-        // P7 Layer 1: 工具输出截断（始终生效）
-        val rawOutput = outputBuilder.toString()
-        val truncationResult = toolTruncator.smartTruncate(rawOutput, registryToolId)
-        val result = truncationResult.text
-
-        // 成功判定：优先采用流式事件信号；仅当工具未发任何 Error 事件且
-        // 异常分支未触发时，才回退到文本前缀检测（兼容只返回 "Error: ..." 文本
-        // 而不发 Error 事件的旧工具）。
-        val actionSuccess = !hadStreamError && !result.startsWith("Error")
-        if (!actionSuccess) anyActionFailed = true
-
-        emit(
-            AgentEvent.ToolCallComplete(
-                callId = toolCall.id,
-                toolName = toolCall.name,
-                arguments = toolCall.arguments,
-                output = result.take(config.maxToolOutputLength),
-                fullOutput = rawOutput.take(100_000),
-                success = actionSuccess,
-                durationMs = duration
-            )
-        )
-
-        // 截断后的结果存入历史（节省后续 token）
-        addMessage(
-            LlmMessage.ToolResult(toolCall.id, result)
-        )
-
-        // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
-        // 传入 actionSuccess 供 CS-Mem 蒸馏时过滤失败动作（避免"鼠标连点失败"
-        // 也被压进 FSM 宏技能，使学到的宏技能必然无法回放）。
-        memoryObserver?.onActionExecuted(
-            "${toolCall.name}(${toolCall.arguments.take(120)})",
-            success = actionSuccess
-        )
-    }
-
     // ═══════════════════════════════════════════════════════
     // Prompt builders
     // ═══════════════════════════════════════════════════════
 
-    private fun buildMessages(): List<LlmMessage> {
+    internal fun buildMessages(): List<LlmMessage> {
         repairDanglingToolCalls()
         val messages = mutableListOf<LlmMessage>()
         messages.add(LlmMessage.System(buildSystemPrompt()))
@@ -1041,7 +932,7 @@ class ApexAgentEngine(
      * TaskRuntime 未接线时（executionTags == null）返回原 context，
      * 行为与 T76 之前完全一致（既有测试不受影响）。
      */
-    private fun tagged(ctx: LlmRequestContext): LlmRequestContext {
+    internal fun tagged(ctx: LlmRequestContext): LlmRequestContext {
         val tags = executionTags ?: return ctx
         return ctx.copy(taskId = tags.first, stepId = tags.second)
     }
@@ -1055,6 +946,7 @@ class ApexAgentEngine(
         toolsUnavailable = currentToolPlan?.tools?.isEmpty() == true &&
             toolDegradationLevel >= EngineToolPlanner.DEGRADATION_NO_TOOLS,
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
+        skillSuggestions = skillSuggestions,
         environmentSummary = environmentInfoProvider?.environmentSummary(),
         connectedServices = connectedServicesProvider?.connectedServicesSummary()
     )

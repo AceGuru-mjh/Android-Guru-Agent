@@ -134,3 +134,20 @@ v2 定义了工具是什么，v3 让工具在循环里不死，v4 让**工具默
 - TaskConfigSnapshot：`enabledToolIds` → `forcedToolIds`+`exposeAllTools`（旧快照反序列化兼容：字段缺失取默认）；
 - LlmClient/ModelRuntime 新方法全部带默认实现：DynamicLlmClient/NoOpLlmClient/全部测试 Fake 零改动编译通过；
 - 既有引擎/编排器测试 131 个全部通过（未映射工具名回退原样直查，旧路径语义不变）。
+
+---
+
+## 8. Wave 2（v4.1）— 全面完善
+
+在 Wave 1（默认可用 + 渐进披露 + 强制调用 + MCP 一等化 + 降级自愈）之上：
+
+| 能力 | 实现 | 对标 |
+|------|------|------|
+| **循环守卫** | 同工具+同参数第 3 次起拦截（不执行），返回 `loop_detected` 自修复指引（重读结果/改参数/换方法）；不同参数不受影响 | rikkahub-agent LoopGuard（实测灾难样本：27 步 141K token 全是同参重复） |
+| **终答回收** | 空终稿（无内容无工具调用）≠ 失败：去工具 + FinalAnswerReminder 重试（≤2 次），仍空才报 "Empty response" | rikkahub-agent FinalAnswerRecovery |
+| **MCP 生命周期** | `mcp_remove_server`（HIGH 风险过确认门——配置即提权面）+ `mcp_toggle_server`（可逆启停，重启自动连接联动）；mcp_connect 描述更新为 v4 一等注册语义 | rikkahub-agent mcp_* 控制工具 + NO_ALWAYS_ALLOW 门控 |
+| **技能建议** | 用户输入分词 → 未启用已安装技能 top-3 匹配 → system prompt "Skill Suggestions" 段（启用技能不重复建议——其 promptInjection 已在 Active Skills） | operit 技能目录 + 模型自主 use_package |
+| **SRP 拆分** | EngineToolExecution / EngineLoopGuard / EngineFinalAnswer 同包扩展文件（引擎回落 1082 行） | 仓库既有 God-file 拆分模式 |
+
+Wave 2 测试 +9（循环守卫 2 / 终答回收 2 / 技能建议 3 / MCP 生命周期 2），
+总 578 全绿（K2 + JUnit）。

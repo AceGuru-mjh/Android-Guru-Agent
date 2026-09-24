@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,12 +49,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.ui.screen.terminal.formatBytes
 import kotlinx.coroutines.delay
@@ -84,15 +87,19 @@ fun StorageScreen(
     }
 
     Scaffold(
+        // 内层 Scaffold 置零 insets：状态栏已由根 Scaffold 顶栏承担，避免双重叠加
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text("存储") },
+                // 顶栏置零 windowInsets，避免与根 Scaffold 状态栏双重叠加
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                title = { Text(stringResource(R.string.storage_title)) },
                 actions = {
                     if (state.busy) {
                         CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
                     }
                     IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.storage_refresh), tint = MaterialTheme.colorScheme.primary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -123,11 +130,11 @@ fun StorageScreen(
             // ═══ 1. 附件沙箱 ═══
             StorageCard(
                 icon = Icons.Default.AttachFile,
-                title = "附件",
+                title = stringResource(R.string.storage_attachments),
                 tint = MaterialTheme.colorScheme.primary
             ) {
-                StorageMetricRow("占用空间", formatBytes(state.attachmentsSize))
-                StorageMetricRow("文件数", "${state.attachmentsCount} 个")
+                StorageMetricRow(stringResource(R.string.storage_space_used), formatBytes(state.attachmentsSize))
+                StorageMetricRow(stringResource(R.string.storage_files), stringResource(R.string.storage_unit_files, state.attachmentsCount))
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
@@ -137,11 +144,11 @@ fun StorageScreen(
                     ) {
                         Icon(Icons.Default.Delete, null, Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("清空附件", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.storage_clear_attachments), color = MaterialTheme.colorScheme.error)
                     }
                 }
                 Text(
-                    "聊天附件的本地缓存；清除后历史消息中的附件预览将不可用（Agent 侧引用路径失效）。",
+                    stringResource(R.string.storage_attachments_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -150,22 +157,23 @@ fun StorageScreen(
             // ═══ 2. Ubuntu 环境 ═══
             StorageCard(
                 icon = Icons.Default.Terminal,
-                title = "Ubuntu 环境（rootfs，内置）",
+                title = stringResource(R.string.storage_ubuntu_title),
                 tint = MaterialTheme.colorScheme.tertiary
             ) {
                 val installed = state.rootfsPhase != UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED
                 StorageMetricRow(
-                    "状态",
+                    stringResource(R.string.storage_status),
                     when (state.rootfsPhase) {
-                        UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> "未解包"
-                        UbuntuLifecycleCoordinator.Phase.READY -> "已就绪"
-                        UbuntuLifecycleCoordinator.Phase.FAILED -> "异常"
+                        UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED -> stringResource(R.string.storage_rootfs_not_installed)
+                        UbuntuLifecycleCoordinator.Phase.READY -> stringResource(R.string.storage_rootfs_ready)
+                        UbuntuLifecycleCoordinator.Phase.FAILED -> stringResource(R.string.storage_rootfs_failed)
                         else -> state.rootfsPhase.name
                     }
                 )
                 StorageMetricRow(
-                    "占用空间",
-                    state.rootfsSize?.let { formatBytes(it) } ?: if (installed) "统计中…" else "—"
+                    stringResource(R.string.storage_space_used),
+                    state.rootfsSize?.let { formatBytes(it) }
+                        ?: if (installed) stringResource(R.string.storage_calculating) else "—"
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
@@ -175,10 +183,10 @@ fun StorageScreen(
                 ) {
                     Icon(Icons.Default.Delete, null, Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("删除 Ubuntu 环境（保留用户数据）", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.storage_delete_ubuntu), color = MaterialTheme.colorScheme.error)
                 }
                 Text(
-                    "删除解包后的 rootfs 与解包缓存；guest /root 用户数据与 workspace 保留，重新离线解包即恢复。完整管理（解包/修复）在终端页环境中心。",
+                    stringResource(R.string.storage_ubuntu_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -187,27 +195,27 @@ fun StorageScreen(
             // ═══ 3. 会话历史 ═══
             StorageCard(
                 icon = Icons.Default.Chat,
-                title = "会话历史",
+                title = stringResource(R.string.storage_conversation_history),
                 tint = MaterialTheme.colorScheme.secondary
             ) {
-                StorageMetricRow("消息数", "${state.conversationCount} 条")
+                StorageMetricRow(stringResource(R.string.storage_messages), stringResource(R.string.storage_unit_msgs, state.conversationCount))
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = viewModel::exportConversation,
                         enabled = !state.busy && state.conversationCount > 0,
                         modifier = Modifier.weight(1f)
-                    ) { Text("导出为文本") }
+                    ) { Text(stringResource(R.string.storage_export_text)) }
                     OutlinedButton(
                         onClick = { confirmAction = "conversation" },
                         enabled = !state.busy && state.conversationCount > 0,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("清空", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.storage_clear), color = MaterialTheme.colorScheme.error)
                     }
                 }
                 Text(
-                    "当前全局会话（跨重启持久化）。清空前建议先导出备份；清空后 Agent 对话上下文从零开始。",
+                    stringResource(R.string.storage_conversation_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -216,11 +224,11 @@ fun StorageScreen(
             // ═══ 4. 运行日志 ═══
             StorageCard(
                 icon = Icons.Default.Info,
-                title = "运行日志（内存环形缓冲）",
+                title = stringResource(R.string.storage_log_title),
                 tint = MaterialTheme.colorScheme.primary
             ) {
-                StorageMetricRow("记录数", "${state.logCount} 条")
-                StorageMetricRow("占用", formatBytes(state.logBytes))
+                StorageMetricRow(stringResource(R.string.storage_records), stringResource(R.string.storage_unit_msgs, state.logCount))
+                StorageMetricRow(stringResource(R.string.storage_usage), formatBytes(state.logBytes))
                 val ratio = (state.logBytes.toFloat() / 8_388_608f).coerceIn(0f, 1f) // 8MB 上限（LogViewer 同源）
                 if (ratio > 0f) {
                     Spacer(Modifier.height(6.dp))
@@ -231,7 +239,7 @@ fun StorageScreen(
                     )
                 }
                 Text(
-                    "日志位于内存环形缓冲（App 重启即释放）；完整查看与导出在「运行日志」页。",
+                    stringResource(R.string.storage_log_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -260,10 +268,22 @@ fun StorageScreen(
 
     // ═══ 破坏性操作二次确认 ═══
     if (confirmAction != null) {
+        // i18n：约 1GB 回退文案（格式化参数在 when 内两处使用，上提取词）
+        val aboutOneGb = stringResource(R.string.storage_about_1gb)
         val (title, text) = when (confirmAction) {
-            "attachments" -> "清空附件？" to "将删除全部 ${state.attachmentsCount} 个附件文件（${formatBytes(state.attachmentsSize)}）。此操作不可撤销。"
-            "rootfs" -> "删除 Ubuntu 环境？" to "将删除解包后的 rootfs（${state.rootfsSize?.let { formatBytes(it) } ?: "约 1GB"}）与解包缓存；内置安装包随 APK 保留，可随时重新离线解包；用户数据（/root、workspace）保留。"
-            else -> "清空会话历史？" to "将删除全部 ${state.conversationCount} 条消息，Agent 上下文从零开始。建议先导出备份。"
+            "attachments" -> stringResource(R.string.storage_confirm_attachments_title) to
+                stringResource(
+                    R.string.storage_confirm_attachments_text,
+                    state.attachmentsCount,
+                    formatBytes(state.attachmentsSize)
+                )
+            "rootfs" -> stringResource(R.string.storage_confirm_rootfs_title) to
+                stringResource(
+                    R.string.storage_confirm_rootfs_text,
+                    state.rootfsSize?.let { formatBytes(it) } ?: aboutOneGb
+                )
+            else -> stringResource(R.string.storage_confirm_conversation_title) to
+                stringResource(R.string.storage_confirm_conversation_text, state.conversationCount)
         }
         AlertDialog(
             onDismissRequest = { confirmAction = null },
@@ -277,10 +297,10 @@ fun StorageScreen(
                         "conversation" -> viewModel.clearConversation()
                     }
                     confirmAction = null
-                }) { Text("确认", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.storage_confirm), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmAction = null }) { Text("取消") }
+                TextButton(onClick = { confirmAction = null }) { Text(stringResource(R.string.storage_cancel)) }
             }
         )
     }

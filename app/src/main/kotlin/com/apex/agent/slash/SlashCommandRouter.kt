@@ -2,9 +2,10 @@ package com.apex.agent.slash
 
 /**
  * Runtime context the [SlashCommandRouter] consults to decide how a command
- * should be routed. Currently only GitHub connection state is needed (for the
- * `/mcp:github` real binding), but the shape is extensible: future connectors
- * / plugins / MCP servers plug in by adding fields here.
+ * should be routed. Currently GitHub connection state (for the
+ * `/mcp:github` real binding) and live MCP server connection state are needed,
+ * but the shape is extensible: future connectors / plugins plug in by adding
+ * fields here.
  *
  * The context is a small immutable value object so routing stays pure and
  * unit-testable — the ViewModel snapshots connection state at dispatch time
@@ -17,10 +18,14 @@ package com.apex.agent.slash
  * @param githubUsername The GitHub login resolved at token-validation time,
  *   or `null` when not connected. Surfaced in the system message so the user
  *   can see *which* account the MCP context is bound to.
+ * @param mcpConnected 已连接的 MCP 服务器名快照（路由时点）。`/mcp:<id>` 对已
+ *   连接的服务器注入 mcp_call 引导提示词；未携带快照的旧调用方退回
+ *   Token 连接态判定（内置 github 服务器随启动自动连接，两者语义一致）。
  */
 data class SlashRouteContext(
     val githubConnected: Boolean = false,
-    val githubUsername: String? = null
+    val githubUsername: String? = null,
+    val mcpConnected: Set<String> = emptySet()
 ) {
     companion object {
         /** Sentinel used when no live connection state is available. */
@@ -76,10 +81,33 @@ data class SlashCommandRoute(
 object SlashCommandRouter {
 
     /**
-     * GitHub tool IDs registered by `ToolModule` when a token is connected.
+     * 内置 GitHub MCP 服务器 id（= McpManager 配置名 = mcp_call 的 server 参数）。
+     * 与 github/mcp 包的 `BuiltinGithubMcpServer.ID` 保持一致；这里不 import
+     * app 层类，保持 slash 包纯 JVM 可单测（同 [GITHUB_TOOL_IDS] 的镜像策略）。
+     */
+    private const val GITHUB_MCP_SERVER_ID = "github"
+
+    /**
+     * GitHub MCP 工具（内置 github MCP 服务器 tools/list 返回的 7 个工具，
+     * 命名对齐官方 github-mcp-server），经 mcp_call 调用。
+     */
+    private val GITHUB_MCP_TOOLS: List<String> = listOf(
+        "get_me",
+        "list_repositories",
+        "get_file_contents",
+        "create_or_update_file",
+        "create_issue",
+        "list_issues",
+        "search_code"
+    )
+
+    /**
+     * GitHub 原生工具 IDs registered by `ToolModule` when a token is connected.
      * Mirrored here (rather than imported) so the `slash` package stays free
      * of `app`-module dependencies and remains pure-JVM unit-testable. If
-     * `ToolModule` adds/removes a GitHub tool, update this list in lockstep.
+     * `ToolModule` adds/removes a GitHub tool, update this list in lockstep
+     * （与上方 [GITHUB_MCP_TOOLS] 是两套共存的能力：原生工具直调，MCP 工具走
+     * mcp_call —— 提示词里两者都列出，互为备份）。
      */
     private val GITHUB_TOOL_IDS: List<String> = listOf(
         "github_get_user",
@@ -118,13 +146,13 @@ object SlashCommandRouter {
             sourceName = command.id
         )
         is SlashCommand.Plugin -> SlashCommandRoute(
-            // 诚实化：PluginManager.registerPluginTools 仍是 TODO（AIDL 接口未定型），
-            // ToolRegistry 中不存在 plugin 工具 —— 原文案会让模型寻找不存在的工具并
-            // 可能虚构执行结果。改为如实告知，禁止伪造。
-            systemMessage = "📦 插件: ${command.id}（Agent 工具桥接建设中）",
+            // 插件工具桥已激活（IApexPluginHost 宿主桥 + PluginManager 真实注册）：
+            // 插件加载后其工具已注册进 ToolRegistry，模型可直接调用。
+            // 未加载（loadedPlugins 不含该包）时如实引导去市场页安装/启用。
+            systemMessage = "📦 插件: ${command.id}（工具已注册进 Agent 工具表）",
             agentPrompt = command.buildAgentPrompt(
-                verb = "插件 ${command.id} 已加载并验证连通，但 Agent 侧插件工具桥（AIDL → ToolRegistry）尚未接线 —— 请如实告知用户当前版本暂不能执行插件工具，不要虚构执行结果",
-                toolHint = "插件运行时"
+                verb = "插件 ${command.id} 已加载，其工具已注册进 ToolRegistry —— 请直接调用对应的插件工具完成任务（如 browser_* 网页自动化工具）。若工具不存在，提示用户去 市场 → 插件 页面安装/启用该插件后重试",
+                toolHint = "插件工具（browser_* 等）"
             ),
             routeKind = "plugin",
             sourceName = command.id
@@ -138,14 +166,21 @@ object SlashCommandRouter {
     }
 
     /**
-     * MCP routing. `/mcp:github` is bound to the real GitHub tool set; all
-     * other MCP ids fall back to the generic prompt skeleton (they remain
-     * "command exists, capability not yet wired" — same status as before
-     * this change, no regression).
+     * MCP routing.
+     *
+     * - `/mcp:github`：绑定内置 GitHub MCP 服务器（BUILTIN 进程内 transport，
+     *   随 App 启动自动连接）。已连接（或旧调用方只携带 Token 态且已连接）→
+     *   注入列出 7 个 MCP 工具 + mcp_call 用法的提示词；未连接 → 引导走
+     *   GithubTokenDialog 配置流程（与此前行为一致，不回归）。
+     * - 其他 `/mcp:<id>`：已连接的服务器 → 提示词引导用 mcp_call 调用其工具；
+     *   未连接 → 通用骨架（"指令存在，能力待接线"，与此前一致）。
      */
     private fun routeMcp(command: SlashCommand.Mcp, context: SlashRouteContext): SlashCommandRoute {
-        if (command.id == "github") {
-            return if (context.githubConnected) {
+        if (command.id == GITHUB_MCP_SERVER_ID) {
+            // 内置 github 服务器随启动自动连接；上下文未携带 MCP 快照时退回
+            // Token 连接态（两者对内置服务器语义一致，见 SlashRouteContext.kdoc）。
+            val mcpReady = command.id in context.mcpConnected || context.githubConnected
+            return if (mcpReady) {
                 val user = context.githubUsername ?: "GitHub"
                 SlashCommandRoute(
                     systemMessage = "🔌 已启用 GitHub MCP 上下文（用户: $user）",
@@ -161,14 +196,24 @@ object SlashCommandRouter {
                 )
             }
         }
-        // Generic MCP fallback (postgres / filesystem / future servers).
-        return SlashCommandRoute(
-            systemMessage = "🔌 连接 MCP: ${command.id}",
-            agentPrompt = command.buildAgentPrompt(
-                verb = "请根据此指令执行对应操作，通过 MCP 工具执行",
-                toolHint = "mcp"
+        // Generic MCP (postgres / filesystem / future servers).
+        return if (command.id in context.mcpConnected) {
+            SlashCommandRoute(
+                systemMessage = "🔌 连接 MCP: ${command.id}",
+                agentPrompt = command.buildAgentPrompt(
+                    verb = "请根据此指令执行对应操作，通过 MCP 服务器 ${command.id} 的工具执行（用 mcp_call 调用，server 填 \"${command.id}\"；mcp_list 可列出该服务器的全部工具）",
+                    toolHint = "mcp"
+                )
             )
-        )
+        } else {
+            SlashCommandRoute(
+                systemMessage = "🔌 连接 MCP: ${command.id}",
+                agentPrompt = command.buildAgentPrompt(
+                    verb = "请根据此指令执行对应操作，通过 MCP 工具执行",
+                    toolHint = "mcp"
+                )
+            )
+        }
     }
 
     /**
@@ -197,16 +242,21 @@ object SlashCommandRouter {
     /**
      * Prompt builder specialized for `/mcp:github` when GitHub is connected.
      *
-     * Unlike the generic builder, this one explicitly enumerates the
-     * `github_*` tool IDs the agent has access to, so the LLM doesn't have
-     * to guess which tools to call for a repo/issue/code-search task. User
-     * extra text is still forwarded so `/mcp:github repo=owner/name 列出
-     * open issues` works end-to-end.
+     * v2（内置 GitHub MCP 上线）：优先引导用 mcp_call 调用内置服务器 "github"
+     * 的 7 个 MCP 工具（与官方 github-mcp-server 命名对齐），原生 `github_*`
+     * 工具仍然可用（两者共存，互为备份）。若 mcp_call 返回「未连接」类错误，
+     * 模型应改用原生 github_* 工具完成同一任务。User extra text is still
+     * forwarded so `/mcp:github repo=owner/name 列出 open issues` works
+     * end-to-end.
      */
     private fun SlashCommand.Mcp.buildGithubAgentPrompt(username: String): String = buildString {
         append("用户触发了快捷指令: /mcp:github\n")
         append("GitHub MCP 上下文已启用（已连接用户: ").append(username).append("）。\n")
-        append("当前可用 GitHub 工具（优先使用这些）:\n")
+        append("优先通过 MCP 调用 GitHub（用 mcp_call 工具，server 填 \"github\"，arguments 为 JSON 字符串）:\n")
+        GITHUB_MCP_TOOLS.forEach { append("  - ").append(it).append('\n') }
+        append("mcp_call 调用形如: {\"server\": \"github\", \"tool\": \"工具名\", \"arguments\": \"{...JSON 参数...}\"}\n")
+        append("mcp_list 可随时列出已连接 MCP 服务器与全部工具。\n")
+        append("原生 github_* 工具也仍然可用（若 mcp_call 报未连接/不可用错误，改用这些完成同一任务）:\n")
         GITHUB_TOOL_IDS.forEach { append("  - ").append(it).append('\n') }
         if (args.isNotEmpty()) {
             append("\n指令参数: ")

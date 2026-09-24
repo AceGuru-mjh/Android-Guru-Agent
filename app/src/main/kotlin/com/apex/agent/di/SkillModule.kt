@@ -7,6 +7,7 @@ import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.plugin.host.PluginManager
 import com.apex.agent.ui.component.SlashMenuProvider
+import com.apex.agent.ui.language.LanguageManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -45,14 +46,16 @@ object SkillModule {
         skillRegistry: SkillRegistry,
         mcpManager: McpManager,
         pluginManager: PluginManager,
-        connectorRegistry: ConnectorRegistry
+        connectorRegistry: ConnectorRegistry,
+        languageManager: LanguageManager
     ): SlashMenuProvider {
         return SlashMenuProvider(
             skills = skillMenuProvider,
             skillRegistry = skillRegistry,
             mcpManager = mcpManager,
             pluginManager = pluginManager,
-            connectorRegistry = connectorRegistry
+            connectorRegistry = connectorRegistry,
+            languageManager = languageManager
         )
     }
 }

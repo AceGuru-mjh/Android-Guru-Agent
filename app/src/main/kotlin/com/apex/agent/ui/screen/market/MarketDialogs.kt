@@ -28,9 +28,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
 
@@ -78,7 +80,7 @@ fun AddMcpDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加 MCP 工具源") },
+        title = { Text(stringResource(R.string.market_mcp_add_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -87,29 +89,35 @@ fun AddMcpDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称（如 memory / filesystem）") },
+                    label = { Text(stringResource(R.string.market_mcp_name_label)) },
                     isError = name.isNotBlank() && !nameValid,
                     supportingText = if (name.isNotBlank() && !nameValid) {
-                        { Text("不能含引号、反斜杠或换行") }
+                        { Text(stringResource(R.string.market_mcp_name_invalid)) }
                     } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("形态", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.market_mcp_form_label),
+                    style = MaterialTheme.typography.labelMedium
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    McpTransport.entries.forEach { t ->
+                    // BUILTIN 是 App 预置的进程内 transport（工厂在 McpManager 注册表里，
+                    // 用户不可自建）—— 添加对话框只暴露 STDIO / HTTP / SSE 三种形态。
+                    McpTransport.entries.filter { it != McpTransport.BUILTIN }.forEach { t ->
                         FilterChip(
                             selected = transport == t,
                             onClick = { transport = t },
                             label = {
                                 Text(
                                     when (t) {
-                                        McpTransport.STDIO -> "本地命令"
-                                        McpTransport.HTTP -> "远端 HTTP"
-                                        McpTransport.SSE -> "远端 SSE"
+                                        McpTransport.STDIO -> stringResource(R.string.market_mcp_form_stdio)
+                                        McpTransport.HTTP -> stringResource(R.string.market_mcp_form_http)
+                                        McpTransport.SSE -> stringResource(R.string.market_mcp_form_sse)
+                                        McpTransport.BUILTIN -> stringResource(R.string.market_builtin)
                                     }
                                 )
                             }
@@ -121,8 +129,8 @@ fun AddMcpDialog(
                     OutlinedTextField(
                         value = command,
                         onValueChange = { command = it },
-                        label = { Text("命令（command）") },
-                        placeholder = { Text("npx / python / 绝对路径二进制") },
+                        label = { Text(stringResource(R.string.market_mcp_command_label)) },
+                        placeholder = { Text(stringResource(R.string.market_mcp_command_hint)) },
                         isError = command.isNotBlank() && !commandValid,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -130,21 +138,20 @@ fun AddMcpDialog(
                     OutlinedTextField(
                         value = args,
                         onValueChange = { args = it },
-                        label = { Text("参数（args，空格分隔）") },
+                        label = { Text(stringResource(R.string.market_mcp_args_label)) },
                         placeholder = { Text("-y @modelcontextprotocol/server-memory") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = env,
                         onValueChange = { env = it },
-                        label = { Text("环境变量（可选，每行 KEY=VALUE）") },
+                        label = { Text(stringResource(R.string.market_mcp_env_label)) },
                         minLines = 2,
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        "MCP 不必是服务器：这条命令会被作为本地子进程启动，通过 stdin/stdout 走 JSON-RPC。" +
-                            "命令必须在 App 可见的环境里可执行（例如已在本 App 的 Ubuntu 环境中安装 Node/Python）。",
+                        stringResource(R.string.market_mcp_stdio_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -152,7 +159,7 @@ fun AddMcpDialog(
                     OutlinedTextField(
                         value = url,
                         onValueChange = { url = it },
-                        label = { Text("URL（http(s)://…）") },
+                        label = { Text(stringResource(R.string.market_mcp_url_label)) },
                         isError = url.isNotBlank() && !urlValid,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -160,7 +167,7 @@ fun AddMcpDialog(
                     OutlinedTextField(
                         value = apiKey,
                         onValueChange = { apiKey = it },
-                        label = { Text("API Key（可选，作 Bearer 发送）") },
+                        label = { Text(stringResource(R.string.market_mcp_apikey_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -185,10 +192,10 @@ fun AddMcpDialog(
                     )
                 },
                 enabled = valid
-            ) { Text("添加并连接") }
+            ) { Text(stringResource(R.string.market_mcp_add_connect)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
         }
     )
 }
@@ -215,23 +222,22 @@ fun ImportMcpConfigDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("导入 MCP 配置") },
+        title = { Text(stringResource(R.string.market_mcp_import_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
-                    label = { Text("粘贴 mcpServers JSON") },
+                    label = { Text(stringResource(R.string.market_mcp_paste_label)) },
                     placeholder = {
-                        Text("支持 command/args/env 与 type=streamable_http|sse + url")
+                        Text(stringResource(R.string.market_mcp_paste_hint))
                     },
                     minLines = 6,
                     maxLines = 12,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "支持 Claude Desktop / Cursor / Cline / Operit 通用格式：" +
-                        "含 command 的条目按本地命令安装，含 url 的按远端安装；无法判定的条目会逐条报原因。",
+                    stringResource(R.string.market_mcp_paste_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -241,10 +247,10 @@ fun ImportMcpConfigDialog(
             TextButton(
                 onClick = { onImport(content) },
                 enabled = content.trim().startsWith(JSON_OBJECT_OPEN)
-            ) { Text("解析并导入") }
+            ) { Text(stringResource(R.string.market_mcp_parse_import)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
         }
     )
 }
@@ -266,7 +272,7 @@ fun AddConnectorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加连接器") },
+        title = { Text(stringResource(R.string.market_connectors_add_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -275,10 +281,10 @@ fun AddConnectorDialog(
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },
-                    label = { Text("id（如 my_api，用于 /connector:<id>）") },
+                    label = { Text(stringResource(R.string.market_connector_id_label)) },
                     isError = id.isNotBlank() && !idValid,
                     supportingText = if (id.isNotBlank() && !idValid) {
-                        { Text("只允许字母/数字/._-") }
+                        { Text(stringResource(R.string.market_connector_id_invalid)) }
                     } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -286,11 +292,14 @@ fun AddConnectorDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("显示名（如 我的服务）") },
+                    label = { Text(stringResource(R.string.market_connector_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text("类型", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.market_connector_type_label),
+                    style = MaterialTheme.typography.labelMedium
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -305,7 +314,7 @@ fun AddConnectorDialog(
                 OutlinedTextField(
                     value = endpoint,
                     onValueChange = { endpoint = it },
-                    label = { Text("端点（URL / host，可选）") },
+                    label = { Text(stringResource(R.string.market_connector_endpoint_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -315,10 +324,10 @@ fun AddConnectorDialog(
             TextButton(
                 onClick = { onAdd(id, name, type, endpoint) },
                 enabled = idValid && nameValid
-            ) { Text("添加") }
+            ) { Text(stringResource(R.string.market_action_add)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
         }
     )
 }
@@ -333,12 +342,12 @@ fun ImportSkillJsonDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("导入 Skill JSON") },
+        title = { Text(stringResource(R.string.market_skill_json_title)) },
         text = {
             OutlinedTextField(
                 value = content,
                 onValueChange = { content = it },
-                label = { Text("粘贴 apex-skill-v1 manifest JSON") },
+                label = { Text(stringResource(R.string.market_skill_json_label)) },
                 minLines = 6,
                 maxLines = 12,
                 modifier = Modifier.fillMaxWidth()
@@ -350,10 +359,10 @@ fun ImportSkillJsonDialog(
                 // JSON_OBJECT_OPEN 为 JSON 对象起始花括号（unicode 转义写法，避免字面量大括号
                 // 干扰 CI 的源码括号平衡静态检查）
                 enabled = content.trim().startsWith(JSON_OBJECT_OPEN)
-            ) { Text("安装") }
+            ) { Text(stringResource(R.string.market_action_install)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
         }
     )
 }
@@ -386,10 +395,10 @@ fun ImportFromUrlDialog(
             TextButton(
                 onClick = { onConfirm(url.trim()) },
                 enabled = valid
-            ) { Text("下载并安装") }
+            ) { Text(stringResource(R.string.market_url_download_install)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
         }
     )
 }
@@ -413,21 +422,20 @@ fun GitHubRepoInstallDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("从 GitHub 安装技能") },
+        title = { Text(stringResource(R.string.market_github_install_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("owner/repo 或 仓库链接") },
-                    placeholder = { Text("例如 owner/repo 或 https://github.com/owner/repo") },
+                    label = { Text(stringResource(R.string.market_github_input_label)) },
+                    placeholder = { Text(stringResource(R.string.market_github_input_hint)) },
                     isError = trimmed.isNotBlank() && !looksValid,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "将读取仓库默认分支的 manifest.json / skill.json / SKILL.md；" +
-                        "仓库里没有这些内容时会明确报错，不会静默假安装。",
+                    stringResource(R.string.market_github_install_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -440,9 +448,11 @@ fun GitHubRepoInstallDialog(
             TextButton(
                 onClick = { onConfirm(trimmed) },
                 enabled = looksValid && !busy
-            ) { Text("获取并安装") }
+            ) { Text(stringResource(R.string.market_github_fetch_install)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
+        }
     )
 }
 
@@ -478,13 +488,24 @@ internal fun SkillDependencyGraphDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_close)) }
+        },
         title = {
             Column {
-                Text("依赖图", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "${graph.nodes.size} 节点 · ${graph.edges.size} 边" +
-                        if (graph.isHealthy) " · 健康" else " · 不健康",
+                    stringResource(R.string.market_depgraph_title),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    stringResource(R.string.market_depgraph_subtitle, graph.nodes.size, graph.edges.size) +
+                        " · " + stringResource(
+                            if (graph.isHealthy) {
+                                R.string.market_depgraph_healthy
+                            } else {
+                                R.string.market_depgraph_unhealthy
+                            }
+                        ),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (graph.isHealthy) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.error
@@ -500,7 +521,7 @@ internal fun SkillDependencyGraphDialog(
                 // 环警告
                 if (graph.cycles.isNotEmpty()) {
                     Text(
-                        "⚠ 检测到 ${graph.cycles.size} 个循环依赖：",
+                        stringResource(R.string.market_depgraph_cycles, graph.cycles.size),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -517,7 +538,7 @@ internal fun SkillDependencyGraphDialog(
                 // 缺失依赖
                 if (graph.missingDependencies.isNotEmpty()) {
                     Text(
-                        "⚠ 缺失依赖 ${graph.missingDependencies.size} 个：",
+                        stringResource(R.string.market_depgraph_missing, graph.missingDependencies.size),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -533,7 +554,7 @@ internal fun SkillDependencyGraphDialog(
                 }
                 // 拓扑节点列表
                 Text(
-                    "拓扑序（被依赖者在前）：",
+                    stringResource(R.string.market_depgraph_topo),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -582,9 +603,11 @@ internal fun ManifestDryRunDialog(
             TextButton(
                 onClick = onConfirm,
                 enabled = preview.canInstall
-            ) { Text("确认安装") }
+            ) { Text(stringResource(R.string.market_dryrun_confirm)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
+        },
         title = {
             Column {
                 Text(preview.name, style = MaterialTheme.typography.titleMedium)
@@ -616,21 +639,39 @@ internal fun ManifestDryRunDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    PreviewChip("作者", preview.author.ifBlank { "—" })
-                    PreviewChip("许可证", preview.license)
-                    PreviewChip("信任", preview.trustLevel)
-                    PreviewChip("分类", preview.category ?: "—")
-                    PreviewChip("工具数", preview.toolCount.toString())
+                    PreviewChip(
+                        stringResource(R.string.market_meta_author),
+                        preview.author.ifBlank { "—" }
+                    )
+                    PreviewChip(stringResource(R.string.market_meta_license), preview.license)
+                    PreviewChip(stringResource(R.string.market_meta_trust), preview.trustLevel)
+                    PreviewChip(
+                        stringResource(R.string.market_meta_category),
+                        preview.category ?: "—"
+                    )
+                    PreviewChip(
+                        stringResource(R.string.market_meta_tools),
+                        preview.toolCount.toString()
+                    )
                     if (preview.hasPromptInjection) {
-                        PreviewChip("Prompt", "有注入")
+                        PreviewChip(
+                            "Prompt",
+                            stringResource(R.string.market_meta_prompt_injection)
+                        )
                     }
-                    PreviewChip("权限", preview.privilegeLevel)
+                    PreviewChip(
+                        stringResource(R.string.market_meta_privilege),
+                        preview.privilegeLevel
+                    )
                 }
                 // 标签
                 if (preview.tags.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "标签：" + preview.tags.joinToString(" ") { "#$it" },
+                        stringResource(
+                            R.string.market_meta_tags,
+                            preview.tags.joinToString(" ") { "#$it" }
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -640,7 +681,10 @@ internal fun ManifestDryRunDialog(
                 if (preview.missingDependencies.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "⚠ 缺失依赖 ${preview.missingDependencies.size} 个：",
+                        stringResource(
+                            R.string.market_depgraph_missing,
+                            preview.missingDependencies.size
+                        ),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -654,7 +698,7 @@ internal fun ManifestDryRunDialog(
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "安装将被拒绝 —— 请先安装上述依赖。",
+                        stringResource(R.string.market_dryrun_missing_note),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -663,7 +707,7 @@ internal fun ManifestDryRunDialog(
                 if (preview.requirements.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "权限/工具要求：",
+                        stringResource(R.string.market_dryrun_requirements),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

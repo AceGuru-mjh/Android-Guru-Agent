@@ -15,6 +15,8 @@ import com.apex.agent.R
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserOverlay
 import com.apex.agent.browser.CyberNeonBallManager
+import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.*
@@ -35,6 +37,16 @@ class ApexCoreService : LifecycleService() {
     @Inject
     lateinit var browserEngine: BrowserEngine
 
+    // 插件管理器：启动时自动发现并加载已安装插件（如 plugin-web-automation），
+    // 其工具随绑定回调注册进 ToolRegistry —— "安装即生效"，不再要求用户去
+    // 市场页手动加载一次。未安装插件时这里是空操作（discovery 无匹配）。
+    @Inject
+    lateinit var pluginManager: PluginManager
+
+    // i18n：前台通知文案按当前语言取词（LanguageManager 维护 resolvedContext）
+    @Inject
+    lateinit var lang: LanguageManager
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -46,6 +58,13 @@ class ApexCoreService : LifecycleService() {
         // Agent 真正 navigate（网页搜索/自动化浏览）时经 onStateChanged 出现，
         // 会话结束（HIDDEN）时自动收起。此处仅需保证单例已创建并订阅引擎。
         cyberNeonBall.hashCode()
+        // 自动加载已安装插件：discovery（PackageManager IPC）+ bind 走 IO 调度器，
+        // 不阻塞前台服务启动链路；绑定回调后工具注册（见 PluginManager）。
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                pluginManager.discoverPlugins().forEach(pluginManager::loadPlugin)
+            }.onFailure { android.util.Log.w("ApexCoreService", "auto-load plugins failed: ${it.message}") }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -82,10 +101,10 @@ class ApexCoreService : LifecycleService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Apex Agent 服务",
+                lang.getString(R.string.core_notif_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "AI助手后台运行通知"
+                description = lang.getString(R.string.core_notif_channel_desc)
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm.createNotificationChannel(channel)
@@ -101,7 +120,7 @@ class ApexCoreService : LifecycleService() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Apex Agent")
-            .setContentText("AI助手运行中")
+            .setContentText(lang.getString(R.string.core_notif_running))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

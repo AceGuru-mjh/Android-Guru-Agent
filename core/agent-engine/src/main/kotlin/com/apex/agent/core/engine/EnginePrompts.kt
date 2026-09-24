@@ -17,10 +17,18 @@ import com.apex.agent.core.tools.ToolRisk
 internal object EnginePrompts {
 
     /**
-     * Build the system prompt shared by all modes: identity, device privilege
-     * level, mode-specific behaviour rules, thinking instructions, visible
-     * tool inventory, active skill injections, session context and the
+     * Build the system prompt shared by all modes: identity, **mandatory
+     * tool-use policy**, device privilege level, mode-specific behaviour
+     * rules, thinking instructions, connected services, visible tool
+     * inventory, active skill injections, session context and the
      * file-operation / output-management rulebook.
+     *
+     * 2026 主动执行修复：学习 opencode（"you MUST actually make the tool
+     * call" / "NEVER end your turn without having truly solved the problem"）
+     * 与 operit（"proactively select the most appropriate tool"）。旧版
+     * "Use tools when needed" 是被动措辞——模型倾向先叙述后行动，而引擎
+     * 在纯文本轮次即终止循环，任务永远停在"计划"阶段。新增 Tool-Use
+     * Policy 段把"行动优先"写成硬性约束。
      *
      * @param privilegeLevel current privilege ("ROOT" / "SHIZUKU" / anything
      *   else → normal shell guidance)
@@ -28,18 +36,43 @@ internal object EnginePrompts {
      * @param skillPrompts active skill prompt injections (may be empty)
      * @param environmentSummary v3 live capability snapshot (null → section
      *   omitted; same source the environment gate enforces)
+     * @param connectedServices 已连接外部服务摘要（GitHub/连接器等，null →
+     *   省略；让模型知道这些服务已连接、工具已就绪）
      */
     fun buildSystemPrompt(
         config: AgentConfig,
         privilegeLevel: String,
         visibleTools: List<AgentTool>,
         skillPrompts: List<String>,
-        environmentSummary: String? = null
+        environmentSummary: String? = null,
+        connectedServices: String? = null
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
-            appendLine("You are Apex Agent, an AI assistant running on an Android device.")
-            appendLine("You have access to tools for: shell commands, file operations, web browsing, memory, and device control.")
+            appendLine("You are Apex Agent, an AI AGENT running on an Android device.")
+            appendLine("You are not a chatbot: your job is to COMPLETE tasks by taking actions with tools —")
+            appendLine("shell commands, file operations, web browsing/automation, GitHub, messaging connectors, memory, and device control.")
+            appendLine()
+
+            // ═══ 主动工具使用策略（根因修复：模型不主动调工具）═══
+            // opencode beast.txt: "when you say you are going to make a tool
+            // call, make sure you ACTUALLY make the tool call, instead of
+            // ending your turn"；kimi.txt: "you MUST use the appropriate
+            // tools to make actual changes — do not just describe the solution"。
+            appendLine("## Tool-Use Policy (MANDATORY)")
+            appendLine("1. You MUST use tools to actually perform tasks. Describing what you would do is NOT doing it.")
+            appendLine("   Commands or code that only appear in your text response are NOT executed and have no effect.")
+            appendLine("2. When the user asks to create / modify / run / fetch / send / check anything, make the appropriate")
+            appendLine("   tool call IN THIS TURN instead of only explaining what you plan to do.")
+            appendLine("3. NEVER end your turn with 'I will now…' or 'Next I will…' — actually make the call.")
+            appendLine("4. Keep going until the task is truly complete: verify results with tools before reporting success.")
+            appendLine("   Do not claim success you have not verified with a tool.")
+            appendLine("5. Facts you are unsure of (versions, prices, news, docs, current device/web state) MUST be")
+            appendLine("   verified with a tool (web_search / web_fetch / shell) before you state them. Do not guess.")
+            appendLine("6. If a tool call fails, read the error carefully: fix the arguments or switch approach.")
+            appendLine("   Do not give up after one failure; do not blindly retry the identical call.")
+            appendLine("7. Prefer specific tools (read_file, github_read_file, browser_*) over raw shell when both work;")
+            appendLine("   use shell when no dedicated tool fits. Prefer parallel tool calls for independent reads.")
             appendLine()
 
             // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
@@ -73,6 +106,18 @@ internal object EnginePrompts {
                 appendLine(environmentSummary)
                 appendLine("Tools declaring an environment precondition are rejected before running")
                 appendLine("when it is explicitly off; unknown capabilities are allowed (fail-open).")
+                appendLine()
+            }
+
+            // ═══ 已连接服务（根因修复：GitHub 已连接模型却不知道）═══
+            // 与 Live Environment 同一设计模式：prompt 里的状态与执行侧
+            // 同源。GitHub Token 已配置 / 连接器已启用时明确告知"工具已就绪"，
+            // 并给出首个验证动作（github_get_user / connector_list）。
+            if (!connectedServices.isNullOrBlank()) {
+                appendLine("## Connected Services")
+                appendLine(connectedServices)
+                appendLine("These services are already connected/configured — their tools work right now.")
+                appendLine("When the task touches them, use their tools directly; no need to ask the user to set up.")
                 appendLine()
             }
 
@@ -110,8 +155,9 @@ internal object EnginePrompts {
                 }
                 AgentMode.BUILD -> {
                     appendLine("## Mode: BUILD")
-                    appendLine("You are in build mode. Act directly. Use tools when needed.")
-                    appendLine("Be efficient: prefer fewer steps, verify results between calls.")
+                    appendLine("You are in build mode. Act directly and keep working autonomously until the task is done.")
+                    appendLine("Use tools aggressively: a correct action beats a long explanation.")
+                    appendLine("Be efficient: batch independent reads, verify results between destructive steps.")
                 }
             }
             // 自定义模式：附加用户指令（拼入 system prompt）。
@@ -188,7 +234,9 @@ internal object EnginePrompts {
             appendLine("- Use the most appropriate tool for each task (prefer specific tools over raw shell).")
             appendLine("- Always verify command output before proceeding.")
             appendLine("- If a command fails, analyze the error and try an alternative approach.")
-            appendLine("- Keep prose concise; let tool output speak for itself.")
+            appendLine("- Keep prose concise; let tool output speak for itself. Actions speak louder than plans.")
+            appendLine("- When the user asks a capability question ('can you do X?'), verify by attempting it with tools")
+            appendLine("  (or checking state) rather than answering from memory.")
             appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
             appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")
         }
@@ -257,8 +305,10 @@ internal object EnginePrompts {
         }
         appendLine()
         appendLine(
-            "Summarize what was accomplished in 2-4 sentences. Note any issues, " +
-                "partial completions, or follow-ups the user should know about."
+            "State the final outcome and key deliverables directly in 2-4 sentences. " +
+                "Do NOT announce completion (no phrases like 'task complete', '任务已完成', " +
+                "'all done'), and no closing pleasantries. Note any issues, partial " +
+                "completions, or follow-ups the user should know about."
         )
     }
 
@@ -329,7 +379,9 @@ internal object EnginePrompts {
         }
         appendLine()
         appendLine(
-            "Summarize what was delivered in 2-4 sentences. Report any unmet acceptance " +
+            "State the final outcome and key deliverables directly in 2-4 sentences. " +
+                "Do NOT announce completion (no phrases like 'task complete', '任务已完成', " +
+                "'all done'), and no closing pleasantries. Report any unmet acceptance " +
                 "criteria, issues, or follow-ups the user should know about."
         )
     }

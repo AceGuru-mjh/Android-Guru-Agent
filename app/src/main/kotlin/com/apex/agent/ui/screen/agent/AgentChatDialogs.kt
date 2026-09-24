@@ -40,11 +40,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.llm.ReasoningEffort
+import com.apex.agent.R
 
 // ═══ 自定义模式组件 ═══
 
@@ -61,11 +63,11 @@ internal fun CustomInstructionDialog(
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("自定义模式指令") },
+        title = { Text(stringResource(R.string.chat_custom_instruction_title)) },
         text = {
             Column {
                 Text(
-                    text = "该指令会拼入 system prompt，指导 Agent 行为（如输出格式、语言、步骤约束）。",
+                    text = stringResource(R.string.chat_custom_instruction_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -73,7 +75,7 @@ internal fun CustomInstructionDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = { Text("例如：始终用中文回答，先给结论再给细节") },
+                    placeholder = { Text(stringResource(R.string.chat_custom_instruction_hint)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 8
@@ -81,12 +83,12 @@ internal fun CustomInstructionDialog(
             }
         },
         confirmButton = {
-            androidx.compose.material3.Button(onClick = { onSave(text) }) { Text("保存") }
+            androidx.compose.material3.Button(onClick = { onSave(text) }) { Text(stringResource(R.string.chat_save)) }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onClear) { Text("清除") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = onClear) { Text(stringResource(R.string.chat_clear)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_cancel)) }
             }
         }
     )
@@ -116,7 +118,7 @@ internal fun ThinkingLevelSelector(
         ) {
             ThinkingLevel.entries.forEach { level ->
                 DropdownMenuItem(
-                    text = { Text("${level.name} - ${level.description}") },
+                    text = { Text("${level.name} - " + thinkingLevelDescription(level)) },
                     onClick = {
                         onSelect(level)
                         expanded = false
@@ -130,6 +132,30 @@ internal fun ThinkingLevelSelector(
             }
         }
     }
+}
+
+/**
+ * 思考深度描述（UI 层本地化映射；core 枚举 description 保持引擎侧不动）。
+ */
+@Composable
+private fun thinkingLevelDescription(level: ThinkingLevel): String = when (level) {
+    ThinkingLevel.NONE -> stringResource(R.string.chat_thinking_none_desc)
+    ThinkingLevel.LIGHT -> stringResource(R.string.chat_thinking_light_desc)
+    ThinkingLevel.STANDARD -> stringResource(R.string.chat_thinking_standard_desc)
+    ThinkingLevel.DEEP -> stringResource(R.string.chat_thinking_deep_desc)
+    ThinkingLevel.MAXIMUM -> stringResource(R.string.chat_thinking_maximum_desc)
+}
+
+/**
+ * 模型原生思考强度显示名（UI 层本地化；ReasoningEffort.displayName 为 core 侧文案）。
+ */
+@Composable
+private fun reasoningEffortLabel(effort: ReasoningEffort): String = when (effort) {
+    ReasoningEffort.NONE -> stringResource(R.string.chat_effort_none)
+    ReasoningEffort.LOW -> stringResource(R.string.chat_effort_low)
+    ReasoningEffort.MEDIUM -> stringResource(R.string.chat_effort_medium)
+    ReasoningEffort.HIGH -> stringResource(R.string.chat_effort_high)
+    ReasoningEffort.MAX -> stringResource(R.string.chat_effort_max)
 }
 
 /**
@@ -147,7 +173,7 @@ internal fun RowScope.ReasoningEffortChips(
     onSelect: (ReasoningEffort) -> Unit
 ) {
     Text(
-        text = "原生思考:",
+        text = stringResource(R.string.chat_reasoning_effort_label),
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.align(Alignment.CenterVertically)
@@ -156,7 +182,7 @@ internal fun RowScope.ReasoningEffortChips(
         FilterChip(
             selected = effort == current,
             onClick = { onSelect(effort) },
-            label = { Text(effort.displayName, style = MaterialTheme.typography.labelSmall) },
+            label = { Text(reasoningEffortLabel(effort), style = MaterialTheme.typography.labelSmall) },
             leadingIcon = if (effort == current) {
                 { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
             } else null
@@ -207,7 +233,7 @@ internal fun QuestionCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "🧩 Agent 需要你选择",
+                    text = stringResource(R.string.chat_question_title),
                     style = MaterialTheme.typography.titleSmall
                 )
                 if (multiSelect) {
@@ -216,7 +242,7 @@ internal fun QuestionCard(
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = "可多选",
+                            text = stringResource(R.string.chat_multi_select),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
@@ -275,7 +301,7 @@ internal fun QuestionCard(
 
                             if (option.recommended) {
                                 Text(
-                                    text = "推荐",
+                                    text = stringResource(R.string.chat_recommended),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -327,7 +353,7 @@ internal fun QuestionCard(
                     }
 
                     Text(
-                        text = "自定义",
+                        text = stringResource(R.string.chat_custom),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 4.dp)
                     )
@@ -356,7 +382,7 @@ internal fun QuestionCard(
                         onClick = onCancel,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("跳过")
+                        Text(stringResource(R.string.chat_skip))
                     }
                 }
 
@@ -373,7 +399,7 @@ internal fun QuestionCard(
                     enabled = canSubmit,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("继续")
+                    Text(stringResource(R.string.chat_continue))
                 }
             }
         }
@@ -418,15 +444,17 @@ internal fun UserInputDialog(
                     else -> true
                 }
             ) {
-                Text(if (isConfirmation) "确认" else "提交")
+                Text(if (isConfirmation) stringResource(R.string.chat_confirm)
+                else stringResource(R.string.chat_submit))
             }
         },
         dismissButton = {
             TextButton(onClick = onCancel) {
-                Text(if (isConfirmation) "拒绝" else "取消")
+                Text(if (isConfirmation) stringResource(R.string.chat_decline)
+                else stringResource(R.string.chat_cancel))
             }
         },
-        title = { Text("需要你的输入") },
+        title = { Text(stringResource(R.string.chat_input_required_title)) },
         text = {
             Column {
                 Text(
@@ -463,7 +491,7 @@ internal fun UserInputDialog(
                                 text = it
                                 if (it.isNotBlank()) selectedChoice = null
                             },
-                            label = { Text("或输入自定义答案") },
+                            label = { Text(stringResource(R.string.chat_custom_answer_label)) },
                             modifier = Modifier.fillMaxWidth(),
                             minLines = 1,
                             maxLines = 3
@@ -472,7 +500,7 @@ internal fun UserInputDialog(
                     // CONFIRMATION → 语义提示
                     isConfirmation -> {
                         Text(
-                            text = "点击「确认」继续执行，或「拒绝」终止。",
+                            text = stringResource(R.string.chat_confirmation_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -482,7 +510,7 @@ internal fun UserInputDialog(
                         OutlinedTextField(
                             value = text,
                             onValueChange = { text = it },
-                            label = { Text("你的回答") },
+                            label = { Text(stringResource(R.string.chat_your_answer)) },
                             modifier = Modifier.fillMaxWidth(),
                             minLines = 2,
                             maxLines = 6

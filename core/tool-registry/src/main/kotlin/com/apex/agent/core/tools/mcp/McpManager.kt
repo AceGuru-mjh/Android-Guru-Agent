@@ -29,9 +29,18 @@ import java.io.File
  * - `enabled=false` 的服务器：不出现在 `/` 斜杠菜单、不会被 Agent 工具看到（[getEnabledConfigs]）；
  *   禁用时主动断开其活跃连接。
  * - 修复旧实现 `enabled` 字段"只写不读"的空转状态。
+ *
+ * ## 内置服务器（BUILTIN 传输）
+ * - core 不依赖 app 层实现：宿主（app 的 McpModule）在构造时把
+ *   `服务器名 → transport 工厂` 注入 [builtinTransports]，connect 时按名取出传给
+ *   [McpClient]。core 内部默认构造（空 map）行为不变，向后兼容。
+ * - App 预置的内置服务器条目用 [ensureBuiltinServer] 幂等写入：同名用户自建
+ *   条目（HTTP/SSE/STDIO）绝不被动持；用户对 `enabled` 的偏好跨升级保留。
  */
 class McpManager(
-    private val configDir: File
+    private val configDir: File,
+    /** 内置 MCP 服务器注册表：服务器名 → transport 工厂（每次连接新实例）。 */
+    private val builtinTransports: Map<String, () -> McpTransportHandle> = emptyMap()
 ) {
     private val clients = LinkedHashMap<String, McpClient>()
     private val configs = LinkedHashMap<String, McpServerConfig>()
@@ -90,7 +99,8 @@ class McpManager(
         // 先关闭旧连接，避免旧实现「直接覆盖导致连接泄漏」的问题
         synchronized(lock) { clients.remove(name) }?.let { runCatching { it.shutdown() } }
 
-        val client = McpClient(config)
+        // BUILTIN 传输按名取注入的工厂；HTTP/SSE/STDIO 传 null（工厂参数不参与）。
+        val client = McpClient(config, builtinTransportFactory = builtinTransports[name])
         val initResult = client.initialize()
 
         if (initResult.isSuccess) {
@@ -165,6 +175,33 @@ class McpManager(
      */
     fun getEnabledConfigs(): List<McpServerConfig> =
         synchronized(lock) { configs.values.filter { it.enabled } }
+
+    /**
+     * 幂等预置一台内置 MCP 服务器（App 启动时调用，如内置 GitHub）。
+     *
+     * - 无同名条目 → 写入 [config]；
+     * - 同名条目已是 BUILTIN → 按传入定义刷新，但**保留用户 enabled 偏好**
+     *   （升级后新增字段/默认值得以下发，用户手动禁用的不会被重新打开）；
+     * - 同名条目是用户自建（HTTP/SSE/STDIO）→ 不动它（绝不劫持用户配置）。
+     */
+    suspend fun ensureBuiltinServer(config: McpServerConfig): Result<Unit> {
+        val error = synchronized(lock) {
+            val existing = configs[config.name]
+            if (existing != null && existing.transport != McpTransport.BUILTIN) {
+                return Result.failure(
+                    Exception("服务器 '${config.name}' 已被用户自建为 ${existing.transport}，不覆盖用户配置")
+                )
+            }
+            val merged = existing?.let { config.copy(enabled = it.enabled) } ?: config
+            runCatching {
+                configs[config.name] = merged
+                saveConfigsLocked()
+            }.exceptionOrNull()
+        }
+        if (error != null) return Result.failure(error)
+        notifyChanged()
+        return Result.success(Unit)
+    }
 
     /**
      * 删除配置（同时断开活跃连接）。

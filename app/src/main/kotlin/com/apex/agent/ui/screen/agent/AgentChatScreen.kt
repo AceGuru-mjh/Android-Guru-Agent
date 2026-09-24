@@ -55,10 +55,13 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.EntryPointAccessors
+import androidx.annotation.StringRes
+import com.apex.agent.R
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.ui.component.AdaptiveInputField
 import com.apex.agent.ui.component.AttachButton
@@ -115,6 +118,8 @@ fun AgentChatScreen(
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
     val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
+    // 界面相关 Agent 设置（sendKeyBehavior / showRunSummary，即时生效）
+    val uiSettings by viewModel.uiSettings.collectAsStateWithLifecycle()
     // ═══ UX-3：LLM 配置状态（未配置 && 空会话时在消息区顶部显示引导卡）═══
     val llmConfigured by viewModel.llmConfigured.collectAsStateWithLifecycle()
     // 函数调用二级菜单候选工具（注册表快照，v2：含类别/风险元数据）。
@@ -281,7 +286,7 @@ fun AgentChatScreen(
                 ) {
                     Icon(
                         Icons.Outlined.History,
-                        contentDescription = "历史对话",
+                        contentDescription = stringResource(R.string.chat_cd_chat_history),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -293,7 +298,7 @@ fun AgentChatScreen(
                 ) {
                     Icon(
                         Icons.Default.Add,
-                        contentDescription = "新会话",
+                        contentDescription = stringResource(R.string.chat_cd_new_chat),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -313,7 +318,7 @@ fun AgentChatScreen(
         if (showTaskCard && taskState != null) {
             TaskStatusCard(
                 task = taskState!!,
-                statusLabel = { status -> statusLabelOf(status) },
+                statusLabelRes = { status -> statusLabelResOf(status) },
                 onPause = { viewModel.pauseTask() },
                 onResume = { viewModel.resumeTask() },
                 onCancel = { viewModel.cancelTask() },
@@ -356,6 +361,8 @@ fun AgentChatScreen(
                     vm = viewModel,
                     // UX-1：流式生成中禁用消息删除/重生成（菜单内对应条目置灰，复制仍可用）
                     actionsEnabled = !uiState.isLoading,
+                    // 任务总结卡按设置显隐：showRunSummary=false 时完全不渲染（不占位）
+                    showRunSummary = uiSettings.showRunSummary,
                     onImageClick = { att ->
                         lightboxImage = att.thumbnailUri ?: att.localPath
                     },
@@ -444,7 +451,7 @@ fun AgentChatScreen(
                 ) {
                     GlassFloatingButton(
                         icon = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "回到底部",
+                        contentDescription = stringResource(R.string.chat_cd_back_to_bottom),
                         onClick = {
                             userScrolledUp = false
                             scrollScope.launch {
@@ -579,11 +586,15 @@ fun AgentChatScreen(
                     )
 
                     // ═══ 小大脑：模型切换 + 参数调节 + 配置跳转 ═══
+                    // providerNameOf 回调在非 @Composable 上下文触发 —— 兜底文案
+                    // 在本 Composable 层预解析。
+                    val unknownProviderLabel = stringResource(R.string.chat_unknown_provider)
                     BrainMenuButton(
                         profiles = profiles,
                         currentProfileId = currentProfileId ?: "",
                         providerNameOf = { providerId ->
-                            providers.firstOrNull { it.id == providerId }?.displayName ?: "未知 Provider"
+                            providers.firstOrNull { it.id == providerId }?.displayName
+                                ?: unknownProviderLabel
                         },
                         onSelectProfile = { viewModel.selectProfile(it) },
                         onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
@@ -608,6 +619,8 @@ fun AgentChatScreen(
                         AdaptiveInputField(
                             value = inputText,
                             onValueChange = { viewModel.updateInputText(it) },
+                            // 发送键行为：send → 回车直接发送；newline → 回车仅换行（设置页可配）
+                            sendKeyBehavior = uiSettings.sendKeyBehavior,
                             onSend = {
                                 // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
@@ -618,12 +631,12 @@ fun AgentChatScreen(
                             placeholder = {
                                 Text(
                                     text = when (uiState.mode) {
-                                        AgentMode.PLAN -> "描述任务，Agent先规划..."
-                                        AgentMode.SPEC -> "描述需求，Agent先产出规格..."
-                                        AgentMode.REFLECTION -> "描述任务，Agent生成→评审→修正..."
-                                        AgentMode.HUMAN_ASSIST -> "描述任务，有选择时Agent弹出选项菜单..."
-                                        AgentMode.CUSTOM -> "输入指令（自定义模式生效）..."
-                                        AgentMode.BUILD -> "输入指令，/ 触发快捷..."
+                                        AgentMode.PLAN -> stringResource(R.string.chat_hint_plan)
+                                        AgentMode.SPEC -> stringResource(R.string.chat_hint_spec)
+                                        AgentMode.REFLECTION -> stringResource(R.string.chat_hint_reflection)
+                                        AgentMode.HUMAN_ASSIST -> stringResource(R.string.chat_hint_human_assist)
+                                        AgentMode.CUSTOM -> stringResource(R.string.chat_hint_custom)
+                                        AgentMode.BUILD -> stringResource(R.string.chat_hint_build)
                                     },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -653,7 +666,7 @@ fun AgentChatScreen(
                                 .size(40.dp)
                                 .scale(sendScale)
                         ) {
-                            Icon(Icons.Default.Stop, contentDescription = "停止")
+                            Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_cd_stop))
                         }
                     } else {
                         FilledIconButton(
@@ -670,7 +683,7 @@ fun AgentChatScreen(
                                 .size(40.dp)
                                 .scale(sendScale)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_cd_send))
                         }
                     }
                 }
@@ -781,18 +794,21 @@ private fun viroPetMoodOf(
 }
 
 /**
- * T76 — 任务状态文案（TaskStatusCard 用；与 Controller 状态机一致）。
+ * T76 — 任务状态文案资源（TaskStatusCard 用；与 Controller 状态机一致）。
+ * i18n：返回 @StringRes，由 TaskStatusCard 在组合内 stringResource 取词
+ *（原 String 映射无法在非 Composable 上下文取词，最小改动方案）。
  */
-private fun statusLabelOf(status: com.apex.agent.core.engine.task.TaskStatus): String = when (status) {
-    com.apex.agent.core.engine.task.TaskStatus.PENDING -> "准备中"
-    com.apex.agent.core.engine.task.TaskStatus.PLANNING -> "规划中"
-    com.apex.agent.core.engine.task.TaskStatus.RUNNING -> "执行中"
-    com.apex.agent.core.engine.task.TaskStatus.WAITING_USER -> "等待输入"
-    com.apex.agent.core.engine.task.TaskStatus.PAUSED -> "已暂停"
-    com.apex.agent.core.engine.task.TaskStatus.CANCELLING -> "正在取消"
-    com.apex.agent.core.engine.task.TaskStatus.RECOVERING -> "崩溃恢复"
-    com.apex.agent.core.engine.task.TaskStatus.RETRYING -> "重试中"
-    com.apex.agent.core.engine.task.TaskStatus.COMPLETED -> "已完成"
-    com.apex.agent.core.engine.task.TaskStatus.FAILED -> "失败"
-    com.apex.agent.core.engine.task.TaskStatus.CANCELLED -> "已取消"
+@StringRes
+private fun statusLabelResOf(status: com.apex.agent.core.engine.task.TaskStatus): Int = when (status) {
+    com.apex.agent.core.engine.task.TaskStatus.PENDING -> R.string.chat_task_status_pending
+    com.apex.agent.core.engine.task.TaskStatus.PLANNING -> R.string.chat_task_status_planning
+    com.apex.agent.core.engine.task.TaskStatus.RUNNING -> R.string.chat_task_status_running
+    com.apex.agent.core.engine.task.TaskStatus.WAITING_USER -> R.string.chat_task_status_waiting_user
+    com.apex.agent.core.engine.task.TaskStatus.PAUSED -> R.string.chat_task_status_paused
+    com.apex.agent.core.engine.task.TaskStatus.CANCELLING -> R.string.chat_task_status_cancelling
+    com.apex.agent.core.engine.task.TaskStatus.RECOVERING -> R.string.chat_task_status_recovering
+    com.apex.agent.core.engine.task.TaskStatus.RETRYING -> R.string.chat_task_status_retrying
+    com.apex.agent.core.engine.task.TaskStatus.COMPLETED -> R.string.chat_task_status_completed
+    com.apex.agent.core.engine.task.TaskStatus.FAILED -> R.string.chat_task_status_failed
+    com.apex.agent.core.engine.task.TaskStatus.CANCELLED -> R.string.chat_task_status_cancelled
 }

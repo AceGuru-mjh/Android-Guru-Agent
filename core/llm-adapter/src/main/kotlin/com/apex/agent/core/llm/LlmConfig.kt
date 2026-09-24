@@ -1,5 +1,7 @@
 package com.apex.agent.core.llm
 
+import kotlinx.serialization.Serializable
+
 /**
  * LLM配置：支持任何OpenAI兼容API
  * 
@@ -95,6 +97,18 @@ data class LlmConfig(
     val maxToolCalls: Int = 10,
     val toolTimeoutSeconds: Int = 30,
     val maxToolResultTokens: Int = 4096,
+
+    /**
+     * 模型原生联网搜索（Provider-native web search）。
+     *
+     * - OFF（默认）：不发送任何原生搜索参数 —— 请求体与旧版完全一致，兼容所有端点；
+     * - AUTO：按 baseUrl/providerId 自动选择各 Provider 的原生搜索策略（推断不出 → OFF）。
+     *
+     * 与 Agent 内置 web_search 工具（客户端 HTML 抓取，脆弱且常被反爬）互补：
+     * 原生搜索由服务端执行并注入上下文，引用随响应返回（annotations/search_result）。
+     * 详见 [WebSearchMode]。
+     */
+    val webSearch: WebSearchMode = WebSearchMode.OFF,
 
     // ── Structured Output ──────────────────────────────────────
     val structuredOutputMode: StructuredOutputMode = StructuredOutputMode.TEXT,
@@ -202,6 +216,7 @@ data class LlmConfig(
                 maxToolCalls = profile.maxToolCalls,
                 toolTimeoutSeconds = profile.toolTimeoutSeconds,
                 maxToolResultTokens = profile.maxToolResultTokens,
+                webSearch = profile.webSearch,
                 structuredOutputMode = profile.structuredOutputMode,
                 structuredOutputStrict = profile.structuredOutputStrict,
                 jsonSchema = profile.jsonSchema,
@@ -244,5 +259,91 @@ enum class ReasoningEffort(val apiValue: String?, val displayName: String) {
     companion object {
         fun fromName(name: String?): ReasoningEffort =
             entries.firstOrNull { it.name == name } ?: NONE
+    }
+}
+
+/**
+ * 模型原生联网搜索模式（Provider-native web search）。
+ *
+ * 背景：各家 Provider 的原生搜索参数形态互不兼容，发错端点会直接 400，
+ * 故按 Provider 分支注入（由 [StreamingOpenAiClient.buildRequestBody] 消费）：
+ *
+ * - OFF：不发送任何原生搜索参数（默认，兼容所有端点 —— 含未知中转，防 400）
+ * - AUTO：按 baseUrl/providerId 自动选择下述策略（推断不出 → OFF）
+ * - OPENAI：`web_search_options`（gpt-4o-search-preview 系）
+ * - DASHSCOPE：`enable_search: true`（阿里百炼 Qwen compatible-mode）
+ * - ZHIPU：tools 数组追加 `{"type":"web_search",...}`（智谱 GLM server tool）
+ * - OPENROUTER：`plugins: [{"id":"web"}]`（等价模型名 `:online` 后缀）
+ * - ANTHROPIC：tools 数组追加 `web_search_20250305`（Anthropic server tool）
+ * - DEEPSEEK：tools 数组追加 `{"type":"web_search"}`（Responses 兼容端点）
+ *
+ * 作为 [ModelProfile] 的序列化字段（带默认值 OFF，旧持久化 JSON 兼容），
+ * 故标注 @Serializable（与 [ToolChoiceMode]/[StructuredOutputMode] 同风格）。
+ */
+@Serializable
+enum class WebSearchMode(val displayName: String) {
+    /** 不发送任何原生搜索参数（默认，兼容所有端点） */
+    OFF("关闭"),
+
+    /** 按 baseUrl/providerId 自动选择策略；无法识别的端点回退 OFF */
+    AUTO("自动"),
+
+    /** OpenAI Chat Completions 的 web_search_options（search-preview 系模型） */
+    OPENAI("OpenAI web_search_options"),
+
+    /** 阿里百炼 DashScope compatible-mode 的 enable_search 顶层开关 */
+    DASHSCOPE("DashScope enable_search"),
+
+    /** 智谱 GLM 的 web_search server-side tool（入 tools 数组） */
+    ZHIPU("Zhipu web_search tool"),
+
+    /** OpenRouter 的 web 插件（等价模型名 :online 后缀） */
+    OPENROUTER("OpenRouter :online"),
+
+    /** Anthropic 的 web_search_20250305 server-side tool */
+    ANTHROPIC("Anthropic web_search tool"),
+
+    /** DeepSeek Responses 兼容端点的 web_search server tool */
+    DEEPSEEK("DeepSeek web_search tool");
+
+    /**
+     * 解析该模式在给定端点下实际生效的策略（实例入口，
+     * 供 `config.webSearch.resolveFor(baseUrl, providerId)` 直接调用）。
+     *
+     * - 显式指定的模式（非 AUTO）原样生效 —— 用户手动选 OPENAI 即发 OpenAI 参数；
+     * - AUTO 按 baseUrl（小写包含匹配）+ providerId 推断：
+     *   openrouter.ai→OPENROUTER；api.openai.com 或 providerId=="openai"→OPENAI；
+     *   dashscope→DASHSCOPE；bigmodel.cn 或 providerId 含 zhipu/glm→ZHIPU；
+     *   anthropic→ANTHROPIC；deepseek→DEEPSEEK；
+     * - 其余未知端点→OFF：不发送非标准参数（防 400 —— 自建中转/兼容网关
+     *   对陌生命令普遍直接拒绝）。
+     */
+    fun resolveFor(baseUrl: String, providerId: String): WebSearchMode {
+        if (this != AUTO) return this
+        val url = baseUrl.lowercase()
+        val pid = providerId.lowercase()
+        return when {
+            url.contains("openrouter.ai") -> OPENROUTER
+            url.contains("api.openai.com") || pid == "openai" -> OPENAI
+            url.contains("dashscope") -> DASHSCOPE
+            url.contains("bigmodel.cn") || pid.contains("zhipu") || pid.contains("glm") -> ZHIPU
+            url.contains("anthropic") -> ANTHROPIC
+            url.contains("deepseek") -> DEEPSEEK
+            else -> OFF
+        }
+    }
+
+    companion object {
+        /**
+         * 静态入口（等价实例 [resolveFor]）：显式模式原样生效，AUTO 按端点推断。
+         * 注：Kotlin 的 companion 成员不能通过实例调用，因此同时提供实例方法
+         * （`mode.resolveFor(baseUrl, pid)`）与本静态形式两种入口。
+         */
+        fun resolveFor(mode: WebSearchMode, baseUrl: String, providerId: String): WebSearchMode =
+            mode.resolveFor(baseUrl, providerId)
+
+        /** 按枚举名解析（设置层持久化 / UI 透传用）；未知名称回退 OFF。 */
+        fun fromName(name: String?): WebSearchMode =
+            entries.firstOrNull { it.name == name } ?: OFF
     }
 }

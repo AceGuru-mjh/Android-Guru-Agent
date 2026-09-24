@@ -1,5 +1,6 @@
 package com.apex.agent
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,14 +18,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.apex.agent.service.ApexCoreService
 import com.apex.agent.ui.ApexRoot
+import com.apex.agent.ui.language.LanguageManager
 import com.apex.agent.ui.screen.onboarding.OnboardingScreen
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import com.apex.agent.ui.theme.AccentPalette
 import com.apex.agent.ui.theme.ApexTheme
 import com.apex.agent.ui.theme.LocalShowTimestamps
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -32,6 +36,22 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsRepository: SettingsRepository
+
+    @Inject
+    lateinit var languageManager: LanguageManager
+
+    /** attachBaseContext 时静态读出的已应用语言（system/zh/en）；供语言变化 recreate 判定。 */
+    private var appliedLanguage: String? = null
+
+    override fun attachBaseContext(newBase: Context) {
+        // 语言切换基建：attachBaseContext 早于 onCreate / Hilt 字段注入，不能用注入的
+        // LanguageManager —— 用其 companion 静态快读 SharedPreferences（apex_settings
+        // 的 agent_settings_v2 JSON 里 language 字段），再 createConfigurationContext
+        // 包裹对应 Locale；system 则原样返回（交系统 locale）。
+        val lang = LanguageManager.resolveLanguageFromPrefs(newBase)
+        appliedLanguage = lang
+        super.attachBaseContext(LanguageManager.applyLanguage(newBase, lang))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +69,17 @@ class MainActivity : ComponentActivity() {
         if (!coreServiceStartedThisProcess) {
             coreServiceStartedThisProcess = true
             ContextCompat.startForegroundService(this, Intent(this, ApexCoreService::class.java))
+        }
+        // 语言切换：设置中心 language 与当前已应用语言不同 → recreate 重新走
+        // attachBaseContext（新实例以新语言包裹，stringResource 即时取新资源）。
+        // 首帧发射值 == attachBaseContext 读到的持久化值，不会误重建。
+        lifecycleScope.launch {
+            languageManager.language.collect { lang ->
+                if (lang != appliedLanguage) {
+                    appliedLanguage = lang
+                    recreate()
+                }
+            }
         }
         setContent {
             // 全局外观由设置中心驱动：主题模式 / 动态取色 / 字体缩放 / 时间戳开关

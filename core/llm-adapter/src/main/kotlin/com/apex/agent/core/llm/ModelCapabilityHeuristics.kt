@@ -60,6 +60,28 @@ object ModelCapabilityHeuristics {
         "video-generation", "minimax-video", "video-01"
     )
 
+    // ── 原生推理（Reasoning，T2 修复）──────────────────────────────
+    // 思考类模型命名片段（子串匹配，大小写不敏感）：
+    //  - OpenAI: o1 / o3 / o4-mini / gpt-5（词边界正则，见 [REASONING_O_SERIES]）
+    //  - DeepSeek: deepseek-r1 / deepseek-reasoner（"deepseek-r" 前缀覆盖）
+    //  - R1 变体: "-r1" / "r1-"（nemotron-r1 / r1-distill 等）
+    //  - Qwen: qwq / qwen3-thinking（"thinking" 片段覆盖）
+    //  - GLM: glm-4.5 / glm-z1（"z1" 片段覆盖 glm-z1 系）
+    private val REASONING_PATTERNS = listOf(
+        "deepseek-r", "deepseek-reasoner", "-r1", "r1-",
+        "qwq", "thinking", "z1", "glm-4.5", "glm-z1"
+    )
+
+    /**
+     * o-series 词边界匹配：裸子串 "o1"/"o3" 会误伤 "hero1"/"neo3x" 这类
+     * 无关 id，改用 `(?<![a-z0-9])o[134](?![a-z0-9])`（前后不是字母数字才命中）。
+     * gpt-5 不需要词边界（片段本身是完整前缀，误伤概率≈0）。
+     */
+    private val REASONING_O_SERIES: Regex = Regex(
+        "(?<![a-z0-9])o[134](?![a-z0-9])|gpt-5",
+        RegexOption.IGNORE_CASE
+    )
+
     /** id 是否像视觉模型（预填 vision + imageInput）。 */
     fun inferVision(modelId: String): Boolean = matches(VISION_PATTERNS, modelId)
 
@@ -70,16 +92,37 @@ object ModelCapabilityHeuristics {
     fun inferVideoGeneration(modelId: String): Boolean = matches(VIDEO_GEN_PATTERNS, modelId)
 
     /**
+     * id 是否像原生推理/思考模型（预填 reasoning，T2 修复）。
+     *
+     * 单测风格边界示例：
+     *  - 命中："o1"、"o3-mini"、"o4-mini"、"gpt-5"、"deepseek-r1"、
+     *    "deepseek-reasoner"、"qwq-32b"、"qwen3-thinking"、"glm-z1"、
+     *    "glm-4.5"、"nemotron-r1"、"r1-distill-llama-8b"
+     *  - 不命中："neo3x"、"hero1"、"gpt-4o"、"deepseek-chat"、
+     *    "qwen2.5:7b"、"llama-3.1-8b"
+     */
+    fun inferReasoning(modelId: String): Boolean {
+        val id = modelId.lowercase()
+        return matches(REASONING_PATTERNS, id) || REASONING_O_SERIES.containsMatchIn(id)
+    }
+
+    /**
      * 按推断结果合成能力标记（在现有基础上**只加不减**——用户已手动关掉的
      * 能力不会被启发式重新打开，只补齐新模型明显具备的位）。
      */
     fun enrichCapabilities(modelId: String, current: ModelCapabilities): ModelCapabilities {
         if (modelId.isBlank()) return current
+        val reasoning = inferReasoning(modelId)
         return current.copy(
             vision = current.vision || inferVision(modelId),
             imageInput = current.imageInput || inferVision(modelId),
             imageGeneration = current.imageGeneration || inferImageGeneration(modelId),
-            videoGeneration = current.videoGeneration || inferVideoGeneration(modelId)
+            videoGeneration = current.videoGeneration || inferVideoGeneration(modelId),
+            // T2：reasoning 位缺省 false 且旧启发式从不推断 → reasoning_effort
+            // 参数（对支持的模型）从不真实下发。现在预填上，用户仍可在
+            // CapabilityEditor 里手动关闭（只加不减原则保持）。
+            reasoning = current.reasoning || reasoning
+            // o-series 同时支持 toolCalling（GPT-5/o3 均可），无需额外处理。
         )
     }
 

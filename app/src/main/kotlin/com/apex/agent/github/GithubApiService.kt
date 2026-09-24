@@ -116,6 +116,14 @@ class GithubApiService @Inject constructor(
     }
 
     /**
+     * 仓库搜索（/search/repositories，按 star 降序）。
+     * 与 [searchCode] 对称：返回包装类（含 total_count 与 items），
+     * 供工具展示命中总数而非仅当前页条数。
+     */
+    suspend fun searchRepositories(query: String, perPage: Int = 10): GithubSearchReposResult =
+        apiCall("/search/repositories?q=${encodeQuery(query)}&per_page=$perPage&sort=stars")
+
+    /**
      * 拉取一页列表 + 下一页 URL（解析 `Link: rel="next"` 头）。
      *
      * 调用方应循环调用直到 `nextUrl == null` 以遍历所有页面：
@@ -300,3 +308,4 @@ data class PagedResult<T>(val items: List<T>, val nextUrl: String?)
 @Serializable data class GithubBranchCommit(val sha: String = "")
 @Serializable data class GithubSearchResult(val total_count: Int = 0, val items: List<GithubSearchItem> = emptyList())
 @Serializable data class GithubSearchItem(val name: String = "", val path: String = "", val html_url: String = "", val repository: GithubRepo? = null)
+@Serializable data class GithubSearchReposResult(val total_count: Int = 0, val items: List<GithubRepo> = emptyList())

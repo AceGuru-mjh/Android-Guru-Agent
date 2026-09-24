@@ -67,6 +67,14 @@ class ApexAgentEngine(
     private val environmentInfoProvider: EnvironmentInfoProvider? = null,
     private val memoryObserver: ExecutionMemoryObserver? = null,
     /**
+     * 已连接服务提供者（GitHub/连接器等）：非空时系统提示词注入
+     * "## Connected Services" 段，让模型知道这些服务的工具已就绪。
+     *
+     * 根因修复：旧版模型不知道 GitHub 已连接，106 个工具里 7 个
+     * github_* 从不被选中；连接器同理。为空则省略该段（测试兼容）。
+     */
+    private val connectedServicesProvider: ConnectedServicesProvider? = null,
+    /**
      * T72 — 多模型运行时。非空时所有 LLM 调用按 [LlmRequestContext.role] 路由到
      * 对应 Profile / Client，并做能力校验、降级、诊断。
      *
@@ -395,7 +403,7 @@ class ApexAgentEngine(
             specConfirmationDeferred = null
             emit(
                 AgentEvent.Complete(
-                    summary = "Task completed",
+                    summary = "",
                     totalIterations = totalIterations,
                     totalToolCalls = totalToolCalls,
                     totalDurationMs = System.currentTimeMillis() - startTime
@@ -442,10 +450,11 @@ class ApexAgentEngine(
         val planPrompt = buildPlanPrompt(input)
         val planResponseBuilder = StringBuilder()
 
+        // B1：不再显式传 temperature —— 哨兵（-1）回退到 Profile 值，
+        // 设置页/小大脑菜单改参数对下一次请求真实生效。
         runtime.chatStream(
             context = tagged(LlmRequestContext.reasoning("plan_generation")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(planPrompt),
-            temperature = config.temperature
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(planPrompt)
         ).collect { chunk ->
             chunk.content?.let {
                 planResponseBuilder.append(it)
@@ -488,8 +497,7 @@ class ApexAgentEngine(
         val reflectionBuilder = StringBuilder()
         runtime.chatStream(
             context = tagged(LlmRequestContext.primary("plan_reflection")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
-            temperature = config.temperature
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt)
         ).collect { chunk ->
             chunk.content?.let {
                 reflectionBuilder.append(it)
@@ -533,10 +541,10 @@ class ApexAgentEngine(
         val specPrompt = buildSpecPrompt(input)
         val specResponseBuilder = StringBuilder()
 
+        // B1：不传 temperature 哨兵 → Profile 值生效（同 plan 生成）。
         runtime.chatStream(
             context = tagged(LlmRequestContext.reasoning("spec_generation")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt),
-            temperature = config.temperature
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt)
         ).collect { chunk ->
             chunk.content?.let {
                 specResponseBuilder.append(it)
@@ -580,8 +588,7 @@ class ApexAgentEngine(
         val reflectionBuilder = StringBuilder()
         runtime.chatStream(
             context = tagged(LlmRequestContext.primary("spec_reflection")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt),
-            temperature = config.temperature
+            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt)
         ).collect { chunk ->
             chunk.content?.let {
                 reflectionBuilder.append(it)
@@ -672,8 +679,7 @@ class ApexAgentEngine(
             runtime.chatStream(
                 context = reactContext,
                 messages = messages,
-                tools = tools,
-                temperature = config.temperature
+                tools = tools
             ).collect { chunk ->
                 chunk.content?.let {
                     contentBuilder.append(it)
@@ -774,8 +780,7 @@ class ApexAgentEngine(
                             runtime.chatStream(
                                 context = tagged(LlmRequestContext.reasoning("reflection_review")),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
-                                    LlmMessage.User(buildReviewPrompt(draft)),
-                                temperature = config.temperature
+                                    LlmMessage.User(buildReviewPrompt(draft))
                             ).collect { chunk ->
                                 chunk.content?.let { reviewBuilder.append(it) }
                             }
@@ -787,8 +792,7 @@ class ApexAgentEngine(
                             runtime.chatStream(
                                 context = tagged(LlmRequestContext.primary("reflection_revise")),
                                 messages = listOf(LlmMessage.System(buildSystemPrompt())) +
-                                    LlmMessage.User(buildRevisePrompt(draft, review, round + 1)),
-                                temperature = config.temperature
+                                    LlmMessage.User(buildRevisePrompt(draft, review, round + 1))
                             ).collect { chunk ->
                                 chunk.content?.let {
                                     reviseBuilder.append(it)
@@ -1037,7 +1041,8 @@ class ApexAgentEngine(
             config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
         },
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
-        environmentSummary = environmentInfoProvider?.environmentSummary()
+        environmentSummary = environmentInfoProvider?.environmentSummary(),
+        connectedServices = connectedServicesProvider?.connectedServicesSummary()
     )
 
     private fun buildPlanPrompt(input: String): String =

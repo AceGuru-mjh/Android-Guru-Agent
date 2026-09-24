@@ -124,21 +124,52 @@ class StreamingOpenAiClient(
         return builder.build()
     }
     
-    private fun buildRequestBody(
+    /**
+     * 构造 /chat/completions 请求体。
+     *
+     * 可见性 internal（非 private）：同模块单测直接断言请求体字段
+     * （哨兵回退 / o-series 兼容 / Provider 差异化思考字段），免起 MockWebServer。
+     */
+    internal fun buildRequestBody(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int,
         stream: Boolean
     ): JsonObject {
+        // ── B1/B2：采样参数哨兵回退（显式传参优先，否则用 Profile 值）──────────
+        // temperature/maxTokens 是方法入参，旧实现直接写入请求体——引擎每处调用
+        // 都显式传 AgentConfig 快照（0.7f/4096），Profile（设置页/小大脑菜单）的
+        // temperature / maxOutputTokens 被永久覆盖（参数死链）。现在：
+        //   effectiveTemperature = 调用方显式传值（>=0） ?: config.temperature
+        //   requestedTokens      = 调用方显式传值（>0） ?: config.maxTokens ?: 4096（旧行为兜底）
+        val effectiveTemperature = if (temperature >= 0f) temperature else config.temperature
+        val requestedTokens = when {
+            maxTokens > 0 -> maxTokens
+            config.maxTokens > 0 -> config.maxTokens
+            else -> 4096
+        }
+
         // 客户侧预校验 maxTokens：超出 contextWindow - reservedOutputTokens 的请求
         // 会被服务端以模糊的 HTTP 400 拒绝，用户难以定位。这里提前裁减并保留安全余量。
         val effectiveMaxTokens = if (config.contextWindow > 0) {
             val cap = (config.contextWindow - config.reservedOutputTokens).coerceAtLeast(256)
-            maxTokens.coerceAtMost(cap)
+            requestedTokens.coerceAtMost(cap)
         } else {
-            maxTokens
+            requestedTokens
         }
+
+        // ── B3/T4：OpenAI 官方严格推理模型识别（o1/o3/o4-mini/gpt-5）──────────
+        // 这些模型的 API 硬性拒绝 temperature 与 max_tokens：
+        //  - 带 temperature → 400 "Unsupported parameter: 'temperature'"
+        //  - 带 max_tokens → 400 "…'max_tokens' is not supported with this model"
+        //    （必须改用 max_completion_tokens）
+        val isStrictOpenAiReasoner = OPENAI_STRICT_REASONER.containsMatchIn(config.model)
+        // T4：OpenAI 官方端点 + 推理模型 → max_tokens 必须换成 max_completion_tokens。
+        // 官方端点判定 = baseUrl 含 "api.openai.com"（第三方 OpenAI 兼容网关大多
+        // 仍接受 max_tokens，不误伤）。
+        val requiresMaxCompletionTokens = config.baseUrl.contains("api.openai.com", ignoreCase = true) &&
+            (config.capabilities.reasoning || isStrictOpenAiReasoner)
 
         // P1-3 修复：max_tokens 与 max_completion_tokens 互斥。旧实现两者同时发送
         //（thinkingBudget 非空或 ReasoningEffort.MAX 时），OpenAI 端点对同时携带
@@ -147,19 +178,60 @@ class StreamingOpenAiClient(
         // max_tokens；未设置思维预算时才发 max_tokens。
         // 思维预算与 reasoning_effort 不强行绑定：显式设置时以此为准。
         val maxCompletion = config.thinkingBudget ?: run {
-            if (config.reasoningEffort == ReasoningEffort.MAX && config.capabilities.reasoning) maxOf(maxTokens, 8192) else null
+            if (config.reasoningEffort == ReasoningEffort.MAX &&
+                (config.capabilities.reasoning || isStrictOpenAiReasoner)
+            ) maxOf(requestedTokens, 8192) else null
+        }
+
+        // ── 原生联网搜索（Provider 分支）────────────────────────────
+        // 为什么在 buildJsonObject 之前算：搜索参数分两处注入请求体——
+        // ① OPENAI / DASHSCOPE / OPENROUTER 用各自的独立顶层字段（下方 when 注入）；
+        // ② ZHIPU / DEEPSEEK / ANTHROPIC 的搜索开关是 server-side tool，必须写进
+        //    tools 数组 —— 而 kotlinx.serialization 的 JsonArray 构建后不可变，
+        //    无法事后追加，只能在构建期与 function tools 一并写入。
+        // OFF（默认）时 searchToolEntries 为空且下方 when 走 else —— 请求体
+        // 与旧版完全一致，兼容所有端点。
+        val searchMode = config.webSearch.resolveFor(config.baseUrl, config.providerId)
+        val searchToolEntries: List<JsonObject> = when (searchMode) {
+            WebSearchMode.ZHIPU -> listOf(
+                // 智谱 GLM：web_search 作为 server-side tool 挂进 tools 数组；
+                // search_result=true 让响应携带 message.search_result[] 引用列表。
+                buildJsonObject {
+                    put("type", "web_search")
+                    putJsonObject("web_search") {
+                        put("enable", true)
+                        put("search_result", true)
+                    }
+                }
+            )
+            WebSearchMode.DEEPSEEK -> listOf(
+                // DeepSeek Responses 兼容端点：接受 {"type":"web_search"}
+                // （与 GLM 同为 server-side tool 形态，但无嵌套配置）。
+                buildJsonObject { put("type", "web_search") }
+            )
+            WebSearchMode.ANTHROPIC -> listOf(
+                // Anthropic 原生 server tool（经 OpenAI 兼容代理透传时保持同形）。
+                buildJsonObject {
+                    put("type", "web_search_20250305")
+                    put("name", "web_search")
+                    put("max_uses", 3)
+                }
+            )
+            else -> emptyList()
         }
 
         return buildJsonObject {
             put("model", config.model)
-            // P3-c 修复：仅对非推理模型发送 temperature。o-series 等原生推理模型
-            // 不接受 temperature（OpenAI 返回 400），capabilities.reasoning == true
-            // 时省略，让服务端使用模型默认值。
-            if (!config.capabilities.reasoning) {
-                put("temperature", temperature)
+            // B3 修复：仅 OpenAI o-series / gpt-5（API 硬性拒绝）不发 temperature，
+            // 让服务端用模型默认值；其他 reasoning 模型（DeepSeek-R1 / QwQ /
+            // Qwen3-thinking / GLM-Z1 等）的兼容端**接受** temperature，照常发送
+            // ——旧实现只要 capabilities.reasoning=true 就静默丢弃该参数，
+            // 用户在设置页调温对这些模型完全无效。
+            if (!isStrictOpenAiReasoner) {
+                put("temperature", effectiveTemperature)
             }
-            if (maxCompletion != null) {
-                put("max_completion_tokens", maxCompletion)
+            if (maxCompletion != null || requiresMaxCompletionTokens) {
+                put("max_completion_tokens", maxCompletion ?: effectiveMaxTokens)
             } else {
                 put("max_tokens", effectiveMaxTokens)
             }
@@ -181,13 +253,42 @@ class StreamingOpenAiClient(
                 putJsonArray("stop") { config.stopSequences.forEach { s -> add(s) } }
             }
 
-            // ── Reasoning（原生思考强度 + 思维预算）──────────────
-            // T72 §二十二修复：仅当模型声明 reasoning 能力时才发送 reasoning_effort。
-            // 旧实现默认 MEDIUM → 对所有端点（含非推理模型）发 "reasoning_effort":"medium"，
-            // 部分服务端会 400。
-            if (config.capabilities.reasoning) {
-                config.reasoningEffort.apiValue?.let { effort ->
-                    put("reasoning_effort", effort)
+            // ── Reasoning（原生思考强度 + 思维预算，T1/T3 修复）──────────
+            // Provider 差异化思考字段（思考深度档位 → 各家 API 的真实参数）：
+            //  - Anthropic（Claude 3.7+/4，OpenAI 兼容层）：thinking: {type:"enabled", budget_tokens:N}
+            //  - Qwen / DashScope 兼容端：enable_thinking: true/false
+            //  - 其他 OpenAI 兼容端：reasoning_effort（模型声明 reasoning 能力时）
+            val effort = config.reasoningEffort
+            val isAnthropicEndpoint = config.providerId.equals("anthropic", ignoreCase = true) ||
+                config.baseUrl.contains("anthropic", ignoreCase = true)
+            val isQwenEndpoint = config.baseUrl.contains("dashscope", ignoreCase = true) ||
+                config.model.startsWith("qwen", ignoreCase = true)
+            when {
+                isAnthropicEndpoint -> {
+                    // effort 为 NONE（null）时不发 thinking 字段（Claude 默认不思考）。
+                    // budget 优先级：thinkingBudget（>0）> effort 档位映射 > 4096。
+                    if (effort != ReasoningEffort.NONE) {
+                        val budget = config.thinkingBudget?.takeIf { it > 0 }
+                            ?: EFFORT_THINKING_BUDGETS[effort]
+                            ?: 4096
+                        putJsonObject("thinking") {
+                            put("type", "enabled")
+                            put("budget_tokens", budget)
+                        }
+                    }
+                }
+                isQwenEndpoint -> {
+                    // Qwen3 混合思考开关：effort NONE = 关闭思考，其余档位 = 开启。
+                    put("enable_thinking", effort != ReasoningEffort.NONE)
+                }
+                config.capabilities.reasoning || isStrictOpenAiReasoner -> {
+                    // T72 §二十二修复：仅当模型声明 reasoning 能力时才发送
+                    // reasoning_effort。旧实现默认 MEDIUM → 对所有端点（含非推理
+                    // 模型）发 "reasoning_effort":"medium"，部分服务端会 400。
+                    // o-series 正则兜底：存量 Profile 未勾 reasoning 位也能发出。
+                    effort.apiValue?.let { value ->
+                        put("reasoning_effort", value)
+                    }
                 }
             }
             // max_completion_tokens 已在上方请求体开头写入（P1-3：与 max_tokens 互斥）
@@ -292,46 +393,93 @@ class StreamingOpenAiClient(
                 }
             }
             
-            if (config.enableTools && tools.isNotEmpty()) {
+            // ── Tools（function tools + 原生搜索 server tools）────────
+            // 旧逻辑：enableTools 且 tools 非空才发送 tools 数组。扩展：ZHIPU /
+            // DEEPSEEK / ANTHROPIC 的搜索开关就住在 tools 里，即使没有 function
+            // tools 也必须创建数组。OFF（默认）时 searchToolEntries 为空，
+            // 条件退化为旧版 `config.enableTools && tools.isNotEmpty()` —— 请求体
+            // 与旧版逐字节一致。
+            val hasFunctionTools = config.enableTools && tools.isNotEmpty()
+            if (hasFunctionTools || searchToolEntries.isNotEmpty()) {
                 putJsonArray("tools") {
-                    for (tool in tools) {
-                        addJsonObject {
-                            put("type", "function")
-                            putJsonObject("function") {
-                                put("name", tool.name)
-                                put("description", tool.description)
-                                // P0 防爆：单个工具的 parameters 非法 JSON 时，旧实现
-                                // 直接抛异常 → 所有带工具的请求整体失败（一个坏
-                                // schema 拖死全部 ~113 个工具）。现在降级为空对象
-                                // schema（模型仍可调用，参数不校验），并保留该工具。
-                                put(
-                                    "parameters",
-                                    runCatching { Json.parseToJsonElement(tool.parameters) }
-                                        .getOrElse {
-                                            Json.parseToJsonElement(
-                                                """{"type":"object","properties":{}}"""
-                                            )
-                                        }
-                                )
+                    if (hasFunctionTools) {
+                        for (tool in tools) {
+                            addJsonObject {
+                                put("type", "function")
+                                putJsonObject("function") {
+                                    put("name", tool.name)
+                                    put("description", tool.description)
+                                    // P0 防爆：单个工具的 parameters 非法 JSON 时，旧实现
+                                    // 直接抛异常 → 所有带工具的请求整体失败（一个坏
+                                    // schema 拖死全部 ~113 个工具）。现在降级为空对象
+                                    // schema（模型仍可调用，参数不校验），并保留该工具。
+                                    put(
+                                        "parameters",
+                                        runCatching { Json.parseToJsonElement(tool.parameters) }
+                                            .getOrElse {
+                                                Json.parseToJsonElement(
+                                                    """{"type":"object","properties":{}}"""
+                                                )
+                                            }
+                                    )
+                                }
                             }
                         }
                     }
+                    // server-side 搜索 tool 追加在 function tools 之后
+                    // （JsonArray 不可变，构建期一并写入 —— 见上方说明）。
+                    searchToolEntries.forEach { add(it) }
                 }
-                put(
-                    "tool_choice",
-                    when (config.toolChoice) {
-                        ToolChoiceMode.AUTO -> "auto"
-                        ToolChoiceMode.REQUIRED -> "required"
-                        ToolChoiceMode.NONE -> "none"
+                // tool_choice / parallel_tool_calls 仅在存在 function tools 时发送：
+                // server-side 搜索 tool 由服务端自行调度、不参与 tool_choice 语义，
+                // 只带搜索 tool 却发 tool_choice 的请求在部分端点会 400。
+                if (hasFunctionTools) {
+                    put(
+                        "tool_choice",
+                        when (config.toolChoice) {
+                            ToolChoiceMode.AUTO -> "auto"
+                            ToolChoiceMode.REQUIRED -> "required"
+                            ToolChoiceMode.NONE -> "none"
+                        }
+                    )
+                    if (config.parallelToolCalls) {
+                        put("parallel_tool_calls", true)
+                    } else {
+                        // T72 §二十二修复：旧实现 false 时直接省略键，导致用户无法
+                        // 关闭并行工具调用（服务端默认 true）。现在显式发送 false。
+                        put("parallel_tool_calls", false)
                     }
-                )
-                if (config.parallelToolCalls) {
-                    put("parallel_tool_calls", true)
-                } else {
-                    // T72 §二十二修复：旧实现 false 时直接省略键，导致用户无法
-                    // 关闭并行工具调用（服务端默认 true）。现在显式发送 false。
-                    put("parallel_tool_calls", false)
                 }
+            }
+
+            // ── 原生联网搜索（独立顶层字段形态）─────────────────────
+            // OPENAI / DASHSCOPE / OPENROUTER 不走 tools 数组，用各自的专有顶层
+            // 字段开关；ZHIPU / DEEPSEEK / ANTHROPIC 的 server tool 已并入上方
+            // tools 数组（else 分支覆盖）。when 单分支命中，每个键至多写一次，
+            // 不存在重复键问题。OFF（默认）时不写任何键 —— 未知/严格端点
+            // 看不到非标准字段（防 400）。
+            when (searchMode) {
+                WebSearchMode.OPENAI ->
+                    // OpenAI gpt-4o-search-preview / gpt-4o-mini-search-preview 的
+                    // 原生开关（Chat Completions 的 web_search_options）；
+                    // search_context_size 控制抓取量，medium 为官方推荐平衡档。
+                    putJsonObject("web_search_options") {
+                        put("search_context_size", "medium")
+                    }
+                WebSearchMode.DASHSCOPE ->
+                    // 阿里百炼 compatible-mode 的 Qwen 联网开关：顶层布尔字段。
+                    put("enable_search", true)
+                WebSearchMode.OPENROUTER ->
+                    // OpenRouter 原生 web 插件（等价给模型名加 :online 后缀）。
+                    // 它同时兼容 OpenAI 的 web_search_options，但官方文档推荐的
+                    // plugins 形态在旧网关上兼容面更广，故采用 plugins。
+                    putJsonArray("plugins") {
+                        addJsonObject {
+                            put("id", "web")
+                            put("max_results", 5)
+                        }
+                    }
+                else -> Unit
             }
 
             // ── 多模态输出（图片生成）─────────────────────────────
@@ -361,7 +509,23 @@ class StreamingOpenAiClient(
             // 兼容层的图像输出）。旧实现只按 jsonPrimitive 解析，数组形态抛异常
             // 被整体丢弃 —— 图片模型表现为“模型什么都没说”。
             val contentMedia = MultimodalOutputExtractor.parseContent(delta?.get("content"))
-            val content = contentMedia.text
+
+            // 原生联网搜索引用：OpenAI/DeepSeek 的 delta.annotations（或 content-parts
+            // 内嵌 annotations）、智谱的 delta.search_result；部分网关（智谱等）把
+            // 引用挂在流式最后一帧的 message 上（delta 缺失）—— 用 message 兜底。
+            // 注意：只从 message 取引用、不取正文 —— 正文已由前面的增量 delta 流过，
+            // 再合并 message.content 会把整段答案重复一遍（引用是元数据、无此风险）。
+            // 提取后格式化为 Markdown Sources 块追加到 content 尾部，让引擎/UI 都能
+            // 看到搜索来源；无引用时 content 保持原样（非搜索模型行为不变）。
+            val citations = SearchCitations.extractAndFormat(
+                delta ?: choice["message"]?.let { m -> runCatching { m.jsonObject }.getOrNull() }
+            )
+            val baseText = contentMedia.text
+            val content = when {
+                citations == null -> baseText
+                baseText == null || baseText.isEmpty() -> citations
+                else -> baseText + citations
+            }
 
             // message 级 images / video_url（GLM CogView chat 式生图 / 生视频网关）
             val images = contentMedia.images +
@@ -421,7 +585,17 @@ class StreamingOpenAiClient(
 
         // 多模态输出：message.content 可能为 content-parts 数组（同流式路径）。
         val contentMedia = MultimodalOutputExtractor.parseContent(message?.get("content"))
-        val content = contentMedia.text
+
+        // 原生联网搜索引用（OpenAI/DeepSeek 的 message.annotations、智谱的
+        // message.search_result）→ Markdown Sources 块。非搜索模型无这些字段，
+        // 提取结果为 null，content 保持原样（行为不变）。
+        val citations = SearchCitations.extractAndFormat(message)
+        val baseText = contentMedia.text
+        val content = when {
+            citations == null -> baseText
+            baseText == null || baseText.isEmpty() -> citations
+            else -> baseText + citations
+        }
         val images = contentMedia.images +
             MultimodalOutputExtractor.parseImagesArray(message?.get("images"))
         val videos = contentMedia.videos +
@@ -473,6 +647,33 @@ class StreamingOpenAiClient(
          */
         val LOCAL_SAMPLING_PROVIDERS: Set<String> = setOf(
             "ollama", "lmstudio", "vllm", "custom_openai"
+        )
+
+        /**
+         * B3/T4：OpenAI 官方"严格"推理模型（硬性拒绝 temperature / max_tokens）。
+         *
+         * 词边界正则（大小写不敏感），单测风格边界示例：
+         *  - 命中："o1"、"o3"、"o3-mini"、"o3-mini-high"、"o1-preview"、
+         *    "o4-mini"、"gpt-5"、"gpt-5-mini"、"gpt-5-chat-latest"、
+         *    "chatgpt-5-latest"、"O3-MINI"
+         *  - 不命中："neo3x"（o3 前是字母，lookbehind 拦截）、"hero1"（同上）、
+         *    "o1abc"（o1 后紧跟字母，lookahead 拦截）、"gpt-4o"、"gpt-4.1"、
+         *    "deepseek-chat"
+         */
+        val OPENAI_STRICT_REASONER: Regex = Regex(
+            "(?<![a-z0-9])o[134](-mini|-preview)?(?![a-z0-9])|gpt-5",
+            RegexOption.IGNORE_CASE
+        )
+
+        /**
+         * T1/T3：Anthropic `thinking.budget_tokens` 的 effort 档位映射
+         * （thinkingBudget 未显式设置时使用）。
+         */
+        val EFFORT_THINKING_BUDGETS: Map<ReasoningEffort, Int> = mapOf(
+            ReasoningEffort.LOW to 2048,
+            ReasoningEffort.MEDIUM to 4096,
+            ReasoningEffort.HIGH to 8192,
+            ReasoningEffort.MAX to 16384
         )
     }
 }

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 市场 UI 中文文案（与 values/strings_market.xml 英文默认一一对应）。
+     语言切换经 LanguageManager + MainActivity attachBaseContext/recreate 生效。 -->
+<resources>
+    <!-- ═══ 顶栏视图 / 子页签 / 技能源 ═══ -->
+    <string name="market_tab_plugins">插件</string>
+    <string name="market_tab_skills">Skills</string>
+    <string name="market_tab_mcp">MCP</string>
+    <string name="market_tab_connectors">连接器</string>
+    <string name="market_tab_integrations">集成</string>
+    <string name="market_scope_browse">市场</string>
+    <string name="market_scope_installed">已安装管理</string>
+    <string name="market_skill_source_local">本地</string>
+    <string name="market_skill_source_clawhub">ClawHub</string>
+
+    <!-- ═══ 通用动作 / 状态 ═══ -->
+    <string name="market_action_cancel">取消</string>
+    <string name="market_action_close">关闭</string>
+    <string name="market_action_add">添加</string>
+    <string name="market_action_import">导入</string>
+    <string name="market_action_install">安装</string>
+    <string name="market_action_uninstall">卸载</string>
+    <string name="market_action_load">加载</string>
+    <string name="market_action_delete">删除</string>
+    <string name="market_action_connect">连接</string>
+    <string name="market_action_disconnect">断开</string>
+    <string name="market_action_search">搜索</string>
+    <string name="market_action_retry">重试</string>
+    <string name="market_action_refresh">刷新</string>
+    <string name="market_searching">搜索中…</string>
+    <string name="market_loading">加载中…</string>
+    <string name="market_connecting">连接中…</string>
+    <string name="market_installing">安装中…</string>
+    <string name="market_status_loaded">已加载</string>
+    <string name="market_status_installed">已安装</string>
+    <string name="market_status_connected">已连接</string>
+    <string name="market_status_offline">离线</string>
+    <string name="market_status_disabled">已禁用</string>
+    <string name="market_builtin">内置</string>
+    <string name="market_builtin_name">%1$s（内置）</string>
+
+    <!-- ═══ 相对时间 ═══ -->
+    <string name="market_time_never">从未</string>
+    <string name="market_time_just_now">刚刚</string>
+    <string name="market_time_seconds_ago">%1$d秒前</string>
+    <string name="market_time_minutes_ago">%1$d分钟前</string>
+    <string name="market_time_hours_ago">%1$d小时前</string>
+    <string name="market_time_days_ago">%1$d天前</string>
+    <string name="market_time_months_ago">%1$d个月前</string>
+
+    <!-- ═══ 市场 · 插件 ═══ -->
+    <string name="market_plugins_empty_hint">未发现已安装的 Apex 插件（安装包含 PLUGIN intent 服务的插件 APK 后自动出现）</string>
+    <string name="market_plugins_header">通过 PLUGIN intent 服务发现的 Apex 插件。加载会验证插件 APK 与服务连通；Agent 工具桥接建设中（暂不能通过 /plugin: 执行工具）。</string>
+
+    <!-- ═══ 市场 · Skills（本地源）═══ -->
+    <string name="market_skills_action_github">GitHub 获取</string>
+    <string name="market_skills_action_url">URL 安装</string>
+    <string name="market_skills_action_local_import">本地导入</string>
+    <string name="market_skills_action_paste_json">粘贴 JSON</string>
+    <string name="market_skills_import_hint">本地导入支持 .zip 技能包（含 manifest + 资源文件）与 .json manifest，自动识别。</string>
+    <string name="market_skills_no_match">未找到匹配的技能（试试调整分类或搜索关键词）</string>
+    <string name="market_skills_builtin_header">内置 = App 自带能力（工具已原生注册，无安装步骤，用 /skill:&lt;id&gt; 直接调用）；已安装技能点击查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）。</string>
+    <string name="market_skills_url_dialog_title">从 URL 安装 Skill</string>
+    <string name="market_skills_url_dialog_hint">manifest JSON 直链，如 https://raw.githubusercontent.com/o/r/main/manifest.json</string>
+    <string name="market_skills_search_hint">搜索技能 / 标签 / 描述（支持模糊匹配）</string>
+    <string name="market_skills_suggestions">你是不是要找：</string>
+    <string name="market_cat_all">全部</string>
+    <string name="market_cat_file">文件</string>
+    <string name="market_cat_web">网络</string>
+    <string name="market_cat_browser">浏览器</string>
+    <string name="market_cat_memory">记忆</string>
+    <string name="market_cat_system">系统</string>
+    <string name="market_cat_utility">工具</string>
+
+    <!-- ═══ 市场 · Skills · ClawHub 仓库 ═══ -->
+    <string name="market_clawhub_search_hint">搜索 ClawHub 技能（如 web search / pdf）</string>
+    <string name="market_clawhub_showing_results">显示「%1$s」的搜索结果</string>
+    <string name="market_clawhub_back_to_trending">返回热门</string>
+    <string name="market_clawhub_header">ClawHub（clawhub.ai）社区技能仓库：安装时下载完整技能包，SKILL.md 全文转为 prompt 型技能注入对话，references/scripts 等资源落盘到技能目录。</string>
+    <string name="market_load_failed_with_reason">加载失败：%1$s</string>
+    <string name="market_clawhub_loading">正在拉取 ClawHub 技能列表…</string>
+    <string name="market_clawhub_no_results">没有找到与「%1$s」匹配的技能，换个关键词试试</string>
+    <string name="market_clawhub_empty_trending">ClawHub 热门列表为空</string>
+    <string name="market_clawhub_load_more">加载更多</string>
+    <string name="market_clawhub_downloads">%1$s 次下载</string>
+    <string name="market_clawhub_featured">精选</string>
+    <string name="market_clawhub_official">官方</string>
+
+    <!-- ═══ 市场 · MCP ═══ -->
+    <string name="market_mcp_header">MCP 不一定是服务器：STDIO 型就是一条本地命令（如 npx -y @modelcontextprotocol/server-memory），由 App 拉起子进程通过 stdin/stdout 通信。添加的工具源启用后出现在 / 菜单（/mcp:&lt;名称&gt;）。</string>
+    <string name="market_mcp_add_title">添加工具源</string>
+    <string name="market_mcp_add_desc">远端 HTTP / SSE 或本地命令 STDIO，含 apiKey 支持；添加后自动尝试连接。</string>
+    <string name="market_mcp_import_card_title">导入配置</string>
+    <string name="market_mcp_import_desc">粘贴社区通用 MCP 配置 JSON（{\"mcpServers\": \u2026}），支持 command/args/env 与 url 两种形态。</string>
+    <string name="market_mcp_import_file_title">从本地文件导入</string>
+    <string name="market_mcp_import_file_desc">选择设备上的 MCP 配置文件（.json，如从桌面端 Claude/Cursor 导出的 mcp.json），解析失败的条目会逐条报出原因。</string>
+    <string name="market_mcp_choose_file">选择文件</string>
+    <string name="market_mcp_manage_hint">已添加的 MCP 工具源在「已安装管理 · MCP」中连接 / 断开 / 启停 / 删除。</string>
+
+    <!-- ═══ 市场 · 连接器 ═══ -->
+    <string name="market_connectors_header">连接器 = 对外部服务（API/SSH/数据库/网盘）的访问配置。启用的连接器出现在 / 菜单（/connector:&lt;id&gt;）。</string>
+    <string name="market_connectors_add_title">添加连接器</string>
+    <string name="market_connectors_add_desc">登记 id / 名称 / 类型 / 端点，保存后即可在对话中以 /connector:&lt;id&gt; 调用。</string>
+    <string name="market_connectors_manage_hint">已有连接器的启停与删除在「已安装管理 · 连接器」。</string>
+
+    <!-- ═══ 市场 · 集成（魔搭 + GitHub）═══ -->
+    <string name="market_modelscope_title">魔搭 ModelScope Skills（官方 modelscope-skills 仓库）</string>
+    <string name="market_modelscope_filter">过滤技能</string>
+    <string name="market_modelscope_error_title">魔搭加载失败</string>
+    <string name="market_modelscope_loading">正在拉取仓库技能目录（GitHub API）…</string>
+    <string name="market_github_title">GitHub 仓库搜索（含 apex-skill-v1 manifest 的仓库可一键安装）</string>
+    <string name="market_github_query_label">仓库名 / 关键词</string>
+    <string name="market_github_error_title">GitHub 搜索失败</string>
+
+    <!-- ═══ 已安装管理 · 插件 ═══ -->
+    <string name="market_installed_plugins_empty">尚未加载任何插件 —— 到「市场」加载设备上发现的插件 APK</string>
+    <string name="market_installed_plugins_go">去市场加载</string>
+    <string name="market_installed_plugins_header">已加载 %1$d 个插件；卸载仅解除服务绑定，APK 仍在设备上，可随时重新加载。</string>
+    <string name="market_plugins_uninstall_title">卸载插件</string>
+    <string name="market_plugins_uninstall_text">解除与 %1$s 的绑定？可随时重新加载。</string>
+
+    <!-- ═══ 已安装管理 · Skills ═══ -->
+    <string name="market_installed_skills_empty">暂无已安装技能 —— 到「市场」从 GitHub / URL / 魔搭安装</string>
+    <string name="market_installed_skills_go">去市场安装</string>
+    <string name="market_installed_skills_empty_short">暂无已安装技能</string>
+    <string name="market_installed_skills_header">已安装 %1$d 个技能（按最近使用排序）；点击卡片查看认知详情（能量 / 结晶 / 调用统计 / 熔断 / 轨迹）；开关控制是否注入对话，卸载将删除 manifest 与资源目录。</string>
+    <string name="market_skill_last_used">最近 %1$s</string>
+    <string name="market_skill_never_used">从未执行</string>
+    <string name="market_cd_uninstall_skill">卸载技能</string>
+    <string name="market_uninstall_skill_title">卸载技能</string>
+    <string name="market_uninstall_skill_text">卸载「%1$s」？其 manifest 与资源目录将一并删除。</string>
+
+    <!-- ═══ 已安装管理 · MCP ═══ -->
+    <string name="market_installed_mcp_empty">未配置 MCP 工具源 —— 到「市场」添加远端 HTTP/SSE 或本地命令 STDIO</string>
+    <string name="market_installed_go_add">去市场添加</string>
+    <string name="market_installed_mcp_empty_short">未配置 MCP 工具源</string>
+    <string name="market_installed_mcp_header">已配置 %1$d 个 MCP 工具源；连接后其工具注入对话，/ 菜单出现 /mcp:&lt;名称&gt;。</string>
+    <string name="market_transport_stdio">传输：STDIO（本地命令）</string>
+    <string name="market_transport_sse">传输：SSE（远端 SSE）</string>
+    <string name="market_transport_http">传输：HTTP（远端 HTTP）</string>
+    <string name="market_transport_builtin">传输：BUILTIN（进程内置）</string>
+    <string name="market_delete_mcp_title">删除 MCP 服务器</string>
+    <string name="market_delete_mcp_text">删除「%1$s」的配置？活跃连接将被断开。</string>
+
+    <!-- ═══ 已安装管理 · 连接器 ═══ -->
+    <string name="market_installed_connectors_empty">无连接器 —— 到「市场」添加外部服务访问配置</string>
+    <string name="market_installed_connectors_empty_short">无连接器</string>
+    <string name="market_installed_connectors_header">启用的连接器出现在 / 菜单（/connector:&lt;id&gt;）。内置示例删除后重启恢复。</string>
+    <string name="market_delete_connector_title">删除连接器</string>
+    <string name="market_delete_connector_text">删除「%1$s」？</string>
+    <string name="market_delete_connector_builtin_suffix">（内置示例，重启后恢复）</string>
+
+    <!-- ═══ 已安装管理 · 集成 ═══ -->
+    <string name="market_installed_integrations_empty">尚未从远程仓库（魔搭 / GitHub / ClawHub）安装技能 —— 到「市场」浏览与一键安装</string>
+    <string name="market_installed_integrations_go">去市场逛逛</string>
+    <string name="market_installed_integrations_empty_short">暂无远程来源技能</string>
+    <string name="market_installed_integrations_header">ms- 前缀 = 魔搭 ModelScope 安装；gh- 前缀 = GitHub 仓库转换安装；ch- 前缀 = ClawHub 仓库安装。自定义 manifest 的 GitHub 技能在「Skills」页管理。</string>
+    <string name="market_source_modelscope">魔搭</string>
+
+    <!-- ═══ 对话框 · 添加 MCP ═══ -->
+    <string name="market_mcp_name_label">名称（如 memory / filesystem）</string>
+    <string name="market_mcp_name_invalid">不能含引号、反斜杠或换行</string>
+    <string name="market_mcp_form_label">形态</string>
+    <string name="market_mcp_form_stdio">本地命令</string>
+    <string name="market_mcp_form_http">远端 HTTP</string>
+    <string name="market_mcp_form_sse">远端 SSE</string>
+    <string name="market_mcp_command_label">命令（command）</string>
+    <string name="market_mcp_command_hint">npx / python / 绝对路径二进制</string>
+    <string name="market_mcp_args_label">参数（args，空格分隔）</string>
+    <string name="market_mcp_env_label">环境变量（可选，每行 KEY=VALUE）</string>
+    <string name="market_mcp_stdio_hint">MCP 不必是服务器：这条命令会被作为本地子进程启动，通过 stdin/stdout 走 JSON-RPC。命令必须在 App 可见的环境里可执行（例如已在本 App 的 Ubuntu 环境中安装 Node/Python）。</string>
+    <string name="market_mcp_url_label">URL（http(s)://…）</string>
+    <string name="market_mcp_apikey_label">API Key（可选，作 Bearer 发送）</string>
+    <string name="market_mcp_add_connect">添加并连接</string>
+
+    <!-- ═══ 对话框 · 导入 MCP 配置 ═══ -->
+    <string name="market_mcp_import_dialog_title">导入 MCP 配置</string>
+    <string name="market_mcp_paste_label">粘贴 mcpServers JSON</string>
+    <string name="market_mcp_paste_hint">支持 command/args/env 与 type=streamable_http|sse + url</string>
+    <string name="market_mcp_paste_body">支持 Claude Desktop / Cursor / Cline / Operit 通用格式：含 command 的条目按本地命令安装，含 url 的按远端安装；无法判定的条目会逐条报原因。</string>
+    <string name="market_mcp_parse_import">解析并导入</string>
+
+    <!-- ═══ 对话框 · 添加连接器 ═══ -->
+    <string name="market_connector_id_label">id（如 my_api，用于 /connector:&lt;id&gt;）</string>
+    <string name="market_connector_id_invalid">只允许字母/数字/._-</string>
+    <string name="market_connector_name_label">显示名（如 我的服务）</string>
+    <string name="market_connector_type_label">类型</string>
+    <string name="market_connector_endpoint_label">端点（URL / host，可选）</string>
+
+    <!-- ═══ 对话框 · Skill JSON / URL / GitHub ═══ -->
+    <string name="market_skill_json_title">导入 Skill JSON</string>
+    <string name="market_skill_json_label">粘贴 apex-skill-v1 manifest JSON</string>
+    <string name="market_url_download_install">下载并安装</string>
+    <string name="market_github_install_title">从 GitHub 安装技能</string>
+    <string name="market_github_input_label">owner/repo 或 仓库链接</string>
+    <string name="market_github_input_hint">例如 owner/repo 或 https://github.com/owner/repo</string>
+    <string name="market_github_install_body">将读取仓库默认分支的 manifest.json / skill.json / SKILL.md；仓库里没有这些内容时会明确报错，不会静默假安装。</string>
+    <string name="market_github_fetch_install">获取并安装</string>
+
+    <!-- ═══ 对话框 · 依赖图 ═══ -->
+    <string name="market_depgraph_title">依赖图</string>
+    <string name="market_depgraph_subtitle">%1$d 节点 · %2$d 边</string>
+    <string name="market_depgraph_healthy">健康</string>
+    <string name="market_depgraph_unhealthy">不健康</string>
+    <string name="market_depgraph_cycles">⚠ 检测到 %1$d 个循环依赖：</string>
+    <string name="market_depgraph_missing">⚠ 缺失依赖 %1$d 个：</string>
+    <string name="market_depgraph_topo">拓扑序（被依赖者在前）：</string>
+
+    <!-- ═══ 对话框 · manifest 干运行预览 ═══ -->
+    <string name="market_dryrun_confirm">确认安装</string>
+    <string name="market_meta_author">作者</string>
+    <string name="market_meta_license">许可证</string>
+    <string name="market_meta_trust">信任</string>
+    <string name="market_meta_category">分类</string>
+    <string name="market_meta_tools">工具数</string>
+    <string name="market_meta_prompt_injection">有注入</string>
+    <string name="market_meta_privilege">权限</string>
+    <string name="market_meta_tags">标签：%1$s</string>
+    <string name="market_dryrun_missing_note">安装将被拒绝 —— 请先安装上述依赖。</string>
+    <string name="market_dryrun_requirements">权限/工具要求：</string>
+
+    <!-- ═══ 技能详情对话框（认知市场）═══ -->
+    <string name="market_detail_loading">正在从 cs-mem 投影认知数据…</string>
+    <string name="market_detail_health">认知健康</string>
+    <string name="market_detail_usage">调用统计</string>
+    <string name="market_detail_tool_stats">工具级明细</string>
+    <string name="market_detail_traces">最近调用轨迹（参数已脱敏）</string>
+    <string name="market_detail_no_macro">该技能尚未被蒸馏为 cs-mem 宏（未被 Agent 实际执行过）</string>
+    <string name="market_energy">能量</string>
+    <string name="market_stat_success">成功</string>
+    <string name="market_stat_failure">失败</string>
+    <string name="market_stat_success_rate">成功率</string>
+    <string name="market_stat_transitions">转移</string>
+    <string name="market_stat_total">总调用</string>
+    <string name="market_detail_last_executed">最近执行：%1$s</string>
+    <string name="market_detail_crystallized">✦ 已结晶 —— 命中初始状态时可跳过 LLM 直接回放（毫秒级响应）</string>
+    <string name="market_crystallized">已结晶</string>
+    <string name="market_low_energy">低能量</string>
+    <string name="market_breaker_open">熔断器开启（%1$d 个工具）</string>
+    <string name="market_breaker_tool">%1$s（%2$d 失败）</string>
+    <string name="market_breaker_hint">冷却期后自动进入半开状态，成功探测一次后恢复</string>
+    <string name="market_detail_no_usage">暂无调用记录</string>
+    <string name="market_detail_invocations_count">%1$d次</string>
+
+    <!-- ═══ ViewModel 消息（snackbar）═══ -->
+    <string name="market_skill_uninstalled">已卸载技能：%1$s</string>
+    <string name="market_skill_not_found">未找到技能：%1$s</string>
+    <string name="market_install_failed">安装失败：%1$s</string>
+    <string name="market_import_failed">导入失败：%1$s</string>
+    <string name="market_local_import_failed">本地导入失败</string>
+    <string name="market_read_file_failed">读取文件失败：%1$s</string>
+    <string name="market_mcp_added">已添加 MCP 工具源：%1$s（连接后其工具注入对话）</string>
+    <string name="market_add_failed">添加失败：%1$s</string>
+    <string name="market_mcp_import_none">未导入任何条目：%1$s</string>
+    <string name="market_mcp_import_empty">配置为空</string>
+    <string name="market_name_reason">%1$s：%2$s</string>
+    <string name="market_list_sep">"；"</string>
+    <string name="market_mcp_imported_count">已导入 %1$d 个 MCP 工具源</string>
+    <string name="market_mcp_import_failed_part">，失败 %1$d：%2$s</string>
+    <string name="market_mcp_import_skipped_part">；跳过 %1$d：%2$s</string>
+    <string name="market_mcp_enabled">已启用 %1$s</string>
+    <string name="market_mcp_disabled_disconnected">已禁用并断开 %1$s</string>
+    <string name="market_action_failed">操作失败：%1$s</string>
+    <string name="market_mcp_connected">MCP 已连接：%1$s</string>
+    <string name="market_connect_failed">连接失败：%1$s</string>
+    <string name="market_mcp_disconnected">已断开：%1$s</string>
+    <string name="market_mcp_removed">已删除 MCP 服务器：%1$s</string>
+    <string name="market_connector_added">已添加连接器：%1$s（/ 菜单与 /connector:%1$s 可用）</string>
+    <string name="market_connector_removed">已删除连接器：%1$s</string>
+    <string name="market_plugin_load_requested">插件加载请求已发出：%1$s</string>
+    <string name="market_plugin_unloaded">已卸载插件：%1$s</string>
+    <string name="market_modelscope_install_failed">魔搭安装失败：%1$s</string>
+    <string name="market_clawhub_install_failed">ClawHub 安装失败：%1$s</string>
+</resources>

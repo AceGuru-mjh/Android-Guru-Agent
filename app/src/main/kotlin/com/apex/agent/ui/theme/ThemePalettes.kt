@@ -35,7 +35,11 @@ enum class AccentPalette(val key: String, val label: String) {
     VIOLET("violet", "暗夜紫罗兰"),
     OCEAN("ocean", "海洋青"),
     ROSE("rose", "玫瑰粉"),
-    FOREST("forest", "森林绿");
+    FOREST("forest", "森林绿"),
+    CYAN("cyan", "冰碧青"),
+    SUNSET("sunset", "日落"),
+    GOLD("gold", "鎏金"),
+    CRIMSON("crimson", "绯红");
 
     companion object {
         /** 持久化 key → 枚举（未知值兜底 MINT，兼容旧版本数据）。 */
@@ -334,6 +338,139 @@ private val ForestLight = AccentSet(
     onTertiaryContainer = Color(0xFF3B0E01)
 )
 
+// ═══════════════════ CYAN · 冰碧青 ═══════════════════
+// 青色（非蓝）：霓虹提亮 #22D3EE 系；tertiary 取薄荷梯次（青→绿和谐渐变）。
+
+private val CyanDark = AccentSet(
+    primary = Color(0xFF22D3EE),          // neon cyan
+    onPrimary = Color(0xFF00363D),
+    primaryContainer = Color(0xFF004957),
+    onPrimaryContainer = Color(0xFFB4EBF8),
+    secondary = Color(0xFFFFD08A),        // warm gold accent
+    onSecondary = Color(0xFF4A2F00),
+    secondaryContainer = Color(0xFF5A4100),
+    onSecondaryContainer = Color(0xFFFFE9C4),
+    tertiary = Color(0xFF4EE9B0),        // jade mint（冰碧呼应）
+    onTertiary = Color(0xFF00251A),
+    tertiaryContainer = Color(0xFF0C3A2C),
+    onTertiaryContainer = Color(0xFF9CF3D2)
+)
+
+private val CyanLight = AccentSet(
+    primary = Color(0xFF155E75),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFC2ECFA),
+    onPrimaryContainer = Color(0xFF001E2E),
+    secondary = Color(0xFF7C5800),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFDF9C),
+    onSecondaryContainer = Color(0xFF261A00),
+    tertiary = Color(0xFF0E7A57),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFB4F3DC),
+    onTertiaryContainer = Color(0xFF00382A)
+)
+
+// ═══════════════════ SUNSET · 日落 ═══════════════════
+// 橙→绯渐变感：primary #FB923C 橙，secondary 玫瑰绯，tertiary 晚霞紫。
+
+private val SunsetDark = AccentSet(
+    primary = Color(0xFFFB923C),          // sunset orange
+    onPrimary = Color(0xFF4A2100),
+    primaryContainer = Color(0xFF5C2E00),
+    onPrimaryContainer = Color(0xFFFFDDBA),
+    secondary = Color(0xFFFF8FA3),        // rose（橙→绯过渡）
+    onSecondary = Color(0xFF4A0725),
+    secondaryContainer = Color(0xFF5F1F33),
+    onSecondaryContainer = Color(0xFFFFD9E0),
+    tertiary = Color(0xFFD8B4FE),        // dusk violet
+    onTertiary = Color(0xFF3A1D66),
+    tertiaryContainer = Color(0xFF52378F),
+    onTertiaryContainer = Color(0xFFEBDCFF)
+)
+
+private val SunsetLight = AccentSet(
+    primary = Color(0xFF9A3412),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDBCC),
+    onPrimaryContainer = Color(0xFF380D00),
+    secondary = Color(0xFFA03C50),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFD9DE),
+    onSecondaryContainer = Color(0xFF3F0713),
+    tertiary = Color(0xFF6B4FA0),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFEADDFF),
+    onTertiaryContainer = Color(0xFF271457)
+)
+
+// ═══════════════════ GOLD · 鎏金 ═══════════════════
+// primary #FBBF24 系：深色态鎏金发光，浅色态偏黄而非琥珀棕（与 AMBER 区分）；
+// secondary 取与金色成对比的湖青。
+
+private val GoldDark = AccentSet(
+    primary = Color(0xFFFBBF24),          // molten gold
+    onPrimary = Color(0xFF3F2E00),
+    primaryContainer = Color(0xFF5B4300),
+    onPrimaryContainer = Color(0xFFFFE08C),
+    secondary = Color(0xFF8AD8E8),        // lake cyan（金青对村）
+    onSecondary = Color(0xFF00323B),
+    secondaryContainer = Color(0xFF004956),
+    onSecondaryContainer = Color(0xFFB8EEF7),
+    tertiary = Color(0xFFFDA4AF),        // rose highlight
+    onTertiary = Color(0xFF4A0723),
+    tertiaryContainer = Color(0xFF662338),
+    onTertiaryContainer = Color(0xFFFFD9E2)
+)
+
+private val GoldLight = AccentSet(
+    primary = Color(0xFFA16207),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFE08C),
+    onPrimaryContainer = Color(0xFF2B2000),
+    secondary = Color(0xFF0E6E7D),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFC0ECF6),
+    onSecondaryContainer = Color(0xFF003640),
+    tertiary = Color(0xFFA03A52),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFFD9E2),
+    onTertiaryContainer = Color(0xFF3F0019)
+)
+
+// ═══════════════════ CRIMSON · 绯红 ═══════════════════
+// primary #EF4444 系：深色态霓虹绯红；secondary 暖金，tertiary 冰青（火/冰对比）。
+
+private val CrimsonDark = AccentSet(
+    primary = Color(0xFFFF7A70),          // neon crimson
+    onPrimary = Color(0xFF490005),
+    primaryContainer = Color(0xFF6B1610),
+    onPrimaryContainer = Color(0xFFFFDAD4),
+    secondary = Color(0xFFFFD08A),        // warm gold
+    onSecondary = Color(0xFF4A2F00),
+    secondaryContainer = Color(0xFF5A4100),
+    onSecondaryContainer = Color(0xFFFFE9C4),
+    tertiary = Color(0xFF8AD8E8),        // ice cyan
+    onTertiary = Color(0xFF00323B),
+    tertiaryContainer = Color(0xFF004956),
+    onTertiaryContainer = Color(0xFFB8EEF7)
+)
+
+private val CrimsonLight = AccentSet(
+    primary = Color(0xFFB3261E),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDAD5),
+    onPrimaryContainer = Color(0xFF410002),
+    secondary = Color(0xFF7C5800),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFDF9C),
+    onSecondaryContainer = Color(0xFF261A00),
+    tertiary = Color(0xFF00696E),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFF9CF1FF),
+    onTertiaryContainer = Color(0xFF001F26)
+)
+
 /** 配色方案 → 当前深浅态的强调色组。 */
 private fun accentSetFor(palette: AccentPalette, dark: Boolean): AccentSet = when (palette) {
     AccentPalette.MINT -> if (dark) MintDark else MintLight
@@ -343,6 +480,10 @@ private fun accentSetFor(palette: AccentPalette, dark: Boolean): AccentSet = whe
     AccentPalette.OCEAN -> if (dark) OceanDark else OceanLight
     AccentPalette.ROSE -> if (dark) RoseDark else RoseLight
     AccentPalette.FOREST -> if (dark) ForestDark else ForestLight
+    AccentPalette.CYAN -> if (dark) CyanDark else CyanLight
+    AccentPalette.SUNSET -> if (dark) SunsetDark else SunsetLight
+    AccentPalette.GOLD -> if (dark) GoldDark else GoldLight
+    AccentPalette.CRIMSON -> if (dark) CrimsonDark else CrimsonLight
 }
 
 /**

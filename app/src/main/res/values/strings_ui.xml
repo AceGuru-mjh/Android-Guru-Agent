@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI 字符串（英文默认）—— 本轮新增：语言 / 发送键行为 / 任务总结 / 详细输入。
+     中文在 values-zh/strings_ui.xml；语言切换经 LanguageManager + MainActivity
+     attachBaseContext/recreate 生效。 -->
+<resources>
+    <!-- 语言 -->
+    <string name="settings_language">Language</string>
+    <string name="settings_language_desc">Interface language; restarts the screen to apply</string>
+    <string name="settings_language_system">Follow system</string>
+    <string name="settings_language_chinese">中文</string>
+    <string name="settings_language_english">English</string>
+
+    <!-- 发送键行为 -->
+    <string name="settings_send_key">Send key behavior</string>
+    <string name="settings_send_key_desc">Action of the Enter key in the chat input field</string>
+    <string name="settings_send_key_send">Send message</string>
+    <string name="settings_send_key_newline">New line</string>
+
+    <!-- 任务总结卡片 -->
+    <string name="settings_show_run_summary">Show task summary card</string>
+    <string name="settings_show_run_summary_desc">Show a summary card when a task finishes (off by default)</string>
+
+    <!-- 详细输入（分层编辑入口） -->
+    <string name="detailed_input">Detailed input</string>
+    <string name="detailed_input_hint">Compose long text here across lines; multi-line supported</string>
+</resources>

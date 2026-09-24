@@ -18,7 +18,7 @@ import java.io.File
  *
  * @param id       连接器唯一 id（如 `github`、`google_drive`）
  * @param name     显示名
- * @param type     类型（api / ssh / database / storage / other）
+ * @param type     类型（api / ssh / database / storage / messaging / other）
  * @param endpoint 服务端点（URL / host / 数据库地址）
  * @param apiKey   认证密钥（可为空；序列化时原样落盘，由上层决定是否加密）
  * @param extra    扩展配置（键值对，如 port、username）
@@ -186,6 +186,31 @@ class ConnectorRegistry(
                 name = "SSH",
                 type = "ssh",
                 endpoint = "",
+                builtin = true
+            ),
+            // 消息推送连接器：ConnectorMessenger 可直接发送文本（connector_send_message）
+            ConnectorDef(
+                id = "wechat",
+                name = "微信（企业微信群机器人）",
+                type = "messaging",
+                endpoint = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
+                extra = mapOf("hint" to "apiKey 填机器人 Webhook key（或 endpoint 直接填完整 webhook URL）"),
+                builtin = true
+            ),
+            ConnectorDef(
+                id = "feishu",
+                name = "飞书（自定义机器人）",
+                type = "messaging",
+                endpoint = "https://open.feishu.cn/open-apis/bot/v2/hook/",
+                extra = mapOf("hint" to "apiKey 填机器人 hook token（或 endpoint 直接填完整 hook URL）"),
+                builtin = true
+            ),
+            ConnectorDef(
+                id = "telegram",
+                name = "Telegram Bot",
+                type = "messaging",
+                endpoint = "https://api.telegram.org",
+                extra = mapOf("hint" to "apiKey 填 Bot token，extra.chat_id 填目标 chat id"),
                 builtin = true
             )
         )

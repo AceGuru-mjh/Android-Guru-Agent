@@ -261,7 +261,7 @@ class ApexAgentEngine(
     /**
      * 把消息加入内存历史，同时持久化到 [memory]（如果存在）。
      */
-    private fun addMessage(message: LlmMessage) {
+    internal fun addMessage(message: LlmMessage) {
         conversationHistory.add(message)
         memory?.append(message)
     }
@@ -447,24 +447,6 @@ class ApexAgentEngine(
      * 无附件时原样返回 [UserInput.text]；有附件时在文本前拼接文件清单上下文
      * （图片不在此处列出 —— 它们走 `LlmMessage.User.images` 直接 Vision）。
      */
-    private fun buildUserText(input: UserInput): String {
-        if (input.images.isEmpty() && input.files.isEmpty()) return input.text
-        return buildString {
-            if (input.images.isNotEmpty()) {
-                appendLine("[用户附加了 ${input.images.size} 张图片]")
-            }
-            if (input.files.isNotEmpty()) {
-                appendLine("[用户附加文件]")
-                input.files.forEach { f ->
-                    appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes) path=${f.localPath}")
-                }
-            }
-            appendLine()
-            append("用户消息: ")
-            append(input.text)
-        }
-    }
-
     // ═══════════════════════════════════════════════════════
     // PLAN mode
     // ═══════════════════════════════════════════════════════
@@ -687,7 +669,9 @@ class ApexAgentEngine(
             // 计划决定请求 tools 数组（provider 安全名 + 预算钳制）与 system
             // prompt 工具清单（同一份 plan.visibleRegistryIds）——两侧永远
             // 一致；tool_open 激活的工具从下一轮自动进入计划。
-            val plan = buildToolPlan()
+            val plan = EngineToolPlanner.buildToolPlan(
+                config, toolRegistry, toolActivation, toolDegradationLevel
+            )
             currentToolPlan = plan
 
             val messages = buildMessages()
@@ -709,7 +693,9 @@ class ApexAgentEngine(
             }
 
             // v4：强制函数调用 → tool_choice=required / 具体函数；降级后不再强制。
-            val forcedChoice = if (toolDegradationLevel == 0) forcedToolChoiceSpec(plan) else null
+            val forcedChoice = EngineToolPlanner.forcedToolChoiceSpec(
+                config.forcedToolIds, plan, toolDegradationLevel
+            )
 
             try {
                 runtime.chatStream(
@@ -764,7 +750,7 @@ class ApexAgentEngine(
                 // LlmException.Http（SingleClientModelRuntime/测试路径）。
                 if (contentBuilder.isEmpty() && reasoningBuilder.isEmpty() &&
                     toolCallsAccumulator.isEmpty() && toolDegradationLevel < 2 &&
-                    plan.tools.isNotEmpty() && isToolsRelatedRejection(e)
+                    plan.tools.isNotEmpty() && EngineToolPlanner.isToolsRelatedRejection(e)
                 ) {
                     toolDegradationLevel++
                     AppLogger.instance.warn(
@@ -791,39 +777,8 @@ class ApexAgentEngine(
                     )
 
                     for (toolCall in toolCalls) {
-                        // ask_user 工具：暂停执行，等待用户输入
-                        if (toolCall.name == "ask_user") {
-                            val args = try {
-                                kotlinx.serialization.json.Json.parseToJsonElement(toolCall.arguments).jsonObject
-                            } catch (_: Exception) {
-                                emptyMap<String, String>()
-                            }
-                            // P3-d 修复：旧实现 `?.toString()?.trim('"')` 依赖 JsonPrimitive.toString()
-                            // 的带引号表示，非字符串 JSON 值（数字/嵌套对象）会变成 JSON 文本，
-                            // 且 trim 会误伤字符串末尾本身含引号的内容。改用 jsonPrimitive.content。
-                            val question = (args["question"] as? JsonPrimitive)?.contentOrNull ?: "Please provide input:"
-                            val inputType = (args["type"] as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "text"
-                            val eventType = when (inputType) {
-                                "confirmation" -> InputType.CONFIRMATION
-                                "choice" -> InputType.CHOICE
-                                else -> InputType.TEXT
-                            }
-                            emit(AgentEvent.UserInputRequired(question, eventType))
-                            val answer = awaitUserInput()
-                            addMessage(LlmMessage.ToolResult(toolCall.id, "User answered: $answer"))
-                            emit(
-                                AgentEvent.ToolCallComplete(
-                                    callId = toolCall.id,
-                                    toolName = toolCall.name,
-                                    arguments = toolCall.arguments,
-                                    output = "User answered: $answer",
-                                    success = true,
-                                    durationMs = 0
-                                )
-                            )
-                            continue
-                        }
-
+                        // ask_user 工具：暂停执行，等待用户输入（流程拆至 EngineAskUserFlow.kt）
+                        if (handleAskUserToolCall(toolCall, emit)) continue
                         executeToolCallStreaming(toolCall, emit)
                     }
                 }
@@ -929,7 +884,7 @@ class ApexAgentEngine(
         // v4：模型回显的是 provider 安全名（terminal_exec）；执行器/截断策略
         // 需要注册表 id（terminal.exec）——经当前计划的反向映射解析。
         // 无映射时（旧会话回放/模型直呼 registry id）原样直查，两条路都通。
-        val registryToolId = toolNameToRegistryId(toolCall.name)
+        val registryToolId = EngineToolPlanner.registryIdOf(currentToolPlan, toolCall.name)
 
         emit(
             AgentEvent.ToolCallStart(
@@ -1037,70 +992,6 @@ class ApexAgentEngine(
         )
     }
 
-    // ═══ Tool System v4 — 计划/强制/降级/名称映射 ═══
-
-    /**
-     * 本轮请求工具计划：强制（仅选中集）/ 默认（CORE+激活+可选全量）/
-     * 降级（1=纯 CORE；2=空）。
-     */
-    private fun buildToolPlan(): ToolRequestBudget.RequestToolPlan {
-        val forced = config.forcedToolIds
-        return when {
-            toolDegradationLevel >= 2 -> EMPTY_TOOL_PLAN
-            forced.isNotEmpty() && toolDegradationLevel == 0 ->
-                ToolRequestBudget.planForced(toolRegistry, forced)
-            else -> ToolRequestBudget.planDefault(
-                registry = toolRegistry,
-                activation = toolActivation,
-                exposeAll = config.exposeAllTools && toolDegradationLevel == 0,
-                coreOnly = toolDegradationLevel >= 1
-            )
-        }
-    }
-
-    /** 强制 tool_choice：单选=具体函数，多选=required。 */
-    private fun forcedToolChoiceSpec(plan: ToolRequestBudget.RequestToolPlan): ToolChoiceSpec? {
-        if (config.forcedToolIds.isEmpty()) return null
-        if (plan.tools.isEmpty()) return null
-        return if (plan.tools.size == 1) {
-            ToolChoiceSpec.Function(plan.tools.first().name)
-        } else {
-            ToolChoiceSpec.Required
-        }
-    }
-
-    /**
-     * 判定异常是否与工具负载相关（降级重试的前置条件）。
-     *
-     * 覆盖：①模型/网关拒绝带 tools 请求的典型报错文案（函数名/schema/
-     * tool_choice/parallel）；②400/422 级请求拒绝（ModelRequestRejected /
-     * LlmException.Http）——请求体里只有 tools 是本 v4 新变量，用它当降级
-     * 信号；若非工具问题，降级后仍会在同一轮报错并上抛，不吞错。
-     */
-    private fun isToolsRelatedRejection(e: Throwable): Boolean {
-        // 401/403（鉴权）不是工具问题——排除，避免无意义降级重试。
-        if (e is LlmException.Http && (e.code == 400 || e.code == 413 || e.code == 422)) {
-            return true
-        }
-        val msg = (e.message ?: "").lowercase()
-        return TOOLS_REJECTION_KEYWORDS.any { msg.contains(it) }
-    }
-
-    /** 模型回显的工具名 → 注册表 id（无映射时原样返回——registry id 直查）。 */
-    private fun toolNameToRegistryId(providerName: String): String =
-        currentToolPlan?.providerNameToId?.get(providerName) ?: providerName
-
-    private val TOOLS_REJECTION_KEYWORDS = listOf(
-        "tool", "function", "schema", "parameters", "parallel_tool"
-    )
-    private val EMPTY_TOOL_PLAN = ToolRequestBudget.RequestToolPlan(
-        tools = emptyList(),
-        providerNameToId = emptyMap(),
-        visibleRegistryIds = emptySet(),
-        totalBytes = 0,
-        droppedByBudget = emptyList()
-    )
-
     // ═══════════════════════════════════════════════════════
     // Prompt builders
     // ═══════════════════════════════════════════════════════
@@ -1143,19 +1034,6 @@ class ApexAgentEngine(
         )
     }
 
-    /**
-     * T72 §十一 — 判定当前消息列表是否含图片（用户附件 / 历史 Vision 上下文）。
-     *
-     * 主 ReAct 流据此把请求路由到 VISION 角色（要求 vision+imageInput）。
-     * 路由器会校验所选 Profile 的 effective capabilities：
-     *  - 具备视觉 → 正常发送 multimodal content（图片在 [StreamingOpenAiClient.buildRequestBody]
-     *    里以 `image_url` part 发送，链路完整，见 AUDIT-ENGINE Q11）。
-     *  - 不具备 → 降级到具备视觉能力的 PRIMARY；全链无视觉模型 → 抛
-     *    [ModelRuntimeException.ModelCapabilityMismatch]（§七：不允许降级到 text-only
-     *    然后丢图）。
-     */
-    private fun messagesContainImages(messages: List<LlmMessage>): Boolean =
-        messages.any { it is LlmMessage.User && it.images.isNotEmpty() }
 
     /**
      * T76 — 把当前 executionTags（taskId/stepId）填入 LlmRequestContext。
@@ -1171,20 +1049,11 @@ class ApexAgentEngine(
     private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
         config = config,
         privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL",
-        visibleTools = currentToolPlan?.let { plan ->
-            toolRegistry.getAllTools().filter { it.id in plan.visibleRegistryIds }
-        } ?: toolRegistry.getAllTools(),
-        catalogTools = currentToolPlan?.tools?.takeIf { it.isNotEmpty() }?.let {
-            // 目录总览：全部非 legacy 工具（仅在请求携带工具时才展示目录段）
-            toolRegistry.getAllTools().filterNot { tool ->
-                com.apex.agent.core.tools.catalog.ToolTierPolicy.isLegacyAlias(tool.id)
-            }
-        } ?: emptyList(),
-        toolNameMap = currentToolPlan?.let { plan ->
-            // id → provider 名（提示词工具清单与请求 tools 数组同名）
-            plan.providerNameToId.entries.associate { (name, id) -> id to name }
-        } ?: emptyMap(),
-        toolsUnavailable = currentToolPlan?.tools?.isEmpty() == true && toolDegradationLevel >= 2,
+        visibleTools = EngineToolPlanner.visibleToolsFor(currentToolPlan, toolRegistry),
+        catalogTools = EngineToolPlanner.catalogToolsFor(currentToolPlan, toolRegistry),
+        toolNameMap = EngineToolPlanner.idToProviderName(currentToolPlan),
+        toolsUnavailable = currentToolPlan?.tools?.isEmpty() == true &&
+            toolDegradationLevel >= EngineToolPlanner.DEGRADATION_NO_TOOLS,
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
         environmentSummary = environmentInfoProvider?.environmentSummary(),
         connectedServices = connectedServicesProvider?.connectedServicesSummary()
@@ -1250,7 +1119,7 @@ class ApexAgentEngine(
         userInputDeferred?.complete("")
     }
 
-    private suspend fun awaitUserInput(): String {
+    internal suspend fun awaitUserInput(): String {
         val deferred = CompletableDeferred<String>()
         userInputDeferred = deferred
         return try {

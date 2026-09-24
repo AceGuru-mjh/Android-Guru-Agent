@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,12 +44,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.core.engine.task.AgentTask
 import com.apex.agent.core.engine.task.TaskStatus
 import com.patrykandpatrick.vico.compose.chart.Chart
@@ -79,15 +82,19 @@ fun TaskHistoryScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
+        // 内层 Scaffold 置零 insets：状态栏已由根 Scaffold 顶栏承担，避免双重叠加
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text("任务") },
+                // 顶栏置零 windowInsets，避免与根 Scaffold 状态栏双重叠加
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                title = { Text(stringResource(R.string.tasks_title)) },
                 actions = {
                     if (state.loading) {
                         CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
                     } else {
                         IconButton(onClick = viewModel::refresh) {
-                            Icon(Icons.Default.Refresh, contentDescription = "刷新", tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.tasks_refresh), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
@@ -110,9 +117,9 @@ fun TaskHistoryScreen(
                         Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
-                    Text("暂无任务记录", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.tasks_empty_title), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "在聊天页以任务模式（Plan / Spec）发起请求后，\n任务会持久化并出现在这里（跨重启保留）。",
+                        stringResource(R.string.tasks_empty_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -146,24 +153,24 @@ fun TaskHistoryScreen(
                                     Icon(Icons.Default.Checklist, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            Text("任务总览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.tasks_overview), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            StatCell("总数", state.stats.total, MaterialTheme.colorScheme.onSurface)
-                            StatCell("进行中", state.stats.active, Color(0xFFE0A63C))
-                            StatCell("完成", state.stats.completed, Color(0xFF3E9C51))
-                            StatCell("失败", state.stats.failed, Color(0xFFB06055))
-                            StatCell("取消", state.stats.cancelled, MaterialTheme.colorScheme.onSurfaceVariant)
+                            StatCell(stringResource(R.string.tasks_total), state.stats.total, MaterialTheme.colorScheme.onSurface)
+                            StatCell(stringResource(R.string.tasks_active), state.stats.active, Color(0xFFE0A63C))
+                            StatCell(stringResource(R.string.tasks_completed), state.stats.completed, Color(0xFF3E9C51))
+                            StatCell(stringResource(R.string.tasks_failed), state.stats.failed, Color(0xFFB06055))
+                            StatCell(stringResource(R.string.tasks_cancelled), state.stats.cancelled, MaterialTheme.colorScheme.onSurfaceVariant)
                         }
 
                         // 近 7 日创建量（Vico 柱状图；无轴设计 —— 柱高即数量，底部自绘周几标签）
                         if (state.dailyCreated.any { it.second > 0 }) {
                             Spacer(Modifier.height(14.dp))
-                            Text("近 7 日创建", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.tasks_daily_created), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(4.dp))
                             val barColor = MaterialTheme.colorScheme.primary
                             val columns = remember(barColor) {
@@ -178,7 +185,8 @@ fun TaskHistoryScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                val fmt = remember { SimpleDateFormat("E", Locale.CHINESE) }
+                                // i18n：周几标签跟随系统语言（原硬编码 Locale.CHINESE）
+                                val fmt = remember { SimpleDateFormat("E", Locale.getDefault()) }
                                 state.dailyCreated.forEach { (day, count) ->
                                     Text(
                                         if (count > 0) fmt.format(Date(day * 86_400_000L)) else "–",
@@ -224,7 +232,8 @@ private fun TaskHistoryCard(
     expanded: Boolean,
     onToggle: () -> Unit
 ) {
-    val timeFmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINESE) }
+    // i18n：时间戳跟随系统语言（原硬编码 Locale.CHINESE）
+    val timeFmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -247,17 +256,17 @@ private fun TaskHistoryCard(
                         fontWeight = FontWeight.Medium,
                         maxLines = if (expanded) 4 else 1
                     )
+                    val timeLabel = timeFmt.format(Date(task.createdAt))
+                    val dur = task.completedAt - task.startedAt
                     Text(
-                        buildString {
-                            append(task.mode)
-                            append(" · ")
-                            append(timeFmt.format(Date(task.createdAt)))
-                            val dur = task.completedAt - task.startedAt
-                            if (task.startedAt > 0 && dur > 0) {
-                                append(" · 用时 ")
-                                append(formatDuration(dur))
-                            }
-                        },
+                        if (task.startedAt > 0 && dur > 0)
+                            stringResource(
+                                R.string.tasks_card_meta_duration,
+                                task.mode,
+                                timeLabel,
+                                formatDuration(dur)
+                            )
+                        else stringResource(R.string.tasks_card_meta, task.mode, timeLabel),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -271,7 +280,8 @@ private fun TaskHistoryCard(
                 )
                 Icon(
                     if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "收起" else "展开",
+                    contentDescription = if (expanded) stringResource(R.string.tasks_collapse)
+                    else stringResource(R.string.tasks_expand),
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -280,7 +290,7 @@ private fun TaskHistoryCard(
             // 展开态：步骤回放 + 用户输入 + 结果摘要
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
-                Text("用户输入", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.tasks_user_input), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 Text(
                     task.userInput,
                     style = MaterialTheme.typography.bodySmall,
@@ -289,7 +299,7 @@ private fun TaskHistoryCard(
                 )
                 if (task.steps.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("计划步骤", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.tasks_plan_steps), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     task.steps.forEach { step ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
@@ -323,16 +333,16 @@ private fun TaskHistoryCard(
                 }
                 task.completionSummary?.let { summary ->
                     Spacer(Modifier.height(6.dp))
-                    Text("结果", style = MaterialTheme.typography.labelMedium, color = Color(0xFF3E9C51), fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.tasks_result), style = MaterialTheme.typography.labelMedium, color = Color(0xFF3E9C51), fontWeight = FontWeight.SemiBold)
                     Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 5)
                 }
                 task.error?.let { err ->
                     Spacer(Modifier.height(6.dp))
-                    Text("错误", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.tasks_error), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                     Text(err.take(300), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, maxLines = 5)
                 }
                 Text(
-                    "ID：${task.taskId} · 重试 ${task.retryCount} 次",
+                    stringResource(R.string.tasks_id_retry, task.taskId, task.retryCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -354,18 +364,20 @@ private fun TaskStatusIcon(status: TaskStatus) {
     Icon(icon, contentDescription = status.name, Modifier.size(18.dp), tint = tint)
 }
 
+/** i18n：状态徽标文案（@Composable，经 stringResource 按当前语言取词）。 */
+@Composable
 private fun statusLabel(status: TaskStatus): String = when (status) {
-    TaskStatus.PENDING -> "排队"
-    TaskStatus.PLANNING -> "规划中"
-    TaskStatus.RUNNING -> "执行中"
-    TaskStatus.WAITING_USER -> "等确认"
-    TaskStatus.PAUSED -> "已暂停"
-    TaskStatus.CANCELLING -> "取消中"
-    TaskStatus.RECOVERING -> "恢复中"
-    TaskStatus.RETRYING -> "重试中"
-    TaskStatus.COMPLETED -> "完成"
-    TaskStatus.FAILED -> "失败"
-    TaskStatus.CANCELLED -> "已取消"
+    TaskStatus.PENDING -> stringResource(R.string.tasks_status_pending)
+    TaskStatus.PLANNING -> stringResource(R.string.tasks_status_planning)
+    TaskStatus.RUNNING -> stringResource(R.string.tasks_status_running)
+    TaskStatus.WAITING_USER -> stringResource(R.string.tasks_status_waiting)
+    TaskStatus.PAUSED -> stringResource(R.string.tasks_status_paused)
+    TaskStatus.CANCELLING -> stringResource(R.string.tasks_status_cancelling)
+    TaskStatus.RECOVERING -> stringResource(R.string.tasks_status_recovering)
+    TaskStatus.RETRYING -> stringResource(R.string.tasks_status_retrying)
+    TaskStatus.COMPLETED -> stringResource(R.string.tasks_status_completed)
+    TaskStatus.FAILED -> stringResource(R.string.tasks_status_failed)
+    TaskStatus.CANCELLED -> stringResource(R.string.tasks_status_cancelled)
 }
 
 private fun statusColor(status: TaskStatus): Color = when (status) {

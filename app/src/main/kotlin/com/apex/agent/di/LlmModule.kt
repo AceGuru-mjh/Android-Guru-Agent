@@ -1,12 +1,14 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.R
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.llm.runtime.DefaultModelRuntime
 import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.llm.runtime.ModelRuntimeRegistry
 import com.apex.agent.core.llm.runtime.ModelRoleRouter
 import com.apex.agent.core.llm.runtime.ModelRuntimeStore
+import com.apex.agent.ui.language.LanguageManager
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.Module
@@ -37,14 +39,15 @@ object LlmModule {
     @Singleton
     fun provideLlmClient(
         repo: SettingsRepository,
-        chatToolkit: ChatToolkitStore
+        chatToolkit: ChatToolkitStore,
+        lang: LanguageManager
     ): LlmClient {
         // 动态委托：设置页/对话页"小大脑"菜单修改默认模型或采样参数后即时生效，
         // 无需重启 App（内部按 profiles/providers 变化重建真实 client）。
         // T72 之后：引擎已改用 [ModelRuntime] 路由多模型；此 [LlmClient] 单例仍
         // 保留供需要直连的旧消费者（如 SettingsViewModel.testConnection）。
         // 会话级"网络搜索"开关同时贯通（见 DynamicLlmClient 注释）。
-        return DynamicLlmClient(repo, chatToolkit)
+        return DynamicLlmClient(repo, chatToolkit, lang)
     }
 
     /**
@@ -120,9 +123,9 @@ object LlmModule {
 }
 
 /**
- * 未配置时的占位客户端
+ * 未配置时的占位客户端（文案按当前语言取 —— 首启未配置模型时用户看到的提示）
  */
-class NoOpLlmClient : LlmClient {
+class NoOpLlmClient(private val lang: LanguageManager? = null) : LlmClient {
     override suspend fun chat(
         messages: List<LlmMessage>,
         tools: List<ToolDefinition>,
@@ -130,7 +133,8 @@ class NoOpLlmClient : LlmClient {
         maxTokens: Int
     ): LlmResponse {
         return LlmResponse(
-            content = "请先在设置中配置API（Base URL + API Key + Model）",
+            content = lang?.getString(R.string.chat_llm_not_configured)
+                ?: "API is not configured yet (Base URL + API Key + Model)",
             toolCalls = emptyList()
         )
     }
@@ -142,7 +146,8 @@ class NoOpLlmClient : LlmClient {
         maxTokens: Int
     ): kotlinx.coroutines.flow.Flow<LlmStreamChunk> {
         return kotlinx.coroutines.flow.flowOf(
-            LlmStreamChunk(content = "请先在设置中配置API"),
+            LlmStreamChunk(content = lang?.getString(R.string.chat_llm_not_configured_short)
+                ?: "API is not configured yet"),
             LlmStreamChunk(isFinish = true)
         )
     }

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Market UI strings (English default). Chinese in values-zh/strings_market.xml.
+     Language switching via LanguageManager + MainActivity attachBaseContext/recreate. -->
+<resources>
+    <!-- ═══ Top-level tabs / views / skill sources ═══ -->
+    <string name="market_tab_plugins">Plugins</string>
+    <string name="market_tab_skills">Skills</string>
+    <string name="market_tab_mcp">MCP</string>
+    <string name="market_tab_connectors">Connectors</string>
+    <string name="market_tab_integrations">Integrations</string>
+    <string name="market_scope_browse">Market</string>
+    <string name="market_scope_installed">Installed</string>
+    <string name="market_skill_source_local">Local</string>
+    <string name="market_skill_source_clawhub">ClawHub</string>
+
+    <!-- ═══ Common actions / status ═══ -->
+    <string name="market_action_cancel">Cancel</string>
+    <string name="market_action_close">Close</string>
+    <string name="market_action_add">Add</string>
+    <string name="market_action_import">Import</string>
+    <string name="market_action_install">Install</string>
+    <string name="market_action_uninstall">Uninstall</string>
+    <string name="market_action_load">Load</string>
+    <string name="market_action_delete">Delete</string>
+    <string name="market_action_connect">Connect</string>
+    <string name="market_action_disconnect">Disconnect</string>
+    <string name="market_action_search">Search</string>
+    <string name="market_action_retry">Retry</string>
+    <string name="market_action_refresh">Refresh</string>
+    <string name="market_searching">Searching\u2026</string>
+    <string name="market_loading">Loading\u2026</string>
+    <string name="market_connecting">Connecting\u2026</string>
+    <string name="market_installing">Installing\u2026</string>
+    <string name="market_status_loaded">Loaded</string>
+    <string name="market_status_installed">Installed</string>
+    <string name="market_status_connected">Connected</string>
+    <string name="market_status_offline">Offline</string>
+    <string name="market_status_disabled">Disabled</string>
+    <string name="market_builtin">Built-in</string>
+    <string name="market_builtin_name">%1$s (built-in)</string>
+
+    <!-- ═══ Relative time ═══ -->
+    <string name="market_time_never">Never</string>
+    <string name="market_time_just_now">Just now</string>
+    <string name="market_time_seconds_ago">%1$d s ago</string>
+    <string name="market_time_minutes_ago">%1$d min ago</string>
+    <string name="market_time_hours_ago">%1$d h ago</string>
+    <string name="market_time_days_ago">%1$d d ago</string>
+    <string name="market_time_months_ago">%1$d mo ago</string>
+
+    <!-- ═══ Browse · Plugins ═══ -->
+    <string name="market_plugins_empty_hint">No Apex plugins installed yet (plugin APKs exposing a PLUGIN intent service appear here automatically)</string>
+    <string name="market_plugins_header">Apex plugins discovered via the PLUGIN intent service. Loading verifies the plugin APK and service connectivity; the agent tool bridge is under construction (tools cannot be invoked via /plugin: yet).</string>
+
+    <!-- ═══ Browse · Skills (local source) ═══ -->
+    <string name="market_skills_action_github">GitHub</string>
+    <string name="market_skills_action_url">Install from URL</string>
+    <string name="market_skills_action_local_import">Local import</string>
+    <string name="market_skills_action_paste_json">Paste JSON</string>
+    <string name="market_skills_import_hint">Local import supports .zip skill packages (manifest + resources) and .json manifests, auto-detected.</string>
+    <string name="market_skills_no_match">No matching skills (try adjusting the category or search keywords)</string>
+    <string name="market_skills_builtin_header">Built-in = capabilities bundled with the App (tools natively registered, no install step, invoke with /skill:&lt;id&gt; directly); tap an installed skill for cognitive details (energy / crystallization / usage stats / circuit breaker / traces).</string>
+    <string name="market_skills_url_dialog_title">Install Skill from URL</string>
+    <string name="market_skills_url_dialog_hint">Direct link to a manifest JSON, e.g. https://raw.githubusercontent.com/o/r/main/manifest.json</string>
+    <string name="market_skills_search_hint">Search skills / tags / descriptions (fuzzy matching)</string>
+    <string name="market_skills_suggestions">Did you mean:</string>
+    <string name="market_cat_all">All</string>
+    <string name="market_cat_file">File</string>
+    <string name="market_cat_web">Network</string>
+    <string name="market_cat_browser">Browser</string>
+    <string name="market_cat_memory">Memory</string>
+    <string name="market_cat_system">System</string>
+    <string name="market_cat_utility">Utility</string>
+
+    <!-- ═══ Browse · Skills · ClawHub repository ═══ -->
+    <string name="market_clawhub_search_hint">Search ClawHub skills (e.g. web search / pdf)</string>
+    <string name="market_clawhub_showing_results">Showing search results for \u201C%1$s\u201D</string>
+    <string name="market_clawhub_back_to_trending">Back to trending</string>
+    <string name="market_clawhub_header">ClawHub (clawhub.ai) community skill repository: installing downloads the full skill package; the SKILL.md body becomes a prompt-type skill injected into conversations, and references/scripts and other resources are written to the skill directory.</string>
+    <string name="market_load_failed_with_reason">Failed to load: %1$s</string>
+    <string name="market_clawhub_loading">Fetching ClawHub skill list\u2026</string>
+    <string name="market_clawhub_no_results">No skills matched \u201C%1$s\u201D; try another keyword</string>
+    <string name="market_clawhub_empty_trending">ClawHub trending list is empty</string>
+    <string name="market_clawhub_load_more">Load more</string>
+    <string name="market_clawhub_downloads">%1$s downloads</string>
+    <string name="market_clawhub_featured">Featured</string>
+    <string name="market_clawhub_official">Official</string>
+
+    <!-- ═══ Browse · MCP ═══ -->
+    <string name="market_mcp_header">MCP is not necessarily a server: the STDIO form is just a local command (e.g. npx -y @modelcontextprotocol/server-memory) that the App launches as a child process communicating over stdin/stdout. Added tool sources appear in the / menu once enabled (/mcp:&lt;name&gt;).</string>
+    <string name="market_mcp_add_title">Add tool source</string>
+    <string name="market_mcp_add_desc">Remote HTTP / SSE or local command STDIO, with apiKey support; connects automatically after adding.</string>
+    <string name="market_mcp_import_card_title">Import config</string>
+    <string name="market_mcp_import_desc">Paste the community-standard MCP config JSON ({\"mcpServers\": \u2026}), supporting both command/args/env and url forms.</string>
+    <string name="market_mcp_import_file_title">Import from local file</string>
+    <string name="market_mcp_import_file_desc">Pick an MCP config file on the device (.json, e.g. mcp.json exported from desktop Claude/Cursor); entries that fail to parse report their reasons one by one.</string>
+    <string name="market_mcp_choose_file">Choose file</string>
+    <string name="market_mcp_manage_hint">Added MCP tool sources are managed (connect / disconnect / toggle / delete) under \u201CInstalled \u00B7 MCP\u201D.</string>
+
+    <!-- ═══ Browse · Connectors ═══ -->
+    <string name="market_connectors_header">A connector = access configuration for an external service (API/SSH/database/cloud drive). Enabled connectors appear in the / menu (/connector:&lt;id&gt;).</string>
+    <string name="market_connectors_add_title">Add connector</string>
+    <string name="market_connectors_add_desc">Register id / name / type / endpoint; after saving, invoke it in conversations via /connector:&lt;id&gt;.</string>
+    <string name="market_connectors_manage_hint">Enable/disable and delete existing connectors under \u201CInstalled \u00B7 Connectors\u201D.</string>
+
+    <!-- ═══ Browse · Integrations (ModelScope + GitHub) ═══ -->
+    <string name="market_modelscope_title">ModelScope Skills (official modelscope-skills repository)</string>
+    <string name="market_modelscope_filter">Filter skills</string>
+    <string name="market_modelscope_error_title">ModelScope failed to load</string>
+    <string name="market_modelscope_loading">Fetching the repository skill catalog (GitHub API)\u2026</string>
+    <string name="market_github_title">GitHub repository search (repos containing an apex-skill-v1 manifest can be installed in one tap)</string>
+    <string name="market_github_query_label">Repo name / keyword</string>
+    <string name="market_github_error_title">GitHub search failed</string>
+
+    <!-- ═══ Installed · Plugins ═══ -->
+    <string name="market_installed_plugins_empty">No plugins loaded yet \u2014 load discovered plugin APKs in \u201CMarket\u201D</string>
+    <string name="market_installed_plugins_go">Load in Market</string>
+    <string name="market_installed_plugins_header">%1$d plugins loaded; unloading only unbinds the service \u2014 the APK stays on the device and can be reloaded anytime.</string>
+    <string name="market_plugins_uninstall_title">Unload plugin</string>
+    <string name="market_plugins_uninstall_text">Unbind %1$s? It can be reloaded anytime.</string>
+
+    <!-- ═══ Installed · Skills ═══ -->
+    <string name="market_installed_skills_empty">No skills installed yet \u2014 install from GitHub / URL / ModelScope in \u201CMarket\u201D</string>
+    <string name="market_installed_skills_go">Install from Market</string>
+    <string name="market_installed_skills_empty_short">No skills installed</string>
+    <string name="market_installed_skills_header">%1$d skills installed (sorted by recent use); tap a card for cognitive details (energy / crystallization / usage stats / circuit breaker / traces); the switch controls whether it is injected into conversations; uninstalling deletes the manifest and resource directory.</string>
+    <string name="market_skill_last_used">Used %1$s</string>
+    <string name="market_skill_never_used">Never executed</string>
+    <string name="market_cd_uninstall_skill">Uninstall skill</string>
+    <string name="market_uninstall_skill_title">Uninstall skill</string>
+    <string name="market_uninstall_skill_text">Uninstall \u201C%1$s\u201D? Its manifest and resource directory will be deleted.</string>
+
+    <!-- ═══ Installed · MCP ═══ -->
+    <string name="market_installed_mcp_empty">No MCP tool sources configured \u2014 add remote HTTP/SSE or local command STDIO in \u201CMarket\u201D</string>
+    <string name="market_installed_go_add">Add in Market</string>
+    <string name="market_installed_mcp_empty_short">No MCP tool sources configured</string>
+    <string name="market_installed_mcp_header">%1$d MCP tool sources configured; once connected their tools join conversations and /mcp:&lt;name&gt; appears in the / menu.</string>
+    <string name="market_transport_stdio">Transport: STDIO (local command)</string>
+    <string name="market_transport_sse">Transport: SSE (remote)</string>
+    <string name="market_transport_http">Transport: HTTP (remote)</string>
+    <string name="market_transport_builtin">Transport: BUILTIN (in-process)</string>
+    <string name="market_delete_mcp_title">Delete MCP server</string>
+    <string name="market_delete_mcp_text">Delete the configuration of \u201C%1$s\u201D? Active connections will be closed.</string>
+
+    <!-- ═══ Installed · Connectors ═══ -->
+    <string name="market_installed_connectors_empty">No connectors \u2014 add external service access configs in \u201CMarket\u201D</string>
+    <string name="market_installed_connectors_empty_short">No connectors</string>
+    <string name="market_installed_connectors_header">Enabled connectors appear in the / menu (/connector:&lt;id&gt;). Built-in samples are restored after restart if deleted.</string>
+    <string name="market_delete_connector_title">Delete connector</string>
+    <string name="market_delete_connector_text">Delete \u201C%1$s\u201D?</string>
+    <string name="market_delete_connector_builtin_suffix"> (built-in sample, restored after restart)</string>
+
+    <!-- ═══ Installed · Integrations ═══ -->
+    <string name="market_installed_integrations_empty">No skills installed from remote repositories (ModelScope / GitHub / ClawHub) yet \u2014 browse and install in one tap from \u201CMarket\u201D</string>
+    <string name="market_installed_integrations_go">Browse Market</string>
+    <string name="market_installed_integrations_empty_short">No skills from remote sources</string>
+    <string name="market_installed_integrations_header">The ms- prefix = installed from ModelScope; gh- = converted from a GitHub repository; ch- = installed from the ClawHub repository. GitHub skills with custom manifests are managed on the Skills tab.</string>
+    <string name="market_source_modelscope">ModelScope</string>
+
+    <!-- ═══ Dialogs · Add MCP ═══ -->
+    <string name="market_mcp_name_label">Name (e.g. memory / filesystem)</string>
+    <string name="market_mcp_name_invalid">Must not contain quotes, backslashes or newlines</string>
+    <string name="market_mcp_form_label">Form</string>
+    <string name="market_mcp_form_stdio">Local command</string>
+    <string name="market_mcp_form_http">Remote HTTP</string>
+    <string name="market_mcp_form_sse">Remote SSE</string>
+    <string name="market_mcp_command_label">Command</string>
+    <string name="market_mcp_command_hint">npx / python / absolute path to a binary</string>
+    <string name="market_mcp_args_label">Arguments (args, space-separated)</string>
+    <string name="market_mcp_env_label">Environment variables (optional, KEY=VALUE per line)</string>
+    <string name="market_mcp_stdio_hint">MCP is not necessarily a server: this command is started as a local child process speaking JSON-RPC over stdin/stdout. The command must be executable in an environment visible to the App (e.g. Node/Python installed in the App\'s Ubuntu environment).</string>
+    <string name="market_mcp_url_label">URL (http(s)://\u2026)</string>
+    <string name="market_mcp_apikey_label">API Key (optional, sent as Bearer)</string>
+    <string name="market_mcp_add_connect">Add &amp; connect</string>
+
+    <!-- ═══ Dialogs · Import MCP config ═══ -->
+    <string name="market_mcp_import_dialog_title">Import MCP config</string>
+    <string name="market_mcp_paste_label">Paste mcpServers JSON</string>
+    <string name="market_mcp_paste_hint">Supports command/args/env and type=streamable_http|sse + url</string>
+    <string name="market_mcp_paste_body">Supports the common Claude Desktop / Cursor / Cline / Operit format: entries with command are installed as local commands, entries with url as remote; undecidable entries report their reasons one by one.</string>
+    <string name="market_mcp_parse_import">Parse &amp; import</string>
+
+    <!-- ═══ Dialogs · Add connector ═══ -->
+    <string name="market_connector_id_label">id (e.g. my_api, used as /connector:&lt;id&gt;)</string>
+    <string name="market_connector_id_invalid">Only letters/digits/._- allowed</string>
+    <string name="market_connector_name_label">Display name (e.g. My service)</string>
+    <string name="market_connector_type_label">Type</string>
+    <string name="market_connector_endpoint_label">Endpoint (URL / host, optional)</string>
+
+    <!-- ═══ Dialogs · Skill JSON / URL / GitHub ═══ -->
+    <string name="market_skill_json_title">Import Skill JSON</string>
+    <string name="market_skill_json_label">Paste an apex-skill-v1 manifest JSON</string>
+    <string name="market_url_download_install">Download &amp; install</string>
+    <string name="market_github_install_title">Install skill from GitHub</string>
+    <string name="market_github_input_label">owner/repo or repository link</string>
+    <string name="market_github_input_hint">e.g. owner/repo or https://github.com/owner/repo</string>
+    <string name="market_github_install_body">Reads manifest.json / skill.json / SKILL.md from the repository default branch; if none of these exist, a clear error is reported \u2014 no silent fake installs.</string>
+    <string name="market_github_fetch_install">Fetch &amp; install</string>
+
+    <!-- ═══ Dialogs · Dependency graph ═══ -->
+    <string name="market_depgraph_title">Dependency graph</string>
+    <string name="market_depgraph_subtitle">%1$d nodes \u00B7 %2$d edges</string>
+    <string name="market_depgraph_healthy">Healthy</string>
+    <string name="market_depgraph_unhealthy">Unhealthy</string>
+    <string name="market_depgraph_cycles">\u26A0 %1$d circular dependencies detected:</string>
+    <string name="market_depgraph_missing">\u26A0 %1$d missing dependencies:</string>
+    <string name="market_depgraph_topo">Topological order (dependencies first):</string>
+
+    <!-- ═══ Dialogs · Manifest dry-run preview ═══ -->
+    <string name="market_dryrun_confirm">Confirm install</string>
+    <string name="market_meta_author">Author</string>
+    <string name="market_meta_license">License</string>
+    <string name="market_meta_trust">Trust</string>
+    <string name="market_meta_category">Category</string>
+    <string name="market_meta_tools">Tools</string>
+    <string name="market_meta_prompt_injection">has injection</string>
+    <string name="market_meta_privilege">Privilege</string>
+    <string name="market_meta_tags">Tags: %1$s</string>
+    <string name="market_dryrun_missing_note">Install will be rejected \u2014 please install the dependencies above first.</string>
+    <string name="market_dryrun_requirements">Permission/tool requirements:</string>
+
+    <!-- ═══ Skill detail dialog (cognitive market) ═══ -->
+    <string name="market_detail_loading">Projecting cognitive data from cs-mem\u2026</string>
+    <string name="market_detail_health">Cognitive health</string>
+    <string name="market_detail_usage">Usage stats</string>
+    <string name="market_detail_tool_stats">Per-tool details</string>
+    <string name="market_detail_traces">Recent traces (args redacted)</string>
+    <string name="market_detail_no_macro">This skill has not been distilled into a cs-mem macro yet (never actually executed by the Agent)</string>
+    <string name="market_energy">Energy</string>
+    <string name="market_stat_success">Success</string>
+    <string name="market_stat_failure">Failure</string>
+    <string name="market_stat_success_rate">Success rate</string>
+    <string name="market_stat_transitions">Transitions</string>
+    <string name="market_stat_total">Total</string>
+    <string name="market_detail_last_executed">Last executed: %1$s</string>
+    <string name="market_detail_crystallized">\u2726 Crystallized \u2014 skips the LLM and replays directly on initial-state hits (millisecond response)</string>
+    <string name="market_crystallized">Crystallized</string>
+    <string name="market_low_energy">Low energy</string>
+    <string name="market_breaker_open">Circuit breaker open (%1$d tools)</string>
+    <string name="market_breaker_tool">%1$s (%2$d failures)</string>
+    <string name="market_breaker_hint">Automatically half-opens after the cooldown; recovers after one successful probe</string>
+    <string name="market_detail_no_usage">No invocations yet</string>
+    <string name="market_detail_invocations_count">%1$d calls</string>
+
+    <!-- ═══ ViewModel messages (snackbar) ═══ -->
+    <string name="market_skill_uninstalled">Skill uninstalled: %1$s</string>
+    <string name="market_skill_not_found">Skill not found: %1$s</string>
+    <string name="market_install_failed">Install failed: %1$s</string>
+    <string name="market_import_failed">Import failed: %1$s</string>
+    <string name="market_local_import_failed">Local import failed</string>
+    <string name="market_read_file_failed">Failed to read file: %1$s</string>
+    <string name="market_mcp_added">MCP tool source added: %1$s (its tools join conversations once connected)</string>
+    <string name="market_add_failed">Add failed: %1$s</string>
+    <string name="market_mcp_import_none">No entries imported: %1$s</string>
+    <string name="market_mcp_import_empty">The configuration is empty</string>
+    <string name="market_name_reason">%1$s: %2$s</string>
+    <string name="market_list_sep">"; "</string>
+    <string name="market_mcp_imported_count">Imported %1$d MCP tool sources</string>
+    <string name="market_mcp_import_failed_part">, %1$d failed: %2$s</string>
+    <string name="market_mcp_import_skipped_part">; skipped %1$d: %2$s</string>
+    <string name="market_mcp_enabled">Enabled %1$s</string>
+    <string name="market_mcp_disabled_disconnected">Disabled and disconnected %1$s</string>
+    <string name="market_action_failed">Operation failed: %1$s</string>
+    <string name="market_mcp_connected">MCP connected: %1$s</string>
+    <string name="market_connect_failed">Connection failed: %1$s</string>
+    <string name="market_mcp_disconnected">Disconnected: %1$s</string>
+    <string name="market_mcp_removed">MCP server removed: %1$s</string>
+    <string name="market_connector_added">Connector added: %1$s (available in the / menu and as /connector:%1$s)</string>
+    <string name="market_connector_removed">Connector removed: %1$s</string>
+    <string name="market_plugin_load_requested">Plugin load requested: %1$s</string>
+    <string name="market_plugin_unloaded">Plugin unloaded: %1$s</string>
+    <string name="market_modelscope_install_failed">ModelScope install failed: %1$s</string>
+    <string name="market_clawhub_install_failed">ClawHub install failed: %1$s</string>
+</resources>

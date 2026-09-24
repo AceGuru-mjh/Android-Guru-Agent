@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- UI 字符串（中文）—— 本轮新增：语言 / 发送键行为 / 任务总结 / 详细输入。
+     英文默认在 values/strings_ui.xml；语言切换经 LanguageManager + MainActivity
+     attachBaseContext/recreate 生效。 -->
+<resources>
+    <!-- 语言 -->
+    <string name="settings_language">语言</string>
+    <string name="settings_language_desc">界面语言，切换后立即重建生效</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_chinese">中文</string>
+    <string name="settings_language_english">English</string>
+
+    <!-- 发送键行为 -->
+    <string name="settings_send_key">发送键行为</string>
+    <string name="settings_send_key_desc">聊天输入框回车键的行为</string>
+    <string name="settings_send_key_send">发送消息</string>
+    <string name="settings_send_key_newline">换行</string>
+
+    <!-- 任务总结卡片 -->
+    <string name="settings_show_run_summary">显示任务总结卡片</string>
+    <string name="settings_show_run_summary_desc">任务完成时显示总结卡片（默认关闭）</string>
+
+    <!-- 详细输入（分层编辑入口） -->
+    <string name="detailed_input">详细输入</string>
+    <string name="detailed_input_hint">在此分层编辑长文本，支持多行</string>
+</resources>

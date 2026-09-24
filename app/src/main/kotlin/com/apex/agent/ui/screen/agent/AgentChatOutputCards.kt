@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -81,6 +82,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.util.Locale
+import androidx.annotation.StringRes
+import com.apex.agent.R
 
 // ═══════════════════════════════════════════════════════════════════════
 // 流水线智能输出渲染器
@@ -204,17 +207,20 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier, tint: C
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    // i18n：Toast 文案在组合内预取（onClick 非组合上下文）
+    val copiedToast = stringResource(R.string.chat_copied)
     IconButton(
         onClick = {
             clipboard.setText(AnnotatedString(text))
             copied = true
-            android.widget.Toast.makeText(context, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, copiedToast, android.widget.Toast.LENGTH_SHORT).show()
         },
         modifier = modifier.size(28.dp)
     ) {
         Icon(
             imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-            contentDescription = if (copied) "已复制" else "复制",
+            contentDescription = if (copied) stringResource(R.string.chat_cd_copied)
+            else stringResource(R.string.chat_cd_copy),
             modifier = Modifier.size(15.dp),
             tint = tint
                 ?: if (copied) MaterialTheme.colorScheme.primary
@@ -234,8 +240,12 @@ internal fun TextOutputBlock(
     text: String,
     fullText: String?,
     expanded: Boolean,
-    label: String = if (expanded) "完整输出" else "输出摘要"
+    // i18n：null 时按折叠态取词（组合内 stringResource，避开 composable 默认参数限制）
+    label: String? = null
 ) {
+    val resolvedLabel = label ?: stringResource(
+        if (expanded) R.string.chat_output_full else R.string.chat_output_summary
+    )
     Column {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -243,14 +253,14 @@ internal fun TextOutputBlock(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = label,
+                text = resolvedLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
             if (!expanded && fullText != null && fullText.length > text.length) {
                 Text(
-                    text = "已截断，展开查看全部",
+                    text = stringResource(R.string.chat_output_truncated),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1
@@ -280,17 +290,15 @@ internal fun TextOutputBlock(
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = outputStats(text),
+            text = stringResource(
+                R.string.chat_output_stats,
+                text.count { it == '\n' } + 1,
+                text.length
+            ),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
         )
     }
-}
-
-/** 输出统计信息（行数 + 字符数）。 */
-internal fun outputStats(text: String): String {
-    val lines = text.count { it == '\n' } + 1
-    return "$lines 行 · ${text.length} 字符"
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -503,7 +511,7 @@ internal fun CodeOutputCard(
                         modifier = Modifier.weight(1f)
                     )
                     Text(
-                        text = "$lineCount 行",
+                        text = stringResource(R.string.chat_line_count, lineCount),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
@@ -536,11 +544,13 @@ internal fun CodeOutputCard(
 
 /** 文件操作解析结果（从 write/edit/delete/copy_move 的输出中提取结构化信息）。 */
 internal data class FileOpInfo(
-    val fileName: String,
+    val fileName: String?,
     val path: String?,
-    val opLabel: String,
+    // i18n：操作标签改持 @StringRes，展示端 stringResource 取词
+    @StringRes val opLabel: Int,
     val sizeChange: String?,
-    val statLine: String?,
+    val statLineCount: Int?,
+    val statLineSize: String?,
     val extras: List<String>
 )
 
@@ -556,19 +566,20 @@ internal fun parseFileOp(toolName: String, args: String, output: String): FileOp
         .find(args)?.groupValues?.getOrNull(1)
 
     val firstLine = output.lineSequence().firstOrNull { it.isNotBlank() } ?: ""
+    // i18n：非 Composable 解析层返回 @StringRes，展示层（FileOpCard）取词
     val opLabel = when {
-        firstLine.contains("Created", ignoreCase = true) -> "新建"
-        firstLine.contains("Overwritten", ignoreCase = true) -> "覆盖"
-        firstLine.contains("Appended", ignoreCase = true) -> "追加"
-        firstLine.contains("Edited", ignoreCase = true) -> "编辑"
-        firstLine.contains("Deleted", ignoreCase = true) -> "删除"
-        firstLine.contains("Moved", ignoreCase = true) -> "移动"
-        firstLine.contains("Copied", ignoreCase = true) -> "复制"
-        toolName == "write_file" -> "写入"
-        toolName == "edit_file" -> "编辑"
-        toolName == "delete_file" -> "删除"
-        toolName == "copy_move_file" -> "复制/移动"
-        else -> "文件操作"
+        firstLine.contains("Created", ignoreCase = true) -> R.string.chat_fileop_created
+        firstLine.contains("Overwritten", ignoreCase = true) -> R.string.chat_fileop_overwritten
+        firstLine.contains("Appended", ignoreCase = true) -> R.string.chat_fileop_appended
+        firstLine.contains("Edited", ignoreCase = true) -> R.string.chat_fileop_edited
+        firstLine.contains("Deleted", ignoreCase = true) -> R.string.chat_fileop_deleted
+        firstLine.contains("Moved", ignoreCase = true) -> R.string.chat_fileop_moved
+        firstLine.contains("Copied", ignoreCase = true) -> R.string.chat_fileop_copied
+        toolName == "write_file" -> R.string.chat_fileop_write
+        toolName == "edit_file" -> R.string.chat_fileop_edit
+        toolName == "delete_file" -> R.string.chat_fileop_delete
+        toolName == "copy_move_file" -> R.string.chat_fileop_copy_move
+        else -> R.string.chat_fileop_generic
     }
 
     val sizeChange = Regex("Old:\\s*(.+?)\\s*→\\s*New:\\s*(.+)")
@@ -578,11 +589,11 @@ internal fun parseFileOp(toolName: String, args: String, output: String): FileOp
 
     // 行数统计：优先 "File now: N lines, size"（edit_file），回退到首个 "N lines, size"（write_file）。
     // 注意不要命中 edit 输出中的 "Net change: +X lines"（统计的是变更行而非总行数）。
-    val statLine = (Regex("File now:\\s*(\\d+) lines(?:,\\s*(\\S+))?").find(output)
-        ?: Regex("(\\d+) lines(?:,\\s*(\\S+))?").find(output))?.let { m ->
-            val size = m.groupValues[2].takeIf { it.isNotBlank() }
-            "${m.groupValues[1]} 行" + (size?.let { " · $it" } ?: "")
-        }
+    // i18n：行数与大小拆开存，展示层本地化拼装。
+    val statMatch = (Regex("File now:\\s*(\\d+) lines(?:,\\s*(\\S+))?").find(output)
+        ?: Regex("(\\d+) lines(?:,\\s*(\\S+))?").find(output))
+    val statLineCount = statMatch?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }?.toInt()
+    val statLineSize = statMatch?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
     val extras = output.lineSequence()
         .map { it.trim() }
@@ -601,14 +612,15 @@ internal fun parseFileOp(toolName: String, args: String, output: String): FileOp
             ?.groupValues?.getOrNull(1)
     val pathForName = argPath ?: nameFromOutput
     val fileName = pathForName?.substringAfterLast('/')?.substringAfterLast('\\')
-        ?: nameFromOutput ?: "文件"
+        ?: nameFromOutput
 
     return FileOpInfo(
         fileName = fileName,
         path = argPath ?: nameFromOutput,
         opLabel = opLabel,
         sizeChange = sizeChange,
-        statLine = statLine,
+        statLineCount = statLineCount,
+        statLineSize = statLineSize,
         extras = extras
     )
 }
@@ -648,7 +660,7 @@ internal fun FileOpCard(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = fileIconFor(info.path ?: info.fileName),
+                            imageVector = fileIconFor(info.path ?: info.fileName ?: ""),
                             contentDescription = null,
                             tint = accent,
                             modifier = Modifier.size(18.dp)
@@ -657,7 +669,7 @@ internal fun FileOpCard(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = info.fileName,
+                        text = info.fileName ?: stringResource(R.string.chat_file),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -675,21 +687,25 @@ internal fun FileOpCard(
                     }
                 }
                 Text(
-                    text = info.opLabel,
+                    text = stringResource(info.opLabel),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = accent
                 )
             }
 
-            if (info.sizeChange != null || info.statLine != null) {
+            if (info.sizeChange != null || info.statLineCount != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     info.sizeChange?.let {
                         FileOpChip(it, MaterialTheme.colorScheme.secondary)
                     }
-                    info.statLine?.let {
-                        FileOpChip(it, MaterialTheme.colorScheme.tertiary)
+                    info.statLineCount?.let { count ->
+                        FileOpChip(
+                            stringResource(R.string.chat_line_count, count) +
+                                (info.statLineSize?.let { " · $it" } ?: ""),
+                            MaterialTheme.colorScheme.tertiary
+                        )
                     }
                 }
             }
@@ -798,7 +814,8 @@ internal fun ShellOutputCard(
                 text = output,
                 fullText = null,
                 expanded = true,
-                label = if (hasError) "执行输出（失败）" else "执行输出"
+                label = if (hasError) stringResource(R.string.chat_exec_output_failed)
+                else stringResource(R.string.chat_exec_output)
             )
         }
     }
@@ -818,7 +835,7 @@ internal fun JsonOutputCard(json: String) {
         runCatching { Json.parseToJsonElement(json) }.getOrNull()
     }
     if (element == null) {
-        TextOutputBlock(text = json, fullText = null, expanded = true, label = "输出")
+        TextOutputBlock(text = json, fullText = null, expanded = true, label = stringResource(R.string.chat_output_label))
         return
     }
 
@@ -829,7 +846,7 @@ internal fun JsonOutputCard(json: String) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "结构化输出",
+                text = stringResource(R.string.chat_structured_output),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
@@ -917,7 +934,8 @@ private fun JsonBranch(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = if (expanded) "$size 项" else "… $size 项",
+                text = if (expanded) stringResource(R.string.chat_json_items, size)
+                else stringResource(R.string.chat_json_items_collapsed, size),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 modifier = Modifier.padding(horizontal = 4.dp)
@@ -933,7 +951,8 @@ private fun JsonBranch(
             Icon(
                 imageVector = if (expanded) Icons.Default.KeyboardArrowUp
                 else Icons.Default.KeyboardArrowDown,
-                contentDescription = if (expanded) "折叠" else "展开",
+                contentDescription = if (expanded) stringResource(R.string.chat_cd_collapse)
+                else stringResource(R.string.chat_cd_expand),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(14.dp)
             )
@@ -944,7 +963,7 @@ private fun JsonBranch(
             }
             if (entries.size > JSON_MAX_CHILDREN) {
                 Text(
-                    text = "… 还有 ${entries.size - JSON_MAX_CHILDREN} 项",
+                    text = stringResource(R.string.chat_json_more, entries.size - JSON_MAX_CHILDREN),
                     style = MaterialTheme.typography.labelSmall,
                     fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1022,7 +1041,7 @@ internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
-                    text = "任务完成",
+                    text = stringResource(R.string.chat_run_stats),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     color = accent
@@ -1039,8 +1058,8 @@ internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SummaryStatChip("迭代 ${summary.totalIterations}")
-                SummaryStatChip("工具调用 ${summary.totalToolCalls}")
+                SummaryStatChip(stringResource(R.string.chat_stat_iterations, summary.totalIterations))
+                SummaryStatChip(stringResource(R.string.chat_stat_tool_calls, summary.totalToolCalls))
             }
 
             if (summary.summary.isNotBlank()) {
@@ -1105,7 +1124,7 @@ internal fun StepMarkerCard(marker: AgentUiMessage.StepMarker) {
                     modifier = Modifier.size(12.dp)
                 )
                 Text(
-                    text = "步骤 ${marker.stepIndex + 1}",
+                    text = stringResource(R.string.chat_step, marker.stepIndex + 1),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = accent

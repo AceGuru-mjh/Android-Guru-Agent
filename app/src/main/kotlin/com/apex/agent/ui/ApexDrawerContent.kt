@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -130,7 +131,7 @@ fun ApexDrawerContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "全能 AI 助手",
+                                    stringResource(R.string.drawer_tagline),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -173,7 +174,7 @@ fun ApexDrawerContent(
                 destinations.forEach { dest ->
                     GlassNavigationItem(
                         icon = dest.icon,
-                        label = dest.label,
+                        label = stringResource(dest.labelRes),
                         selected = currentDestination == dest,
                         onClick = { onDestinationSelected(dest) },
                         state = glassState,
@@ -201,7 +202,7 @@ fun ApexDrawerContent(
                     }
                     if (agentState.historyDepth > 0) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        StatusChip("MEM", "${agentState.historyDepth} 条")
+                        StatusChip("MEM", stringResource(R.string.drawer_mem_count, agentState.historyDepth))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     // GitHub 连接状态常显（不再仅在触发 /mcp:github 时提示）
@@ -312,7 +313,8 @@ private fun GithubStatusRow(
                     )
             )
             Text(
-                text = if (isConnected) "@${username ?: "GitHub"}" else "GitHub 未连接",
+                text = if (isConnected) "@${username ?: "GitHub"}"
+                else stringResource(R.string.drawer_github_not_connected),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (isConnected)
                     MaterialTheme.colorScheme.primary

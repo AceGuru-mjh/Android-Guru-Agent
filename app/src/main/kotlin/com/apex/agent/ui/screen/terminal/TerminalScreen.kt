@@ -65,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.apex.agent.R
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -328,7 +330,7 @@ private fun ConsoleTopBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onOpenNavDrawer) {
-            Icon(Icons.Default.Menu, contentDescription = "打开导航", tint = ConsoleTheme.text)
+            Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.term_cd_nav), tint = ConsoleTheme.text)
         }
         Column(
             modifier = Modifier
@@ -337,7 +339,7 @@ private fun ConsoleTopBar(
             verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             Text(
-                "终端",
+                stringResource(R.string.term_title),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = ConsoleTheme.text
@@ -349,9 +351,9 @@ private fun ConsoleTopBar(
                 ubuntuPhase in setOf(
                     UbuntuLifecycleCoordinator.Phase.INSTALLING,
                     UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING
-                ) -> "环境准备中 ${ubuntuPercent}%"
-                ubuntuPhase == UbuntuLifecycleCoordinator.Phase.FAILED -> "环境异常"
-                else -> "等待会话"
+                ) -> stringResource(R.string.term_env_preparing, ubuntuPercent)
+                ubuntuPhase == UbuntuLifecycleCoordinator.Phase.FAILED -> stringResource(R.string.term_env_error_short)
+                else -> stringResource(R.string.term_waiting_session)
             }
             Text(
                 subtitle,
@@ -363,13 +365,13 @@ private fun ConsoleTopBar(
             )
         }
         IconButton(onClick = onNewSession) {
-            Icon(Icons.Default.Add, contentDescription = "新建会话", tint = ConsoleTheme.accent)
+            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.term_cd_new_session), tint = ConsoleTheme.accent)
         }
         IconButton(onClick = onOpenCenter) {
-            Icon(Icons.Default.Layers, contentDescription = "环境中心", tint = ConsoleTheme.accent)
+            Icon(Icons.Default.Layers, contentDescription = stringResource(R.string.term_cd_env_center), tint = ConsoleTheme.accent)
         }
         IconButton(onClick = onOpenSettings) {
-            Icon(Icons.Default.Settings, contentDescription = "终端设置", tint = ConsoleTheme.accent)
+            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.term_cd_settings), tint = ConsoleTheme.accent)
         }
     }
 }
@@ -456,7 +458,7 @@ private fun SessionChip(
             )
         }
         Icon(
-            Icons.Default.Close, "关闭会话",
+            Icons.Default.Close, stringResource(R.string.term_cd_close_session),
             Modifier
                 .size(18.dp)
                 .clip(CircleShape)
@@ -484,7 +486,7 @@ private fun StatusStrip(
     ) {
         if (semantic == null) {
             Text(
-                "未连接会话",
+                stringResource(R.string.term_no_session),
                 fontSize = 10.5.sp,
                 fontFamily = FontFamily.Monospace,
                 color = ConsoleTheme.dim
@@ -511,7 +513,7 @@ private fun StatusStrip(
             // 等待输入（prompt 检测）
             if (semantic.prompt?.detected == true || semantic.input.state.name == "HIGH_CONFIDENCE") {
                 Text(
-                    "⌨ 等待输入",
+                    stringResource(R.string.term_waiting_input),
                     fontSize = 10.5.sp,
                     fontFamily = FontFamily.Monospace,
                     color = ConsoleTheme.amber,
@@ -627,14 +629,14 @@ private fun EnvironmentPreparingContent(
     }
     Spacer(Modifier.height(22.dp))
     Text(
-        "Ubuntu 环境准备中",
+        stringResource(R.string.term_env_prep_title),
         fontSize = 19.sp,
         fontWeight = FontWeight.Bold,
         color = ConsoleTheme.text
     )
     Spacer(Modifier.height(6.dp))
     Text(
-        "完整 Linux 开发环境随应用内置 · 离线解包，无需下载",
+        stringResource(R.string.term_env_prep_desc),
         fontSize = 12.sp,
         color = ConsoleTheme.dim,
         textAlign = TextAlign.Center
@@ -643,7 +645,11 @@ private fun EnvironmentPreparingContent(
 
     // ── 三步进度 ──
     val currentStep = setupStepIndex(progress?.stage)
-    val steps = listOf("解压内置 Ubuntu 档案", "配置系统环境", "初始化工具链")
+    val steps = listOf(
+        stringResource(R.string.term_step_unpack),
+        stringResource(R.string.term_step_configure),
+        stringResource(R.string.term_step_toolchain)
+    )
     steps.forEachIndexed { index, label ->
         SetupStepRow(
             label = label,
@@ -673,7 +679,7 @@ private fun EnvironmentPreparingContent(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 when {
-                    progress == null -> "启动中…"
+                    progress == null -> stringResource(R.string.term_starting)
                     else -> progress.message.ifBlank { progress.stage }
                 },
                 fontSize = 11.sp,
@@ -722,7 +728,7 @@ private fun EnvironmentPreparingContent(
             )
         }
         Text(
-            "首次准备约 2~5 分钟（约 1GB 磁盘）· 完成后自动进入终端",
+            stringResource(R.string.term_prep_footnote),
             fontSize = 10.5.sp,
             color = ConsoleTheme.dim
         )
@@ -734,12 +740,12 @@ private fun EnvironmentPreparingContent(
         TextButton(onClick = onNewLocal) {
             Icon(Icons.Default.Android, null, Modifier.size(15.dp), tint = ConsoleTheme.dim)
             Spacer(Modifier.width(6.dp))
-            Text("先用 Android Shell", color = ConsoleTheme.dim, fontSize = 12.sp)
+            Text(stringResource(R.string.term_use_android_first), color = ConsoleTheme.dim, fontSize = 12.sp)
         }
         TextButton(onClick = onOpenCenter) {
             Icon(Icons.Default.Layers, null, Modifier.size(15.dp), tint = ConsoleTheme.dim)
             Spacer(Modifier.width(6.dp))
-            Text("环境中心", color = ConsoleTheme.dim, fontSize = 12.sp)
+            Text(stringResource(R.string.term_env_center), color = ConsoleTheme.dim, fontSize = 12.sp)
         }
     }
 }
@@ -795,7 +801,7 @@ private fun EnvironmentFailureContent(
         tint = ConsoleTheme.danger, modifier = Modifier.size(56.dp)
     )
     Spacer(Modifier.height(18.dp))
-    Text("环境准备失败", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = ConsoleTheme.text)
+    Text(stringResource(R.string.term_env_failed_title), fontSize = 19.sp, fontWeight = FontWeight.Bold, color = ConsoleTheme.text)
     Spacer(Modifier.height(8.dp))
     if (!lastError.isNullOrBlank()) {
         Text(
@@ -822,12 +828,12 @@ private fun EnvironmentFailureContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(Icons.Default.Refresh, contentDescription = null, tint = ConsoleTheme.danger, modifier = Modifier.size(17.dp))
-            Text("重试", color = ConsoleTheme.danger, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(stringResource(R.string.term_retry), color = ConsoleTheme.danger, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
     }
     Spacer(Modifier.height(14.dp))
     TextButton(onClick = onOpenCenter) {
-        Text("打开环境中心诊断", color = ConsoleTheme.dim, fontSize = 12.sp)
+        Text(stringResource(R.string.term_open_env_center_diag), color = ConsoleTheme.dim, fontSize = 12.sp)
     }
 }
 
@@ -841,10 +847,10 @@ private fun EnvironmentReadyEmptyContent(
         tint = ConsoleTheme.accent, modifier = Modifier.size(52.dp)
     )
     Spacer(Modifier.height(18.dp))
-    Text("当前没有终端会话", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = ConsoleTheme.text)
+    Text(stringResource(R.string.term_no_terminal_session), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = ConsoleTheme.text)
     Spacer(Modifier.height(6.dp))
     Text(
-        "Ubuntu 环境已就绪 · bash / gcc / python3 / git 开箱即用",
+        stringResource(R.string.term_env_ready_hint),
         fontSize = 12.sp,
         color = ConsoleTheme.dim,
         textAlign = TextAlign.Center
@@ -864,7 +870,7 @@ private fun EnvironmentReadyEmptyContent(
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
             Icon(Icons.Default.Terminal, contentDescription = null, tint = ConsoleTheme.accent, modifier = Modifier.size(18.dp))
-            Text("新建 Ubuntu 会话", color = ConsoleTheme.accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(stringResource(R.string.term_new_ubuntu_session), color = ConsoleTheme.accent, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
     }
     Spacer(Modifier.height(12.dp))
@@ -898,9 +904,9 @@ private fun UbuntuBusyStrip(
         )
         Text(
             if (phase == UbuntuLifecycleCoordinator.Phase.INSTALLING) {
-                "Ubuntu 环境解包中 ${progress?.percent ?: 0}% · 完成后可新建 Ubuntu 会话"
+                stringResource(R.string.term_busy_unpacking, progress?.percent ?: 0)
             } else {
-                "Ubuntu 工具链初始化中…"
+                stringResource(R.string.term_busy_bootstrap)
             },
             fontSize = 11.sp,
             color = ConsoleTheme.dim,
@@ -920,25 +926,25 @@ private fun NewSessionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建终端会话") },
+        title = { Text(stringResource(R.string.term_new_session_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 SessionTypeCard(
                     icon = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp)) },
-                    title = "Ubuntu 会话",
-                    desc = "完整 Linux 环境 · bash / gcc / python3 / git（推荐）",
+                    title = stringResource(R.string.term_ubuntu_session),
+                    desc = stringResource(R.string.term_session_ubuntu_desc),
                     onClick = onUbuntu
                 )
                 SessionTypeCard(
                     icon = { Icon(Icons.Default.Android, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(22.dp)) },
                     title = "Android Shell",
-                    desc = "系统 toybox 环境 · 适合快查设备（无完整工具链）",
+                    desc = stringResource(R.string.term_session_android_desc),
                     onClick = onLocal
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.term_cancel)) }
         }
     )
 }
@@ -1003,46 +1009,46 @@ private fun TerminalSettingsDrawer(
             // 标题
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SurfaceBadge(Icons.Default.Settings, MaterialTheme.colorScheme.primary)
-                Text("终端设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.term_settings_title), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
 
             // ═══ 1. 终端外观与交互 ═══
-            SettingsCard(Icons.Default.Settings, "终端外观") {
-                LabeledNumber("字号", settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
-                ToggleRow("单色模式", settings.monochrome) { onSettings { copy(monochrome = it) } }
-                ToggleRow("键盘辅助行（ESC / CTRL / 方向键）", settings.showKeybar) { onSettings { copy(showKeybar = it) } }
+            SettingsCard(Icons.Default.Settings, stringResource(R.string.term_appearance)) {
+                LabeledNumber(stringResource(R.string.term_font_size), settings.fontSize, 8, 32) { onSettings { copy(fontSize = it) } }
+                ToggleRow(stringResource(R.string.term_monochrome), settings.monochrome) { onSettings { copy(monochrome = it) } }
+                ToggleRow(stringResource(R.string.term_keybar), settings.showKeybar) { onSettings { copy(showKeybar = it) } }
             }
 
             // ═══ 1b. 反馈（对齐 Termux / ConnectBot 的终端反馈习惯）═══
-            SettingsCard(Icons.Default.Settings, "反馈") {
-                ToggleRow("响铃时振动（BEL）", settings.vibrateOnBell) {
+            SettingsCard(Icons.Default.Settings, stringResource(R.string.term_feedback)) {
+                ToggleRow(stringResource(R.string.term_vibrate_on_bell), settings.vibrateOnBell) {
                     onSettings { copy(vibrateOnBell = it) }
                 }
                 Text(
-                    "shell 发出 BEL（补全失败、Ctrl+G、命令报错）时振动一下。",
+                    stringResource(R.string.term_vibrate_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                ToggleRow("保持屏幕常亮", settings.keepScreenOn) {
+                ToggleRow(stringResource(R.string.term_keep_screen_on), settings.keepScreenOn) {
                     onSettings { copy(keepScreenOn = it) }
                 }
                 Text(
-                    "看长任务输出（编译 / apt / 日志）时不被息屏打断。",
+                    stringResource(R.string.term_keep_screen_on_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             // ═══ 2. 黑名单 / 白名单 ═══
-            SettingsCard(Icons.Default.Block, "命令黑名单 / 白名单") {
+            SettingsCard(Icons.Default.Block, stringResource(R.string.term_blacklist_title)) {
                 Text(
-                    "白名单非空时仅允许其中命令；黑名单中的命令始终禁止。按命令首段（如 rm / adb）匹配。",
+                    stringResource(R.string.term_blacklist_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
                 CommandListEditor(
-                    title = "黑名单",
+                    title = stringResource(R.string.term_blacklist),
                     items = blacklist.toList().sorted(),
                     onAdd = onAddBlack,
                     onRemove = onRemoveBlack,
@@ -1050,7 +1056,7 @@ private fun TerminalSettingsDrawer(
                 )
                 Spacer(Modifier.height(8.dp))
                 CommandListEditor(
-                    title = "白名单",
+                    title = stringResource(R.string.term_whitelist),
                     items = whitelist.toList().sorted(),
                     onAdd = onAddWhite,
                     onRemove = onRemoveWhite,
@@ -1060,13 +1066,13 @@ private fun TerminalSettingsDrawer(
 
             // ═══ 3. 入口提示（环境解包在环境中心）═══
             Text(
-                "环境解包与管理（内置 Ubuntu / 依赖工具链）在顶栏图层图标的环境中心。",
+                stringResource(R.string.term_env_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
-                Text("关闭")
+                Text(stringResource(R.string.term_close))
             }
         }
     }
@@ -1111,12 +1117,12 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
             onValueChange = { input = it },
             modifier = Modifier.weight(1f),
             singleLine = true,
-            placeholder = { Text("如 rm / adb / format", style = MaterialTheme.typography.bodySmall) },
+            placeholder = { Text(stringResource(R.string.term_cmd_hint), style = MaterialTheme.typography.bodySmall) },
             textStyle = MaterialTheme.typography.bodySmall
         )
         TextButton(onClick = {
             if (input.isNotBlank()) { onAdd(input.trim()); input = "" }
-        }) { Text("添加") }
+        }) { Text(stringResource(R.string.term_add)) }
     }
     if (items.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
@@ -1124,7 +1130,7 @@ private fun CommandListEditor(title: String, items: List<String>, onAdd: (String
             items(items) { cmd ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("• $cmd", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
-                    TextButton(onClick = { onRemove(cmd) }) { Text("移除", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { onRemove(cmd) }) { Text(stringResource(R.string.term_remove), color = MaterialTheme.colorScheme.error) }
                 }
             }
         }

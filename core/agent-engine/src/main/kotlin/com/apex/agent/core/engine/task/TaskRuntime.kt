@@ -626,7 +626,10 @@ class TaskRuntime(
     private suspend fun persistSummary(task: AgentTask, summary: String, toolCalls: Int) {
         persist(
             task.copy(
-                completionSummary = summary.take(TaskStoreLimits.MAX_OUTPUT_DIGEST),
+                // S-c（5a）：引擎 Complete.summary 已改空串（去聊天流"任务完成"提醒）。
+                // 空摘要落盘为 null —— TaskHistoryScreen 的"结果"段按 null 隐藏，
+                // 避免历史卡出现空标题。任务目标另有 goal 字段，不依赖此摘要。
+                completionSummary = summary.take(TaskStoreLimits.MAX_OUTPUT_DIGEST).ifBlank { null },
                 operations = task.operations // journal 保持
             ),
             CheckpointBoundary.COMPLETED

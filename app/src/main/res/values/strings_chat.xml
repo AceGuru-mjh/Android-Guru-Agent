@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chat screen strings (English default). Chinese in values-zh/strings_chat.xml.
+     Language switching: LanguageManager + MainActivity attachBaseContext/recreate. -->
+<resources>
+
+    <!-- ═══ AgentChatScreen ═══ -->
+    <string name="chat_cd_chat_history">Chat history</string>
+    <string name="chat_cd_new_chat">New chat</string>
+    <string name="chat_cd_back_to_bottom">Back to bottom</string>
+    <string name="chat_unknown_provider">Unknown provider</string>
+    <string name="chat_hint_plan">Describe the task; the agent plans first…</string>
+    <string name="chat_hint_spec">Describe requirements; the agent drafts a spec first…</string>
+    <string name="chat_hint_reflection">Describe the task: generate → review → refine…</string>
+    <string name="chat_hint_human_assist">Describe the task; option menus pop up on choices…</string>
+    <string name="chat_hint_custom">Type instructions (custom mode applies)…</string>
+    <string name="chat_hint_build">Type instructions; / for shortcuts…</string>
+    <string name="chat_cd_stop">Stop</string>
+    <string name="chat_cd_send">Send</string>
+    <string name="chat_task_status_pending">Preparing</string>
+    <string name="chat_task_status_planning">Planning</string>
+    <string name="chat_task_status_running">Running</string>
+    <string name="chat_task_status_waiting_user">Waiting for input</string>
+    <string name="chat_task_status_paused">Paused</string>
+    <string name="chat_task_status_cancelling">Cancelling</string>
+    <string name="chat_task_status_recovering">Crash recovery</string>
+    <string name="chat_task_status_retrying">Retrying</string>
+    <string name="chat_task_status_completed">Completed</string>
+    <string name="chat_task_status_failed">Failed</string>
+    <string name="chat_task_status_cancelled">Cancelled</string>
+
+    <!-- ═══ AgentChatMessages ═══ -->
+    <string name="chat_cd_message_actions">Message actions</string>
+    <string name="chat_copied">Copied</string>
+    <string name="chat_cd_copy">Copy</string>
+    <string name="chat_cd_organize_memory">Save to memory</string>
+    <string name="chat_thinking_process">Thinking process</string>
+    <string name="chat_thinking_done_tap">Thinking done · tap to view</string>
+    <string name="chat_reasoning_in_progress">Reasoning…</string>
+    <string name="chat_cd_collapse_thinking">Collapse thinking</string>
+    <string name="chat_cd_expand_thinking">Expand thinking</string>
+    <string name="chat_execution_error">Execution error</string>
+    <string name="chat_copied_error">Error copied</string>
+    <string name="chat_cd_copy_error">Copy error message</string>
+    <string name="chat_review_opinion">Review</string>
+
+    <!-- ═══ AgentChatPlanCards ═══ -->
+    <string name="chat_pipeline_calling_connector">Calling connector</string>
+    <string name="chat_pipeline_calling_plugin">Calling plugin</string>
+    <string name="chat_pipeline_running_skill">Running skill</string>
+    <string name="chat_pipeline_connector_done">Connector finished</string>
+    <string name="chat_pipeline_plugin_done">Plugin finished</string>
+    <string name="chat_pipeline_skill_done">Skill finished</string>
+    <string name="chat_cd_done">Completed</string>
+    <string name="chat_confirm_plan_title">Run this plan?</string>
+    <string name="chat_cancel">Cancel</string>
+    <string name="chat_execute">Run</string>
+    <string name="chat_spec_title">📐 Requirements spec</string>
+    <string name="chat_risk_level">Risk %1$s</string>
+    <string name="chat_spec_goal">Goal</string>
+    <string name="chat_spec_requirements">Requirements</string>
+    <string name="chat_spec_constraints">Constraints</string>
+    <string name="chat_spec_acceptance">Acceptance criteria</string>
+    <string name="chat_spec_deliverables">Deliverables</string>
+    <string name="chat_confirm_spec_title">Confirm this spec and start execution?</string>
+    <string name="chat_spec_goal_line">Goal: %1$s</string>
+    <string name="chat_spec_deliverables_line">Deliverables: %1$s</string>
+    <string name="chat_reject">Reject</string>
+    <string name="chat_confirm_execute">Confirm &amp; run</string>
+
+    <!-- ═══ AgentChatOutputCards ═══ -->
+    <string name="chat_cd_copied">Copied</string>
+    <string name="chat_output_full">Full output</string>
+    <string name="chat_output_summary">Output summary</string>
+    <string name="chat_output_truncated">Truncated — expand for full text</string>
+    <string name="chat_output_stats">%1$d lines · %2$d chars</string>
+    <string name="chat_line_count">%1$d lines</string>
+    <string name="chat_fileop_created">Created</string>
+    <string name="chat_fileop_overwritten">Overwritten</string>
+    <string name="chat_fileop_appended">Appended</string>
+    <string name="chat_fileop_edited">Edited</string>
+    <string name="chat_fileop_deleted">Deleted</string>
+    <string name="chat_fileop_moved">Moved</string>
+    <string name="chat_fileop_copied">Copied</string>
+    <string name="chat_fileop_write">Write</string>
+    <string name="chat_fileop_edit">Edit</string>
+    <string name="chat_fileop_delete">Delete</string>
+    <string name="chat_fileop_copy_move">Copy/Move</string>
+    <string name="chat_fileop_generic">File operation</string>
+    <string name="chat_file">File</string>
+    <string name="chat_exec_output_failed">Output (failed)</string>
+    <string name="chat_exec_output">Output</string>
+    <string name="chat_output_label">Output</string>
+    <string name="chat_structured_output">Structured output</string>
+    <string name="chat_json_items">%1$d items</string>
+    <string name="chat_json_items_collapsed">… %1$d items</string>
+    <string name="chat_cd_collapse">Collapse</string>
+    <string name="chat_cd_expand">Expand</string>
+    <string name="chat_json_more">… %1$d more</string>
+    <string name="chat_run_stats">Run stats</string>
+    <string name="chat_stat_iterations">%1$d iterations</string>
+    <string name="chat_stat_tool_calls">%1$d tool calls</string>
+    <string name="chat_step">Step %1$d</string>
+
+    <!-- ═══ AgentChatToolCards ═══ -->
+    <string name="chat_toolkind_local">Local tool</string>
+    <string name="chat_toolkind_mcp">MCP</string>
+    <string name="chat_toolkind_skill">Skill</string>
+    <string name="chat_toolkind_github">GitHub</string>
+    <string name="chat_toolkind_web_search">Web search</string>
+    <string name="chat_toolkind_web_fetch">Web fetch</string>
+    <string name="chat_toolkind_connector">Connector</string>
+    <string name="chat_toolkind_plugin">Plugin</string>
+    <string name="chat_status_done">Done</string>
+    <string name="chat_status_failed">Failed</string>
+    <string name="chat_status_running">Running</string>
+    <string name="chat_cd_collapse_tool">Collapse tool details</string>
+    <string name="chat_cd_expand_tool">Expand tool details</string>
+    <string name="chat_params">Parameters</string>
+    <string name="chat_execution_steps">Execution steps</string>
+    <string name="chat_retry">Retry</string>
+    <string name="chat_search_query">🔍 Search: %1$s</string>
+    <string name="chat_cd_open_link">Open link</string>
+
+    <!-- ═══ AgentChatDialogs ═══ -->
+    <string name="chat_custom_instruction_title">Custom mode instruction</string>
+    <string name="chat_custom_instruction_desc">This instruction is appended to the system prompt to guide the agent (e.g. output format, language, step constraints).</string>
+    <string name="chat_custom_instruction_hint">e.g. Always answer in Chinese, conclusion first, then details</string>
+    <string name="chat_save">Save</string>
+    <string name="chat_clear">Clear</string>
+    <string name="chat_reasoning_effort_label">Native reasoning:</string>
+    <string name="chat_effort_none">Default</string>
+    <string name="chat_effort_low">Low</string>
+    <string name="chat_effort_medium">Medium</string>
+    <string name="chat_effort_high">High</string>
+    <string name="chat_effort_max">Max</string>
+    <string name="chat_thinking_none_desc">Act directly without reasoning</string>
+    <string name="chat_thinking_light_desc">Brief analysis, then act</string>
+    <string name="chat_thinking_standard_desc">Analyze → pick approach → execute</string>
+    <string name="chat_thinking_deep_desc">Compare options → assess risks → pick best</string>
+    <string name="chat_thinking_maximum_desc">Full reasoning chain + self-review + multi-round validation</string>
+    <string name="chat_question_title">🧩 The agent needs your choice</string>
+    <string name="chat_multi_select">Multi-select</string>
+    <string name="chat_recommended">Recommended</string>
+    <string name="chat_custom">Custom</string>
+    <string name="chat_skip">Skip</string>
+    <string name="chat_continue">Continue</string>
+    <string name="chat_confirm">Confirm</string>
+    <string name="chat_submit">Submit</string>
+    <string name="chat_decline">Decline</string>
+    <string name="chat_input_required_title">Your input needed</string>
+    <string name="chat_custom_answer_label">Or type a custom answer</string>
+    <string name="chat_confirmation_hint">Tap “Confirm” to continue, or “Decline” to abort.</string>
+    <string name="chat_your_answer">Your answer</string>
+
+    <!-- ═══ BrainMenuButton ═══ -->
+    <string name="chat_cd_brain">Model brain</string>
+    <string name="chat_current_model">Current model</string>
+    <string name="chat_only_one_model">Only one model configured</string>
+    <string name="chat_not_configured">Not configured</string>
+    <string name="chat_cd_collapse_models">Collapse model list</string>
+    <string name="chat_cd_expand_models">Expand model list</string>
+    <string name="chat_configure_model">Configure models</string>
+    <string name="chat_model_params">Model parameters</string>
+
+    <!-- ═══ ToolkitRingButton ═══ -->
+    <string name="chat_cd_toolkit">Toolkit menu</string>
+    <string name="chat_web_search">Web search</string>
+    <string name="chat_time">Time</string>
+    <string name="chat_function_calls">Function calls</string>
+    <string name="chat_function_calls_n">Function calls (%1$d)</string>
+    <string name="chat_category_other">Other</string>
+    <string name="chat_structured_output_fmt">Structured output: %1$s</string>
+    <string name="chat_rules">Rules</string>
+    <string name="chat_rules_n">Rules (%1$d)</string>
+    <string name="chat_cd_enabled">Enabled</string>
+    <string name="chat_import_rule_default">Imported rule</string>
+    <string name="chat_rule_manager_title">Rules</string>
+    <string name="chat_rule_name_label">Rule name</string>
+    <string name="chat_rule_content_label">Rule content (Markdown supported)</string>
+    <string name="chat_unnamed_rule">Untitled rule</string>
+    <string name="chat_no_rules_hint">No rules yet. Create one or import a .md file.</string>
+    <string name="chat_cd_delete">Delete</string>
+    <string name="chat_new_rule">New rule</string>
+    <string name="chat_import_md">Import MD</string>
+    <string name="chat_done">Done</string>
+    <string name="chat_schema_dialog_title">Custom output schema</string>
+    <string name="chat_schema_hint">Schema definition (e.g. JSON Schema)</string>
+    <string name="chat_save_enable">Save &amp; enable</string>
+    <string name="chat_web_search_on">Web search on</string>
+    <string name="chat_time_aware_on">Time awareness on</string>
+    <string name="chat_rules_loaded">%1$d rules loaded</string>
+    <string name="chat_cd_close">Close</string>
+
+    <!-- ═══ AgentModeSelector ═══ -->
+    <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
+    <string name="chat_mode_build_desc">Think and act in real time</string>
+    <string name="chat_mode_plan_desc">Full plan first, confirm, then execute</string>
+    <string name="chat_mode_spec_desc">Produce a requirements spec first, confirm, then execute</string>
+    <string name="chat_mode_reflect_desc">Generate → review → refine for higher quality</string>
+    <string name="chat_mode_assist_desc">Shows option menus on choices; you decide</string>
+    <string name="chat_mode_custom_desc">Run with extra custom instructions</string>
+
+    <!-- ═══ ChatHistorySheet ═══ -->
+    <string name="chat_history_title">Chat history (%1$d)</string>
+    <string name="chat_clear_all">Clear all</string>
+    <string name="chat_history_hint">Sessions auto-archive; tap to restore into the current chat with context intact</string>
+    <string name="chat_history_empty">No history yet\nYour first message will be archived automatically</string>
+    <string name="chat_delete_session_title">Delete session</string>
+    <string name="chat_delete_session_text">Delete “%1$s”?\n\nThe messages of this session will be removed. This cannot be undone.</string>
+    <string name="chat_delete">Delete</string>
+    <string name="chat_clear_history_title">Clear chat history</string>
+    <string name="chat_clear_history_text">Delete all %1$d sessions?\n\nThis cannot be undone.</string>
+    <string name="chat_delete_all">Delete all</string>
+    <string name="chat_msg_count">%1$d msgs</string>
+    <string name="chat_current_session">Current</string>
+    <string name="chat_time_just_now">Just now</string>
+    <string name="chat_time_minutes_ago">%1$d min ago</string>
+    <string name="chat_time_hours_ago">%1$d h ago</string>
+    <string name="chat_time_yesterday">Yesterday</string>
+    <string name="chat_date_pattern_this_year">MMM d</string>
+    <string name="chat_date_pattern_full">MMM d, yyyy</string>
+
+    <!-- ═══ AgentChatOnboarding ═══ -->
+    <string name="chat_setup_title">Set up your AI brain</string>
+    <string name="chat_setup_subtitle">Connect a model in 3 minutes and the agent can start thinking</string>
+    <string name="chat_setup_body">No usable model endpoint yet. Add a provider and an API key to start chatting, running tools and long tasks.</string>
+    <string name="chat_go_setup">Set up now</string>
+    <string name="chat_setup_supported">Works with DeepSeek / OpenRouter / Ollama and any OpenAI-compatible endpoint</string>
+
+    <!-- ═══ TaskStatusCard / TaskRecoveryBanner ═══ -->
+    <string name="chat_retried_n">Retried %1$d times</string>
+    <string name="chat_cd_pause_task">Pause task</string>
+    <string name="chat_cd_cancel_task">Cancel task</string>
+    <string name="chat_cd_resume_task">Resume task</string>
+    <string name="chat_cd_retry_task">Retry task</string>
+    <string name="chat_cd_abandon_task">Abandon task</string>
+    <string name="chat_recovery_title">Unfinished task found</string>
+    <string name="chat_interrupted_at_step">Interrupted at step %1$d/%2$d</string>
+
+    <!-- ═══ AgentChatViewModel (user-visible toasts / system rows / tool steps) ═══ -->
+    <string name="chat_memory_goal_default">Memory digest</string>
+    <string name="chat_organized_to_memory">Saved to memory: %1$s</string>
+    <string name="chat_organize_failed">Failed to save to memory: %1$s</string>
+    <string name="chat_unknown_error">Unknown error</string>
+    <string name="chat_compress_unavailable">⚠️ Compression unavailable (no compression engine enabled)</string>
+    <string name="chat_vm_context_compressed_manual">📦 Context compressed: %1$d→%2$d tokens (strategy=%3$s, %4$d msgs removed)</string>
+    <string name="chat_vm_context_compressed">📦 Context compressed: %1$d→%2$d tokens (%3$s, %4$d msgs removed%5$s)</string>
+    <string name="chat_vm_truncated_suffix">, truncated %1$d</string>
+    <string name="chat_slash_attachments_removed">⚠️ Slash commands don’t carry attachments; removed %1$d</string>
+    <string name="chat_attachment_failed">Attachment processing failed: %1$s</string>
+    <string name="chat_execution_failed">Execution failed: %1$s</string>
+    <string name="chat_tool_step_start">Calling %1$s, args:\n%2$s</string>
+    <string name="chat_progress_percent">Progress %1$d%%</string>
+    <string name="chat_tool_step_done">Done (%1$dms): %2$s</string>
+    <string name="chat_tool_step_failed">Failed (%1$dms): %2$s</string>
+    <string name="chat_aborted">⏹ Aborted</string>
+
+    <!-- ═══ SlashMenuProvider (slash menu groups) ═══ -->
+    <string name="chat_slash_no_skills">No active skills</string>
+    <string name="chat_slash_mcp_servers">MCP servers</string>
+    <string name="chat_slash_mcp_connected">%1$d connected</string>
+    <string name="chat_slash_mcp_empty">No MCP servers configured (add in Market)</string>
+    <string name="chat_slash_plugins">Plugins</string>
+    <string name="chat_slash_plugins_empty">No installed plugins found</string>
+    <string name="chat_slash_plugins_partial">Loaded plugins are connectivity-verified only — tool bridge in progress</string>
+    <string name="chat_slash_connectors">Connectors</string>
+    <string name="chat_slash_connectors_empty">No enabled connectors (add in Market)</string>
+
+    <!-- ═══ Toolkit structured-output formats & unconfigured-LLM guard ═══ -->
+    <string name="chat_format_none">Off</string>
+    <string name="chat_format_custom">Custom schema</string>
+    <string name="chat_llm_not_configured">API is not configured yet (Base URL + API Key + Model). Open Settings to set it up.</string>
+    <string name="chat_llm_not_configured_short">API is not configured yet</string>
+</resources>

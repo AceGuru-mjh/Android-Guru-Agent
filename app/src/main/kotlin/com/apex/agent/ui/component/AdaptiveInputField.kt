@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -50,12 +51,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.LaunchedEffect
+import com.apex.agent.R
 
 /**
  * 自适应输入框。
@@ -63,8 +66,9 @@ import androidx.compose.runtime.LaunchedEffect
  * 特性：
  * 1. 根据内容自动扩展行数（1 → 最大 5 行）；
  * 2. 长文本（>200 字符）时显示字符计数；
- * 3. 全屏编辑按钮（常显，适合编辑长 prompt / 代码片段）；
- * 4. 全屏模式支持 IME action 完成。
+ * 3. 详细输入按钮（常显，分层编辑长 prompt / 代码片段的入口）；
+ * 4. 全屏模式支持 IME action 完成；
+ *    发送键行为可配置：sendKeyBehavior = "newline" 时回车仅换行，发送交给按钮。
  *
  * ## 修复：点击输入框不弹输入法
  *
@@ -90,6 +94,8 @@ import androidx.compose.runtime.LaunchedEffect
  * @param modifier 外部 Modifier
  * @param placeholder 占位文本
  * @param focusRequester 焦点请求器（可选，外部用于自动聚焦）
+ * @param onSend IME「发送」动作回调（仅 sendKeyBehavior == "send" 时挂接）
+ * @param sendKeyBehavior 发送键行为："send" → 回车直接发送；"newline" → 回车仅换行
  */
 @Composable
 fun AdaptiveInputField(
@@ -98,13 +104,16 @@ fun AdaptiveInputField(
     modifier: Modifier = Modifier,
     placeholder: @Composable () -> Unit = { Text("输入指令...") },
     focusRequester: FocusRequester = remember { FocusRequester() },
-    onSend: () -> Unit = {}
+    onSend: () -> Unit = {},
+    sendKeyBehavior: String = "send"
 ) {
     var isFullscreen by remember { mutableStateOf(false) }
 
     // 根据内容自动计算行数：内容行数 coerce 到 1-5 行（超出 5 行由 maxLines=5 内部滚动）。
     // P3-j（6-c）：修正注释——实现为 coerceIn(1, 5)，与旧注释"6-12 行展开"不符（选改注释，最小风险）。
-    val dynamicMaxLines = remember(value) {
+    // newline 模式下固定允许 5 行：maxLines=1 会吞掉回车插入的换行符，
+    // 导致「换行行为」永远无法生效（内容进不了多行态）。
+    val effectiveMaxLines = if (sendKeyBehavior == "newline") 5 else remember(value) {
         val lineCount = value.count { it == '\n' } + 1
         lineCount.coerceIn(1, 5)
     }
@@ -118,6 +127,14 @@ fun AdaptiveInputField(
     val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(isFocused) {
         if (isFocused) keyboardController?.show()
+    }
+    // ── Press 提前 show（不消费事件，安全）：按下瞬间即请求 IME，早于焦点建立 ──
+    // 覆盖「点击后焦点到位但 IME 迟迟不弹」的设备；与上方 isFocused 兑底双保险。
+    // 注意：不加 clickable / pointerInput（历史教训 c649934：父级手势会吃掉 TextField 点击）。
+    LaunchedEffect(Unit) {
+        interactionSource.interactions.collect { interaction ->
+            if (interaction is PressInteraction.Press) keyboardController?.show()
+        }
     }
     val fieldBackground by animateColorAsState(
         targetValue = if (isFocused)
@@ -139,7 +156,7 @@ fun AdaptiveInputField(
                 .background(fieldBackground, RoundedCornerShape(8.dp))
                 .focusRequester(focusRequester),
             placeholder = placeholder,
-            maxLines = dynamicMaxLines,
+            maxLines = effectiveMaxLines,
             minLines = 1,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -148,11 +165,12 @@ fun AdaptiveInputField(
             ),
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Send
+                // 发送键行为：send → IME「发送」直接发出；newline → 回车插入换行不触发发送。
+                // 注：Compose 无 ImeAction.Newline —— 多行回车键由 ImeAction.Default 呈现。
+                imeAction = if (sendKeyBehavior == "newline") ImeAction.Default else ImeAction.Send
             ),
-            keyboardActions = KeyboardActions(
-                onSend = { onSend() }
-            ),
+            keyboardActions = if (sendKeyBehavior == "newline") KeyboardActions.Default
+            else KeyboardActions(onSend = { onSend() }),
             trailingIcon = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -175,14 +193,14 @@ fun AdaptiveInputField(
                             modifier = Modifier.padding(end = 4.dp)
                         )
                     }
-                    // 全屏编辑按钮（常显 —— 原「双击进全屏」手势已移除，见类 KDoc）
+                    // 详细输入按钮（常显，分层编辑入口 —— 原「双击进全屏」手势已移除，见类 KDoc）
                     IconButton(
                         onClick = { isFullscreen = true },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             Icons.Default.Fullscreen,
-                            contentDescription = "全屏编辑",
+                            contentDescription = stringResource(R.string.detailed_input),
                             modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -191,7 +209,7 @@ fun AdaptiveInputField(
             }
         )
 
-        // 全屏编辑对话框
+        // 全屏编辑对话框（详细输入：分层编辑长文本）
         if (isFullscreen) {
             FullscreenEditorDialog(
                 initialValue = value,
@@ -206,9 +224,9 @@ fun AdaptiveInputField(
 }
 
 /**
- * 全屏编辑对话框。
+ * 详细输入（全屏编辑对话框）。
  *
- * - 占满整个屏幕，适合编辑长 prompt / 代码片段；
+ * - 占满整个屏幕，适合分层编辑长 prompt / 代码片段；
  * - 支持 IME action 完成；
  * - 点击关闭按钮或返回键均保存（与 KDoc 声明一致；关闭按钮丢弃修改属于静默数据丢失）。
  */
@@ -250,7 +268,7 @@ private fun FullscreenEditorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "编辑消息",
+                        stringResource(R.string.detailed_input),
                         style = MaterialTheme.typography.titleMedium
                     )
                     Row(
@@ -271,6 +289,15 @@ private fun FullscreenEditorDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 辅助说明：分层编辑长文本，支持多行
+                Text(
+                    stringResource(R.string.detailed_input_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 

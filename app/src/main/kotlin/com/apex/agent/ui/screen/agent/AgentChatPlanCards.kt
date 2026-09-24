@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ExecutionSpec
 import com.apex.agent.core.engine.RiskLevel
+import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassCard
 
 /**
@@ -54,29 +56,30 @@ import com.apex.agent.ui.glass.GlassCard
 @Composable
 internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
     val finished = banner.finishedAt != null
-    val style: Triple<String, ImageVector, Color> = when (banner.kind) {
+    // i18n：标签改持 @StringRes，组合内 stringResource 取词
+    val style: Triple<Int, ImageVector, Color> = when (banner.kind) {
         ToolKind.CONNECTOR -> Triple(
-            "正在调用连接器",
+            R.string.chat_pipeline_calling_connector,
             Icons.Default.Link,
             Color(0xFF8B5CF6)
         )
         ToolKind.PLUGIN -> Triple(
-            "正在调用插件",
+            R.string.chat_pipeline_calling_plugin,
             Icons.Default.Extension,
             Color(0xFFF59E0B)
         )
         else -> Triple(
-            "正在执行 Skill",
+            R.string.chat_pipeline_running_skill,
             Icons.Default.AutoAwesome,
             MaterialTheme.colorScheme.primary
         )
     }
-    val (runningLabel, icon, color) = style
+    val (runningLabelRes, icon, color) = style
     val title = when {
-        finished && banner.kind == ToolKind.CONNECTOR -> "连接器执行完成"
-        finished && banner.kind == ToolKind.PLUGIN -> "插件执行完成"
-        finished -> "Skill 执行完成"
-        else -> runningLabel
+        finished && banner.kind == ToolKind.CONNECTOR -> stringResource(R.string.chat_pipeline_connector_done)
+        finished && banner.kind == ToolKind.PLUGIN -> stringResource(R.string.chat_pipeline_plugin_done)
+        finished -> stringResource(R.string.chat_pipeline_skill_done)
+        else -> stringResource(runningLabelRes)
     }
 
     // 脉冲动画仅在运行态创建——完成态横幅不再运行无限动画，避免常驻重组开销。
@@ -131,7 +134,7 @@ internal fun PipelineBannerCard(banner: AgentUiMessage.PipelineBanner) {
                 )
                 Icon(
                     imageVector = Icons.Default.Check,
-                    contentDescription = "已完成",
+                    contentDescription = stringResource(R.string.chat_cd_done),
                     tint = color,
                     modifier = Modifier.size(16.dp)
                 )
@@ -197,11 +200,11 @@ internal fun PlanConfirmationCard(
         accent = MaterialTheme.colorScheme.secondary
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("确认执行此计划？", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.chat_confirm_plan_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onReject) { Text("取消") }
-                androidx.compose.material3.Button(onClick = onConfirm) { Text("执行") }
+                OutlinedButton(onClick = onReject) { Text(stringResource(R.string.chat_cancel)) }
+                androidx.compose.material3.Button(onClick = onConfirm) { Text(stringResource(R.string.chat_execute)) }
             }
         }
     }
@@ -251,7 +254,7 @@ internal fun SpecCard(spec: ExecutionSpec) {
                         )
                     }
                 }
-                Text("📐 需求规格", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.chat_spec_title), style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.weight(1f))
                 // 风险徽章
                 val risk = riskColor(spec.riskLevel)
@@ -260,7 +263,7 @@ internal fun SpecCard(spec: ExecutionSpec) {
                     shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        text = "风险 ${spec.riskLevel.name}",
+                        text = stringResource(R.string.chat_risk_level, spec.riskLevel.name),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Medium,
                         color = risk,
@@ -271,7 +274,7 @@ internal fun SpecCard(spec: ExecutionSpec) {
 
             Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "目标",
+                text = stringResource(R.string.chat_spec_goal),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -282,10 +285,10 @@ internal fun SpecCard(spec: ExecutionSpec) {
                 fontWeight = FontWeight.SemiBold
             )
 
-            SpecSection("需求", spec.requirements)
-            SpecSection("约束", spec.constraints)
-            SpecSection("验收标准", spec.acceptanceCriteria)
-            SpecSection("交付物", spec.deliverables)
+            SpecSection(stringResource(R.string.chat_spec_requirements), spec.requirements)
+            SpecSection(stringResource(R.string.chat_spec_constraints), spec.constraints)
+            SpecSection(stringResource(R.string.chat_spec_acceptance), spec.acceptanceCriteria)
+            SpecSection(stringResource(R.string.chat_spec_deliverables), spec.deliverables)
         }
     }
 }
@@ -337,10 +340,10 @@ internal fun SpecConfirmationCard(
         accent = MaterialTheme.colorScheme.primary
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("确认此规格并开始执行？", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.chat_confirm_spec_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "目标：${spec.goal}",
+                text = stringResource(R.string.chat_spec_goal_line, spec.goal),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -348,7 +351,10 @@ internal fun SpecConfirmationCard(
             if (spec.deliverables.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "交付物：${spec.deliverables.joinToString("、")}",
+                    text = stringResource(
+                        R.string.chat_spec_deliverables_line,
+                        spec.deliverables.joinToString("、")
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
@@ -357,8 +363,8 @@ internal fun SpecConfirmationCard(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onReject) { Text("驳回") }
-                androidx.compose.material3.Button(onClick = onConfirm) { Text("确认执行") }
+                OutlinedButton(onClick = onReject) { Text(stringResource(R.string.chat_reject)) }
+                androidx.compose.material3.Button(onClick = onConfirm) { Text(stringResource(R.string.chat_confirm_execute)) }
             }
         }
     }

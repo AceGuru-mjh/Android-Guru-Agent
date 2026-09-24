@@ -58,11 +58,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassToolCard
 import com.apex.agent.ui.glass.GlassToolStatus
@@ -73,10 +75,11 @@ import java.util.Date
 /**
  * 工具来源分类的视觉规格：图标 + 标签 + 主题色。
  * 集中管理，保证 ToolCallCard / RunningToolCallCard / ErrorBlock 一致。
+ * i18n：label 改持 @StringRes，展示端（ToolKindBadge 等）stringResource 取词。
  */
 @Immutable
 internal data class ToolKindStyle(
-    val label: String,
+    @StringRes val labelRes: Int,
     val icon: ImageVector,
     val color: Color
 )
@@ -84,37 +87,37 @@ internal data class ToolKindStyle(
 @Composable
 internal fun toolKindStyle(kind: ToolKind): ToolKindStyle = when (kind) {
     ToolKind.LOCAL -> ToolKindStyle(
-        "本地工具", Icons.Default.Build,
+        R.string.chat_toolkind_local, Icons.Default.Build,
         MaterialTheme.colorScheme.primary
     )
     ToolKind.MCP -> ToolKindStyle(
-        "MCP", Icons.Default.Hub,
+        R.string.chat_toolkind_mcp, Icons.Default.Hub,
         MaterialTheme.colorScheme.tertiary
     )
     ToolKind.WEB_SEARCH -> ToolKindStyle(
-        "联网搜索", Icons.Default.Search,
+        R.string.chat_toolkind_web_search, Icons.Default.Search,
         MaterialTheme.colorScheme.secondary
     )
     ToolKind.WEB_FETCH -> ToolKindStyle(
-        "网页抓取", Icons.Default.Language,
+        R.string.chat_toolkind_web_fetch, Icons.Default.Language,
         MaterialTheme.colorScheme.secondary
     )
     ToolKind.SKILL -> ToolKindStyle(
-        "Skill", Icons.Default.AutoAwesome,
+        R.string.chat_toolkind_skill, Icons.Default.AutoAwesome,
         MaterialTheme.colorScheme.primary
     )
     ToolKind.GITHUB -> ToolKindStyle(
         // 官方 Octocat mark（res/drawable/ic_github_mark）+ GitHub fg-muted 灰：
         // 深浅主题均可读（纯黑 #181717 在暗色主题不可见）。
-        "GitHub", ImageVector.vectorResource(R.drawable.ic_github_mark),
+        R.string.chat_toolkind_github, ImageVector.vectorResource(R.drawable.ic_github_mark),
         Color(0xFF6E7681)
     )
     ToolKind.CONNECTOR -> ToolKindStyle(
-        "连接器", Icons.Default.Link,
+        R.string.chat_toolkind_connector, Icons.Default.Link,
         Color(0xFF8B5CF6)
     )
     ToolKind.PLUGIN -> ToolKindStyle(
-        "插件", Icons.Default.Extension,
+        R.string.chat_toolkind_plugin, Icons.Default.Extension,
         Color(0xFFF59E0B)
     )
 }
@@ -127,9 +130,9 @@ internal fun ToolKindBadge(kind: ToolKind, server: String? = null, skill: String
     val style = toolKindStyle(kind)
     val color = style.color
     val label = when (kind) {
-        ToolKind.SKILL -> skill?.let { "Skill: $it" } ?: style.label
-        ToolKind.MCP -> server?.let { "MCP · $it" } ?: style.label
-        else -> style.label
+        ToolKind.SKILL -> skill?.let { "Skill: $it" } ?: stringResource(style.labelRes)
+        ToolKind.MCP -> server?.let { "MCP · $it" } ?: stringResource(style.labelRes)
+        else -> stringResource(style.labelRes)
     }
     Surface(
         color = color.copy(alpha = 0.14f),
@@ -258,11 +261,20 @@ internal fun ToolCallCard(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
                         )
-                        // 状态徽章
+                        // 状态徽章（i18n：组合内取词）
                         val status = when {
-                            toolCall.success == true -> Pair("完成", MaterialTheme.colorScheme.primary)
-                            toolCall.success == false -> Pair("失败", MaterialTheme.colorScheme.error)
-                            else -> Pair("运行", MaterialTheme.colorScheme.secondary)
+                            toolCall.success == true -> Pair(
+                                stringResource(R.string.chat_status_done),
+                                MaterialTheme.colorScheme.primary
+                            )
+                            toolCall.success == false -> Pair(
+                                stringResource(R.string.chat_status_failed),
+                                MaterialTheme.colorScheme.error
+                            )
+                            else -> Pair(
+                                stringResource(R.string.chat_status_running),
+                                MaterialTheme.colorScheme.secondary
+                            )
                         }
                         Surface(
                             color = status.second.copy(alpha = 0.16f),
@@ -308,7 +320,8 @@ internal fun ToolCallCard(
 
                 Icon(
                     imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (expanded) "折叠工具详情" else "展开工具详情",
+                    contentDescription = if (expanded) stringResource(R.string.chat_cd_collapse_tool)
+                    else stringResource(R.string.chat_cd_expand_tool),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -317,7 +330,7 @@ internal fun ToolCallCard(
             if (expanded && toolCall.args.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "参数",
+                    text = stringResource(R.string.chat_params),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -341,7 +354,7 @@ internal fun ToolCallCard(
             if (expanded && toolCall.steps.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "执行过程",
+                    text = stringResource(R.string.chat_execution_steps),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -415,7 +428,7 @@ internal fun RetryChip(onRetry: () -> Unit) {
                 modifier = Modifier.size(14.dp)
             )
             Text(
-                text = "重试",
+                text = stringResource(R.string.chat_retry),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onError
@@ -469,7 +482,7 @@ internal fun WebSearchResultsCard(results: List<WebSearchItem>, query: String?) 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         query?.let {
             Text(
-                text = "🔍 搜索：$it",
+                text = stringResource(R.string.chat_search_query, it),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -531,7 +544,7 @@ internal fun WebSearchResultsCard(results: List<WebSearchItem>, query: String?) 
                     }
                     Icon(
                         imageVector = Icons.Default.OpenInNew,
-                        contentDescription = "打开链接",
+                        contentDescription = stringResource(R.string.chat_cd_open_link),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )

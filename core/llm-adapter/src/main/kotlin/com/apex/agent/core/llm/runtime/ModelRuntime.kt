@@ -28,13 +28,22 @@ import kotlinx.coroutines.flow.flow
  */
 interface ModelRuntime {
 
-    /** 非流式请求。可能抛 [ModelRuntimeException]（含降级耗尽 / 能力不匹配等）。 */
+    /**
+     * 非流式请求。可能抛 [ModelRuntimeException]（含降级耗尽 / 能力不匹配等）。
+     *
+     * 采样参数哨兵回退制（B1/B2 修复）：[temperature] / [maxTokens] 默认为
+     * 哨兵（< 0 = 未指定），透传给 [LlmClient] 后由实现层回退到 Profile
+     * （LlmConfig）值——引擎不再显式传 AgentConfig 快照，设置页改参数对
+     * 下一次请求真实生效；需要强制覆盖的场景（摘要压缩低温）传显式值。
+     */
     suspend fun chat(
         context: LlmRequestContext,
         messages: List<LlmMessage>,
         tools: List<ToolDefinition> = emptyList(),
-        temperature: Float = 0.7f,
-        maxTokens: Int = 4096
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值；>= 0 = 显式覆盖。 */
+        temperature: Float = -1f,
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值（皆未设置时回退 4096）。 */
+        maxTokens: Int = -1
     ): LlmResponse
 
     /** 流式请求。Flow 内可能抛 [ModelRuntimeException]。 */
@@ -42,8 +51,10 @@ interface ModelRuntime {
         context: LlmRequestContext,
         messages: List<LlmMessage>,
         tools: List<ToolDefinition> = emptyList(),
-        temperature: Float = 0.7f,
-        maxTokens: Int = 4096
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值；>= 0 = 显式覆盖。 */
+        temperature: Float = -1f,
+        /** < 0（默认 -1）= 未指定 → 用 Profile 值（皆未设置时回退 4096）。 */
+        maxTokens: Int = -1
     ): Flow<LlmStreamChunk>
 
     /** 当前全部 Profile 的运行时快照（§十五），不含 API Key。 */

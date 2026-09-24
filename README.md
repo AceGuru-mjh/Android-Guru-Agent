@@ -3,6 +3,8 @@
 
 <img src="docs/assets/banner.svg" alt="Android Guru Agent" width="880"/>
 
+<a href="#quickstart"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&amp;weight=600&amp;size=20&amp;pause=1200&amp;color=00C2D1&amp;center=true&amp;vCenter=true&amp;width=820&amp;height=64&amp;lines=An+autonomous+AI+agent+that+lives+entirely+on+your+Android+device.;109+tools+%C2%B7+6+agent+modes+%C2%B7+PRoot+Ubuntu+24.04+%C2%B7+cs-mem;No+server.+No+PC.+Bring+your+own+LLM." alt="Android Guru Agent — typing"/></a>
+
 # Android Guru Agent
 
 ### 🤖 原生于 Android 的自主智能体 —— 设备上的大脑、终端、与肌肉记忆
@@ -23,6 +25,13 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 <img src="https://img.shields.io/badge/JDK-17-orange?logo=openjdk&logoColor=white" alt="JDK 17"/>
 
 **技术栈**
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://skillicons.dev/icons?i=kotlin,java,androidstudio,gradle,sqlite,bash,git,github&amp;theme=dark"/>
+  <img src="https://skillicons.dev/icons?i=kotlin,java,androidstudio,gradle,sqlite,bash,git,github&amp;theme=light" alt="Tech Stack" height="42"/>
+</picture>
+
+<br/>
 
 <img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin"/>
 <img src="https://img.shields.io/badge/AGP-8.7.3-3DDC84?logo=android&logoColor=white" alt="AGP"/>
@@ -73,6 +82,74 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 ---
 
+<a id="at-a-glance"></a>
+## 🔭 一眼看懂
+
+<table>
+<tr>
+<td align="center" width="33%">
+
+🧠
+
+**仿生认知记忆**
+
+屏幕感知 → 语义降维 → FSM 宏技能<br/>指纹命中即 **0 token** 旁路回放
+
+</td>
+<td align="center" width="33%">
+
+🖥️
+
+**真 Linux 终端**
+
+设备上 PRoot 沙箱跑 Ubuntu 24.04<br/>原生 PTY + 自研 VT100，`apt install` 可用
+
+</td>
+<td align="center" width="33%">
+
+🔀
+
+**双引擎工作流**
+
+流式 ReAct 循环 + 任务编排器<br/>状态机 · 恢复规划 · 用户交互门
+
+</td>
+</tr>
+<tr>
+<td align="center" width="33%">
+
+🗜️
+
+**上下文工程**
+
+三级压缩：工具输出截断 → 滑动窗口<br/>→ LLM 摘要，长任务不爆窗口
+
+</td>
+<td align="center" width="33%">
+
+🛰️
+
+**BYO-LLM**
+
+任意 OpenAI 兼容端点 / 局域网 Ollama<br/>多模型角色路由 + 原生思维链透传
+
+</td>
+<td align="center" width="33%">
+
+⚡
+
+**三级权限链**
+
+Root → Shizuku → 沙箱 Shell 自动降级<br/>无 Root 也能执行特权命令
+
+</td>
+</tr>
+</table>
+
+<p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
+
+---
+
 ## 📖 目录
 
 <table>
@@ -80,6 +157,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 <td valign="top" width="50%">
 
 **核心能力**
+- [🔭 一眼看懂](#at-a-glance)
 - [✨ 项目亮点](#highlights)
 - [🆚 与其他方案对比](#comparison)
 - [🏗️ 架构总览](#architecture)
@@ -969,6 +1047,27 @@ debug APK 工件（每次构建保留 14 天），零环境开箱体验。
     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=AceGuru-mjh/Android-Guru-Agent&type=Date" width="720" />
   </picture>
 </a>
+
+---
+
+## 👥 贡献者
+
+<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=AceGuru-mjh/Android-Guru-Agent" alt="Contributors"/>
+</a>
+
+---
+
+## 🪪 仓库名片
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github-readme-stats.vercel.app/api/pin/?username=AceGuru-mjh&amp;repo=Android-Guru-Agent&amp;theme=tokyonight&amp;hide_border=true&amp;border_radius=12&amp;show_owner=true"/>
+  <img src="https://github-readme-stats.vercel.app/api/pin/?username=AceGuru-mjh&amp;repo=Android-Guru-Agent&amp;theme=default&amp;hide_border=true&amp;border_radius=12&amp;show_owner=true" alt="Repo Card"/>
+</picture>
+
+<br/><br/>
+
+<img src="https://komarev.com/ghpvc/?username=AceGuru-mjh&amp;repo=Android-Guru-Agent&amp;color=blueviolet&amp;style=flat-square" alt="Repo Views"/>
 
 ---
 

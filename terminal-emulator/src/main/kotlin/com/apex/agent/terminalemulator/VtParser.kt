@@ -44,10 +44,21 @@ class VtParser {
         val privateMarker: Char?,
         val params: IntArray,
         val intermediates: CharArray,
-        val finalByte: Char
+        val finalByte: Char,
+        /**
+         * 冒号子参数表（索引 → 子参数数组）。键 = 该参数在 [params] 中的下标；
+         * 值 = 该 token 按冒号拆开的完整子参数序列（含首项）。
+         *
+         * 例：`ESC[38:2:255:0:0m` → params=[38], subParams={0: [38,2,255,0,0]}。
+         * 消费方（SGR）据此区分「38;5;n」（分号扩展）与「38:5:n」（冒号子参数），
+         * 旧实现把带冒号的 token 解析为参数 0 —— 真彩色被静默重置样式（T85 修复）。
+         */
+        val subParams: Map<Int, IntArray> = emptyMap()
     ) {
         fun param(idx: Int, default: Int = 0): Int = params.getOrNull(idx) ?: default
         fun paramOrDefault(idx: Int, default: Int): Int = if (idx < params.size && params[idx] != 0) params[idx] else default
+        /** 该下标参数是否来自冒号形式（如 4:3、38:2:…）。 */
+        fun hasSubParams(idx: Int): Boolean = subParams.containsKey(idx)
     }
 
     data class OSCSequence(val code: Int, val data: String)
@@ -86,8 +97,30 @@ class VtParser {
             cp == 0x1B -> state = State.ESCAPE              // ESC
             cp < 0x20 -> sink(Event.C0Control(cp))           // C0 control
             cp == 0x7F -> sink(Event.C0Control(0x7F))        // DEL
-            cp in 0x80..0x9F -> sink(Event.C0Control(cp))    // C1 control (treat as C0 for simplicity)
+            // T85：C1 控制（0x80..0x9F）映射为 7 位等价序列 —— 旧实现当 C0 直接丢弃，
+            // 8 位终端模式程序（部分 ncurses/旧软件）行为错乱。映射表按 xterm：
+            //   0x9B CSI → 直接进 CSI 状态；0x90 DCS；0x9D OSC；0x98/0x9E/0x9F SOS/PM/APC → 忽略串；
+            //   0x84 IND / 0x85 NEL / 0x8D RI / 0x88 HTS → 等价 ESC D/E/M/H 事件。
+            cp in 0x80..0x9F -> handleC1(cp, sink)
             else -> sink(Event.Printable(cp))                // printable
+        }
+    }
+
+    /** T85：单字节 C1 控制的 7 位等价处理（xterm C1 控制码兼容）。 */
+    private fun handleC1(cp: Int, sink: (Event) -> Unit) {
+        when (cp) {
+            0x9B -> {  // CSI（8 位形式）
+                csiParams.clear(); csiIntermediates.clear(); csiPrivateMarker = null
+                state = State.CSI_ENTRY
+            }
+            0x90 -> { stringBuf.clear(); state = State.DCS_ENTRY }          // DCS
+            0x9D -> { stringBuf.clear(); state = State.OSC_STRING }         // OSC
+            0x98, 0x9E, 0x9F -> state = State.STRING_IGNORE                 // SOS/PM/APC
+            0x84 -> sink(Event.Esc('D'))                                    // IND
+            0x85 -> sink(Event.Esc('E'))                                    // NEL
+            0x8D -> sink(Event.Esc('M'))                                    // RI
+            0x88 -> sink(Event.Esc('H'))                                    // HTS
+            else -> sink(Event.Unknown)                                     // 其余 C1：安全忽略（§24）
         }
     }
 
@@ -123,6 +156,8 @@ class VtParser {
             }
             cp in 0x30..0x39 -> { appendCsiParam(cp.toChar()); state = State.CSI_PARAM }  // digit
             cp == ';'.code -> { appendCsiParam(';'); state = State.CSI_PARAM }
+            // T85：冒号子参数分隔符（SGR 38:2:r:g:b / 4:3 —— kitty/nvim/delta 常用）。
+            cp == ':'.code -> { appendCsiParam(':'); state = State.CSI_PARAM }
             cp in 0x20..0x2F -> { appendCsiIntermediate(cp.toChar()); state = State.CSI_INTERMEDIATE }
             cp in 0x40..0x7E -> { emitCsi(cp.toChar(), sink); state = State.GROUND }  // final byte
             else -> { state = State.CSI_IGNORE }
@@ -133,6 +168,8 @@ class VtParser {
         when {
             cp in 0x30..0x39 -> appendCsiParam(cp.toChar())  // digit
             cp == ';'.code -> appendCsiParam(';')
+            // T85：冒号子参数分隔符（同 handleCsiEntry）。
+            cp == ':'.code -> appendCsiParam(':')
             cp in 0x20..0x2F -> { appendCsiIntermediate(cp.toChar()); state = State.CSI_INTERMEDIATE }
             cp in 0x40..0x7E -> { emitCsi(cp.toChar(), sink); state = State.GROUND }
             else -> state = State.CSI_IGNORE
@@ -216,9 +253,10 @@ class VtParser {
     }
 
     private fun emitCsi(final: Char, sink: (Event) -> Unit) {
-        val params = parseParams(csiParams.toString())
+        val raw = csiParams.toString()
+        val parsed = parseParams(raw)
         val inter = csiIntermediates.toString().toCharArray()
-        sink(Event.Csi(CSISequence(csiPrivateMarker, params, inter, final)))
+        sink(Event.Csi(CSISequence(csiPrivateMarker, parsed.first, inter, final, parsed.second)))
     }
 
     private fun emitOsc(sink: (Event) -> Unit) {
@@ -230,9 +268,27 @@ class VtParser {
         stringBuf.clear()
     }
 
-    private fun parseParams(s: String): IntArray {
-        if (s.isEmpty()) return IntArray(0)
-        return s.split(';').map { it.toIntOrNull() ?: 0 }.toIntArray()
+    /**
+     * 解析 CSI 参数串（';' 分隔）。token 含 ':' 时记录完整子参数序列：
+     * 首项作为 [params] 主值（`38:2:…` → 38），完整序列进 subParams。
+     * 空 token / 非法 token → 0（xterm 语义：缺省参数）。
+     */
+    private fun parseParams(s: String): Pair<IntArray, Map<Int, IntArray>> {
+        if (s.isEmpty()) return IntArray(0) to emptyMap()
+        val tokens = s.split(';')
+        val params = IntArray(tokens.size)
+        val subParams = HashMap<Int, IntArray>()
+        for (i in tokens.indices) {
+            val t = tokens[i]
+            if (t.indexOf(':') >= 0) {
+                val subs = t.split(':').map { it.toIntOrNull() ?: 0 }
+                params[i] = subs.firstOrNull() ?: 0
+                subParams[i] = subs.toIntArray()
+            } else {
+                params[i] = t.toIntOrNull() ?: 0
+            }
+        }
+        return params to subParams
     }
 
     fun reset() {

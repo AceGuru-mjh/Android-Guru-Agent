@@ -87,11 +87,19 @@ class SemanticStateReducer(
                     startedAt = event.timestamp, finishedAt = null
                 )
                 jobs[event.jobId] = snap
+                // T85（R-9）：jobs 只增不减 —— 万条命令的长会话无上限累积。
+                // 超限测除最旧条目（保持最近 MAX_TRACKED_JOBS 条；JobManager 自身
+                // 已有 drop，此处是冗余安全网）。
+                if (jobs.size > MAX_TRACKED_JOBS) {
+                    val oldest = jobs.keys.minOrNull()
+                    if (oldest != null) jobs.remove(oldest)
+                }
                 if (!event.background) foregroundJobId = event.jobId
                 s.copy(
                     session = s.session.copy(state = if (event.background) s.session.state else SessionState.RUNNING),
                     foregroundJob = if (event.background) s.foregroundJob else snap,
-                    backgroundJobs = if (event.background) s.backgroundJobs + snap else s.backgroundJobs
+                    // T85（R-9）：后台作业列表同样有界（最近 MAX_BACKGROUND_JOBS 条）。
+                    backgroundJobs = if (event.background) (s.backgroundJobs + snap).takeLast(MAX_BACKGROUND_JOBS) else s.backgroundJobs
                 )
             }
             is TerminalEvent.OutputProduced -> s.copy(
@@ -188,4 +196,12 @@ class SemanticStateReducer(
 
     /** Snapshot for observe(SEMANTIC). */
     fun snapshot(): TerminalSemanticState = _state.value
+
+    private companion object {
+        /** T85（R-9）：jobs 追踪上限（超出淘汰最旧 jobId）。 */
+        const val MAX_TRACKED_JOBS = 256
+
+        /** T85（R-9）：后台作业展示列表上限。 */
+        const val MAX_BACKGROUND_JOBS = 32
+    }
 }

@@ -35,7 +35,11 @@ class Utf8Decoder {
                 if (b < 0x80) {
                     sink(b)  // ASCII
                 } else if (b < 0xC0) {
-                    sink(0xFFFD)  // lone continuation byte
+                    // T85：独立 C1 字节（0x80..0x9F）在 UTF-8 流中本属非法 —— 与其
+                    // 输出 U+FFFD 污染屏幕，透传给 VT 层按 xterm C1 控制语义处理
+                    //（CSI 0x9B / OSC 0x9D / NEL 0x85 …）。部分 ncurses/旧程序仍发
+                    // 8 位控制序列；0xA0..0xBF 保持替换符。
+                    sink(if (b < 0xA0) b else 0xFFFD)
                 } else if (b < 0xE0) {
                     pending[0] = bytes[i]; pendingCount = 1; expectedBytes = 2
                 } else if (b < 0xF0) {

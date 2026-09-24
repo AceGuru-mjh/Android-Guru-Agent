@@ -72,12 +72,17 @@ sealed class Decision {
 
 /**
  * Input request subject to policy check.
+ *
+ * T85：[interactive] —— 交互上下文标记（REPL/编辑器内输入、括号粘贴等）。
+ * true 时策略用分段检查（引号内操作符不切段、逐段取去引号执行名匹配黑名单）
+ * 而非「复杂即拒」的保守路径 —— 避免 `print("a|b")` 这类交互输入被误杀。
  */
 data class InputRequest(
     val sessionId: Long,
     val command: String?,
     val bytes: ByteArray?,
-    val owner: com.apex.agent.platform.terminal.io.InputOwner
+    val owner: com.apex.agent.platform.terminal.io.InputOwner,
+    val interactive: Boolean = false
 )
 
 /**

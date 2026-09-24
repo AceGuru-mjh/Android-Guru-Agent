@@ -140,9 +140,42 @@ class SessionMetadataStore(
     suspend fun clear() = mutex.withLock { storageDir.listFiles()?.forEach { it.delete() } }
 
     private fun TerminalJob.toRecord() = JobRecord(
-        id, sessionId, command, owner.name, background, startCursor, endCursor,
+        id, sessionId, redactSecrets(command), owner.name, background, startCursor, endCursor,
         state.name, exitCode, signal?.name, startedAt, finishedAt
     )
+
+    // ─── T85（S-6）：命令凭据脱敏 ───
+
+    /**
+     * 密码类参数（`-pSECRET` / `-p SECRET` / `--password=…`）→ 保留参数名 + 掩码。
+     * REVIEW-R3：必须带至少一个连字符 —— 初版 `-{0,2}` 允许零连字符，
+     * `ps aux` / `pip install` / `grep pattern` 这类含 p 开头词的命令被大面积误改写。
+     */
+    private val passwordArg = Regex("(?i)(-{1,2}(?:password|passwd|pwd|pass|secret|token|apikey|api_key|access[-_]?key|p)(?:\\s*=|\\s+)?)(\\S+)")
+
+    /** 裸 key=value 形式（URL 查询串 / 表单数据）：`password=hunter2` → `password=***`。 */
+    private val passwordKv = Regex("(?i)\\b(password|passwd|pwd|secret|token|apikey|api_key|access[-_]?key)\\s*=\\s*\\S+")
+
+    /** Bearer / Basic 认证头与长十六进制/base64 状凭据。 */
+    private val authHeader = Regex("(?i)(bearer|basic)\\s+[A-Za-z0-9+/=._-]{8,}")
+
+    /**
+     * 落盘前的凭据脱敏：session-*.json 会随崩溃恢复持久化到磁盘，
+     * `mysql -pSECRET`、`curl -H "Authorization: Bearer …"` 这类命令曾**明文**
+     * 写入（InputWritten 早已脱敏为 bytes=N，job 命令漏了）。掩码保留可诊断性。
+     */
+    private fun redactSecrets(command: String): String {
+        var s = command
+        s = passwordArg.replace(s) { it.groupValues[1] + "***" }
+        s = passwordKv.replace(s) { it.groupValues[1] + "=***" }
+        s = authHeader.replace(s) { "${it.groupValues[1]} ***" }
+        return if (s.length > MAX_PERSISTED_COMMAND) s.take(MAX_PERSISTED_COMMAND) + "…" else s
+    }
+
+    private companion object {
+        /** 落盘命令长度上限（防超长 heredoc/脚本填满存储）。 */
+        const val MAX_PERSISTED_COMMAND = 512
+    }
 
     private fun TerminalEvent.toRecord(): EventRecord {
         val type = when (this) {
@@ -161,7 +194,8 @@ class SessionMetadataStore(
         }
         val summary = when (this) {
             is TerminalEvent.SessionCreated -> "shell=$shell pid=$pid"
-            is TerminalEvent.ProcessStarted -> "job=$jobId cmd=$command"
+            // T85（S-6）：事件摘要同样脱敏（autoSave 每 2s 落盘一次事件尾）。
+            is TerminalEvent.ProcessStarted -> "job=$jobId cmd=${redactSecrets(command)}"
             is TerminalEvent.InputWritten -> "owner=$owner kind=$kind bytes=$byteCount"
             is TerminalEvent.OutputProduced -> "bytes=$startCursor..$endCursor"
             is TerminalEvent.ResizeChanged -> "${rows}x${cols}"

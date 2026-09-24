@@ -82,6 +82,14 @@ class PtyOutputPumpImpl(
             // 500 条事件窗被刷满。同置信度 400ms 内只发一条。
             var lastWaitingAt = 0L
             var lastConfidence: Confidence? = null
+            // T85（P-4 修正）：被防抖抑制的事件必须**暂存待发**，不能丢弃 ——
+            // WaitingInput(HIGH, jobId=null) 是 JobManager 合成 ProcessExited 的唯一
+            // 触发源（见 JobManagerImpl.onEvent）。命令输出与重绘的 prompt 常常落在
+            // 同一个 read 里：此时置信度与会话起始的 prompt 相同、间隔又不足 400ms，
+            // 丢帧 = 命令完成信号永久丢失 → job 卡在 RUNNING 直到超时（CI 实测 4 例）。
+            // 因此抑制只做「延后」：输出静默后在 n==0 分支补发。
+            var pendingWaitingCursor = -1L
+            var pendingWaitingConfidence: Confidence? = null
             try {
                 while (isActive && running.get()) {
                     val n = native.nativeRead(nativeSessionId, buf, buf.size)
@@ -109,7 +117,21 @@ class PtyOutputPumpImpl(
                             break
                         }
                         n == 0 -> {
-                            // no data — poll wait, avoid busy-loop
+                            // no data — poll wait, avoid busy-loop。
+                            // T85（P-4 修正）：输出静默 = 一次检测周期的终点 —— 补发被防抖
+                            // 暂存的 WaitingInput（窗口已过即发），保证「回到提示符」
+                            // 信号不因输出停止而永久丢失。
+                            if (pendingWaitingConfidence != null &&
+                                System.currentTimeMillis() - lastWaitingAt >= WAITING_INPUT_DEBOUNCE_MS
+                            ) {
+                                val pending = pendingWaitingConfidence
+                                if (pending != null) {
+                                    lastWaitingAt = emitWaitingInput(pending, pendingWaitingCursor)
+                                    lastConfidence = pending
+                                    pendingWaitingCursor = -1L
+                                    pendingWaitingConfidence = null
+                                }
+                            }
                             if (!native.nativeIsAlive(nativeSessionId)) {
                                 // T85（R-4）：进程已退但没人 close —— 宽限 3s（≈150 次 20ms 轮询）
                                 // 后泵自终止：write 已无意义，永久空转只耗电。
@@ -154,17 +176,14 @@ class PtyOutputPumpImpl(
                                     val now = System.currentTimeMillis()
                                     val changed = confidence != lastConfidence
                                     if (changed || now - lastWaitingAt >= WAITING_INPUT_DEBOUNCE_MS) {
-                                        lastWaitingAt = now
+                                        lastWaitingAt = emitWaitingInput(confidence, startCursor + n)
                                         lastConfidence = confidence
-                                        val wev = TerminalEvent.WaitingInput(
-                                            id = 0, sessionId = sessionId, timestamp = now,
-                                            cursor = startCursor + n, jobId = null, confidence = confidence
-                                        )
-                                        val wid = eventLog.append(wev)
-                                        val wevWithId = wev.copy(id = wid)
-                                        semanticReducer.onEvent(wevWithId)
-                                        waitEngine.onEvent(wevWithId)
-                                        eventBus.emit(wevWithId)
+                                        pendingWaitingCursor = -1L
+                                        pendingWaitingConfidence = null
+                                    } else {
+                                        // 抑制 ≠ 丢弃：暂存，待输出静默后补发（见 n==0 分支）。
+                                        pendingWaitingCursor = startCursor + n
+                                        pendingWaitingConfidence = confidence
                                     }
                                 } else {
                                     lastConfidence = confidence
@@ -204,6 +223,25 @@ class PtyOutputPumpImpl(
         // coroutines (exit watcher, event dispatch). The loop's `isActive && running` guard
         // plus pumpJob.cancel() terminates the pump coroutine.
         pumpJob?.cancel()
+    }
+
+    /**
+     * 落地一条 WaitingInput 事件（log → reducer → waitEngine → bus），返回事件时间戳。
+     *
+     * 抽出来是为了 P-4 防抖的两条路径（立即发 / 静默后补发）共用同一份语义。
+     */
+    private suspend fun emitWaitingInput(confidence: Confidence, cursor: Long): Long {
+        val now = System.currentTimeMillis()
+        val wev = TerminalEvent.WaitingInput(
+            id = 0, sessionId = sessionId, timestamp = now,
+            cursor = cursor, jobId = null, confidence = confidence
+        )
+        val wid = eventLog.append(wev)
+        val wevWithId = wev.copy(id = wid)
+        semanticReducer.onEvent(wevWithId)
+        waitEngine.onEvent(wevWithId)
+        eventBus.emit(wevWithId)
+        return now
     }
 
     private suspend fun emitError(code: String, message: String, recoverable: Boolean) {

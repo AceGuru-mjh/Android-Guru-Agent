@@ -554,13 +554,15 @@ class AgentChatViewModel @Inject constructor(
             files = fileRefs
         )
 
-        // ═══ "小圆环"工具菜单：发送前注入会话上下文 + 收窄工具白名单 ═══
+        // ═══ "小圆环"工具菜单：发送前注入会话上下文 + v4 工具计划参数 ═══
         // 时间注入在调用时刻生成；规则/结构化输出/网络搜索指令组装为
-        // "## Session Context" 段落；函数调用圈选则只向模型暴露白名单工具。
+        // "## Session Context" 段落；「函数调用」圈选 = 强制调用（tool_choice）；
+        // 不选 = 默认 CORE 工具集 + 目录（直接发送即可用，不再需要手动圈选）。
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
             cfg.copy(
                 additionalSystemContext = chatToolkit.buildSessionContext(),
-                enabledToolIds = chatToolkit.effectiveToolWhitelist()
+                forcedToolIds = chatToolkit.forcedToolIds(),
+                exposeAllTools = chatToolkit.exposeAllToolsEnabled()
             )
         }
 

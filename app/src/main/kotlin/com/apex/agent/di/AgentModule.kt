@@ -18,6 +18,7 @@ import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.catalog.ToolActivationStore
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import dagger.Module
@@ -144,7 +145,9 @@ object AgentModule {
         // github_* / connector_* 工具已就绪可主动使用
         connectedServicesProvider: AndroidConnectedServicesProvider,
         // T72：注入多模型运行时，按角色路由 PRIMARY/VISION/REASONING/SUMMARY
-        modelRuntime: ModelRuntime
+        modelRuntime: ModelRuntime,
+        // v4：会话激活存储（与目录工具/编排器共享同一实例）
+        toolActivation: ToolActivationStore
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -158,7 +161,8 @@ object AgentModule {
             environmentInfoProvider = environmentInfoProvider,
             memoryObserver = memoryObserver,
             connectedServicesProvider = connectedServicesProvider,
-            modelRuntime = modelRuntime
+            modelRuntime = modelRuntime,
+            toolActivation = toolActivation
         )
     }
 
@@ -232,9 +236,9 @@ object AgentModule {
                     maxToolOutputLength = cfg.maxToolOutputLength,
                     temperature = cfg.temperature,
                     reflectionRounds = cfg.reflectionRounds,
-                    // AgentConfig.enabledToolIds is Set<String>? while the snapshot
-                    // expects List<String>; convert explicitly to satisfy the type.
-                    enabledToolIds = cfg.enabledToolIds?.toList() ?: emptyList()
+                    // v4：强制函数圈选（旧 enabledToolIds 白名单已废弃）。
+                    forcedToolIds = cfg.forcedToolIds.toList(),
+                    exposeAllTools = cfg.exposeAllTools
                 )
             },
             contextInjector = { content -> apex?.injectSystemContext(content) },
@@ -255,7 +259,9 @@ object AgentModule {
         privilegeInfoProvider: PrivilegeInfoProvider,
         contextCompressor: ContextCompressor,
         // T72：注入多模型运行时，BUILD 循环按角色路由
-        modelRuntime: ModelRuntime
+        modelRuntime: ModelRuntime,
+        // v4：与 AgentEngine 共享会话激活存储（tool_open 激活对两条执行路径同时生效）
+        toolActivation: ToolActivationStore
     ): TaskOrchestrator {
         return DefaultTaskOrchestrator(
             llmClient = llmClient,
@@ -273,7 +279,8 @@ object AgentModule {
             // P7：编排器与 AgentEngine 共享同一上下文压缩链路（HybridCompressor），
             // 使经编排器执行的长任务同样具备三级压缩（截断/滑窗/LLM摘要），
             // 修复"编排器路径工具输出无界增长"的上下文窗口风险。
-            contextCompressor = contextCompressor
+            contextCompressor = contextCompressor,
+            toolActivation = toolActivation
         )
     }
 }

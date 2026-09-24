@@ -51,6 +51,42 @@ class McpManager(
     private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
     val changes: SharedFlow<Unit> = _changes.asSharedFlow()
 
+    /**
+     * 会话生命周期监听（v4：MCP 工具一键注册进 ToolRegistry）。
+     *
+     * 连接成功 → [onServerConnected]；断开/移除/禁用 → [onServerDisconnected]。
+     * [McpToolRegistrar] 订阅后，远程工具自动变成 first-class AgentTool。
+     */
+    interface SessionListener {
+        fun onServerConnected(serverName: String)
+        fun onServerDisconnected(serverName: String)
+    }
+
+    private val sessionListeners = mutableListOf<SessionListener>()
+
+    /** 订阅会话生命周期（幂等；重复注册同一监听器会被忽略）。 */
+    fun addSessionListener(listener: SessionListener) {
+        synchronized(lock) {
+            if (listener !in sessionListeners) sessionListeners += listener
+        }
+    }
+
+    fun removeSessionListener(listener: SessionListener) {
+        synchronized(lock) { sessionListeners -= listener }
+    }
+
+    private fun fireConnected(serverName: String) {
+        synchronized(lock) { sessionListeners.toList() }.forEach {
+            runCatching { it.onServerConnected(serverName) }
+        }
+    }
+
+    private fun fireDisconnected(serverName: String) {
+        synchronized(lock) { sessionListeners.toList() }.forEach {
+            runCatching { it.onServerDisconnected(serverName) }
+        }
+    }
+
     init {
         runCatching { configDir.mkdirs() }
         loadConfigs()
@@ -83,7 +119,10 @@ class McpManager(
                 saveConfigsLocked()
             }.exceptionOrNull()
         }
-        staleClient?.let { runCatching { it.shutdown() } }
+        staleClient?.let {
+            runCatching { it.shutdown() }
+            fireDisconnected(name)
+        }
         if (error != null) return Result.failure(error)
         notifyChanged()
         return Result.success(Unit)
@@ -108,6 +147,7 @@ class McpManager(
             val loser = synchronized(lock) { clients.put(name, client) }
             loser?.let { runCatching { it.shutdown() } }
             notifyChanged()
+            fireConnected(name)
         } else {
             // STDIO 服务器在构造阶段就已 fork 出子进程；握手失败若不收尾就是进程泄漏
             runCatching { client.shutdown() }
@@ -130,6 +170,16 @@ class McpManager(
     }
 
     /**
+     * 列出单台服务器的工具（v4：[McpToolRegistrar] 逐台注册 first-class 工具用）。
+     * 服务器未连接时返回空列表——调用方据此跳过注册。
+     */
+    suspend fun listServerTools(serverName: String): List<McpToolDef> {
+        val client = synchronized(lock) { clients[serverName] } ?: return emptyList()
+        return runCatching { client.listTools().getOrDefault(emptyList()) }
+            .getOrDefault(emptyList())
+    }
+
+    /**
      * 调用MCP工具
      */
     suspend fun callTool(serverName: String, toolName: String, arguments: String): Result<McpToolResult> {
@@ -143,21 +193,25 @@ class McpManager(
      */
     suspend fun disconnect(name: String) {
         val client = synchronized(lock) { clients.remove(name) }
-        client?.let { runCatching { it.shutdown() } }
-        notifyChanged()
+        client?.let {
+            runCatching { it.shutdown() }
+            notifyChanged()
+            fireDisconnected(name)
+        }
     }
 
     /**
      * 断开所有
      */
     suspend fun disconnectAll() {
-        val snapshot = synchronized(lock) {
-            val all = clients.values.toList()
+        val removed = synchronized(lock) {
+            val all = clients.entries.associate { it.key to it.value }
             clients.clear()
             all
         }
-        snapshot.forEach { runCatching { it.shutdown() } }
+        removed.values.forEach { runCatching { it.shutdown() } }
         notifyChanged()
+        removed.keys.forEach { fireDisconnected(it) }
     }
 
     /**
@@ -208,7 +262,10 @@ class McpManager(
      */
     suspend fun removeServer(name: String) {
         val client = synchronized(lock) { clients.remove(name) }
-        client?.let { runCatching { it.shutdown() } }
+        client?.let {
+            runCatching { it.shutdown() }
+            fireDisconnected(name)
+        }
         synchronized(lock) {
             configs.remove(name)
             runCatching { saveConfigsLocked() }

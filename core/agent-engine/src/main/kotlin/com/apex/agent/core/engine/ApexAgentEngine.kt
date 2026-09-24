@@ -16,6 +16,8 @@ import com.apex.agent.core.logging.LogLevel
 import com.apex.agent.core.tools.ToolExecutor
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.ToolStreamEvent
+import com.apex.agent.core.tools.catalog.ToolActivationStore
+import com.apex.agent.core.tools.catalog.ToolRequestBudget
 import com.apex.agent.core.tools.skill.SkillRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -84,7 +86,14 @@ class ApexAgentEngine(
      *  2. 生产环境由 DI 注入 [com.apex.agent.core.llm.runtime.DefaultModelRuntime]，
      *     获得完整多模型能力。
      */
-    modelRuntime: ModelRuntime? = null
+    modelRuntime: ModelRuntime? = null,
+    /**
+     * Tool System v4 — 会话工具激活存储（tool_open 激活的工具进入下一轮请求）。
+     *
+     * 为空时引擎自建实例（单引擎场景等价）；DI 注入与 McpToolRegistrar /
+     * 编排器共享同一实例。任务开始时 [execute] 会 reset（激活不跨会话泄漏）。
+     */
+    private val toolActivation: ToolActivationStore = ToolActivationStore()
 ) : AgentEngine, ConfirmationSink {
 
     /**
@@ -117,6 +126,23 @@ class ApexAgentEngine(
     private val toolTruncator = ToolOutputTruncator(
         maxChars = config.maxToolOutputLength
     )
+
+    // ═══ Tool System v4 — 请求工具计划 / 名称映射 / 降级状态 ═══
+
+    /**
+     * 当前迭代的请求工具计划（provider 安全名 + 回映射）。
+     * 每轮迭代 chatStream 前重建；[executeToolCallStreaming] 用它的
+     * providerNameToId 把模型回显的工具名映射回注册表 id。
+     */
+    @Volatile
+    private var currentToolPlan: ToolRequestBudget.RequestToolPlan? = null
+
+    /**
+     * 工具请求降级等级（0=正常 / 1=纯 CORE 无强制 / 2=无工具）。
+     * Provider 以 4xx 拒绝带 tools 的请求时逐级降级重试同一轮，
+     * 保证“直接发送对话”永远有响应而非直接报错。
+     */
+    private var toolDegradationLevel = 0
 
     private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
         memory?.load()?.let { addAll(it) }
@@ -275,6 +301,9 @@ class ApexAgentEngine(
     override fun execute(input: UserInput): Flow<AgentEvent> = flow {
         isRunning = true
         anyActionFailed = false
+        // v4：新任务开始 —— 会话激活的工具不跨任务泄漏；降级状态复位。
+        toolActivation.reset()
+        toolDegradationLevel = 0
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
@@ -654,11 +683,14 @@ class ApexAgentEngine(
                 else -> { /* NotAttempted / NotMatched → 照常走 LLM */ }
             }
 
+            // ═══ Tool System v4：先建工具计划，再建消息 ═══
+            // 计划决定请求 tools 数组（provider 安全名 + 预算钳制）与 system
+            // prompt 工具清单（同一份 plan.visibleRegistryIds）——两侧永远
+            // 一致；tool_open 激活的工具从下一轮自动进入计划。
+            val plan = buildToolPlan()
+            currentToolPlan = plan
+
             val messages = buildMessages()
-            // 「函数调用」白名单：仅向模型暴露用户圈选的工具子集（null = 全部）
-            val tools = toolRegistry.getToolDefinitions().let { defs ->
-                config.enabledToolIds?.let { whitelist -> defs.filter { it.name in whitelist } } ?: defs
-            }
 
             val contentBuilder = StringBuilder()
             val reasoningBuilder = StringBuilder()
@@ -676,11 +708,18 @@ class ApexAgentEngine(
                 tagged(LlmRequestContext.primary("react_loop"))
             }
 
-            runtime.chatStream(
-                context = reactContext,
-                messages = messages,
-                tools = tools
-            ).collect { chunk ->
+            // v4：强制函数调用 → tool_choice=required / 具体函数；降级后不再强制。
+            val forcedChoice = if (toolDegradationLevel == 0) forcedToolChoiceSpec(plan) else null
+
+            try {
+                runtime.chatStream(
+                    context = reactContext,
+                    messages = messages,
+                    tools = plan.tools,
+                    temperature = -1f,
+                    maxTokens = -1,
+                    toolChoice = forcedChoice
+                ).collect { chunk ->
                 chunk.content?.let {
                     contentBuilder.append(it)
                     emit(AgentEvent.ResponseChunk(it))
@@ -710,6 +749,32 @@ class ApexAgentEngine(
                     }
                     acc.append(tc.name, tc.arguments)
                 }
+            }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // ═══ Tool System v4：工具请求降级重试 ═══
+                // 根因：部分 Provider/网关对带 tools 的请求直接 400（函数名非法/
+                // schema 关键字不支持/tool_choice 形态不支持），旧实现直接把异常
+                // 抛给 UI —— 表象即“直接发送对话就报错，必须手动圈选函数才能发”。
+                // 现在：仅在本轮**尚未输出任何内容**且降级等级未到 2 时，逐级降级
+                // （1=纯 CORE 无强制；2=无工具纯对话）重试同一轮，保证发送永远
+                // 有响应；已流式输出过的轮次不重试（避免内容重复拼接）。
+                // 同时覆盖 ModelRequestRejected（生产多模型路径）与裸
+                // LlmException.Http（SingleClientModelRuntime/测试路径）。
+                if (contentBuilder.isEmpty() && reasoningBuilder.isEmpty() &&
+                    toolCallsAccumulator.isEmpty() && toolDegradationLevel < 2 &&
+                    plan.tools.isNotEmpty() && isToolsRelatedRejection(e)
+                ) {
+                    toolDegradationLevel++
+                    AppLogger.instance.warn(
+                        LogCategory.ENGINE, "ApexAgentEngine",
+                        "Tools rejected by provider (level ${toolDegradationLevel}): " +
+                            "${e.message ?: e::class.simpleName} — degrading tool payload and retrying"
+                    )
+                    continue
+                }
+                throw e
             }
 
             // 若本轮收到了原生思考内容，发射 ThinkingComplete 让 UI 收尾。
@@ -861,6 +926,11 @@ class ApexAgentEngine(
         toolCall: ToolCall,
         emit: suspend (AgentEvent) -> Unit
     ) {
+        // v4：模型回显的是 provider 安全名（terminal_exec）；执行器/截断策略
+        // 需要注册表 id（terminal.exec）——经当前计划的反向映射解析。
+        // 无映射时（旧会话回放/模型直呼 registry id）原样直查，两条路都通。
+        val registryToolId = toolNameToRegistryId(toolCall.name)
+
         emit(
             AgentEvent.ToolCallStart(
                 callId = toolCall.id,
@@ -877,7 +947,7 @@ class ApexAgentEngine(
         // 真实数据）也不会被误判为执行失败。
         var hadStreamError = false
         try {
-            toolExecutor.executeStream(toolCall.name, toolCall.arguments).collect { event ->
+            toolExecutor.executeStream(registryToolId, toolCall.arguments).collect { event ->
                 when (event) {
                     is ToolStreamEvent.Output -> {
                         outputBuilder.append(event.chunk)
@@ -932,7 +1002,7 @@ class ApexAgentEngine(
 
         // P7 Layer 1: 工具输出截断（始终生效）
         val rawOutput = outputBuilder.toString()
-        val truncationResult = toolTruncator.smartTruncate(rawOutput, toolCall.name)
+        val truncationResult = toolTruncator.smartTruncate(rawOutput, registryToolId)
         val result = truncationResult.text
 
         // 成功判定：优先采用流式事件信号；仅当工具未发任何 Error 事件且
@@ -966,6 +1036,70 @@ class ApexAgentEngine(
             success = actionSuccess
         )
     }
+
+    // ═══ Tool System v4 — 计划/强制/降级/名称映射 ═══
+
+    /**
+     * 本轮请求工具计划：强制（仅选中集）/ 默认（CORE+激活+可选全量）/
+     * 降级（1=纯 CORE；2=空）。
+     */
+    private fun buildToolPlan(): ToolRequestBudget.RequestToolPlan {
+        val forced = config.forcedToolIds
+        return when {
+            toolDegradationLevel >= 2 -> EMPTY_TOOL_PLAN
+            forced.isNotEmpty() && toolDegradationLevel == 0 ->
+                ToolRequestBudget.planForced(toolRegistry, forced)
+            else -> ToolRequestBudget.planDefault(
+                registry = toolRegistry,
+                activation = toolActivation,
+                exposeAll = config.exposeAllTools && toolDegradationLevel == 0,
+                coreOnly = toolDegradationLevel >= 1
+            )
+        }
+    }
+
+    /** 强制 tool_choice：单选=具体函数，多选=required。 */
+    private fun forcedToolChoiceSpec(plan: ToolRequestBudget.RequestToolPlan): ToolChoiceSpec? {
+        if (config.forcedToolIds.isEmpty()) return null
+        if (plan.tools.isEmpty()) return null
+        return if (plan.tools.size == 1) {
+            ToolChoiceSpec.Function(plan.tools.first().name)
+        } else {
+            ToolChoiceSpec.Required
+        }
+    }
+
+    /**
+     * 判定异常是否与工具负载相关（降级重试的前置条件）。
+     *
+     * 覆盖：①模型/网关拒绝带 tools 请求的典型报错文案（函数名/schema/
+     * tool_choice/parallel）；②400/422 级请求拒绝（ModelRequestRejected /
+     * LlmException.Http）——请求体里只有 tools 是本 v4 新变量，用它当降级
+     * 信号；若非工具问题，降级后仍会在同一轮报错并上抛，不吞错。
+     */
+    private fun isToolsRelatedRejection(e: Throwable): Boolean {
+        // 401/403（鉴权）不是工具问题——排除，避免无意义降级重试。
+        if (e is LlmException.Http && (e.code == 400 || e.code == 413 || e.code == 422)) {
+            return true
+        }
+        val msg = (e.message ?: "").lowercase()
+        return TOOLS_REJECTION_KEYWORDS.any { msg.contains(it) }
+    }
+
+    /** 模型回显的工具名 → 注册表 id（无映射时原样返回——registry id 直查）。 */
+    private fun toolNameToRegistryId(providerName: String): String =
+        currentToolPlan?.providerNameToId?.get(providerName) ?: providerName
+
+    private val TOOLS_REJECTION_KEYWORDS = listOf(
+        "tool", "function", "schema", "parameters", "parallel_tool"
+    )
+    private val EMPTY_TOOL_PLAN = ToolRequestBudget.RequestToolPlan(
+        tools = emptyList(),
+        providerNameToId = emptyMap(),
+        visibleRegistryIds = emptySet(),
+        totalBytes = 0,
+        droppedByBudget = emptyList()
+    )
 
     // ═══════════════════════════════════════════════════════
     // Prompt builders
@@ -1037,9 +1171,20 @@ class ApexAgentEngine(
     private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
         config = config,
         privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL",
-        visibleTools = toolRegistry.getAllTools().let { all ->
-            config.enabledToolIds?.let { whitelist -> all.filter { it.id in whitelist } } ?: all
-        },
+        visibleTools = currentToolPlan?.let { plan ->
+            toolRegistry.getAllTools().filter { it.id in plan.visibleRegistryIds }
+        } ?: toolRegistry.getAllTools(),
+        catalogTools = currentToolPlan?.tools?.takeIf { it.isNotEmpty() }?.let {
+            // 目录总览：全部非 legacy 工具（仅在请求携带工具时才展示目录段）
+            toolRegistry.getAllTools().filterNot { tool ->
+                com.apex.agent.core.tools.catalog.ToolTierPolicy.isLegacyAlias(tool.id)
+            }
+        } ?: emptyList(),
+        toolNameMap = currentToolPlan?.let { plan ->
+            // id → provider 名（提示词工具清单与请求 tools 数组同名）
+            plan.providerNameToId.entries.associate { (name, id) -> id to name }
+        } ?: emptyMap(),
+        toolsUnavailable = currentToolPlan?.tools?.isEmpty() == true && toolDegradationLevel >= 2,
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
         environmentSummary = environmentInfoProvider?.environmentSummary(),
         connectedServices = connectedServicesProvider?.connectedServicesSummary()

@@ -3,6 +3,11 @@ package com.apex.agent.di
 import android.content.Context
 import com.apex.agent.core.tools.*
 import com.apex.agent.core.tools.builtin.*
+import com.apex.agent.core.tools.catalog.McpToolRegistrar
+import com.apex.agent.core.tools.catalog.ToolActivationStore
+import com.apex.agent.core.tools.catalog.ToolListTool
+import com.apex.agent.core.tools.catalog.ToolOpenTool
+import com.apex.agent.core.tools.catalog.ToolSearchTool
 import com.apex.agent.core.tools.connector.ConnectorMessenger
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
@@ -168,6 +173,31 @@ object ToolModule {
     @Singleton
     fun provideShortcutRegistry(): ShortcutRegistry = ShortcutRegistry()
 
+    // ═══ Tool System v4：会话激活 / 目录 / MCP 一等工具 ═══
+
+    /** v4 — 会话激活存储（引擎/目录工具/编排器共享单例）。 */
+    @Provides
+    @Singleton
+    fun provideToolActivationStore(): ToolActivationStore = ToolActivationStore()
+
+    /**
+     * v4 — MCP 工具注册器：McpManager 会话事件 → ToolRegistry 一等工具
+     * （mcp__server__tool）。IO 专用 Supervisor 作用域：发现失败不影响宿主，
+     * 进程级生命周期（不主动取消）。
+     */
+    @Provides
+    @Singleton
+    fun provideMcpToolRegistrar(
+        mcpManager: McpManager,
+        registry: ToolRegistry
+    ): McpToolRegistrar = McpToolRegistrar(
+        manager = mcpManager,
+        registry = registry,
+        scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+    )
+
     /**
      * v3 统一执行器装配：gate（环境前置 + 风险审批）→ schema 校验 →
      * 限流 → 熔断 → 策略（超时/重试）→ 追踪，逐层可选、全部共享单例。
@@ -220,6 +250,7 @@ object ToolModule {
     fun provideToolRegistry(
         @ApplicationContext context: Context,
         httpClient: OkHttpClient,
+        toolActivation: ToolActivationStore,
         terminalRuntime: TerminalRuntime,
         rootfsProvisioner: RootfsProvisioner,
         rootfsTarget: RootfsTarget,
@@ -522,9 +553,20 @@ object ToolModule {
         // v3+P83 联合收敛：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
         // 三次（第 12 节前后各一次 + 尾部重复块）——REPLACE 策略下静默互踩。
         // 此处为唯一注册点（v3 去重 + P83 尾部重复块移除，同题同解）。
+        // v4：连接成功后 McpToolRegistrar 还会把远程工具以 mcp__server__tool
+        // 一等函数注册进来（带真实 schema，模型可直接调用）。
         registry.register(SafeAgentTool(McpCallTool(mcpManager)))
         registry.register(SafeAgentTool(McpListTool(mcpManager)))
         registry.register(SafeAgentTool(McpConnectTool(mcpManager)))
+
+        // ═══ 12. Tool System v4 — 工具目录元工具（渐进披露）═══
+        // 注册表 ~110 工具不再全量随请求发送（根因：请求体撑爆 + 非法函数名
+        // 直接 400）。CORE 集常驻，其余能力经目录按需加载：
+        //   tool_search 找 → tool_open 加载（描述+schema 作为工具结果注入，
+        //   下一轮即可调用）→ tool_list 总览。
+        registry.register(SafeAgentTool(ToolSearchTool(registry)))
+        registry.register(SafeAgentTool(ToolOpenTool(registry, toolActivation)))
+        registry.register(SafeAgentTool(ToolListTool(registry)))
 
         // ═══ 13. Skill 工具接线（此前缺口：skill_* 管理工具与已启用技能的
         // composite/script 工具从未注册进 ToolRegistry，安装后形同虚设）═══

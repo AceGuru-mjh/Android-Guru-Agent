@@ -186,13 +186,23 @@ data class AgentConfig(
     val additionalSystemContext: String = "",
 
     /**
-     * 本轮允许暴露给 LLM 的工具 id 白名单；null = 全部工具。
+     * **v4 强制函数调用**（"调用函数"菜单的强制语义）：
      *
-     * 用于"函数调用"功能：用户在输入框工具菜单中圈选可用函数子集后，
-     * 引擎只把白名单内的 [com.apex.agent.core.llm.ToolDefinition] 传给模型，
-     * system prompt 的工具清单同步收窄，避免模型幻觉调用未启用工具。
+     * 非空时本轮请求**只**暴露这些工具，且 `tool_choice = required`
+     * （单选时为具体函数）——被选中的函数**必须**被模型调用。
+     *
+     * 空 = 默认模式：CORE 工具集 + 会话激活的工具（v4 渐进披露），
+     * 无 tool_choice 强制。旧字段 `enabledToolIds`（白名单收窄）已废弃：
+     * 它是"全量发送拖垮请求 + 手动圈选才能用"这个根因问题的载体。
      */
-    val enabledToolIds: Set<String>? = null
+    val forcedToolIds: Set<String> = emptySet(),
+
+    /**
+     * **v4 全量模式**：true 时向模型暴露注册表内全部（非 legacy）工具
+     * （仍受 [com.apex.agent.core.tools.catalog.ToolRequestBudget] 预算钳制）。
+     * 默认 false = CORE + 激活集。电源用户/调试用。
+     */
+    val exposeAllTools: Boolean = false
 ) {
     companion object {
         /** 快速模式：Build + 无思考 */

@@ -36,15 +36,40 @@ class StreamingOpenAiClient(
         maxTokens: Int
     ): LlmResponse {
         val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = false)
-        
+
         val request = buildRequest(body)
         val response = httpClient.newCall(request).await()
         val responseBody = response.body?.string() ?: throw LlmException.EmptyResponse()
-        
+
         if (!response.isSuccessful) {
             throw LlmException.Http(response.code, responseBody)
         }
-        
+
+        return parseNonStreamResponse(responseBody)
+    }
+
+    // ═══ Tool System v4 — per-request tool choice（强制函数调用）═══
+
+    override suspend fun chat(
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): LlmResponse {
+        val body = buildRequestBody(
+            messages, tools, temperature, maxTokens,
+            stream = false, toolChoiceOverride = toolChoice
+        )
+
+        val request = buildRequest(body)
+        val response = httpClient.newCall(request).await()
+        val responseBody = response.body?.string() ?: throw LlmException.EmptyResponse()
+
+        if (!response.isSuccessful) {
+            throw LlmException.Http(response.code, responseBody)
+        }
+
         return parseNonStreamResponse(responseBody)
     }
 
@@ -53,8 +78,20 @@ class StreamingOpenAiClient(
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int
+    ): Flow<LlmStreamChunk> =
+        chatStream(messages, tools, temperature, maxTokens, null)
+
+    override fun chatStream(
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
     ): Flow<LlmStreamChunk> = flow {
-        val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = true)
+        val body = buildRequestBody(
+            messages, tools, temperature, maxTokens,
+            stream = true, toolChoiceOverride = toolChoice
+        )
         val request = buildRequest(body)
 
         val call = httpClient.newCall(request)
@@ -135,7 +172,8 @@ class StreamingOpenAiClient(
         tools: List<ToolDefinition>,
         temperature: Float,
         maxTokens: Int,
-        stream: Boolean
+        stream: Boolean,
+        toolChoiceOverride: ToolChoiceSpec? = null
     ): JsonObject {
         // ── B1/B2：采样参数哨兵回退（显式传参优先，否则用 Profile 值）──────────
         // temperature/maxTokens 是方法入参，旧实现直接写入请求体——引擎每处调用
@@ -408,19 +446,19 @@ class StreamingOpenAiClient(
                                 put("type", "function")
                                 putJsonObject("function") {
                                     put("name", tool.name)
-                                    put("description", tool.description)
+                                    // v4：请求侧描述限额——超大描述直接截断，避免单个
+                                    // 工具（含全量文档式的 description）拖爆请求体。
+                                    put("description", clampRequestDescription(tool.description))
                                     // P0 防爆：单个工具的 parameters 非法 JSON 时，旧实现
                                     // 直接抛异常 → 所有带工具的请求整体失败（一个坏
                                     // schema 拖死全部 ~113 个工具）。现在降级为空对象
                                     // schema（模型仍可调用，参数不校验），并保留该工具。
+                                    // v4 增强：Gemini OpenAI 兼容层拒绝 enum/format/
+                                    // additionalProperties 等关键字——按 baseUrl 命中
+                                    // gemini 端点时递归剔除（rikkahub 同款策略）。
                                     put(
                                         "parameters",
-                                        runCatching { Json.parseToJsonElement(tool.parameters) }
-                                            .getOrElse {
-                                                Json.parseToJsonElement(
-                                                    """{"type":"object","properties":{}}"""
-                                                )
-                                            }
+                                        sanitizeParameters(tool.parameters)
                                     )
                                 }
                             }
@@ -434,14 +472,37 @@ class StreamingOpenAiClient(
                 // server-side 搜索 tool 由服务端自行调度、不参与 tool_choice 语义，
                 // 只带搜索 tool 却发 tool_choice 的请求在部分端点会 400。
                 if (hasFunctionTools) {
-                    put(
-                        "tool_choice",
-                        when (config.toolChoice) {
-                            ToolChoiceMode.AUTO -> "auto"
-                            ToolChoiceMode.REQUIRED -> "required"
-                            ToolChoiceMode.NONE -> "none"
-                        }
-                    )
+                    // v4：toolChoiceOverride（强制函数调用）优先；否则回退 Profile 值。
+                    // 注意：put() 返回“旧值”（首次写入恒 null），不能用 elvis——
+                    // 否则 override 分支写入后还会被 Profile 分支覆盖（实测教训）。
+                    // Function 形态：{"type":"function","function":{"name":…}} ——
+                    // 必须指向本请求 tools 里存在的名字，由引擎层保证（只暴露被选中的工具）。
+                    val spec = toolChoiceOverride
+                    if (spec != null) {
+                        put(
+                            "tool_choice",
+                            when (spec) {
+                                ToolChoiceSpec.Auto -> JsonPrimitive("auto")
+                                ToolChoiceSpec.Required -> JsonPrimitive("required")
+                                ToolChoiceSpec.None -> JsonPrimitive("none")
+                                is ToolChoiceSpec.Function -> buildJsonObject {
+                                    put("type", "function")
+                                    putJsonObject("function") {
+                                        put("name", spec.name)
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        put(
+                            "tool_choice",
+                            when (config.toolChoice) {
+                                ToolChoiceMode.AUTO -> "auto"
+                                ToolChoiceMode.REQUIRED -> "required"
+                                ToolChoiceMode.NONE -> "none"
+                            }
+                        )
+                    }
                     if (config.parallelToolCalls) {
                         put("parallel_tool_calls", true)
                     } else {
@@ -495,6 +556,56 @@ class StreamingOpenAiClient(
         }
     }
     
+    // ═══ Tool System v4 — 请求侧工具描述/Schema 硬化 ═══
+
+    /** 单工具描述在请求里的硬上限（v4：防"文档式 description"拖爆请求体）。 */
+    private fun clampRequestDescription(description: String, maxChars: Int = 1024): String =
+        if (description.length <= maxChars) description
+        else description.take(maxChars).trimEnd() + "\n[description truncated for request size]"
+
+    /**
+     * 请求侧 schema 硬化（P0 兜底的 v4 升级）：
+     * 1. 非法 JSON → 空对象骨架（原 P0 行为）；
+     * 2. baseUrl 命中 Gemini OpenAI 兼容端点（generativelanguage / gemini）→
+     *    递归剔除 Gemini 拒绝的关键字（enum / format / additionalProperties /
+     *    propertyNames / exclusive* / examples）——rikkahub 同款策略；
+     * 3. 其余端点原样透传（OpenAI/兼容网关自己能吃下的就不动，避免过度剪裁
+     *    破坏语义）。
+     */
+    private fun sanitizeParameters(parameters: String): JsonElement {
+        val parsed = runCatching { Json.parseToJsonElement(parameters) }
+            .getOrElse {
+                return Json.parseToJsonElement("""{"type":"object","properties":{}}""")
+            }
+        if (!isGeminiCompatEndpoint()) return parsed
+        return runCatching { stripGeminiUnsupported(parsed) }
+            .getOrDefault(Json.parseToJsonElement("""{"type":"object","properties":{}}"""))
+    }
+
+    private fun isGeminiCompatEndpoint(): Boolean {
+        val url = config.baseUrl.lowercase()
+        return url.contains("generativelanguage") || url.contains("gemini")
+    }
+
+    private val GEMINI_UNSUPPORTED_KEYS = setOf(
+        "enum", "format", "additionalProperties", "propertyNames",
+        "exclusiveMinimum", "exclusiveMaximum", "examples", "\$schema",
+        "patternProperties", "const"
+    )
+
+    private fun stripGeminiUnsupported(element: JsonElement): JsonElement = when (element) {
+        is JsonObject -> buildJsonObject {
+            for ((key, value) in element) {
+                if (key in GEMINI_UNSUPPORTED_KEYS) continue
+                put(key, stripGeminiUnsupported(value))
+            }
+        }
+        is JsonArray -> buildJsonArray {
+            for (item in element) add(stripGeminiUnsupported(item))
+        }
+        else -> element
+    }
+
     private fun parseStreamChunk(data: String): LlmStreamChunk? {
         return try {
             val json = Json.parseToJsonElement(data).jsonObject

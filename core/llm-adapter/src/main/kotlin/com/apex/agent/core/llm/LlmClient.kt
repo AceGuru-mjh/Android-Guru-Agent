@@ -35,6 +35,30 @@ interface LlmClient {
         /** < 0（默认 -1）= 未指定 → 用 Profile 值（皆未设置时回退 4096）。 */
         maxTokens: Int = -1
     ): Flow<LlmStreamChunk>
+
+    // ═══ Tool System v4 — per-request tool choice overloads ═══
+    //
+    // The v4 engine uses these to honour the chat input's "调用函数" selection
+    // as FORCED tool use (tool_choice = required / specific function).
+    // Default implementations delegate to the legacy methods with no
+    // override, so every existing LlmClient implementation (fakes in tests,
+    // DynamicLlmClient, NoOpLlmClient, …) keeps compiling and behaving.
+
+    suspend fun chat(
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): LlmResponse = chat(messages, tools, temperature, maxTokens)
+
+    fun chatStream(
+        messages: List<LlmMessage>,
+        tools: List<ToolDefinition>,
+        temperature: Float,
+        maxTokens: Int,
+        toolChoice: ToolChoiceSpec?
+    ): Flow<LlmStreamChunk> = chatStream(messages, tools, temperature, maxTokens)
 }
 
 sealed interface LlmMessage {

@@ -61,6 +61,7 @@ import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.permission.PermissionModeGate
 import com.apex.agent.permission.PermissionAwareToolGate
+import com.apex.agent.permission.PermissionSnapshot
 import com.apex.agent.ui.screen.settings.SettingsRepository
 import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.core.tools.CompositeToolGate
@@ -236,13 +237,16 @@ object ToolModule {
     fun providePermissionModeGate(
         gateway: UserQuestionGateway,
         settingsRepository: SettingsRepository
-    ): PermissionModeGate = PermissionModeGate(gateway) {
-        val agent = settingsRepository.agentSettings.value
-        com.apex.agent.permission.PermissionSnapshot(
-            mode = agent.permissionMode,
-            rules = agent.permissionRules
-        )
-    }
+    ): PermissionModeGate = PermissionModeGate(
+        gateway = gateway,
+        settingsProvider = {
+            val agent = settingsRepository.agentSettings.value
+            PermissionSnapshot(
+                mode = agent.permissionMode,
+                rules = agent.permissionRules
+            )
+        }
+    )
 
     /**
      * 工具使用统计（v2）：DefaultToolExecutor 每次调用后记录

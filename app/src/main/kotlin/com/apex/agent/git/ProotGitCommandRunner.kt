@@ -185,7 +185,7 @@ class ProotGitCommandRunner(
     // ══════════════════════════════════════════════════════════════════
 
     /** rootfs 解析结果：rootfs 与 errorMessage 互斥。 */
-    private class RootfsResolution(val rootfs: File?, val errorMessage: String?)
+    internal class RootfsResolution(val rootfs: File?, val errorMessage: String?)
 
     /**
      * rootfs 基目录 → 真实根目录（与 ProotMcpProcessLauncher 同款语义）：

@@ -64,6 +64,16 @@ class ToolExecutionPolicy {
             put("shell_execute", ToolIdempotencyClass.UNKNOWN)        // 任意命令：行为不可判定
             put("get_device_info", ToolIdempotencyClass.READ_ONLY)
             put("get_time", ToolIdempotencyClass.READ_ONLY)
+            // #171/#172：合并工具（纯函数）/ 上下文回顾三件套（会话只读视图）
+            // / 图片元信息 —— 重放无副作用。
+            put("time", ToolIdempotencyClass.READ_ONLY)
+            put("random", ToolIdempotencyClass.READ_ONLY)
+            put("regex", ToolIdempotencyClass.READ_ONLY)
+            put("json", ToolIdempotencyClass.READ_ONLY)
+            put("context_recap", ToolIdempotencyClass.READ_ONLY)
+            put("context_search", ToolIdempotencyClass.READ_ONLY)
+            put("session_stats", ToolIdempotencyClass.READ_ONLY)
+            put("image_info", ToolIdempotencyClass.READ_ONLY)
             put("get_set_settings", ToolIdempotencyClass.IDEMPOTENT_WRITE) // put 值幂等
             put("logcat", ToolIdempotencyClass.READ_ONLY)
             put("screenshot", ToolIdempotencyClass.READ_ONLY)

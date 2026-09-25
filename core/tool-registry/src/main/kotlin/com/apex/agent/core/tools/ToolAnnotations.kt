@@ -164,6 +164,11 @@ data class ToolAnnotations(
                 toolId == "notification_read" ||
                 toolId == "list_files" || toolId == "glob_files" ||
                 toolId == "search_files" || toolId == "read_file" ||
+                // #171/#172：合并工具与上下文回顾三件套 / 图片元信息 ——
+                // 纯确定性计算或会话只读视图（显式声明缺位时的兜底口径）。
+                toolId == "time" || toolId == "image_info" ||
+                toolId == "context_recap" || toolId == "context_search" ||
+                toolId == "session_stats" ||
                 toolId.startsWith("memory_") ||
                 toolId.startsWith("terminal.linux.status") ||
                 toolId.startsWith("terminal.ubuntu.status") ||

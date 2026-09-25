@@ -1,7 +1,12 @@
 package com.apex.agent.ui.screen.settings
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.R
@@ -27,10 +32,8 @@ internal fun AgentRulesAndHooksSections(
     viewModel: SettingsViewModel
 ) {
     // ═══ 规则（#164）：全局规则（Agent/coding 双模式）+ 默认工作区 AGENTS.md ═══
-    var rulesRefreshKey by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(0)
-    }
-    val projectRulesFile by androidx.compose.runtime.produceState<String?>(
+    var rulesRefreshKey by remember { mutableStateOf(0) }
+    val projectRulesFile by produceState<String?>(
         initialValue = null,
         key1 = rulesRefreshKey
     ) {

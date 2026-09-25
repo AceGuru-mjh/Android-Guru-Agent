@@ -369,23 +369,22 @@ object ToolModule {
         // isNoOp（无钩子关心）时返回 null，执行器走原路径零开销；
         // blocked 透传 reason 短路（文案对齐 gate 拒绝）；modifiedArgs 改写
         // 后续 schema 校验按新参数执行（钩子改不出绕过校验的载荷）。
-        .beforeToolHooks(
-            hookRegistry?.let { hooks ->
-                { toolId, args ->
-                    hooks.dispatch(HookEvent.PreToolUse(toolId, args))
+        // 注：builder 的 setter 形参非空且持期望类型——经 .apply{} 条件装配，
+        // lambda 才能推成 suspend（?.let{} / if/else 直传均不行，K2 限制，
+        // 见 .verify/scratch/t2c/test/BridgePatternCheck.kt 三轮验证）。
+        .apply {
+            if (hookRegistry != null) {
+                beforeToolHooks { toolId, args ->
+                    hookRegistry.dispatch(HookEvent.PreToolUse(toolId, args))
                         .takeUnless { it.isNoOp }
                 }
-            }
-        )
-        .afterToolHooks(
-            hookRegistry?.let { hooks ->
-                { toolId, args, result, isError, durationMs ->
-                    hooks.dispatch(
+                afterToolHooks { toolId, args, result, isError, durationMs ->
+                    hookRegistry.dispatch(
                         HookEvent.PostToolUse(toolId, args, result, isError, durationMs)
                     )
                 }
             }
-        )
+        }
         .usageTracker(toolUsageTracker)
         .policyResolver(
             DefaultToolRunPolicyResolver(TERMINAL_TOOL_RUN_POLICIES)

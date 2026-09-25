@@ -1,0 +1,38 @@
+{
+  "schema": "apex-skill-v1",
+  "id": "sql-optimizer",
+  "name": "SQL 查询优化",
+  "version": "1.0.0",
+  "description": "查询优化方法论：执行计划四信号解读、索引选择性与最左前缀、JOIN 策略、深分页游标/延迟关联、N+1 识别与消除",
+  "author": "Apex",
+  "license": "MIT",
+  "dependencies": [],
+  "requirements": {
+    "minAppVersion": 1,
+    "permissions": [],
+    "toolsRequired": [],
+    "privilegeLevel": "none"
+  },
+  "tools": [],
+  "configuration": {
+    "autoSetup": [],
+    "userConfig": []
+  },
+  "promptInjection": "【SQL 查询优化方法论】\n\n你已装备「SQL 查询优化」技能。凡慢查询优化、索引设计、执行计划解读类任务，按\"先读计划、再动结构\"的顺序执行，禁止未诊断先改写。\n\n━━ 一、触发场景 ━━\n- 查询慢 / 超时 / 数据库 CPU 飙高，要求优化。\n- 设计新表索引或评审索引方案。\n- 解读 EXPLAIN / EXPLAIN ANALYZE 输出。\n- ORM 生成的查询行为怪异，要求排查（常是 N+1 或隐式全表扫描）。\n- 不触发：数据库选型、分库分表架构设计（那是架构任务，本技能只管单库查询层）。\n\n━━ 二、方法论 ━━\n\n【第 0 步：量化基线（优化前后可比的前提）】\n- 先测后改：记录优化前的耗时（多次取 P95）、行数、执行计划；\n  没有基线的优化无法证明收益，也无法发现\"优化反而变慢\"。\n- 测量环境注意：首次查询含冷缓存（页不在 buffer pool），应预热后测；\n  开发库与生产库的数据量分布不同，结论要标注适用范围。\n- 获取计划的命令（按方言）：\n  MySQL：EXPLAIN / EXPLAIN ANALYZE（8.0.18+）；\n  PostgreSQL：EXPLAIN (ANALYZE, BUFFERS)；\n  SQLite：EXPLAIN QUERY PLAN。\n\n【第 1 步：读执行计划（EXPLAIN / EXPLAIN ANALYZE）四信号】\n1. **访问类型**（type / Scan Type）：\n   - ALL = 全表扫描——大表上的 ALL 是头号嫌疑（小表、维度表可接受）；\n   - index = 全索引扫描；range = 范围扫描；ref / eq_ref = 索引点查（健康）。\n2. **行数估算**（rows / est. rows）：\n   - 与实际行数差一个数量级以上 = 统计信息过期——先 ANALYZE TABLE 再重读计划，别在过期统计上做决策。\n3. **附加信息**（Extra / Detail）：\n   - Using filesort = 排序没走索引；Using temporary = 临时表；\n   - 两者出现在大行数节点上是重点优化对象。\n4. **JOIN 顺序**：驱动表是否是过滤后行数最小的表；被驱动表的 JOIN 键是否命中索引。\n读计划纪律：先定位**成本最高的节点**（行数 × 访问类型乘积直觉），一次只主攻一个节点，改完重读计划再攻下一个。\n\n【读计划范例（带注释的输出解读）】\nEXPLAIN SELECT ... FROM orders WHERE tenant_id=7 ORDER BY created_at DESC LIMIT 20;\n  type: ALL            ← 全表扫描，大表上头号嫌疑\n  rows: 19,842,036     ← 估算扫描行数（约全表）\n  Extra: Using filesort ← 排序未走索引序，内存 / 磁盘排序\n解读链：扫描全部 2000 万行 + 逐行过滤 tenant_id + 过滤结果另行排序 →\n两处代价叠加；加 (tenant_id, created_at) 索引后预期：\n  type: ref（索引点查 tenant）+ 索引序免 filesort + rows 降至该租户实际行数。\n\n【第 2 步：索引选择性与最左前缀】\n- 复合索引 (a, b, c) 按最左前缀服务：\n  - WHERE a=? ✓；WHERE a=? AND b=? ✓；WHERE a=? AND b=? AND c=? ✓；\n  - WHERE b=? ✗（缺最左列）；WHERE a>? AND b=? 部分（a 用范围后 b 参与不了索引序查找）。\n- 等值列在前、范围列在后：WHERE tenant=? AND created_at>? 用 (tenant, created_at)。\n- 范围条件之后的列参与不了索引排序：WHERE a>? ORDER BY b 需要额外 filesort——要么改查询（先收敛 a 的精确集合），要么接受并量化代价。\n- 索引列上套函数 / 表达式 / 隐式类型转换会废掉索引：\n  - WHERE DATE(created_at)='2026-01-01' ❌ → WHERE created_at>='2026-01-01' AND created_at<'2026-01-02' ✓\n  - 字符串列用数字比较（WHERE code=123）触发隐式转换同理。\n- 选择性：区分度低的列（性别 / 状态）单独建索引收益小，但作为复合索引前缀配合其它等值条件仍有价值。\n- 写入频繁的表索引数量要克制：每个索引都是写放大与存储成本。\n\n【第 3 步：JOIN 策略】\n- 小结果集驱动大表：先确保驱动侧 WHERE 过滤后行数小，被驱动表 JOIN 键有索引。\n- JOIN 键类型必须一致：INT JOIN VARCHAR 会隐式转换毁索引。\n- 多表 JOIN 优先减少中间结果：把选择性最强的过滤条件尽量前移。\n- EXISTS vs IN：外表小内表大用 IN，内表小外表大用 EXISTS；DISTINCT + JOIN 可尝试改 EXISTS 消重。\n- 相邻行比较（环比 / 前一行）优先窗口函数 LAG / LEAD，避免自 JOIN。\n\n【第 4 步：分页优化（深分页）】\n症状：LIMIT 100000, 20——扫描并丢弃前 10 万行。\n三种替代（按优先级）：\n1. **游标 / 书签法**（首选，要求排序键唯一且有序）：\n   WHERE id > :last_id ORDER BY id LIMIT 20\n2. **延迟关联**（排序键非主键时）：先用覆盖索引查出目标页主键，再回表取整行：\n   SELECT * FROM orders JOIN (\n     SELECT id FROM orders ORDER BY created_at LIMIT 100000, 20\n   ) p ON orders.id = p.id\n3. **产品层限制**：禁止跳页，只提供上一页 / 下一页（与游标法天然配套）。\n\n【第 5 步：N+1 识别与消除】\n- 症状：ORM 循环里逐条查询——列表 1 次 + 每行 1 次；日志特征：同形态 SQL 高频重复。\n- 消除手段：\n  - JOIN 一次取回（数据量可控时）；\n  - IN 批量（注意 IN 列表长度上限，超限分批）；\n  - 预取 + 内存组装（按外键 groupBy 建映射）。\n- 判别 lazy loading：确认业务真的需要关联数据，再触发批量预取（fetch join / batch size）。\n\n【第 6 步：其它要点】\n- SELECT 明确列：给覆盖索引免回表的机会；SELECT * 拖全部列。\n- 大事务拆小：长事务持锁拖垮并发；批量写入分批提交（每批数百至数千行）。\n- 精确 COUNT(*) 在大表上是全扫代价：估算场景用 EXPLAIN 行数或统计表。\n- 优化后必须复测：同一数据量、同一计划对比，给出前后耗时对照——不做\"应该快了\"的无凭结论。\n\n【范例（校准输出颗粒度）】\n诊断：orders 表 2000 万行，EXPLAIN 显示 type=ALL、rows≈20M、Extra 含 Using filesort。\n根因：WHERE tenant_id=? 无索引；ORDER BY created_at 无法走索引序。\n方案：\n- DDL：CREATE INDEX idx_orders_tenant_created ON orders (tenant_id, created_at);\n- 改写：SELECT id, amount, status FROM orders WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20;\n预期：访问类型 range + 索引序免 filesort；P95 从 4.2s → <50ms（以实测为准）。\n\n【范例二（N+1 型，校准识别模式）】\n症状：列表页加载 100 条订单耗时 2.3s，日志中 SELECT * FROM users WHERE id=? 出现 101 次。\n诊断：ORM 循环逐条取用户（1 + 100 次查询），单次 20ms × 100 ≈ 2s，占总耗时 87%。\n方案：\n- 预取：val usersById = userDao.getByIds(orderList.map { it.userId }.toSet()).associateBy { it.id }\n- 组装：orders.map { it.copy(userName = usersById[it.userId]?.name) }\n预期：101 次查询 → 2 次（列表 1 + IN 批量 1）；耗时 2.3s → <200ms。\n\n【第 7 步：写多读少场景的反向清单（索引不是越多越好）】\n- 每个索引都是写放大：INSERT / UPDATE 涉及索引列时全部索引同步维护。\n- 写热表索引评估：预期查询频率 × 加速收益 vs 写入频率 × 维护成本，量化后决策。\n- 减索引手段：合并冗余索引（(a) 与 (a,b) 并存时通常可删前者）；\n  用覆盖索引替代多个单列索引；定期审计未使用的索引（usage 统计）。\n- 批量写入：LOAD DATA / 批量 INSERT 优于逐行；事务包裹但分批提交。\n\n━━ 三、输出格式约定 ━━\n1. **原查询**：贴回用户 SQL。\n2. **诊断**：指认瓶颈节点，引用计划证据（访问类型 / rows / Extra）。\n3. **优化后查询**：完整可执行；多处改动逐条列出。\n4. **建议索引 DDL**：CREATE INDEX 语句 + 最左前缀推导过程 + 写入代价提示。\n5. **预期收益**：前后计划 / 耗时对照或量级估算，并注明验证方法（如何复测）。",
+  "category": "UTILITY",
+  "tags": [
+    "sql",
+    "database",
+    "index",
+    "performance"
+  ],
+  "trustLevel": "verified",
+  "bundled": true,
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-09-25",
+      "notes": "首个内置版本：随 APK assets 打包，首启幂等释放安装（Issue #166）。"
+    }
+  ]
+}

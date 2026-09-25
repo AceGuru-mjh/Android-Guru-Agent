@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 内置技能字符串（Issue #166：assets 释放的内置优质技能）。
+     键归属内置技能特性，不并入 strings_market.xml（并行改动避免冲突）。
+     语言切换经 LanguageManager + MainActivity attachBaseContext/recreate。 -->
+<resources>
+    <!-- 技能卡 / 已安装行 / 详情标题上的「内置」徽标（manifest.bundled == true） -->
+    <string name="market_skill_bundled_badge">内置</string>
+    <!-- 内置技能的卸载替代提示（可禁用不可卸载——SkillRegistry.uninstall 恒拒绝） -->
+    <string name="market_skill_bundled_uninstall_blocked_hint">内置技能：可禁用，不可卸载</string>
+</resources>

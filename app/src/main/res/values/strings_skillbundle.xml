@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bundled-skill strings (Issue #166: assets-released built-in skills).
+     English default; Chinese in values-zh/strings_skillbundle.xml.
+     Keys are owned by the bundled-skill feature — do NOT merge them into
+     strings_market.xml (parallel ownership, avoids cross-branch conflicts).
+     Language switching via LanguageManager + MainActivity attachBaseContext/recreate. -->
+<resources>
+    <!-- Badge shown on skill cards / installed rows / detail title for
+         skills released from APK assets (manifest.bundled == true). -->
+    <string name="market_skill_bundled_badge">Bundled</string>
+    <!-- Hint replacing the uninstall entry for bundled skills (can be
+         disabled but not uninstalled — SkillRegistry.uninstall refuses). -->
+    <string name="market_skill_bundled_uninstall_blocked_hint">Bundled skill: can be disabled but not uninstalled</string>
+</resources>

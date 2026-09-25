@@ -19,6 +19,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,12 +54,19 @@ import com.apex.agent.core.tools.mcp.McpTransport
  * - [McpTransport.HTTP] / [McpTransport.SSE] —— 填远端 URL + 可选鉴权。
  *
  * 校验按传输方式分别生效：STDIO 要求命令非空，远端要求 URL 以 http 开头。
+ *
+ * @param sandboxAvailable PRoot 沙箱是否就绪（内嵌 Ubuntu rootfs 已安装，由
+ *   MarketViewModel 传入，Issue #163）。就绪时 STDIO 表单的「在 PRoot 沙箱中
+ *   运行」开关可用且默认开（Android 宿主没有 npx/node，本地命令几乎必然要
+ *   沙箱）；未就绪时开关禁用并提示先安装 Ubuntu 环境 —— 默认值 false 保证
+ *   接线缺失时用户看到的是诚实的「不可用」而不是能点但必败的开关。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddMcpDialog(
     onDismiss: () -> Unit,
-    onAdd: (McpServerConfig) -> Unit
+    onAdd: (McpServerConfig) -> Unit,
+    sandboxAvailable: Boolean = false
 ) {
     var name by remember { mutableStateOf("") }
     var transport by remember { mutableStateOf(McpTransport.STDIO) }
@@ -71,6 +79,9 @@ fun AddMcpDialog(
     // 远端字段
     var url by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+
+    // 沙箱开关（Issue #163）：就绪即默认开 —— Android 宿主没有 npx
+    var runInSandbox by remember { mutableStateOf(sandboxAvailable) }
 
     val nameValid = name.trim().isNotBlank() && !name.trim().contains(Regex("[\"\\\\\\n]"))
     val isStdio = transport == McpTransport.STDIO
@@ -150,6 +161,32 @@ fun AddMcpDialog(
                         maxLines = 4,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    // Issue #163：沙箱开关 —— Android 宿主没有 npx/node，本地命令
+                    // 推荐在 PRoot Ubuntu 内跑；未装环境时禁用并给引导文案。
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.market_mcp_sandbox_label),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                stringResource(
+                                    if (sandboxAvailable) R.string.market_mcp_sandbox_desc
+                                    else R.string.market_mcp_sandbox_unavailable
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = runInSandbox && sandboxAvailable,
+                            onCheckedChange = { runInSandbox = it },
+                            enabled = sandboxAvailable
+                        )
+                    }
                     Text(
                         stringResource(R.string.market_mcp_stdio_hint),
                         style = MaterialTheme.typography.bodySmall,
@@ -187,6 +224,9 @@ fun AddMcpDialog(
                             command = command.trim().takeIf { isStdio && it.isNotBlank() },
                             args = if (isStdio) args.trim().split(ARGS_SPLIT).filter { it.isNotBlank() } else emptyList(),
                             env = if (isStdio) parseKeyValueLines(env) else emptyMap(),
+                            // Issue #163：沙箱开关透传（远端形态强制 false；
+                            // 未就绪时双重保险归 false，防止意外态写出沙箱配置）
+                            runInSandbox = isStdio && runInSandbox && sandboxAvailable,
                             headers = emptyMap()
                         )
                     )

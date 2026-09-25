@@ -173,6 +173,11 @@
     <string name="market_mcp_apikey_label">API Key (optional, sent as Bearer)</string>
     <string name="market_mcp_add_connect">Add &amp; connect</string>
 
+    <!-- ═══ Dialogs · Add MCP · PRoot sandbox (Issue #163) ═══ -->
+    <string name="market_mcp_sandbox_label">Run in PRoot sandbox</string>
+    <string name="market_mcp_sandbox_desc">Runs the command inside the embedded Ubuntu environment (recommended for local commands \u2014 the Android host has no npx/node)</string>
+    <string name="market_mcp_sandbox_unavailable">Requires the Ubuntu environment to be installed first</string>
+
     <!-- ═══ Dialogs · Import MCP config ═══ -->
     <string name="market_mcp_import_dialog_title">Import MCP config</string>
     <string name="market_mcp_paste_label">Paste mcpServers JSON</string>

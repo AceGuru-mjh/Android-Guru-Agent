@@ -248,6 +248,9 @@ private fun AgentTab(
             onRulesChange = { rs -> onAgent(agent.copy(permissionRules = rs)) }
         )
 
+        // ═══ 规则（#164）+ 钩子（#165）：挂载块抽出（本文件预算红线）═══
+        AgentRulesAndHooksSections(agent, onAgent, viewModel)
+
         AgentSection(agent, onAgent)
         CompressionSection(agent, onAgent)
         VisionSection(agent, roles, profiles, viewModel)

@@ -173,6 +173,11 @@
     <string name="market_mcp_apikey_label">API Key（可选，作 Bearer 发送）</string>
     <string name="market_mcp_add_connect">添加并连接</string>
 
+    <!-- ═══ 对话框 · 添加 MCP · PRoot 沙箱（Issue #163） ═══ -->
+    <string name="market_mcp_sandbox_label">在 PRoot 沙箱中运行</string>
+    <string name="market_mcp_sandbox_desc">命令将在内嵌 Ubuntu 环境中执行（本地命令建议开启——Android 宿主没有 npx/node）</string>
+    <string name="market_mcp_sandbox_unavailable">需先安装 Ubuntu 环境</string>
+
     <!-- ═══ 对话框 · 导入 MCP 配置 ═══ -->
     <string name="market_mcp_import_dialog_title">导入 MCP 配置</string>
     <string name="market_mcp_paste_label">粘贴 mcpServers JSON</string>

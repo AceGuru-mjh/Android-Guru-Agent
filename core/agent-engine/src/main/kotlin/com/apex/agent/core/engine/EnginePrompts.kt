@@ -13,6 +13,10 @@ import com.apex.agent.core.tools.ToolRisk
  *
  * All builders are deterministic functions of their inputs — no engine state
  * is read — which makes them trivially testable in isolation.
+ *
+ * #164（Rules 规则系统）：[buildSystemPrompt] 尾参 `globalRules` 新增了
+ * 全局行为规则注入段（"## Global Rules"，Session Context 之后）；空参时
+ * 段落省略，既有调用方行为零变化。
  */
 internal object EnginePrompts {
 
@@ -38,6 +42,17 @@ internal object EnginePrompts {
      *   omitted; same source the environment gate enforces)
      * @param connectedServices 已连接外部服务摘要（GitHub/连接器等，null →
      *   省略；让模型知道这些服务已连接、工具已就绪）
+     * @param globalRules 全局行为规则（#164 Rules 系统，设置层
+     *   AgentSettings.globalRules 持久化的自由文本）。非空时在 Session
+     *   Context 段之后渲染 "## Global Rules" 段，内容原样注入。
+     *
+     *   **双注防线（接线契约）**：这是 agent 模式与 coding 模式**共用**的
+     *   全局规则注入点，但两条通道二选一——coding 模式已经经
+     *   AgentConfig.additionalSystemContext（CodeAgentEngine.refreshContext
+     *   → RulesProvider.formatGlobalRules）把 Global Rules 拼进 Session
+     *   Context 段，此时本参数必须保持默认空串，否则同一段内容会注入两次；
+     *   agent 模式（AgentChatViewModel / AgentModule 链路）才用本参数直注。
+     *   由主控接线时保证，本函数不做去重。
      */
     fun buildSystemPrompt(
         config: AgentConfig,
@@ -55,7 +70,9 @@ internal object EnginePrompts {
         /** v4 — registry id → provider 名（工具清单与请求 tools 数组同名）。 */
         toolNameMap: Map<String, String> = emptyMap(),
         /** v4 — 降级到无工具时告知模型本轮纯文本作答。 */
-        toolsUnavailable: Boolean = false
+        toolsUnavailable: Boolean = false,
+        /** #164 — 全局行为规则（见上 KDoc 双注防线；默认空串 = 段落省略）。 */
+        globalRules: String = ""
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
@@ -275,6 +292,17 @@ internal object EnginePrompts {
                 appendLine()
                 appendLine("## Session Context")
                 appendLine(config.additionalSystemContext.trim())
+            }
+
+            // ═══ 全局行为规则（#164 Rules 系统）═══
+            // 位置紧跟 Session Context（规则是对当前会话行为的约束，
+            // 先于通用策略段落）；内容原样注入（用户预期：写了什么就是什么）。
+            // coding 模式经 additionalSystemContext 注入时此处恒为空（防双注，
+            // 见函数 KDoc 接线契约）。
+            if (globalRules.isNotBlank()) {
+                appendLine()
+                appendLine("## Global Rules")
+                appendLine(globalRules.trim())
             }
             appendLine()
             appendLine("## File Operation Strategy")

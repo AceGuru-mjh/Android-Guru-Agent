@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hooks 钩子系统字符串（中文）。 -->
+<resources>
+    <!-- 钩子分区（设置 → Agent 页） -->
+    <string name="code_hooks_section_title">钩子</string>
+    <string name="code_hooks_section_subtitle">工具与会话生命周期钩子</string>
+    <string name="code_hooks_builtin_badge">内置</string>
+    <string name="code_hooks_enabled_label">启用钩子</string>
+    <string name="code_hooks_no_hooks">暂无钩子</string>
+
+    <!-- 事件徽标 -->
+    <string name="code_hooks_event_pre_tool_use">工具调用前</string>
+    <string name="code_hooks_event_post_tool_use">工具调用后</string>
+    <string name="code_hooks_event_user_prompt_submit">输入提交</string>
+    <string name="code_hooks_event_session_start">会话开始</string>
+    <string name="code_hooks_event_session_end">会话结束</string>
+    <string name="code_hooks_event_stop">回合结束</string>
+    <string name="code_hooks_event_subagent_stop">子代理结束</string>
+    <string name="code_hooks_event_pre_compact">压缩前</string>
+</resources>

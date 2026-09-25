@@ -66,4 +66,17 @@
     <string name="code_perm_rule_delete">删除规则</string>
     <string name="code_perm_save">保存</string>
     <string name="code_perm_cancel">取消</string>
+
+    <!-- 行为规则（v1.1 #164） -->
+    <string name="code_rules_section_title">行为规则</string>
+    <string name="code_rules_section_subtitle">全局规则与 AGENTS.md 项目规则</string>
+    <string name="code_rules_global_label">全局规则</string>
+    <string name="code_rules_global_hint">对所有工作区与两种模式生效；超过 32768 字符的部分注入时会被截断</string>
+    <string name="code_rules_global_count_fmt">%1$d / %2$d 字符</string>
+    <string name="code_rules_project_title">项目规则（AGENTS.md）</string>
+    <string name="code_rules_project_status_loaded_fmt">已加载：%1$s</string>
+    <string name="code_rules_project_status_missing">未创建（在工作区根放置 AGENTS.md / CLAUDE.md / .cursorrules 即生效）</string>
+    <string name="code_rules_project_status_no_workspace">无工作区——请先在 Code 屏创建或选择工作区</string>
+    <string name="code_rules_project_create">创建模板</string>
+    <string name="code_rules_section_note">优先级：项目规则（AGENTS.md）＞ 全局规则 ＞ 一般偏好；均低于安全与权限约束</string>
 </resources>

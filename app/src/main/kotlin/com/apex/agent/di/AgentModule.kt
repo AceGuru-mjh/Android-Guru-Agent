@@ -159,7 +159,10 @@ object AgentModule {
         // T72：注入多模型运行时，按角色路由 PRIMARY/VISION/REASONING/SUMMARY
         modelRuntime: ModelRuntime,
         // v4：会话激活存储（与目录工具/编排器共享同一实例）
-        toolActivation: ToolActivationStore
+        toolActivation: ToolActivationStore,
+        // Issue #165：生命周期钩子派发口（SessionStart/UserPromptSubmit/Stop/
+        // PreCompact/SessionEnd；null 注入零开销，此处生产性传非空）
+        hookRunner: HookRunner
     ): AgentEngine {
         return ApexAgentEngine(
             llmClient = llmClient,
@@ -174,7 +177,8 @@ object AgentModule {
             memoryObserver = memoryObserver,
             connectedServicesProvider = connectedServicesProvider,
             modelRuntime = modelRuntime,
-            toolActivation = toolActivation
+            toolActivation = toolActivation,
+            hookRunner = hookRunner
         )
     }
 

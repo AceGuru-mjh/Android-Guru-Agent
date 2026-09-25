@@ -91,12 +91,16 @@ import com.apex.agent.core.code.subagent.CodeTaskTool
 import com.apex.agent.core.code.subagent.SubAgentRunner
 import com.apex.agent.core.engine.ApexAgentEngine
 import com.apex.agent.core.engine.EnvironmentInfoProvider
+import com.apex.agent.core.engine.HookRunner
+import com.apex.agent.core.engine.HookRegistryHookRunner
 import com.apex.agent.core.engine.PrivilegeInfoProvider
 import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.llm.LlmClient
 import com.apex.agent.core.llm.runtime.ModelRuntime
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.core.tools.hook.HookEvent
+import com.apex.agent.core.tools.hook.HookRegistry
 import com.apex.agent.core.tools.skill.SkillHotReloadLogLevel
 import com.apex.agent.core.tools.skill.SkillHotReloader
 import com.apex.agent.browser.BrowserEngine
@@ -117,6 +121,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
@@ -275,6 +282,37 @@ object ToolModule {
     )
 
     /**
+     * Issue #165 —— 钩子注册表（@Singleton）：声明式配置落
+     * `<filesDir>/hooks/hooks.json`（原子写 + 损坏备份重建），审计日志
+     * hooks.log 256KB 滚动；init 幂等预置三内置系统钩子。
+     * errorLog → AppLogger（PLUGIN 分类与 SkillHotReloader 惯例一致）。
+     * 作用域：进程级 Supervisor + IO，仅承载 fire-and-forget 派发。
+     */
+    @Provides
+    @Singleton
+    fun provideHookRegistry(@ApplicationContext context: Context): HookRegistry =
+        HookRegistry(
+            configDir = File(context.filesDir, "hooks"),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            errorLog = { message ->
+                AppLogger.instance.warn(LogCategory.PLUGIN, "HookRegistry", message)
+            }
+        )
+
+    /**
+     * Issue #165 —— 引擎侧钩子派发口：工具钩子与生命周期钩子共用同一
+     * [HookRegistry]（设置页启停对所有事件类型统一生效），异步派发走
+     * 独立 Supervisor 作用域（注册表自身作用域死亡不影响引擎侧 fire-and-forget）。
+     */
+    @Provides
+    @Singleton
+    fun provideHookRunner(hookRegistry: HookRegistry): HookRunner =
+        HookRegistryHookRunner(
+            registry = hookRegistry,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        )
+
+    /**
      * 工具使用统计（v2）：DefaultToolExecutor 每次调用后记录
      * 成败/耗时；设置页与诊断报告从这读取。单例，随进程存活。
      */
@@ -342,7 +380,9 @@ object ToolModule {
         toolUsageTracker: ToolUsageTracker,
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
-        breaker: ToolCircuitBreaker
+        breaker: ToolCircuitBreaker,
+        // Issue #165：钩子注册表（null 安全重载仅为可测性保留；生产性传非空）
+        hookRegistry: HookRegistry? = null
     ): com.apex.agent.core.tools.ToolExecutor = ToolExecutorBuilder(registry)
         // v1.0 #55 门控链：环境门 →（权限门 → 风险门）—— PermissionAwareToolGate
         // 把权限模式与风险确认合成一门：权限门显式放行/会话记忆命中时跳过
@@ -351,6 +391,26 @@ object ToolModule {
             ToolEnvironmentGate(environmentState),
             PermissionAwareToolGate(permissionModeGate, riskAwareToolGate)
         ))
+        // Issue #165 —— PreToolUse/PostToolUse 插槽：桥接 HookRegistry。
+        // isNoOp（无钩子关心）时返回 null，执行器走原路径零开销；
+        // blocked 透传 reason 短路（文案对齐 gate 拒绝）；modifiedArgs 改写
+        // 后续 schema 校验按新参数执行（钩子改不出绕过校验的载荷）。
+        // 注：builder 的 setter 形参非空且持期望类型——经 .apply{} 条件装配，
+        // lambda 才能推成 suspend（?.let{} / if/else 直传均不行，K2 限制，
+        // 见 .verify/scratch/t2c/test/BridgePatternCheck.kt 三轮验证）。
+        .apply {
+            if (hookRegistry != null) {
+                beforeToolHooks { toolId, args ->
+                    hookRegistry.dispatch(HookEvent.PreToolUse(toolId, args))
+                        .takeUnless { it.isNoOp }
+                }
+                afterToolHooks { toolId, args, result, isError, durationMs ->
+                    hookRegistry.dispatch(
+                        HookEvent.PostToolUse(toolId, args, result, isError, durationMs)
+                    )
+                }
+            }
+        }
         .usageTracker(toolUsageTracker)
         .policyResolver(
             DefaultToolRunPolicyResolver(TERMINAL_TOOL_RUN_POLICIES)
@@ -376,6 +436,8 @@ object ToolModule {
         commandPermissionGate: CommandPermissionGate,
         privilegeManager: PrivilegeManager,
         privilegeUiProvider: PrivilegeUiProvider,
+        // Issue #165：钩子注册表（主执行器插槽 + SubagentStop 派发）
+        hookRegistry: HookRegistry,
         memoryRecentEpisodesTool: MemoryRecentEpisodesTool,
         memorySearchNodesTool: MemorySearchNodesTool,
         memoryRecallMacroTool: MemoryRecallMacroTool,
@@ -772,10 +834,12 @@ object ToolModule {
         // #167：外层再包 SecretRedactingExecutor —— 批量步骤 / 技能步骤 /
         // 子代理工具链的输出同样被金库脱敏器兜底擦洗（双保险：引擎主入口的
         // provideToolExecutor 另有一层；脱敏幂等，叠加无害）。
+        // #165 钩子插槽仍在 delegate 内装配：PreToolUse 改参 / PostToolUse 审计
+        // 先于外层脱敏发生（脱敏幂等，两层组合无副作用）。
         val mainExecutor: ToolExecutor = SecretRedactingExecutor(
             delegate = buildV3Executor(
                 registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
-                environmentState, traceRecorder, circuitBreaker
+                environmentState, traceRecorder, circuitBreaker, hookRegistry
             ),
             redactor = vaultRepository.secretRedactor
         )
@@ -825,6 +889,18 @@ object ToolModule {
                     environmentInfoProvider = environmentInfoProvider,
                     modelRuntime = modelRuntime
                 )
+            },
+            // Issue #165 —— SubagentStop：子代理回合收官（结果返回前）非阻断派发。
+            // sessionId 置空：子代理引擎的会话号内生于其自身 execute，工具侧
+            // 不可见；subagentId 由类型 + 任务描述组成，审计日志可定位。
+            onSubagentStop = { typeKey, description, success ->
+                hookRegistry.dispatchFireAndForget(
+                    HookEvent.SubagentStop(
+                        sessionId = "",
+                        subagentId = "code_task-$typeKey-${description.take(32)}" +
+                            (if (success) "" else " (failed)")
+                    )
+                )
             }
         )
         registry.register(SafeAgentTool(CodeTaskTool(subAgentRunner)))
@@ -859,12 +935,15 @@ object ToolModule {
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
         circuitBreaker: ToolCircuitBreaker,
+        // Issue #165：钩子注册表（独立供给路径与 provideToolRegistry 内的
+        // 主执行器同源——同一 @Singleton，两处装配行为一致）
+        hookRegistry: HookRegistry,
         // #167：金库脱敏器 —— 引擎主入口的工具输出统一擦洗（纵深防御）。
         secretRedactor: SecretRedactor
     ): ToolExecutor = SecretRedactingExecutor(
         delegate = buildV3Executor(
             registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
-            environmentState, traceRecorder, circuitBreaker
+            environmentState, traceRecorder, circuitBreaker, hookRegistry
         ),
         redactor = secretRedactor
     )

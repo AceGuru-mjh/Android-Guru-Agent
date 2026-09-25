@@ -66,4 +66,17 @@
     <string name="code_perm_rule_delete">Delete rule</string>
     <string name="code_perm_save">Save</string>
     <string name="code_perm_cancel">Cancel</string>
+
+    <!-- 行为规则（v1.1 #164） -->
+    <string name="code_rules_section_title">Behavioral rules</string>
+    <string name="code_rules_section_subtitle">Global rules and AGENTS.md project rules</string>
+    <string name="code_rules_global_label">Global rules</string>
+    <string name="code_rules_global_hint">Apply to every workspace and both modes. Content beyond 32768 characters is truncated on injection.</string>
+    <string name="code_rules_global_count_fmt">%1$d / %2$d chars</string>
+    <string name="code_rules_project_title">Project rules (AGENTS.md)</string>
+    <string name="code_rules_project_status_loaded_fmt">Loaded: %1$s</string>
+    <string name="code_rules_project_status_missing">Not created (place AGENTS.md / CLAUDE.md / .cursorrules at the workspace root to activate)</string>
+    <string name="code_rules_project_status_no_workspace">No workspace — create or select one on the Code screen first</string>
+    <string name="code_rules_project_create">Create template</string>
+    <string name="code_rules_section_note">Priority: project rules (AGENTS.md) &gt; global rules &gt; general preferences; all sit below safety and permission constraints</string>
 </resources>

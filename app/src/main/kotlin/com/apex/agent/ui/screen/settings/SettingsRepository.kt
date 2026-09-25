@@ -448,4 +448,12 @@ data class AgentSettings(
     // 覆盖 mcp__ 动态 id）。决策器见 PermissionDecider，门见 PermissionModeGate。
     val permissionMode: PermissionMode = PermissionMode.DEFAULT,
     val permissionRules: List<PermissionRule> = emptyList(),
+
+    // ═══ 行为规则（v1.1 #164 Rules 规则系统）═══
+    // 全局规则：设置层持久化的自由文本，对所有工作区/两种模式生效，
+    // 注入系统提示词 "## Global Rules" 段（coding 模式经 additionalSystemContext
+    // 通道、agent 模式经 EnginePrompts.globalRules 参数——二选一，防双注）。
+    // 项目规则（AGENTS.md/CLAUDE.md/.cursorrules）不持久化，由 RulesProvider
+    // 每轮从工作区即时发现。默认空串 = 无规则，向后兼容零迁移。
+    val globalRules: String = "",
 )

@@ -21,18 +21,33 @@ import java.io.File
  * - 编码行为通过 [AgentConfig.additionalSystemContext] 通道注入（BUILD 循环 +
  *   coding 提示词段），不改动 EnginePrompts 本体，agent 模式零影响；
  * - 工作区切换 = 绑定 per-workspace 记忆（[codeMemory.bindWorkspace]）+ 重放
- *   该工作区历史 + JIT 上下文刷新（[CodeContextProvider]）。
+ *   该工作区历史 + JIT 上下文刷新（[CodeContextProvider]）；
+ * - 行为规则（#164）：[rulesProvider] 在每次 [refreshContext] 时从工作区
+ *   发现 AGENTS.md / CLAUDE.md / .cursorrules 项目规则，连同 [globalRules]
+ *   一起注入 Session Context 段（此时 EnginePrompts 的 globalRules 参数应
+ *   保持为空——防双注，接线约定见 [RulesProvider] KDoc）。
  */
 class CodeAgentEngine(
     private val delegate: ApexAgentEngine,
     private val codeMemory: CodeConversationMemory,
-    private val contextProvider: CodeContextProvider?
+    private val contextProvider: CodeContextProvider?,
+    /**
+     * 行为规则提供者（#164；null = 无规则系统，行为与 v1.0 完全一致）。
+     *
+     * 带默认值保持既有构造兼容：主控接线时在 CodeModule 的
+     * provideCodeAgentEngine 里追加 `rulesProvider = RulesProvider()`，
+     * 并由 VM 在设置变更/每轮发送前调 [updateGlobalRules]。
+     */
+    private val rulesProvider: RulesProvider? = null
 ) : AgentEngine {
 
     private var currentWorkspaceId: String? = null
     private var currentRoot: File? = null
     private var currentWorkspaceName: String? = null
     private var currentActiveFile: String? = null
+
+    /** 全局规则文本（设置层 AgentSettings.globalRules 的引擎侧缓存）。 */
+    private var globalRules: String = ""
 
     // ═══ AgentEngine 委托 ═══
 
@@ -87,6 +102,15 @@ class CodeAgentEngine(
      */
     fun prepareForTask() = refreshContext()
 
+    /**
+     * 更新全局规则（#164）：VM 在设置变更或每轮发送前调用，把
+     * AgentSettings.globalRules 同步进引擎（存字段，不立即刷上下文——
+     * 上下文本来就是每轮 JIT 重算的，下次 [prepareForTask] 自然生效）。
+     */
+    fun updateGlobalRules(rules: String) {
+        globalRules = rules
+    }
+
     /** 清当前工作区的对话历史（新会话）。 */
     fun clearConversation() {
         delegate.clearHistory()
@@ -121,6 +145,18 @@ class CodeAgentEngine(
                 projectStats = null,
                 activeFile = currentActiveFile
             )
+        }
+
+        // ═══ 行为规则（#164）：只追加，不动既有段落 ═══
+        // 全局规则（设置层持久化）+ 项目规则（工作区规则文件即时发现）。
+        // RulesProvider 的 IO 是同步的，与上面 contextProvider.provide 同一
+        // 线程约定（调用方 = VM 的 prepareForTask 链路）。
+        if (rulesProvider != null) {
+            rulesProvider.formatGlobalRules(globalRules)?.let { segments += it }
+            rulesProvider
+                .loadProjectRules(root, currentActiveFile)
+                ?.let { rulesProvider.formatProjectRules(it) }
+                ?.let { segments += it }
         }
 
         val context = segments.joinToString("\n\n")

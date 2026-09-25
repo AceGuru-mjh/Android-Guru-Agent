@@ -4,6 +4,7 @@ import android.content.Context
 import com.apex.agent.core.code.CodeAgentEngine
 import com.apex.agent.core.code.CodeContextProvider
 import com.apex.agent.core.code.CodeConversationMemory
+import com.apex.agent.core.code.RulesProvider
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.tools.CodeTodoTool
@@ -155,7 +156,9 @@ object CodeModule {
         connectedServicesProvider: AndroidConnectedServicesProvider,
         modelRuntime: ModelRuntime,
         codeMemory: CodeConversationMemory,
-        codeContextProvider: CodeContextProvider
+        codeContextProvider: CodeContextProvider,
+        // Issue #165：生命周期钩子派发口（coding 引擎实例同样接入）
+        hookRunner: com.apex.agent.core.engine.HookRunner
     ): AgentEngine {
         val codeConfig = AgentConfig(
             mode = AgentMode.BUILD,
@@ -180,12 +183,17 @@ object CodeModule {
             connectedServicesProvider = connectedServicesProvider,
             modelRuntime = modelRuntime,
             // 独立激活存储：tool_open 的会话激活不与 Agent 模式互相污染
-            toolActivation = ToolActivationStore()
+            toolActivation = ToolActivationStore(),
+            // Issue #165：coding 引擎同样接入生命周期钩子（会话/回合/压缩事件）
+            hookRunner = hookRunner
         )
         return CodeAgentEngine(
             delegate = inner,
             codeMemory = codeMemory,
-            contextProvider = codeContextProvider
+            contextProvider = codeContextProvider,
+            // Issue #164：规则提供者（无状态可直 new）——refreshContext 时
+            // 组装 Global/Project Rules 追加进 additionalSystemContext
+            rulesProvider = RulesProvider()
         )
     }
 }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hooks 钩子系统字符串（英文默认）。中文在 values-zh/strings_hooks.xml。 -->
+<resources>
+    <!-- 钩子分区（设置 → Agent 页） -->
+    <string name="code_hooks_section_title">Hooks</string>
+    <string name="code_hooks_section_subtitle">Tool &amp; session lifecycle hooks</string>
+    <string name="code_hooks_builtin_badge">Built-in</string>
+    <string name="code_hooks_enabled_label">Enable hook</string>
+    <string name="code_hooks_no_hooks">No hooks configured</string>
+
+    <!-- 事件徽标 -->
+    <string name="code_hooks_event_pre_tool_use">Before tool</string>
+    <string name="code_hooks_event_post_tool_use">After tool</string>
+    <string name="code_hooks_event_user_prompt_submit">Prompt submit</string>
+    <string name="code_hooks_event_session_start">Session start</string>
+    <string name="code_hooks_event_session_end">Session end</string>
+    <string name="code_hooks_event_stop">Turn end</string>
+    <string name="code_hooks_event_subagent_stop">Subagent end</string>
+    <string name="code_hooks_event_pre_compact">Before compact</string>
+</resources>

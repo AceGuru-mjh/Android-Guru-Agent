@@ -342,6 +342,17 @@ do_install() {
   local missing
   missing="$(run_in_guest "for p in $pkgs; do dpkg-query -W -f '\${Status}\n' \"\$p\" 2>/dev/null | grep -q 'install ok installed' || echo \"\$p\"; done")" || true
   if [ -n "$missing" ]; then fail "packages not installed after install stage: $missing"; fi
+  # Issue #163：预装沙箱 MCP 预设服务器（官方 reference servers，全局装进
+  # /usr/lib/node_modules）—— 避免 npx 首次冷启动在线下载包（移动网络下
+  # 60s 握手超时，App 侧已放宽到 180s 兜底，这里把冷启动直接消掉）。
+  # 仅影响后续 rootfs 构建，不影响已安装环境（设备端可 npm install -g 补装）。
+  # 注：@modelcontextprotocol/server-git 已从 npm 下架（registry 404），
+  # 预设清单用 server-memory 替代（与 McpManager.SANDBOX_PRESET_SERVERS 一致）。
+  run_in_guest "npm install -g --no-audit --no-fund @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory @modelcontextprotocol/server-everything" \
+    || log "⚠ npm 预装 MCP 服务器失败（不阻断构建 —— 设备端 npx 会按需下载）"
+  # 沙箱 fs 服务器的默认作用域目录（server-filesystem 要求目录存在才肯起，
+  # 预置条目 args 指向 /workspace —— 见 McpManager.SANDBOX_PRESET_SERVERS）
+  mkdir -p "$ROOTFS/workspace"
   stage_done install
   log "✅ install done (all $n packages verified installed)"
 }

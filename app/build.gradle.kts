@@ -118,6 +118,8 @@ dependencies {
     implementation(project(":core:code-tools"))
     implementation(project(":core:code-engine"))
     implementation(project(":platform:code-workspace"))
+    // 逆向 MCP Host（#173）：手机作为 MCP Server（streamable HTTP，纯 JVM）
+    implementation(project(":platform:mcp-host"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose

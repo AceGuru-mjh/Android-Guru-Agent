@@ -55,6 +55,11 @@ class ApexApp : Application(), Configuration.Provider {
     @Inject
     lateinit var guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService
 
+    // ★ #173 逆向 MCP Host：触发 @Singleton 创建 —— enabled 时 App 启动即自启
+    //（见 McpHostManager.init；未启用则零网络副作用）。
+    @Inject
+    lateinit var mcpHostManager: com.apex.agent.mcphost.McpHostManager
+
     /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 

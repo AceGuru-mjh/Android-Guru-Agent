@@ -167,7 +167,13 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (skill.isCrystallized) {
+                        if (skill.bundled) {
+                            // Issue #166：assets 释放的内置技能——「内置」徽标（复用状态 chip 样式）
+                            MarketStatusChip(
+                                text = stringResource(R.string.market_skill_bundled_badge),
+                                positive = true
+                            )
+                        } else if (skill.isCrystallized) {
                             MarketCrystallizedBadge()
                         } else if (skill.isLowEnergy) {
                             MarketLowEnergyBadge()
@@ -176,12 +182,16 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
                             checked = skill.enabled,
                             onCheckedChange = { viewModel.toggleSkill(skill.id, it) }
                         )
-                        IconButton(onClick = { pendingUninstall = skill }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.market_cd_uninstall_skill),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        // Issue #166：内置技能不可卸载（可禁用）——不渲染删除按钮，
+                        // 卡片下方给替代提示；SkillRegistry.uninstall 侧同样拦一道。
+                        if (!skill.bundled) {
+                            IconButton(onClick = { pendingUninstall = skill }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.market_cd_uninstall_skill),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -189,6 +199,15 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
             // 能量条
             Spacer(modifier = Modifier.height(4.dp))
             MarketEnergyBar(energy = skill.energy)
+            // Issue #166：内置技能的卸载替代提示（删除按钮已隐藏）
+            if (skill.bundled) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.market_skill_bundled_uninstall_blocked_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             // 成功率 + 调用计数
             if (skill.successCount + skill.failureCount > 0) {
                 Spacer(modifier = Modifier.height(2.dp))

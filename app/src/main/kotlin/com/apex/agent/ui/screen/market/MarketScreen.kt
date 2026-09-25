@@ -127,6 +127,8 @@ fun MarketScreen(viewModel: MarketViewModel = hiltViewModel()) {
         MarketSkillDetailDialog(
             skillId = detailSkillId,
             skillName = skillName,
+            // Issue #166：内置技能在详情标题行展示「内置」徽标（manifest.bundled → 行数据）
+            bundled = skillRow?.bundled == true,
             detailState = state.detailState,
             loading = state.detailLoading,
             onDismiss = viewModel::closeSkillDetail

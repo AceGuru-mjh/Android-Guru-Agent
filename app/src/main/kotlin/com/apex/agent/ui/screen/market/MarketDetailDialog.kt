@@ -61,7 +61,9 @@ internal fun MarketSkillDetailDialog(
     skillName: String,
     detailState: SkillDetailUiState?,
     loading: Boolean,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** Issue #166：内置技能（assets 释放）——标题行展示「内置」徽标。 */
+    bundled: Boolean = false
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -78,6 +80,22 @@ internal fun MarketSkillDetailDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontFamily = FontFamily.Monospace
                 )
+                // Issue #166：内置技能徽标（复用状态 chip 样式；样式先例见
+                // MarketComponents.MarketStatusChip / 内置模板徽标渲染）
+                if (bundled) {
+                    Spacer(Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Text(
+                            stringResource(R.string.market_skill_bundled_badge),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
             }
         },
         text = {

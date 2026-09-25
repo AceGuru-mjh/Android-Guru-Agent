@@ -56,7 +56,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 class SubAgentRunner(
     private val engineFactory: (AgentConfig) -> AgentEngine,
     private val maxConcurrent: Int = DEFAULT_MAX_CONCURRENT,
-    private val timeoutMs: Long = DEFAULT_TIMEOUT_MS
+    private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    /**
+     * Issue #165 —— 子代理回合结束回调（成功/失败/超时都算结束）：
+     * 装配层（ToolModule）用它派发 HookEvent.SubagentStop。
+     * 回调在 run 的收尾路径同步调用，异常由调用方自行隔离（钩子体系纪律：
+     * 生命周期事件不得影响工具结果）。null = 未接线（默认，零开销）。
+     */
+    private val onSubagentStop: (suspend (typeKey: String, description: String, success: Boolean) -> Unit)? = null
 ) {
 
     /**
@@ -224,6 +231,17 @@ class SubAgentRunner(
                 )
                 Result.success(SubAgentResult(output, iterations, toolCalls, durationMs, truncated = tooLong))
             }
+        }
+        // Issue #165 —— SubagentStop：回合收官点（结果返回前）。回调自身
+        // 异常由装配层隔离（见参数 KDoc），不碰 result。
+        onSubagentStop?.let { cb ->
+            runCatching { cb(type.key, trimmedDescription, result.isSuccess) }
+                .onFailure {
+                    AppLogger.instance.warn(
+                        LogCategory.ENGINE, TAG,
+                        "onSubagentStop 回调异常（已隔离）: ${it.message}"
+                    )
+                }
         }
         return result
     }

@@ -99,6 +99,17 @@ class AgentChatViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { role -> applyRoleToEngine(role) }
         }
+
+        // ═══ Issue #164：全局规则 → 引擎热更新 ═══
+        // 设置页 RulesSettingsSection 编辑后无需重启：EnginePrompts 的
+        // "## Global Rules" 段在下一轮 buildSystemPrompt 即生效（coding
+        // 模式走 CodeAgentEngine.rulesProvider 通道，两通道互斥防双注）。
+        viewModelScope.launch {
+            settingsRepository.agentSettings
+                .map { it.globalRules }
+                .distinctUntilChanged()
+                .collect { rules -> (agentEngine as? ApexAgentEngine)?.updateGlobalRules(rules) }
+        }
     }
 
     /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */

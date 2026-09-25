@@ -2,6 +2,7 @@ package com.apex.agent.core.tools.mcp
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -22,6 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
  *       "command": "npx",
  *       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/sdcard"],
  *       "env": { "FOO": "bar" },
+ *       "runInSandbox": true,
  *       "disabled": false
  *     },
  *     "remote": {
@@ -32,6 +34,10 @@ import kotlinx.serialization.json.jsonPrimitive
  *  }
  * }
  * ```
+ *
+ * STDIO 条目还接受可选布尔字段 `runInSandbox`（Issue #163）：true = 命令在
+ * PRoot Ubuntu 沙箱内启动（Android 宿主没有 npx/node 时的推荐形态）；
+ * 严格 Boolean 类型，缺失或非布尔（如字符串 "true"）一律落默认 false。
  *
  * 判定规则（与 Operit `mcp_config_transport_import` 的结论一致）：
  * - 有非空 `command` → STDIO；
@@ -101,6 +107,15 @@ object McpConfigImport {
         val disabled = entry["disabled"]?.jsonPrimitive?.booleanOrNull
             ?: (entry["disabled"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
 
+        // Issue #163：严格 Boolean —— 只认 JSON 布尔字面量（booleanOrNull 会把
+        // 字符串 "true" 的 content 也解析成 true，须先排除 isString）；缺失或
+        // 非布尔（字符串/数字/对象）一律落 false。沙箱路由是安全敏感开关，
+        // 与 disabled 的字符串宽容解析刻意不同。
+        val runInSandbox = (entry["runInSandbox"] as? JsonPrimitive)
+            ?.takeIf { !it.isString }
+            ?.booleanOrNull
+            ?: false
+
         val transport = when {
             command.isNotBlank() -> {
                 if (url.isNotBlank() && type.isBlank()) {
@@ -130,6 +145,7 @@ object McpConfigImport {
                 command = command.takeIf { it.isNotBlank() },
                 args = args,
                 env = env,
+                runInSandbox = runInSandbox,
                 headers = headers
             )
         )

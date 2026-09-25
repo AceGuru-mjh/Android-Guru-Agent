@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -576,6 +577,12 @@ private fun SkillListCard(skill: MarketSkillRow, viewModel: MarketViewModel) {
             trailing = {
                 if (skill.builtin) {
                     MarketStatusChip(text = stringResource(R.string.market_builtin), positive = false)
+                } else if (skill.bundled) {
+                    // Issue #166：assets 释放的内置技能——「内置」徽标（复用状态 chip 样式）
+                    MarketStatusChip(
+                        text = stringResource(R.string.market_skill_bundled_badge),
+                        positive = true
+                    )
                 } else if (skill.isCrystallized) {
                     MarketCrystallizedBadge()
                 } else if (skill.isLowEnergy) {
@@ -655,12 +662,20 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
     }
 
     if (showAddDialog) {
+        // Issue #163：沙箱可用性在对话框打开时重查（单次 exists() 系统调用，
+        // 开销可忽略）——rootfs 装好后无需重启即生效。判定与
+        // ProotMcpProcessLauncher 的门禁同源：`<filesDir>/rootfs/ubuntu/current`。
+        val context = LocalContext.current
+        val sandboxAvailable = androidx.compose.runtime.remember(showAddDialog) {
+            java.io.File(context.filesDir, "rootfs/ubuntu/current").exists()
+        }
         AddMcpDialog(
             onDismiss = { showAddDialog = false },
             onAdd = { config ->
                 viewModel.addMcpServer(config)
                 showAddDialog = false
-            }
+            },
+            sandboxAvailable = sandboxAvailable
         )
     }
     if (showImportDialog) {

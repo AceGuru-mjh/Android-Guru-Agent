@@ -524,6 +524,12 @@ class SkillUninstallTool(
         val skillId = json["skill_id"]?.jsonPrimitive?.content ?: return "Error: 'skill_id' required"
 
         val success = skillRegistry.uninstall(skillId)
-        return if (success) "✅ Skill '$skillId' uninstalled" else "Error: Skill '$skillId' not found"
+        // Issue #166：bundled 技能 uninstall 恒 false——文案区分「未找到」与「内置不可卸载」，
+        // 避免代理据此误判技能不存在而反复重装。
+        return if (success) {
+            "✅ Skill '$skillId' uninstalled"
+        } else {
+            "Error: Skill '$skillId' not found, or it is a bundled skill (bundled skills cannot be uninstalled, only disabled)"
+        }
     }
 }

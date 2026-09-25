@@ -83,7 +83,10 @@ class CodeViewModel @Inject constructor(
     private val codeTodoTool: CodeTodoTool,
     private val codeSessionStore: CodeSessionStore,
     private val workspaceRoots: CodeWorkspaceRoots,
-    private val userQuestionBridge: UserQuestionBridge
+    private val userQuestionBridge: UserQuestionBridge,
+    // Issue #164：全局规则（设置页 RulesSettingsSection 编辑）——每次发送前
+    // 同步到引擎，refreshContext 时经 RulesProvider 注入 additionalSystemContext
+    private val settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CodeUiState())
@@ -140,6 +143,10 @@ class CodeViewModel @Inject constructor(
                 inputDraft = ""
             )
         }
+
+        // Issue #164：发送前同步全局规则（设置页改动无需重启，下轮生效）。
+        // 引擎侧注入详见 CodeAgentEngine.refreshContext + RulesProvider。
+        codeEngineImpl?.updateGlobalRules(settingsRepository.agentSettings.value.globalRules)
 
         codeEngineImpl?.prepareForTask()
 

@@ -29,7 +29,14 @@ class SkillMenuProvider(
     }
 
     /**
-     * 获取内置模板（未安装但可安装的）
+     * 获取内置模板（未安装但可安装的）。
+     *
+     * Issue #166 历史兼容保留：v1.1 起内置优质技能改由 APK assets
+     * （assets/skills 目录，见 SkillRegistry.installBundled 与 SkillModule 首启释放）
+     * 提供并自动预装；本硬编码模板清单仅为兼容旧版「模板安装」入口与
+     * MarketInstallManager.installSkillTemplate 通道而原样保留，不再扩充。
+     * 注意：两者 id 命名空间已隔离（本清单为 web_scraper 等 5 个旧 id，
+     * assets 侧为 commit-message 等新 id，无冲突）。
      */
     fun getBuiltinTemplates(): List<SkillMenuItem> {
         val installedIds = skillRegistry.getInstalled().map { it.manifest.id }.toSet()

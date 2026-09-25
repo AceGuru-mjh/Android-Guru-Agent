@@ -95,7 +95,13 @@ data class MarketSkillRow(
     val tags: List<String> = emptyList(),
     val author: String = "",
     val version: String = "",
-    val trustLevel: String = "community"
+    val trustLevel: String = "community",
+    /**
+     * Issue #166：manifest.bundled——APK assets（assets/skills/）首启幂等释放的内置优质技能。
+     * 市场卡 / 详情显示「内置」徽标；卸载入口降级（内置可禁用不可卸载，
+     * SkillRegistry.uninstall 对 bundled 恒 false）。
+     */
+    val bundled: Boolean = false
 ) {
     /** 成功率 0..1。 */
     val successRate: Float get() =
@@ -295,7 +301,8 @@ class MarketViewModel @Inject constructor(
                     tags = it.manifest.tags,
                     author = it.manifest.author,
                     version = it.manifest.version,
-                    trustLevel = it.manifest.trustLevel
+                    trustLevel = it.manifest.trustLevel,
+                    bundled = it.manifest.bundled
                 )
             }
             val templates = skillMenuProvider.getBuiltinTemplates().map { t ->
@@ -354,6 +361,12 @@ class MarketViewModel @Inject constructor(
 
     fun uninstallSkill(skillId: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Issue #166：内置技能不可卸载（SkillRegistry.uninstall 对 bundled 恒 false），
+            // 提前拦下并给出正确提示——否则会落进「未找到技能」的误导文案。
+            if (_uiState.value.skills.any { it.id == skillId && it.bundled }) {
+                message(languageManager.getString(R.string.market_skill_bundled_uninstall_blocked_hint))
+                return@launch
+            }
             val ok = skillRegistry.uninstall(skillId)
             message(
                 if (ok) {

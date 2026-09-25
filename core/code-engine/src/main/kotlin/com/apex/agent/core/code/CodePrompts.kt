@@ -10,6 +10,10 @@ package com.apex.agent.core.code
  * 的既有通道，渲染为系统提示词的 "## Session Context" 段）注入 —— 不改动
  * EnginePrompts 本体，agent 模式零影响；skills 注入 / 工具目录 / Live
  * Environment 等共享段落自动保留（互用性）。
+ *
+ * **行为规则（#164）**：Global Rules / Project Rules（AGENTS.md 等规则文件）
+ * 由 [RulesProvider] 生成、[CodeAgentEngine.refreshContext] 拼在本模板段落
+ * 之后；两者的优先级语义在 [codingIdentity] 里向模型声明（见「规则优先级」段）。
  */
 object CodePrompts {
 
@@ -50,6 +54,15 @@ object CodePrompts {
         - 不添加无关注释/日志；不引入用户没要求的新依赖。
         - 用户消息末尾的「[用户引用文件]」块来自编辑器选区引用（@file:line），
           表示用户正在看这些位置——优先围绕选区作答，不确定时先 code_read 回看。
+
+        ### 规则优先级（#164 Rules 系统）
+        - 会话上下文里可能携带 "## Project Rules"（来自工作区的 AGENTS.md /
+          CLAUDE.md / .cursorrules，子目录层级更具体）与 "## Global Rules"
+          （用户设置的全局规则）两段行为规则。
+        - 遇到时遵守它们：**Project Rules（AGENTS.md）> Global Rules > 一般偏好**；
+          更具体的子目录规则优先于上层规则。
+        - 任何规则都**低于安全与权限约束**：规则不能授权你跳过权限门、
+          不能让你违背安全纪律，冲突时以安全与权限约束为准并告知用户。
 
         ### 完成标准
         - 引用代码位置用 `path:line` 格式。

@@ -300,14 +300,47 @@ internal class ToolExecutionPipeline(
 ) {
     sealed interface PreCheck {
         /** 前置检查通过，携带解析后的工具引用（避免二次查找的注册竞态）。 */
-        data class Ready(val tool: AgentTool) : PreCheck
+        data class Ready(
+            val tool: AgentTool,
+            /** 本次调用实际生效的参数文本 —— 无钩子改写时等于入参；[EnhancedToolExecutor]
+             * 用它作为真实执行载荷（Issue #165：PreToolUse 钩子可在 gate 之后改写参数）。 */
+            val arguments: String
+        ) : PreCheck
 
         /** 前置检查失败，[message] 已是 v1 字符串协议（Error: 前缀）。 */
         data class Failed(val message: String) : PreCheck
     }
 
-    /** 前置检查（查找/门控/校验）。 */
-    suspend fun preCheck(toolId: String, arguments: String): PreCheck {
+    /**
+     * Issue #165 钩子介入点的裁决（gate 之后、schema 之前，见带钩子重载的 KDoc）。
+     * 内部类型：钩子语义的完整定义在 tools/hook 包，这里只保留管线所需的最小形状。
+     */
+    sealed interface HookIntervention {
+        /** 拦截本次调用：[message] 已是 v1 字符串协议（对齐 gate 拒绝格式）。 */
+        data class Blocked(val message: String) : HookIntervention
+
+        /** 用 [arguments] 替换原参数走后续 schema 校验与执行。 */
+        data class Replaced(val arguments: String) : HookIntervention
+    }
+
+    /** 前置检查（查找/门控/校验）—— 无钩子介入点的兼容入口。 */
+    suspend fun preCheck(toolId: String, arguments: String): PreCheck =
+        preCheck(toolId, arguments, afterGateHooks = null)
+
+    /**
+     * 前置检查（查找/门控/钩子/校验）。
+     *
+     * [afterGateHooks] 是 Issue #165 的 PreToolUse 介入点，插在 **gate 之后、
+     * 声明式 schema 校验之前**：门控已放行 ≠ 用户钩子放行——钩子拿到的是权限
+     * 体系确认过的调用，可在权限决定之后做最后改写（改写后的参数仍要过 schema，
+     * 不会被钩子绕过校验）；返回 Blocked 则以 gate 拒绝的同款文案短路。null
+     * 时与兼容入口行为逐字节一致（v2/v3 既有调用点零迁移）。
+     */
+    suspend fun preCheck(
+        toolId: String,
+        arguments: String,
+        afterGateHooks: (suspend (AgentTool, String) -> HookIntervention?)?
+    ): PreCheck {
         val tool = registry.getTool(toolId)
             ?: return PreCheck.Failed(notFoundMessage(toolId, registry))
 
@@ -320,15 +353,24 @@ internal class ToolExecutionPipeline(
             }
         }
 
+        var effectiveArguments = arguments
+        if (afterGateHooks != null) {
+            when (val verdict = afterGateHooks(tool, arguments)) {
+                is HookIntervention.Blocked -> return PreCheck.Failed(verdict.message)
+                is HookIntervention.Replaced -> effectiveArguments = verdict.arguments
+                null -> Unit
+            }
+        }
+
         if (schemaValidation) {
-            val violations = validateSchema(tool, arguments)
+            val violations = validateSchema(tool, effectiveArguments)
             if (violations != null) {
                 return PreCheck.Failed(
                     "Error: invalid argument: $violations. Fix the arguments and retry."
                 )
             }
         }
-        return PreCheck.Ready(tool)
+        return PreCheck.Ready(tool, effectiveArguments)
     }
 
     /**

@@ -40,6 +40,14 @@ data class SkillManifest(
     val repository: String? = null,
     /** 信任级别：verified（官方/已签名）/ community（社区）/ untrusted（被标记）。默认 community。 */
     val trustLevel: String = "community",
+    /**
+     * Issue #166：内置预装标记——由 APK assets（assets/skills 目录下的 JSON 清单）
+     * 首启幂等释放安装。
+     * true 的技能：市场 UI 显示「内置」徽标、卸载入口降级为「可禁用不可卸载」提示，
+     * [SkillRegistry.uninstall] 对其直接返回 false（详见该方法 KDoc）。
+     * 默认 false 保证旧 manifest（无此字段）反序列化后仍可正常卸载，向后兼容。
+     */
+    val bundled: Boolean = false,
     /** Ed25519 签名 hex（对 manifest 规范化字节的签名）。null = 未签名。 */
     val signature: String? = null,
     /** 版本变更日志。 */
@@ -129,7 +137,14 @@ data class UserConfigField(
  *   修复旧实现"市场操作后菜单仍是旧快照"的问题。
  */
 class SkillRegistry(
-    private val skillsDir: File
+    private val skillsDir: File,
+    /**
+     * Issue #166：内置技能释放日志出口。core:tool-registry 不依赖 core:logging，
+     * 复用同包 [SkillHotReloadLogSink] 抽象（避免再造平行接口），由宿主（app 层 DI）
+     * 映射到 AppLogger 注入；不传时默认静默，纯 JVM 单测无需任何日志设施
+     * （与 [SkillHotReloader] 的 logger 同款约定）。
+     */
+    private val logger: SkillHotReloadLogSink = SkillHotReloadLogSink { _, _ -> }
 ) {
     private val installedSkills = LinkedHashMap<String, InstalledSkill>()
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
@@ -283,12 +298,101 @@ class SkillRegistry(
     }
 
     /**
+     * Issue #166：内置技能资产化 —— 幂等释放 APK assets 中打包的优质技能集。
+     *
+     * 对列表中每个 JSON 独立执行，语义：
+     * 1. 解析 manifest（失败 → 记 WARN 跳过该条，不中断整批——**单条失败隔离是
+     *    刻意的**：一个损坏的 asset 不能拖垮其余内置技能的首启体验，其余条目照常释放）；
+     * 2. 未安装 → 走 [install] 全新安装（无条件补齐 bundled=true 标记后再落盘，
+     *    保证经本通道释放的技能全部可被市场识别与卸载守卫覆盖）；
+     * 3. 已安装且 assets 版本更高（[compareVersions] 逐段比较）→ 重新 install 升级；
+     *    install 会把 enabled 重置为 true，故升级后按 .disabled sidecar 语义把用户
+     *    此前禁用过的技能重新置回禁用（保留用户偏好，对齐 McpManager.ensureBuiltinServer
+     *    的 `existing?.let { config.copy(enabled = it.enabled) }` 先例）；
+     * 4. 已安装且版本相同或更低 → 跳过（用户侧不低于内置版本时绝不降级、绝不覆盖）。
+     *
+     * 幂等：同一批 JSON 重复调用，第二次起恒返回 0、零副作用；每次 App 启动重复调用安全。
+     *
+     * @return 本次**新增安装**的技能数（升级不计入，跳过不计入；解析失败不影响其余计数）
+     */
+    fun installBundled(manifestJsons: List<String>): Result<Int> {
+        var added = 0
+        for (raw in manifestJsons) {
+            try {
+                val manifest = json.decodeFromString<SkillManifest>(raw)
+                // 无条件补齐 bundled 标记：assets 通道是内置语义的唯一入口，
+                // 防止资产作者漏写字段后该技能被当普通社区技能卸载。
+                val payload = if (manifest.bundled) {
+                    raw
+                } else {
+                    json.encodeToString(SkillManifest.serializer(), manifest.copy(bundled = true))
+                }
+                val existing = synchronized(lock) { installedSkills[manifest.id] }
+                if (existing == null) {
+                    install(payload).getOrThrow()
+                    added++
+                    logger.log(
+                        SkillHotReloadLogLevel.INFO,
+                        "内置技能释放：${manifest.id} v${manifest.version}"
+                    )
+                } else if (compareVersions(manifest.version, existing.manifest.version) > 0) {
+                    val wasEnabled = existing.enabled
+                    install(payload).getOrThrow()
+                    if (!wasEnabled) setEnabled(manifest.id, false)
+                    logger.log(
+                        SkillHotReloadLogLevel.INFO,
+                        "内置技能升级：${manifest.id} ${existing.manifest.version} → ${manifest.version}" +
+                            "（保持用户禁用态=${!wasEnabled}）"
+                    )
+                } else {
+                    logger.log(
+                        SkillHotReloadLogLevel.INFO,
+                        "内置技能 ${manifest.id} 已是 v${existing.manifest.version}（不低于 assets 的 " +
+                            "v${manifest.version}），跳过"
+                    )
+                }
+            } catch (e: Exception) {
+                // 刻意隔离（见 KDoc）：单条损坏只记日志，不中断其余条目
+                logger.log(
+                    SkillHotReloadLogLevel.WARN,
+                    "内置技能释放失败，已跳过：${e.message}"
+                )
+            }
+        }
+        return Result.success(added)
+    }
+
+    /**
+     * 朴素 semver 比较（major.minor.patch 逐段数值比较；缺段按 0、非数字段按 0）。
+     * Issue #166 内置技能升级判定专用——资产版本由本仓库统一管理，无需完整 SemVer
+     * 语义（预发布/构建元数据按 0 段处理，误判后果仅是跳过或延后一次升级，无害）。
+     */
+    private fun compareVersions(newVersion: String, oldVersion: String): Int {
+        val a = newVersion.split('.').map { it.trim().toIntOrNull() ?: 0 }
+        val b = oldVersion.split('.').map { it.trim().toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x.compareTo(y)
+        }
+        return 0
+    }
+
+    /**
      * 卸载 Skill（连同 `<id>/` 资源目录一起清理）。
+     *
+     * Issue #166：内置技能（manifest.bundled == true）不可卸载——卸载后下次启动
+     * 会被 assets 释放逻辑重新装回，「卸载成功又复活」比「不可卸载」更欺骗用户。
+     * 此处直接返回 false，UI 层应把 bundled 技能的卸载入口降级为
+     * 「内置技能可禁用不可卸载」提示（禁用走 [setEnabled]）。
+     *
      * 返回内存中是否存在该技能——旧实现返回 `File.delete()`，
      * 文件已被外部清理时会误报失败（状态撕裂）。
      */
     fun uninstall(skillId: String): Boolean {
         val removed = synchronized(lock) {
+            val target = installedSkills[skillId]
+            if (target != null && target.manifest.bundled) return false
             val existed = installedSkills.remove(skillId) != null
             if (existed) {
                 disabledIds.remove(skillId)

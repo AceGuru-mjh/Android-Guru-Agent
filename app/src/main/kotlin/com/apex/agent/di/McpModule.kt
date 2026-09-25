@@ -2,6 +2,8 @@ package com.apex.agent.di
 
 import android.content.Context
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.github.GithubApiService
 import com.apex.agent.github.GithubTokenManager
@@ -27,6 +29,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
@@ -94,6 +100,22 @@ object McpModule {
         BuiltinFsMcpBootstrap.ensureAndConnect(manager)
         BuiltinMemoryMcpBootstrap.ensureAndConnect(manager)
         BuiltinThinkingMcpBootstrap.ensureAndConnect(manager)
+        // Issue #163：沙箱预置（官方 reference servers，npx 在 PRoot Ubuntu 内
+        // 跑）—— **只预置不连接**（enabled=false）：rootfs 未就绪也先写入，连接
+        // 失败发生在用户主动启用/连接时，ProotMcpProcessLauncher 已有引导性
+        // 报错（提示先装 Ubuntu）。同名用户自建宿主条目不被动持（防劫持语义
+        // 与 ensureBuiltinServer 一致）。挂起写入走独立 IO scope，不阻塞注入
+        // 线程（与各 Bootstrap 的 @Provides 副作用模式一致）。
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            McpManager.SANDBOX_PRESET_SERVERS.forEach { preset ->
+                manager.ensureSandboxServer(preset).onFailure {
+                    AppLogger.instance.warn(
+                        LogCategory.SYSTEM, "McpModule",
+                        "预置沙箱 MCP '${preset.name}' 失败: ${it.message}"
+                    )
+                }
+            }
+        }
         return manager
     }
 }

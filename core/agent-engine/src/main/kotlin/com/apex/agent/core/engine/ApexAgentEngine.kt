@@ -52,10 +52,9 @@ import kotlinx.serialization.json.jsonPrimitive
  * - [AgentMode.CUSTOM]: Build loop with a user-supplied custom instruction
  *   appended to the system prompt.
  *
- * All modes:
- * - Stream every LLM response token-by-token via [AgentEvent.ResponseChunk] / [AgentEvent.ThinkingChunk].
- * - Honor [AgentConfig.thinkingLevel] by injecting [ThinkingLevel.toPromptInstruction] into the system prompt.
- * - Accumulate streamed tool-call argument fragments via [StreamingToolCallAccumulator].
+ * All modes: stream every token ([ResponseChunk]/[ThinkingChunk]), honor
+ * [AgentConfig.thinkingLevel] (prompt instruction), accumulate tool-call
+ * fragments via [StreamingToolCallAccumulator].
  */
 class ApexAgentEngine(
     private val llmClient: LlmClient,
@@ -93,8 +92,19 @@ class ApexAgentEngine(
      * 为空时引擎自建实例（单引擎场景等价）；DI 注入与 McpToolRegistrar /
      * 编排器共享同一实例。任务开始时 [execute] 会 reset（激活不跨会话泄漏）。
      */
-    private val toolActivation: ToolActivationStore = ToolActivationStore()
+    private val toolActivation: ToolActivationStore = ToolActivationStore(),
+    /**
+     * Issue #165 — 生命周期钩子派发口（SessionStart/UserPromptSubmit/Stop/
+     * PreCompact/SessionEnd）。装配层传 [HookRegistryHookRunner]；本类内部
+     * 经 [SessionHookCoordinator] 携带状态与派发（文件预算红线，插桩逻辑
+     * 内聚抽出）。null 时所有插桩点零开销，事件流语义与接入前完全一致。
+     */
+    private val hookRunner: HookRunner? = null
 ) : AgentEngine, ConfirmationSink {
+
+    /** #165 插桩句柄（null 安全派生；开号时快照当前模式名）。 */
+    private val sessionHooks: SessionHookCoordinator? =
+        hookRunner?.let { SessionHookCoordinator(it) { config.mode.name } }
 
     /**
      * 实际执行 LLM 调用的运行时。null [modelRuntime] 时回退到单 client，
@@ -186,6 +196,17 @@ class ApexAgentEngine(
         config = newConfig
     }
 
+    /**
+     * Issue #164 —— 全局规则（设置页编辑；Agent 模式经 EnginePrompts 的
+     * "## Global Rules" 段注入。coding 实例不设值——它走 RulesProvider 通道，
+     * 两通道互斥防双注）。
+     */
+    @Volatile
+    private var globalRulesText: String = ""
+
+    /** 更新全局规则（VM 监听设置流调用；下轮 buildSystemPrompt 生效）。 */
+    fun updateGlobalRules(rules: String) { globalRulesText = rules }
+
     /** 当前生效的 [AgentConfig]（供 UI 层做 read-modify-write）。 */
     fun currentConfig(): AgentConfig = config
 
@@ -198,19 +219,18 @@ class ApexAgentEngine(
     }
 
     /**
-     * 清空对话历史并清空持久化记忆（开新会话）。
+     * 清空历史与持久化记忆（开新会话）。#165：SessionEnd 经
+     * [SessionHookCoordinator.onSessionEnd] 派发（restoreHistory 是延续不在此列）。
      */
     fun clearHistory() {
+        sessionHooks?.onSessionEnd()
         conversationHistory.clear()
         memory?.clear()
     }
 
     /**
-     * 恢复历史会话上下文（历史对话功能）：内存 [conversationHistory] 与
-     * 持久化记忆同步替换为指定消息，后续对话自然接续该会话。
-     *
-     * 仅接收 user/assistant 文本对 —— 工具调用链的 toolCallId 配对无法从
-     * 展示态历史重建（强行回填会被 API 拒绝），调用方负责过滤。
+     * 恢复历史会话上下文：内存历史与持久化记忆同步替换，后续对话自然接续。
+     * 仅接收 user/assistant 文本对——工具调用链配对无法从展示态历史重建。
      */
     fun restoreHistory(messages: List<LlmMessage>) {
         conversationHistory.clear()
@@ -218,34 +238,24 @@ class ApexAgentEngine(
         memory?.save(messages)
     }
 
-    /**
-     * 当前持久化的消息条数（用于 UI 显示历史深度）。
-     */
+    /** 当前持久化的消息条数（UI 显示历史深度）。 */
     fun historyCount(): Int = memory?.count() ?: conversationHistory.size
 
-    /**
-     * 当前上下文的估算 token 数（用于 UI 顶部仪表盘实时显示占用）。
-     * 基于 [TokenEstimator.estimateHistory]，与自动压缩阈值计算同源。
-     */
+    /** 当前上下文估算 token 数（UI 仪表盘；与自动压缩阈值计算同源）。 */
     fun currentTokenCount(): Int = TokenEstimator.estimateHistory(conversationHistory)
 
-    /**
-     * 上下文 token 上限（分母，用于计算占用百分比）。
-     */
+    /** 上下文 token 上限（占用百分比的分母）。 */
     fun maxContextTokens(): Int = config.maxContextTokens
 
     /**
-     * 主动压缩上下文（由 UI 仪表盘的"压缩上下文"按钮触发）。
-     *
-     * 与自动压缩 [maybeCompressContext] 共用同一 [ContextCompressor]，
-     * 但不依赖 [execute] 流的 emit：直接返回 [CompressionReport] 供 ViewModel
-     * 自行决定如何呈现（Toast / 系统消息）。compressor 未注入时返回 null。
-     *
-     * 设计要点：手动压缩不受 [AgentConfig.compressionThreshold] 限制，
-     * 用户可随时触发（如长任务中途释放上下文窗口）。
+     * 主动压缩上下文（UI 仪表盘按钮触发）：与自动压缩共用 [ContextCompressor]，
+     * 不依赖 execute 流的 emit，直接返回 [CompressionReport] 供 ViewModel 呈现。
+     * 手动压缩不受 [AgentConfig.compressionThreshold] 限制。compressor 未注入 → null。
      */
     suspend fun compressNow(): CompressionReport? {
         val compressor = contextCompressor ?: return null
+        // #165：PreCompact——手动压缩（压缩器动历史前）。
+        sessionHooks?.onPreCompact()
         val report = runCatching {
             compressor.compress(
                 history = conversationHistory,
@@ -258,9 +268,7 @@ class ApexAgentEngine(
         return report
     }
 
-    /**
-     * 把消息加入内存历史，同时持久化到 [memory]（如果存在）。
-     */
+    /** 把消息加入内存历史，同时持久化到记忆（如果存在）。 */
     internal fun addMessage(message: LlmMessage) {
         conversationHistory.add(message)
         memory?.append(message)
@@ -289,31 +297,25 @@ class ApexAgentEngine(
      */
     override fun execute(input: String): Flow<AgentEvent> = execute(UserInput.text(input))
 
-    /**
-     * 多模态执行入口。
-     *
-     * - 把 [UserInput.images] 注入 `LlmMessage.User.images`，让 Vision-capable
-     *   LLM 真正看图（而非把图片当文件路径文本）。
-     * - 内存 `conversationHistory` 保留 base64 图片（当前会话上下文需要）。
-     * - 持久化 [memory] 只存剥离图片的文本副本（避免 base64 撑爆存储）。
-     * - 非图片 [UserInput.files] 作为路径上下文拼入文本，Agent 可用工具读取。
-     */
+    /** 多模态入口：images 注入 User 消息（Vision 真看图）；内存历史保留
+     * base64、持久化只存文本副本；files 拼路径上下文（工具可读取）。 */
     override fun execute(input: UserInput): Flow<AgentEvent> = flow {
         isRunning = true
         anyActionFailed = false
         // v4：新任务开始 —— 会话激活的工具不跨任务泄漏；降级状态复位。
         toolActivation.reset()
         toolDegradationLevel = 0
+        // #165：SessionStart 开号 + UserPromptSubmit。
+        sessionHooks?.onSessionBeginIfNeeded()
+        sessionHooks?.onUserPrompt(input.text)
         val startTime = System.currentTimeMillis()
         var totalToolCalls = 0
         var totalIterations = 0
         var taskHadFailure = false
 
         try {
-            // 隐式记忆采集（报告 P2）：任务开始。
-            // memoryObserver 内部自行处理无障碍未开启等异常，不会阻断主流程；
-            // 此处再包一层 try/catch 防止观察者异常泄漏导致 isRunning 卡死、
-            // onTaskFinish 永不调用（与 DefaultTaskOrchestrator 的防护保持一致）。
+            // 隐式记忆采集（P2）：观察者异常再包一层防线（与编排器一致），
+            // 防泄漏导致 isRunning 卡死、onTaskFinish 永不调用。
             try {
                 memoryObserver?.onTaskStart(input.text, null)
             } catch (e: Throwable) {
@@ -382,6 +384,9 @@ class ApexAgentEngine(
                     totalIterations = maxOf(totalIterations, iter)
                 }
             }
+
+            // #165：Stop——本回合正常完成（错误/中止不触发）。
+            sessionHooks?.onTurnCompleted()
         } catch (e: TimeoutCancellationException) {
             // P2-4 修复：TimeoutCancellationException 是 CancellationException 的子类，
             // 必须先于父类 catch，否则 Plan/Spec 确认超时被误报为 Aborted（超时分支死代码）。
@@ -1056,7 +1061,9 @@ class ApexAgentEngine(
             toolDegradationLevel >= EngineToolPlanner.DEGRADATION_NO_TOOLS,
         skillPrompts = skillRegistry?.getPromptInjections() ?: emptyList(),
         environmentSummary = environmentInfoProvider?.environmentSummary(),
-        connectedServices = connectedServicesProvider?.connectedServicesSummary()
+        connectedServices = connectedServicesProvider?.connectedServicesSummary(),
+        // Issue #164：全局规则（Agent 模式通道；coding 实例不设值，见 updateGlobalRules KDoc）
+        globalRules = globalRulesText
     )
 
     private fun buildPlanPrompt(input: String): String =
@@ -1148,6 +1155,9 @@ class ApexAgentEngine(
         val thresholdTokens = (config.maxContextTokens * config.compressionThreshold).toInt()
 
         if (currentTokens <= thresholdTokens) return
+
+        // #165：PreCompact——自动压缩（阈值已判定）。
+        sessionHooks?.onPreCompact()
 
         // 需要压缩
         val report = try {

@@ -62,7 +62,15 @@ class McpClient(
      * 沙箱 launcher，把 stdio 命令放进内嵌 Ubuntu rootfs 里执行（配置项
      * [McpServerConfig.runInSandbox] 为 true 时由 [McpManager] 启用注入）。
      */
-    private val processLauncher: McpProcessLauncher? = null
+    private val processLauncher: McpProcessLauncher? = null,
+    /**
+     * STDIO 请求超时（Issue #163）：initialize 握手与所有请求共用。
+     *
+     * 默认 60s（宿主直接 fork 的桌面行为）；沙箱形态由 [McpManager] 按
+     * `runInSandbox` 放宽到 [McpManager.SANDBOX_REQUEST_TIMEOUT_MS] —— npx
+     * 首次冷启动要下载包，60s 会在握手阶段就误判超时。HTTP/SSE 不受影响。
+     */
+    private val stdioRequestTimeoutMs: Long = HOST_STDIO_REQUEST_TIMEOUT_MS
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val requestId = AtomicInteger(0)
@@ -103,10 +111,12 @@ class McpClient(
                 throw McpException("STDIO 传输需要填写命令（command + args），例如 npx -y @modelcontextprotocol/server-memory")
             }
             // Issue #149：宿主未注入沙箱 launcher 时保持原行为（JvmProcessLauncher）。
+            // Issue #163：超时经构造参数注入（沙箱连接由 McpManager 放宽）。
             McpStdioTransport(
                 command = cmdLine,
                 env = config.env,
-                launcher = processLauncher ?: JvmProcessLauncher
+                launcher = processLauncher ?: JvmProcessLauncher,
+                requestTimeoutMs = stdioRequestTimeoutMs
             )
         }
         McpTransport.HTTP, McpTransport.SSE -> {
@@ -359,6 +369,12 @@ class McpClient(
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
             .build()
+
+        /**
+         * 宿主 STDIO 默认请求超时（与 [McpStdioTransport] 的默认值保持一致：
+         * 此处不放宽，桌面 JVM 行为不变；沙箱放宽常量见 [McpManager]）。
+         */
+        const val HOST_STDIO_REQUEST_TIMEOUT_MS = 60_000L
     }
 }
 

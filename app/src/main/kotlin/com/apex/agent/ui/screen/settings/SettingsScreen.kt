@@ -36,6 +36,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.R
 import com.apex.agent.core.llm.*
 import com.apex.agent.permission.PermissionSettingsSection
+import com.apex.agent.ui.component.BrandLogo
+import com.apex.agent.ui.component.ModelBrands
 import com.apex.agent.ui.theme.AccentPalette
 import com.apex.agent.ui.theme.accentSwatchColor
 import kotlinx.coroutines.launch
@@ -1048,6 +1050,13 @@ private fun ProvidersDialog(
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                // #174：服务商品牌图标
+                                BrandLogo(
+                                    brand = ModelBrands.byProviderId(prov.id),
+                                    size = 22.dp,
+                                    fallbackInitial = prov.displayName
+                                )
+                                Spacer(Modifier.width(8.dp))
                                 Text(prov.displayName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                                 if (prov.isBuiltIn) {
                                     // 修复：原 AssistChip(onClick={}) 渲染为可点击涟漪但无任何动作 —— 改为纯静态徽标

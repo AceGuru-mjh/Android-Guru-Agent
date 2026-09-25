@@ -66,6 +66,8 @@ import com.apex.agent.R
 import com.apex.agent.core.llm.ModelCapabilities
 import com.apex.agent.core.llm.ModelCapabilityHeuristics
 import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.ui.component.BrandLogo
+import com.apex.agent.ui.component.ModelBrands
 import com.apex.agent.core.llm.ModelProfileDefaults
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.llm.RemoteModelInfo
@@ -225,10 +227,11 @@ internal fun ModelSetupCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.SmartToy,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
+                // #174：卡片头部显示当前模型品牌图标（模型族 > 服务商 > 兑底）
+                BrandLogo(
+                    brand = selected?.let { ModelBrands.resolve(it.providerId, it.modelId) },
+                    size = 24.dp,
+                    fallbackInitial = provider?.displayName
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
@@ -354,7 +357,14 @@ internal fun ModelSetupCard(
                     onValueChange = {},
                     readOnly = true,
                     label = { Text(stringResource(R.string.model_select_provider)) },
-                    leadingIcon = { Icon(Icons.Outlined.SmartToy, null, Modifier.size(18.dp)) },
+                    leadingIcon = {
+                        // #174：当前服务商品牌图标
+                        BrandLogo(
+                            brand = ModelBrands.byProviderId(providerId),
+                            size = 20.dp,
+                            fallbackInitial = provider?.displayName
+                        )
+                    },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedProvider) },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -368,6 +378,13 @@ internal fun ModelSetupCard(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // #174：服务商菜单项品牌图标
+                                    BrandLogo(
+                                        brand = ModelBrands.byProviderId(prov.id),
+                                        size = 22.dp,
+                                        fallbackInitial = prov.displayName
+                                    )
+                                    Spacer(Modifier.width(8.dp))
                                     RadioButton(selected = prov.id == providerId, onClick = null)
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {
@@ -717,6 +734,13 @@ private fun AvailableModelsDialog(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // #174：模型族品牌图标（gpt→OpenAI / qwen→通义…）
+                                    BrandLogo(
+                                        brand = ModelBrands.byModelId(model.id),
+                                        size = 24.dp,
+                                        fallbackInitial = model.id
+                                    )
+                                    Spacer(Modifier.width(8.dp))
                                     RadioButton(selected = model.id == currentModelId, onClick = null)
                                     Spacer(Modifier.width(8.dp))
                                     Column(Modifier.weight(1f)) {

@@ -25,7 +25,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
@@ -54,6 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.ui.component.BrandLogo
+import com.apex.agent.ui.component.ModelBrands
 import com.apex.agent.R
 import kotlin.math.roundToInt
 import java.util.Locale
@@ -87,6 +88,7 @@ fun BrainMenuButton(
     var modelListOpen by remember { mutableStateOf(false) }
     // i18n：Toast 文案在组合内预取（onClick 非组合上下文）
     val onlyOneModelToast = stringResource(R.string.chat_only_one_model)
+    val brainDescription = stringResource(R.string.chat_cd_brain)
 
     val current = profiles.firstOrNull { it.id == currentProfileId } ?: profiles.firstOrNull()
     val arrowRotation by animateFloatAsState(
@@ -96,13 +98,17 @@ fun BrainMenuButton(
     )
 
     Box(modifier = modifier) {
-        IconButton(onClick = { menuOpen = !menuOpen }, modifier = Modifier.size(40.dp)) { // 对齐修复：与 Attach/Github/Send 统一 40dp（原 36dp）
-            Icon(
-                Icons.Default.Psychology,
-                contentDescription = stringResource(R.string.chat_cd_brain),
-                tint = if (menuOpen) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp)
+        IconButton(
+            onClick = { menuOpen = !menuOpen },
+            modifier = Modifier
+                .size(40.dp) // 对齐修复：与 Attach/Github/Send 统一 40dp（原 36dp）
+                .semantics { contentDescription = brainDescription }
+        ) {
+            // #174：入口显示当前模型品牌图标（模型族 > 服务商 > 通用首字母兜底）
+            BrandLogo(
+                brand = current?.let { ModelBrands.resolve(it.providerId, it.modelId) },
+                size = 24.dp,
+                fallbackInitial = current?.let { providerNameOf(it.providerId) }
             )
         }
 
@@ -157,6 +163,13 @@ fun BrainMenuButton(
                                 }
                                 .padding(horizontal = 12.dp)
                         ) {
+                            // #174：当前模型品牌图标
+                            BrandLogo(
+                                brand = current?.let { ModelBrands.resolve(it.providerId, it.modelId) },
+                                size = 30.dp,
+                                fallbackInitial = current?.let { providerNameOf(it.providerId) }
+                            )
+                            Spacer(Modifier.width(10.dp))
                             Column {
                                 Text(
                                     current?.name ?: stringResource(R.string.chat_not_configured),
@@ -216,6 +229,13 @@ fun BrainMenuButton(
                                         }
                                         .padding(horizontal = 12.dp)
                                 ) {
+                                    // #174：列表项品牌图标（模型族优先，聚合商托管也认）
+                                    BrandLogo(
+                                        brand = ModelBrands.resolve(profile.providerId, profile.modelId),
+                                        size = 26.dp,
+                                        fallbackInitial = providerNameOf(profile.providerId)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             profile.name,

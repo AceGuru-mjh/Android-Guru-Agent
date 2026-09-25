@@ -12,6 +12,9 @@ import com.apex.agent.platform.csmem.dream.DreamRenderer
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +24,7 @@ import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
 @HiltAndroidApp
-class ApexApp : Application(), Configuration.Provider {
+class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -66,6 +69,15 @@ class ApexApp : Application(), Configuration.Provider {
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
+            .build()
+
+    // #174 模型品牌图标：SimpleIcons CDN 提供的是 SVG，需在全局 ImageLoader
+    // 注册 SvgDecoder（Coil 2.x 经 ImageLoaderFactory 接管默认加载器；
+    // 附件预览/Markdown 图片等其他 Coil 调用点不受影响，仅多一种解码能力）。
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .components { add(SvgDecoder.Factory()) }
+            .crossfade(true)
             .build()
 
     override fun onCreate() {

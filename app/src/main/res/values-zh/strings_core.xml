@@ -151,6 +151,7 @@
     <string name="settings_mode_assist">Assist · 人工决策</string>
     <string name="settings_mode_custom">Custom · 自定义指令</string>
     <string name="settings_mode_desc">默认执行模式，修改后重启应用生效</string>
+    <string name="settings_think_auto">Auto · 自适应选档</string>
     <string name="settings_think_minimal">Minimal · 直接执行</string>
     <string name="settings_think_light">Light · 简短思考</string>
     <string name="settings_think_standard">Standard · 标准推理</string>

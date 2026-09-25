@@ -381,7 +381,14 @@ class SettingsRepository @Inject constructor(
 @kotlinx.serialization.Serializable
 data class AgentSettings(
     val defaultMode: String = "auto",        // auto | chat | build
-    val thinkLevel: String = "standard",     // standard | deep | minimal
+    val thinkLevel: String = "standard",     // standard | deep | minimal | auto
+    /**
+     * #168 聊天页思考档位覆盖（持久化）："" = 未覆盖（跟随 thinkLevel 启动默认 +
+     * Profile 原生 reasoningEffort）；"auto" = AUTO 自适应；其余 = ThinkingLevel
+     * 枚举名小写（none/light/standard/deep/maximum）。聊天页选择器写入，
+     * AgentChatViewModel init 恢复（patchConfig 运行时生效，无需重启）。
+     */
+    val thinkingLevelOverride: String = "",
     val maxIterations: Int = 20,
     val keepAlive: Boolean = true,
 

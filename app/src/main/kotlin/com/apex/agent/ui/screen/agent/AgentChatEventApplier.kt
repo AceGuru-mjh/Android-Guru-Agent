@@ -48,6 +48,13 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             }
         }
 
+        // ═══ #168 六档思考：AUTO 档逐轮拉取引擎侧自适应选档理由 ═══
+        is AgentEvent.IterationStart -> {
+            // 引擎在 emit IterationStart 前已解析本轮档位，此处拉取即最新决策；
+            // 非 AUTO 档引擎返回 null → 覆盖旧值，UI 不再显示过期理由。
+            _lastAdaptiveDecision.value = (agentEngine as? ApexAgentEngine)?.currentThinkingDecision()
+        }
+
         // ═══ Plan模式 ═══
         is AgentEvent.PlanGenerated -> {
             _uiState.update { it.copy(plan = event.plan) }

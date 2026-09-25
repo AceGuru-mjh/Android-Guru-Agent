@@ -800,6 +800,7 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
         }
         DropdownRow("Think Level",
             listOf(
+                "auto" to stringResource(R.string.settings_think_auto),
                 "minimal" to stringResource(R.string.settings_think_minimal),
                 "light" to stringResource(R.string.settings_think_light),
                 "standard" to stringResource(R.string.settings_think_standard),

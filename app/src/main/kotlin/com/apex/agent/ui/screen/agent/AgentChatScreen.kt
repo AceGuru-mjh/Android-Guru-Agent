@@ -285,9 +285,10 @@ fun AgentChatScreen(
                     }
                 )
 
-                // 思考深度
+                // 思考深度（#168 六档：AUTO 自适应 + 决策理由展示）
                 ThinkingLevelSelector(
                     current = uiState.thinkingLevel,
+                    adaptiveDecision = viewModel.lastAdaptiveDecision.collectAsStateWithLifecycle().value,
                     onSelect = { viewModel.setThinkingLevel(it) }
                 )
 

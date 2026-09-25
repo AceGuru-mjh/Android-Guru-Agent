@@ -138,6 +138,13 @@
     <string name="chat_thinking_standard_desc">Analyze → pick approach → execute</string>
     <string name="chat_thinking_deep_desc">Compare options → assess risks → pick best</string>
     <string name="chat_thinking_maximum_desc">Full reasoning chain + self-review + multi-round validation</string>
+    <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionEn，含执行策略差异） -->
+    <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
+    <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>
+    <string name="thinking_level_standard_desc">Standard 3-step Chain-of-Thought: decompose, reason, execute and observe</string>
+    <string name="thinking_level_deep_desc">Multi-path 5-step reasoning; self-check after failed or high-risk tool calls, iterations ×1.2</string>
+    <string name="thinking_level_maximum_desc">7-step Tree-of-Thoughts + post-tool verification + final self-check (goal / side effects / omissions), iterations ×1.5</string>
+    <string name="thinking_level_auto_desc">Auto: pick the level per turn from task complexity (length / steps / code / risk / errors)</string>
     <string name="chat_question_title">🧩 The agent needs your choice</string>
     <string name="chat_multi_select">Multi-select</string>
     <string name="chat_recommended">Recommended</string>

@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.thinking.ThinkingProfile
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.ToolCategory
 import com.apex.agent.core.tools.ToolRisk
@@ -71,10 +72,20 @@ internal object EnginePrompts {
         toolNameMap: Map<String, String> = emptyMap(),
         /** v4 — 降级到无工具时告知模型本轮纯文本作答。 */
         toolsUnavailable: Boolean = false,
+<<<<<<< HEAD
         /** #164 — 全局行为规则（见上 KDoc 双注防线；默认空串 = 段落省略）。 */
         globalRules: String = ""
+=======
+        /**
+         * #168 六档思考 — 当前生效档位画像（null = 兼容旧调用：退回
+         * [ThinkingLevel.toPromptInstruction] 的 5 档行为，既有测试零改动）。
+         * 非空时 Thinking 段注入：档位声明 + AUTO 决策理由 + 档位推理框架 +
+         * MAXIMUM 档的响应前自评清单。
+         */
+        currentProfile: ThinkingProfile? = null
+>>>>>>> f14b621 (feat(modes): ThinkingLevel 六档全面完善 —— AUTO 自适应 + 档位执行策略画像（#168）)
     ): String {
-        val thinking = config.thinkingLevel.toPromptInstruction()
+        val thinking = currentProfile?.promptInstruction ?: config.thinkingLevel.toPromptInstruction()
         return buildString {
             // ═══ Agent 角色：身份行（agentName 空 = 历史行为零变化）═══
             appendLine("You are ${config.agentName.ifBlank { "Apex Agent" }}, an AI AGENT running on an Android device.")
@@ -201,10 +212,22 @@ internal object EnginePrompts {
                 appendLine("## Custom Instructions")
                 appendLine(config.customInstruction)
             }
-            if (thinking.isNotBlank()) {
+            // ═══ #168 六档思考：档位声明 + AUTO 决策理由 + MAXIMUM 自评清单 ═══
+            // currentProfile = null → 旧 5 档行为（仅指令文本，既有测试零改动）。
+            if (thinking.isNotBlank() || currentProfile != null) {
                 appendLine()
                 appendLine("## Thinking Instructions")
-                appendLine(thinking)
+                currentProfile?.let { profile ->
+                    appendLine("Current thinking level: ${profile.level.name}.")
+                    profile.decisionReason?.let { reason ->
+                        appendLine("Adaptive selection for this turn: $reason")
+                    }
+                }
+                if (thinking.isNotBlank()) appendLine(thinking)
+                // MAXIMUM 档：响应前自评清单（模型在产出最终回复前看到，真实影响本轮输出）
+                if (currentProfile?.finalSelfCheck == true) {
+                    appendLine(ThinkingProfile.SELF_CHECK_CHECKLIST)
+                }
             }
             // 「函数调用」白名单：system prompt 工具清单与实际下发的 ToolDefinition 保持一致
             // Tool System v2：按类别分组 + 高风险 ⚠ 标记 —— 40+ 工具的字母序长列表

@@ -81,10 +81,18 @@ class AgentChatViewModel @Inject constructor(
     internal var currentHistorySessionCreatedAt: Long? = null
     internal var historyPersistJob: Job? = null
     val uiState: StateFlow<AgentChatUiState> = _uiState.asStateFlow()
+
+    /** #168 AUTO 档：最近一次自适应选档理由（引擎 IterationStart 后由 EventApplier 拉取刷新）。 */
+    internal val _lastAdaptiveDecision = MutableStateFlow<String?>(null)
+    val lastAdaptiveDecision: StateFlow<String?> = _lastAdaptiveDecision.asStateFlow()
     init {
         viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
         // P2-8/P3（6-c）：reasoningEffort chip 初始跟随默认 Profile；contextMaxTokens 回填引擎真实值（原恒 1 → 仪表盘 0%/上限1）。
         settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let { p -> _uiState.update { it.copy(reasoningEffort = p.reasoningEffort) } }
+        // #168：恢复聊天页持久化的思考档位覆盖（"" = 跟随启动默认档位，不动）。
+        settingsRepository.agentSettings.value.thinkingLevelOverride
+            .takeIf { it.isNotBlank() }
+            ?.let { saved -> thinkingLevelFromOverride(saved)?.let(::applyThinkingLevel) }
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
         // 历史对话：会话列表初始加载 + 消息流防抖自动归档
         installChatHistoryAutoPersist()
@@ -670,9 +678,14 @@ class AgentChatViewModel @Inject constructor(
     }
 
     fun setThinkingLevel(level: ThinkingLevel) {
-        _uiState.update { it.copy(thinkingLevel = level) }
-        // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
-        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+        // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）；
+        // AUTO 档不动模型原生 reasoning effort——逐轮档位由引擎侧选档器决定。
+        settingsRepository.updateAgentSettings { it.copy(thinkingLevelOverride = level.name.lowercase()) }
+        applyThinkingLevel(level)
+        if (level == ThinkingLevel.AUTO) {
+            _lastAdaptiveDecision.value = null // 决策理由由下一轮 IterationStart 刷新
+            return
+        }
         // T1（思考程度真实化）：思考档位同步映射为模型原生 reasoning 强度并
         // 持久化到默认 Profile —— DynamicLlmClient 监听 profiles 即时重建，
         // 配合能力位/差异化 body 修复后，下一次请求真实下发
@@ -683,6 +696,17 @@ class AgentChatViewModel @Inject constructor(
             ?: ReasoningEffort.NONE
         setReasoningEffort(effort)
     }
+
+    /** 档位 → UI 状态 + 引擎配置（setThinkingLevel 与启动恢复共用）。 */
+    private fun applyThinkingLevel(level: ThinkingLevel) {
+        _uiState.update { it.copy(thinkingLevel = level) }
+        // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+    }
+
+    /** #168：thinkingLevelOverride 字符串 → ThinkingLevel（未知/空值 → null = 不覆盖）。 */
+    private fun thinkingLevelFromOverride(value: String): ThinkingLevel? =
+        runCatching { ThinkingLevel.valueOf(value.trim().uppercase()) }.getOrNull()
 
     fun confirmPlan(confirmed: Boolean) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }

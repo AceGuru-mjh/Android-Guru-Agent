@@ -5,6 +5,7 @@ import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.engine.task.DanglingToolCallRepair
+import com.apex.agent.core.engine.thinking.ThinkingModeController
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.llm.runtime.LlmRequestContext
 import com.apex.agent.core.llm.runtime.ModelRuntime
@@ -52,9 +53,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * - [AgentMode.CUSTOM]: Build loop with a user-supplied custom instruction
  *   appended to the system prompt.
  *
- * All modes: stream every token ([ResponseChunk]/[ThinkingChunk]), honor
- * [AgentConfig.thinkingLevel] (prompt instruction), accumulate tool-call
- * fragments via [StreamingToolCallAccumulator].
+ * All modes:
+ * - Stream every LLM response token-by-token via [AgentEvent.ResponseChunk] / [AgentEvent.ThinkingChunk].
+ * - Honor [AgentConfig.thinkingLevel] (#168 six levels incl. AUTO) via [ThinkingModeController] profiles.
+ * - Accumulate streamed tool-call argument fragments via [StreamingToolCallAccumulator].
  */
 class ApexAgentEngine(
     private val llmClient: LlmClient,
@@ -99,7 +101,9 @@ class ApexAgentEngine(
      * 经 [SessionHookCoordinator] 携带状态与派发（文件预算红线，插桩逻辑
      * 内聚抽出）。null 时所有插桩点零开销，事件流语义与接入前完全一致。
      */
-    private val hookRunner: HookRunner? = null
+    private val hookRunner: HookRunner? = null,
+    /** #168 六档思考：AUTO 选档/迭代倍率/工具自检/自评清单全在此，引擎仅三个钩子。 */
+    private val thinkingController: ThinkingModeController = ThinkingModeController() // 默认值兼容旧测试
 ) : AgentEngine, ConfirmationSink {
 
     /** #165 插桩句柄（null 安全派生；开号时快照当前模式名）。 */
@@ -209,6 +213,9 @@ class ApexAgentEngine(
 
     /** 当前生效的 [AgentConfig]（供 UI 层做 read-modify-write）。 */
     fun currentConfig(): AgentConfig = config
+
+    /** #168 — 最近一次 AUTO 档选档决策（"LEVEL: 理由"；VM 于 IterationStart 后拉取展示）。 */
+    fun currentThinkingDecision(): String? = thinkingController.lastDecision?.let { "${it.level.name}: ${it.reason}" }
 
     /**
      * 读-改-写式更新配置：保留未触及字段，避免 [updateConfig] 全量替换时
@@ -633,8 +640,10 @@ class ApexAgentEngine(
     private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
 
-        while (isRunning && iteration < config.maxIterations) {
+        while (isRunning && iteration < thinkingController.effectiveMaxIterations(config.maxIterations)) {
             iteration++
+            // #168：解析本轮生效思考档位（AUTO → 复杂度选档；工具计数由控制器自持）。
+            thinkingController.onIterationStart(config, iteration, userText = lastUserPromptText(conversationHistory))
             // 每轮迭代都需要重新触发 ThinkingStart，否则 UI 的思考指示器
             // 在第 2..N 轮迭代不会刷新（与 orchestrator 路径行为一致）。
             var thinkingEmittedForIteration = false
@@ -643,8 +652,8 @@ class ApexAgentEngine(
             // P7: 每轮迭代前检查是否需要压缩
             maybeCompressContext(emit)
 
-            if (config.thinkingLevel != ThinkingLevel.NONE && !thinkingEmittedForIteration) {
-                emit(AgentEvent.ThinkingStart(iteration, config.thinkingLevel))
+            if (thinkingController.effectiveLevel(config) != ThinkingLevel.NONE && !thinkingEmittedForIteration) {
+                emit(AgentEvent.ThinkingStart(iteration, thinkingController.effectiveLevel(config)))
                 thinkingEmittedForIteration = true
             }
 
@@ -850,10 +859,10 @@ class ApexAgentEngine(
             }
         }
 
-        if (iteration >= config.maxIterations) {
+        if (iteration >= thinkingController.effectiveMaxIterations(config.maxIterations)) {
             emit(
                 AgentEvent.Error(
-                    "Reached maximum iterations (${config.maxIterations}). Task may be incomplete.",
+                    "Reached maximum iterations (${thinkingController.effectiveMaxIterations(config.maxIterations)}). Task may be incomplete.",
                     recoverable = false
                 )
             )
@@ -976,7 +985,7 @@ class ApexAgentEngine(
                 callId = toolCall.id,
                 toolName = toolCall.name,
                 arguments = toolCall.arguments,
-                output = result.take(config.maxToolOutputLength),
+                output = result.take(thinkingController.resolveToolOutputBudget(config.maxToolOutputLength)),
                 fullOutput = rawOutput.take(100_000),
                 success = actionSuccess,
                 durationMs = duration
@@ -984,9 +993,11 @@ class ApexAgentEngine(
         )
 
         // 截断后的结果存入历史（节省后续 token）
-        addMessage(
-            LlmMessage.ToolResult(toolCall.id, result)
-        )
+        addMessage(LlmMessage.ToolResult(toolCall.id, result))
+        // #168：工具计数 + DEEP/MAXIMUM 档在失败/HIGH 风险后注入自检提示（下一轮 LLM 可见）。
+        thinkingController.postToolCheckPrompt(
+            registryToolId, actionSuccess, toolRegistry.metadataOf(registryToolId)?.isHighRisk == true
+        )?.let { addMessage(LlmMessage.System(it)) }
 
         // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
         // 传入 actionSuccess 供 CS-Mem 蒸馏时过滤失败动作（避免"鼠标连点失败"
@@ -1053,6 +1064,7 @@ class ApexAgentEngine(
 
     private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
         config = config,
+        currentProfile = thinkingController.profileFor(config),
         privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL",
         visibleTools = EngineToolPlanner.visibleToolsFor(currentToolPlan, toolRegistry),
         catalogTools = EngineToolPlanner.catalogToolsFor(currentToolPlan, toolRegistry),
@@ -1152,7 +1164,7 @@ class ApexAgentEngine(
         val compressor = contextCompressor ?: return
 
         val currentTokens = TokenEstimator.estimateHistory(conversationHistory)
-        val thresholdTokens = (config.maxContextTokens * config.compressionThreshold).toInt()
+        val thresholdTokens = (config.maxContextTokens * thinkingController.resolveCompressionThreshold(config.compressionThreshold)).toInt()
 
         if (currentTokens <= thresholdTokens) return
 

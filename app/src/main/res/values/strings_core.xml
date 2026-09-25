@@ -151,6 +151,7 @@
     <string name="settings_mode_assist">Assist · human decides</string>
     <string name="settings_mode_custom">Custom · custom instructions</string>
     <string name="settings_mode_desc">Default execution mode; takes effect after an app restart</string>
+    <string name="settings_think_auto">Auto · adaptive per turn</string>
     <string name="settings_think_minimal">Minimal · act directly</string>
     <string name="settings_think_light">Light · brief thinking</string>
     <string name="settings_think_standard">Standard · normal reasoning</string>

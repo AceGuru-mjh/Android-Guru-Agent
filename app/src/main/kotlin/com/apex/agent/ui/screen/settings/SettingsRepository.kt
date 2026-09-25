@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.apex.agent.core.engine.modes.ModePreset
+import com.apex.agent.core.engine.modes.migrateLegacyCustomInstruction
+import com.apex.agent.core.engine.modes.selectedModePreset
 import com.apex.agent.core.llm.*
 import com.apex.agent.permission.PermissionMode
 import com.apex.agent.permission.PermissionRule
@@ -254,6 +257,21 @@ class SettingsRepository @Inject constructor(
         persistAgentSettings()
     }
 
+    /**
+     * #168 当前生效的 CUSTOM 模式指令（单一解析源，AgentModule 启动快照与
+     * AgentChatViewModel 运行时热切换共用）：
+     * 1. 选中预设（[AgentSettings.selectedModePresetId] 命中内置或用户预设）
+     *    → 该预设的 instruction；
+     * 2. 未选预设 → 回退旧单串 `custom_mode_instruction`（兼容通道）；
+     * 3. 都为空 → ""（CUSTOM 模式不注入任何额外指令）。
+     */
+    fun effectiveCustomInstruction(): String {
+        val agent = _agentSettings.value
+        selectedModePreset(agent.customModePresets, agent.selectedModePresetId)
+            ?.let { return it.instruction.trim() }
+        return prefs.getString(LEGACY_KEY_CUSTOM_INSTRUCTION, null)?.trim().orEmpty()
+    }
+
     // ── 持久化 ─────────────────────────────────────────────────
     private fun persistProfiles() =
         prefs.edit().putString(KEY_PROFILES, json.encodeToString(_profiles.value)).apply()
@@ -292,14 +310,35 @@ class SettingsRepository @Inject constructor(
     private fun readAgentSettings(): AgentSettings {
         val raw = prefs.getString(KEY_AGENT, null)
         if (raw != null) {
-            runCatching { json.decodeFromString<AgentSettings>(raw) }.getOrNull()?.let { return it }
+            runCatching { json.decodeFromString<AgentSettings>(raw) }.getOrNull()?.let { return migrateCustomModePresets(it) }
         }
         // 兼容旧版散装 Agent 设置 Key
-        return AgentSettings(
-            defaultMode = prefs.getString("agent_default_mode", "auto") ?: "auto",
-            thinkLevel = prefs.getString("agent_think_level", "standard") ?: "standard",
-            maxIterations = prefs.getInt("agent_max_iterations", 20),
-            keepAlive = prefs.getBoolean("agent_keep_alive", true),
+        return migrateCustomModePresets(
+            AgentSettings(
+                defaultMode = prefs.getString("agent_default_mode", "auto") ?: "auto",
+                thinkLevel = prefs.getString("agent_think_level", "standard") ?: "standard",
+                maxIterations = prefs.getInt("agent_max_iterations", 20),
+                keepAlive = prefs.getBoolean("agent_keep_alive", true),
+            )
+        )
+    }
+
+    /**
+     * #168 预设迁移：旧版 CUSTOM 单串指令（SharedPreferences 平键
+     * `custom_mode_instruction`，AgentChatViewModel 写入）→ 首个用户预设。
+     *
+     * 迁移条件见 [migrateLegacyCustomInstruction]（旧指令非空 + 尚无用户预设
+     * + 未迁移过 → 幂等）；迁移后自动选中，保证升级前后 CUSTOM 模式的
+     * system prompt 注入内容逐字一致（行为零变化）。新用户（无旧指令）
+     * 不产生任何预设，选中留空 = 走旧单串兼容路径（选中预设优先于旧串）。
+     */
+    private fun migrateCustomModePresets(settings: AgentSettings): AgentSettings {
+        if (settings.customModePresets.isNotEmpty()) return settings
+        val legacy = prefs.getString(LEGACY_KEY_CUSTOM_INSTRUCTION, null)
+        val migrated = migrateLegacyCustomInstruction(emptyList(), legacy) ?: return settings
+        return settings.copy(
+            customModePresets = listOf(migrated),
+            selectedModePresetId = migrated.id
         )
     }
 
@@ -352,6 +391,9 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ROLES = "model_roles_v2"
         private const val KEY_AGENT = "agent_settings_v2"
         private const val KEY_LEGACY_MIGRATED = "legacy_migrated_v2"
+
+        /** #168：旧版 CUSTOM 单串指令键（AgentChatViewModel 同款键名，迁移读取源）。 */
+        private const val LEGACY_KEY_CUSTOM_INSTRUCTION = "custom_mode_instruction"
 
         /** 加密 Preference 文件名 */
         private const val PREF_SECURE = "apex_secure_settings"
@@ -419,7 +461,18 @@ data class AgentSettings(
     val maxToolOutputLength: Int = 2000,
 
     // ── 反思 ──
-    val reflectionRounds: Int = 1,            // 1..3
+    val reflectionRounds: Int = 1,            // 1..3（设置页 Slider 绑定）
+
+    // ═══ #168 CUSTOM 模式预设（多套命名指令）═══
+    // customModePresets 只存用户自定义预设；内置 4 套由
+    // BuiltinModePresets.ALL 运行时合成（effectiveModePresets）。
+    // selectedModePresetId = "" → 未选：回退旧单串 custom_mode_instruction
+    // （AgentChatViewModel 兼容通道）；选中预设的 instruction 由 VM 拍平进
+    // AgentConfig.customInstruction（既有 "## Custom Instructions" 注入点，
+    // 引擎/提示词零新概念）。旧单串首启自动迁移为预设（幂等，见
+    // SettingsRepository.migrateCustomModePresets）。
+    val customModePresets: List<ModePreset> = emptyList(),
+    val selectedModePresetId: String = "",
 
     // ── 界面 ──
     val themeMode: String = "system",         // system | dark | light

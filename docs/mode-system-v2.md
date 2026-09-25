@@ -169,22 +169,127 @@ AgentChatDialogs（六档选择器）──► AgentChatViewModel.setThinkingLev
   `AgentSettings.thinkingLevelOverride`）；Plan 人控 = 确认卡内联操作
   （无需设置）；终端策略 = 系统提示词常开 + 顾问自适应（无需设置）。
 
-## 5. 文件索引
+## 5. AgentMode 六模式执行差异（#168，Task 4-c）
+
+4-a/4-b 之后，六模式中 HUMAN_ASSIST 与 CUSTOM 仍只靠提示词差异驱动
+（模型不守约时行为回落到 BUILD）。4-c 为两者补上**引擎级专属执行行为**。
+
+### 5.1 六模式 × 行为矩阵
+
+| 模式 | 执行流 | 工具策略 | 人工介入点 | 提示词段 |
+|------|--------|---------|-----------|---------|
+| BUILD | 流式 ReAct：思考→行动→观察→…→首个纯文本即收尾 | 全量 CORE，鼓励激进使用 | 无（高风险工具仍走权限门） | `## Mode: BUILD` |
+| PLAN | 规划（只读）→确认卡（勾选/重排）→拓扑锁定→按锁定序执行→只读反思 | 规划期零工具（READ-ONLY 段）；执行期全量 | 计划确认卡（Phase 3，5 分钟超时拒绝） | `## Mode: PLAN` + Planning Phase 段 |
+| SPEC | 规格（目标/需求/约束/验收/交付物）→确认→逐交付物 Build 循环→总结 | 规格期零工具；执行每步带全量规格上下文 | 规格确认卡（Phase 3） | `## Mode: SPEC` |
+| REFLECTION | 草稿（流式）→评审（ReflectionReview 卡）→修正 ×N（N=反思轮数 1-3） | 同 BUILD；评审/修正为纯 LLM 轮 | 轮间评审卡只读展示；轮数经设置页 Slider 配置 | `## Mode: REFLECTION` |
+| **HUMAN_ASSIST** | BUILD 循环 + **决策点检测拦截**：响应摆出「方案A…方案B…」→自动转人工选择→回填继续 | 同 BUILD；另要求模型主动 ask_user_choice（检测器是兜底） | **每个检出决策点**：UserInputRequired(CHOICE) 挂起等待，5 分钟超时回退草稿 | `## Mode: HUMAN_ASSIST` |
+| **CUSTOM** | BUILD 循环 + 选中预设指令注入（多套命名预设，单选即用） | 同 BUILD；预设可自带工具约束 | 预设管理（设置页 + 聊天页 chip 编辑）；无运行时打断 | `## Mode: CUSTOM` + `## Custom Instructions` |
+
+### 5.2 HUMAN_ASSIST 决策点检测（engine/assist/）
+
+提示词要求模型多选时调 `ask_user_choice`，但模型经常**直接写出方案对比文本**
+而不调工具——纯文本轮一结束引擎就 ResponseComplete，人工介入落空。4-c 在
+引擎纯文本响应分支加**后置兜底拦截**：
+
+```
+assistant 纯文本（无 toolCalls）
+  └─ mode == HUMAN_ASSIST?
+       └─ DecisionPointDetector.detect(text)
+            ├─ null → 照常 ResponseComplete 收尾（安全降级）
+            └─ 检出 → HumanAssistFlow:
+                 emit UserInputRequired(question, CHOICE)   ← 选项按 `1. xxx` 行编码，
+                 awaitUserInput() 挂起                        UserInputDialog 直接渲染单选卡
+                 用户答复 → label→key→序号 三级匹配
+                 回填 User("用户选择：<key>（<label>）——请按该选择继续")
+                 continue 下一轮迭代（不走 ResponseComplete）
+```
+
+**检测规则**（中英双语，`DecisionPointDetector`，纯 Kotlin 可测）：
+
+1. **编号方案**（优先）：`方案一/1/A/（B）`、`Option A / option 1 / Approach B`、
+   行首 `A. / B) / 1) / 2.`、圆圈 `①②③`、keycap `1️⃣2️⃣`；每方案提取
+   label（同行首句，≤60 字符）+ detail（同行后续，≤80 字符）；**≥2 个不同
+   编号才构成决策点**（同一编号重复提及只计一次，单方案陈述不触发）；
+2. **疑问选择**：`……还是……？`（问句收尾）/ `should I … or …?` /
+   `do you want … or …?` / `either … or …?` → 两端短语各成一选项；
+3. **显式请求降级**：`需要你确认/请选择/你希望/which do you prefer/please
+   choose/awaiting your confirmation` 命中但无结构化选项 → 降级双选项
+   （继续 / 停止并说明），绝不静默通过。
+
+**排除规则**：fenced（\`\`\`）与行内（\`）代码块先整体剥离（代码里出现
+`option 1`/`a or b` 是常态）；空文本直接 null。
+
+**降级语义**：用户空答复（超时/取消）→ 拦截放弃，草稿作为最终回复 ——
+绝不因拦截失败丢掉已生成的回复。UI 侧（AgentChatEventApplier）在
+UserInputRequired 时把已流出的草稿落为独立 Agent 消息，避免与下一轮
+回答拼接。
+
+### 5.3 CUSTOM 模式预设系统（engine/modes/ + 设置页 + 聊天页）
+
+单串 `custom_mode_instruction` 升级为**多套命名预设**：
+
+- **数据模型**：`ModePreset(id, name, instruction, builtin, createdAt)`
+  （@Serializable，随 `AgentSettings.customModePresets` JSON 持久化）+
+  `selectedModePresetId`；
+- **内置 4 套**（`BuiltinModePresets.ALL`，锁标不可删改、可复制）：
+  翻译官（双语文本互译/保格式/零解释）、代码评审（Verdict→分级
+  Findings→Suggested patch）、头脑风暴（≥5 类点子/不 prematurely 收敛/
+  🌙 moonshot 标记）、严谨科学家（Claim→Evidence→Confidence→Caveats/
+  区分事实与推测/主动找反证）；
+- **生效链路**：选中预设的 instruction 拍平进 `AgentConfig.customInstruction`
+  （**复用既有 `## Custom Instructions` 注入点，引擎/提示词零新概念**）；
+  `SettingsRepository.effectiveCustomInstruction()` 是单一解析源
+  （选中预设优先 → 回退旧单串 → 空）；AgentModule 启动快照与
+  AgentChatViewModel 的 agentSettings collector（热切换，下一轮请求生效）
+  共用；
+- **迁移**：首启若无用户预设且旧单串非空 → 自动转为「迁移的自定义指令」
+  预设并选中（幂等；升级前后 CUSTOM 模式注入内容逐字一致）；
+- **UI**：设置页「自定义模式预设」分区（列表卡 + 单选 + 新建/编辑/删除
+  确认 + 内置锁标/复制）；聊天页顶栏选中预设显示**预设名 chip**（点击
+  编辑该预设；切到 CUSTOM 且有预设时优先弹预设编辑，无预设走旧单串
+  对话框）。
+
+### 5.4 模式指南与反思轮数 UI
+
+- **ModeGuideSheet**（模式选择器「?」图标打开的底部弹层）：六模式各一节
+  ——图标 + 名称 + 一句话说明 + **适用场景 / 执行流 / 工具策略 / 人工
+  介入点 / 提示词段**五维行为矩阵（文案与实现一一对应），底部六档思考
+  画像简表（数据直读 `ThinkingProfile.forLevel` 静态表，UI 与引擎永远
+  同源）；
+- **反思轮数 Slider**（1-3，绑定 `AgentSettings.reflectionRounds`）在
+  设置页 Agent 分区既有（4-a 前已落地），驱动 REFLECTION 模式的评审-
+  修正轮数；
+- 引擎侧零净增腾挪：spec/reflect prompt 包装器（5 个私有函数，25 行）
+  迁至 `EnginePromptDelegates.kt`（同包顶层扩展，调用点零改动），
+  `toolRegistry` 构造参数 private→internal（一词），HUMAN_ASSIST 接线
+  13 行插入 executeBuildLoop 纯文本分支 —— 引擎保持恰 1200 行。
+
+## 6. 文件索引
 
 | 关注点 | 文件 |
 |--------|------|
 | 六档画像/选档器/控制器 | `core/agent-engine/.../engine/thinking/`（三件套，4-a） |
+| 决策点检测器 | `core/agent-engine/.../engine/assist/DecisionPointDetector.kt`（4-c） |
+| 人工辅助执行策略 | `core/agent-engine/.../engine/assist/HumanAssistFlow.kt`（4-c） |
+| CUSTOM 预设模型/内置/Store | `core/agent-engine/.../engine/modes/ModePresets.kt`（4-c） |
+| spec/reflect prompt 桥接（迁出） | `core/agent-engine/.../engine/EnginePromptDelegates.kt`（4-c） |
 | 计划拓扑/调整/锁定 | `core/agent-engine/.../engine/plan/PlanGraph.kt` |
 | 确认决策承载 | `core/agent-engine/.../engine/plan/PlanConfirmationRequest.kt` |
 | 确认等待（迁出引擎） | `core/agent-engine/.../engine/plan/PlanExecutionSupport.kt` |
 | 终端顾问 | `core/agent-engine/.../engine/terminal/TerminalProactivityAdvisor.kt` |
-| 引擎接线（Phase 3.5/两钩子） | `core/agent-engine/.../engine/ApexAgentEngine.kt`（1200 行门禁内零净增） |
+| 引擎接线（HUMAN_ASSIST 拦截/Phase 3.5/两钩子） | `core/agent-engine/.../engine/ApexAgentEngine.kt`（1200 行门禁内零净增） |
 | 提示词（Terminal-Use/Planning Phase） | `core/agent-engine/.../engine/EnginePrompts.kt` |
+| 预设设置分区 + 编辑器 | `app/.../ui/screen/settings/ModePresetEditorSection.kt`（4-c） |
+| 预设持久化/迁移/解析源 | `app/.../ui/screen/settings/SettingsRepository.kt`（AgentSettings 字段，4-c） |
+| 模式指南弹层 | `app/.../ui/screen/agent/ModeGuideSheet.kt`（4-c） |
+| 模式选择器「?」入口/预设 chip | `app/.../ui/screen/agent/AgentModeSelector.kt` / `AgentChatScreen.kt`（4-c） |
+| 事件归约（拦截草稿落消息）/状态 | `app/.../ui/screen/agent/AgentChatEventApplier.kt` / `AgentUiModels.kt` |
 | 确认卡/锁定卡 | `app/.../ui/screen/agent/AgentChatPlanCards.kt` |
-| 事件归约/状态 | `app/.../ui/screen/agent/AgentChatEventApplier.kt` / `AgentUiModels.kt` |
 | 会话 Agent 徽标 | `app/.../ui/screen/terminal/TerminalScreen.kt`（SessionChip） |
-| 测试 | `plan/PlanGraphTest.kt`、`plan/PlanModeHumanControlTest.kt`、`terminal/TerminalProactivityAdvisorTest.kt` |
+| i18n（预设/指南双语） | `app/src/main/res/values[-zh]/strings_modes.xml`（4-c） |
+| 测试 | `assist/DecisionPointDetectorTest.kt`（21）、`assist/HumanAssistFlowTest.kt`（10）、`assist/HumanAssistModeTest.kt`（4，引擎级）、`modes/ModePresetsTest.kt`（17）、`plan/PlanGraphTest.kt`、`plan/PlanModeHumanControlTest.kt`、`terminal/TerminalProactivityAdvisorTest.kt` |
 
-质量门禁：引擎 `wc -l` = 1200（≤ 上限）；`scripts/check_file_size.sh`、
+质量门禁：引擎 `wc -l` = 1200（= 上限，零净增）；`scripts/check_file_size.sh`、
 `check_code_quality.sh`（无 printStackTrace/反射分发）、括号平衡全部通过；
-agent-engine 全量 215 test 绿（kotlinc 2.0.21 单模块编译 + JUnitCore 实跑）。
+agent-engine 全量 267 test 绿（215 既有 + 52 新增，kotlinc 2.0.21 单模块
+编译 + serialization 插件 + JUnitCore 实跑）。

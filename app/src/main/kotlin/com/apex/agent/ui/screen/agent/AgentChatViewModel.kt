@@ -12,14 +12,17 @@ import com.apex.agent.core.llm.ImageContent
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.ReasoningEffort
+import com.apex.agent.core.engine.modes.ModePreset
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.AgentSettings
 import com.apex.agent.ui.screen.settings.SettingsRepository
+import com.apex.agent.ui.screen.settings.activeModePreset
 import com.apex.agent.ui.screen.settings.activeRole
 import com.apex.agent.ui.screen.settings.allRoles
+import com.apex.agent.ui.screen.settings.withPresetUpserted
 import com.apex.agent.ui.screen.settings.withRoleActivated
 import com.apex.agent.ui.language.LanguageManager
 import com.apex.agent.R
@@ -117,6 +120,23 @@ class AgentChatViewModel @Inject constructor(
                 .map { it.globalRules }
                 .distinctUntilChanged()
                 .collect { rules -> (agentEngine as? ApexAgentEngine)?.updateGlobalRules(rules) }
+        }
+
+        // ═══ #168 CUSTOM 模式预设：选中预设/指令变化 → 引擎热更新 ═══
+        // 选中预设持久化在 agentSettings（设置页/聊天页均可改）；此处把
+        // 「当前生效指令」（选中预设优先，回退旧单串）拍平进引擎
+        // customInstruction——下一轮请求生效，无需重启。无预设无旧串时
+        // 置 null（CUSTOM 模式不注入额外指令，语义合法）。
+        viewModelScope.launch {
+            settingsRepository.agentSettings
+                .map { settingsRepository.effectiveCustomInstruction() }
+                .distinctUntilChanged()
+                .collect { instruction ->
+                    (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+                        cfg.copy(customInstruction = instruction.ifBlank { null })
+                    }
+                }
+        }
         }
     }
 
@@ -281,6 +301,16 @@ class AgentChatViewModel @Inject constructor(
     )
     val customInstruction: StateFlow<String> = _customInstruction.asStateFlow()
 
+    /**
+     * #168 当前选中的 CUSTOM 模式预设（null = 未选，回退旧单串指令）。
+     * AgentChatScreen 据此在顶部显示预设名 chip（点击编辑该预设）。
+     */
+    val activeModePreset: StateFlow<ModePreset?> =
+        settingsRepository.agentSettings
+            .map { it.activeModePreset() }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     fun setCustomInstruction(text: String) {
         val trimmed = text.trim()
         _customInstruction.value = trimmed
@@ -288,9 +318,9 @@ class AgentChatViewModel @Inject constructor(
             .edit()
             .putString(KEY_CUSTOM_INSTRUCTION, trimmed)
             .apply()
-        // CUSTOM 模式运行时立即生效；非 CUSTOM 模式在下次切换时携带。
-        // P1-1（6-c）：patchConfig 替代全新 AgentConfig+updateConfig（后者重置全部引擎设置）。
-        if (_uiState.value.mode == AgentMode.CUSTOM) {
+        // #168：旧单串仅是后备通道——无选中预设时才即时生效；
+        // 选中预设时预设指令优先（agentSettings collector 已接管）。
+        if (activeModePreset.value == null && _uiState.value.mode == AgentMode.CUSTOM) {
             (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(customInstruction = trimmed) }
         }
     }
@@ -663,12 +693,25 @@ class AgentChatViewModel @Inject constructor(
     fun setMode(mode: AgentMode) {
         _uiState.update { it.copy(mode = mode) }
         // P1-1（6-c）：patchConfig 只改 mode/customInstruction，保留其余引擎配置（原 updateConfig 重置全部）。
+        // #168：CUSTOM 模式注入当前生效指令（选中预设优先，回退旧单串）。
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
             cfg.copy(
                 mode = mode,
-                customInstruction = if (mode == AgentMode.CUSTOM) _customInstruction.value else cfg.customInstruction
+                customInstruction = if (mode == AgentMode.CUSTOM) {
+                    settingsRepository.effectiveCustomInstruction().ifBlank { cfg.customInstruction }
+                } else cfg.customInstruction
             )
         }
+    }
+
+    /**
+     * #168 upsert CUSTOM 模式预设（聊天页顶栏 chip 编辑入口）。
+     *
+     * 保存后自动选中（withPresetUpserted 语义）；生效链路复用 init 里的
+     * agentSettings collector → patchConfig(customInstruction)，下一轮请求生效。
+     */
+    fun upsertModePreset(preset: ModePreset) {
+        settingsRepository.updateAgentSettings { withPresetUpserted(preset) }
     }
 
     /** 用户确认/驳回了 Spec 模式的规格，恢复引擎执行。 */

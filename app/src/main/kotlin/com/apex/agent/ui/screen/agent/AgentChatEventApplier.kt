@@ -63,7 +63,24 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update { it.copy(awaitingPlanConfirmation = true) }
         }
         is AgentEvent.UserInputRequired -> {
-            _uiState.update { it.copy(pendingUserInput = UserInputRequest(event.prompt, event.type)) }
+            // #168 HUMAN_ASSIST 决策点拦截：把已流出的草稿（方案对比文本）先落为
+            // 一条独立 Agent 消息（用户需要看到模型摆出的选项才能决策），并清空
+            // currentResponse——避免拦截后的下一轮回答与草稿拼接成一条消息。
+            // 选择菜单由 pendingUserInput 驱动（UserInputDialog，CHOICE 类型
+            // 按编号行渲染单选卡，与 HumanAssistFlow.formatQuestion 的编码对齐）。
+            streamBuffers.flush()
+            val draft = _uiState.value.currentResponse
+            _uiState.update { state ->
+                state.copy(
+                    messages = if (draft.isNotBlank()) {
+                        state.messages + AgentUiMessage.Agent(draft)
+                    } else {
+                        state.messages
+                    },
+                    currentResponse = "",
+                    pendingUserInput = UserInputRequest(event.prompt, event.type)
+                )
+            }
         }
         is AgentEvent.PlanConfirmed -> {
             _uiState.update { state ->

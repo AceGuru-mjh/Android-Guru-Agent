@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mode system v2 strings (#168): custom-mode presets + mode guide.
+     English default; Chinese in values-zh/strings_modes.xml. -->
+<resources>
+
+    <!-- ═══ Custom-mode presets (Settings → Agent, ModePresetEditorSection) ═══ -->
+    <string name="mode_presets_section_title">Custom Mode Presets</string>
+    <string name="mode_presets_section_subtitle">Named instruction sets for Custom mode — pick one and it is injected on the next request</string>
+    <string name="mode_presets_select_hint">Tap a preset to use it in Custom mode. The selected preset\'s instruction is appended to the system prompt; effective from the next request.</string>
+    <string name="mode_presets_none_selected">No preset (legacy instruction)</string>
+    <string name="mode_presets_none_selected_desc">Falls back to the single custom instruction string; pick a preset for reusable behavior</string>
+    <string name="mode_presets_builtin_group">Built-in presets</string>
+    <string name="mode_presets_custom_group">Your presets</string>
+    <string name="mode_presets_builtin_badge">Built-in preset, locked</string>
+    <string name="mode_presets_selected_badge">Active preset</string>
+    <string name="mode_presets_new">New preset</string>
+    <string name="mode_presets_edit_cd">Edit preset</string>
+    <string name="mode_presets_duplicate_cd">Duplicate preset as custom copy</string>
+    <string name="mode_presets_delete_cd">Delete preset</string>
+    <string name="mode_presets_delete_confirm_title">Delete this preset?</string>
+    <string name="mode_presets_delete_confirm_text">\"%1$s\" will be removed permanently. The agent will not use it again.</string>
+    <string name="mode_presets_delete_confirm_yes">Delete</string>
+    <string name="mode_presets_cancel">Cancel</string>
+    <string name="mode_presets_save">Save</string>
+    <string name="mode_presets_editor_new_title">New custom preset</string>
+    <string name="mode_presets_editor_edit_title">Edit preset</string>
+    <string name="mode_presets_field_name">Preset name</string>
+    <string name="mode_presets_field_name_desc">Shown in the preset list and chat header chip</string>
+    <string name="mode_presets_field_instruction">Instruction</string>
+    <string name="mode_presets_field_instruction_desc">Appended to the system prompt in Custom mode. Use MUST / NEVER style constraints for best compliance.</string>
+    <string name="mode_presets_migration_note">Your previous custom instruction was saved as a preset automatically.</string>
+
+    <!-- ═══ Mode guide (ModeGuideSheet, opened from the "?" icon next to the mode selector) ═══ -->
+    <string name="mode_guide_title">Mode Guide</string>
+    <string name="mode_guide_open_cd">Open mode guide</string>
+    <string name="mode_guide_use_cases">Best for</string>
+    <string name="mode_guide_flow_label">Execution flow</string>
+    <string name="mode_guide_tool_label">Tool policy</string>
+    <string name="mode_guide_human_label">Human touchpoints</string>
+    <string name="mode_guide_prompt_label">Prompt section</string>
+
+    <string name="mode_guide_build_cases">Quick tasks, familiar operations, when you want speed over ceremony</string>
+    <string name="mode_guide_build_flow">Streaming ReAct loop: think → act → observe → repeat until done; ends on the first plain-text answer</string>
+    <string name="mode_guide_build_tools">Full CORE toolset exposed; aggressive tool use encouraged — one correct action beats a long explanation</string>
+    <string name="mode_guide_build_human">None by design — high-risk tools still gated by the permission system (first-use confirm)</string>
+    <string name="mode_guide_build_prompt">\"## Mode: BUILD\" — act directly, keep working autonomously</string>
+
+    <string name="mode_guide_plan_cases">Multi-step tasks, risky chains, when you want to review and reorder steps before anything runs</string>
+    <string name="mode_guide_plan_flow">Plan (read-only, no tools) → your confirmation with per-step checkboxes &amp; reorder → topological lock → execute in locked order → read-only reflection</string>
+    <string name="mode_guide_plan_tools">None during planning (explicit read-only prompt section); full CORE set during execution; dependsOn cycles fall back to declared order</string>
+    <string name="mode_guide_plan_human">Plan confirmation card: enable/disable steps, move up/down, execute or cancel; after locking, the plan is immutable</string>
+    <string name="mode_guide_plan_prompt">\"## Mode: PLAN\" + \"## Planning Phase (READ-ONLY)\" while planning</string>
+
+    <string name="mode_guide_spec_cases">Deliverable-driven work: docs, refactors, anything where \"what counts as done\" must be agreed up front</string>
+    <string name="mode_guide_spec_flow">Spec (goal / requirements / constraints / acceptance criteria / deliverables) → your confirmation → each deliverable runs its own build loop → summary</string>
+    <string name="mode_guide_spec_tools">None during spec generation; every execution step carries the full spec as context so scope is respected</string>
+    <string name="mode_guide_spec_human">Spec confirmation card: approve the contract or abort before any tool runs</string>
+    <string name="mode_guide_spec_prompt">\"## Mode: SPEC\" — output the spec JSON only, do not execute yet</string>
+
+    <string name="mode_guide_reflect_cases">Code generation, writing, any output where quality beats latency; tune rounds in Settings → Agent</string>
+    <string name="mode_guide_reflect_flow">Draft (streamed) → review (critique card) → revise ×N rounds (N = Reflection Rounds, 1–3) → final answer</string>
+    <string name="mode_guide_reflect_tools">Same CORE toolset as Build; review/revise passes are LLM-only (no extra tool risk)</string>
+    <string name="mode_guide_reflect_human">You read the review card between passes; rounds are configurable, not interactive</string>
+    <string name="mode_guide_reflect_prompt">\"## Mode: REFLECTION\" — aim for completeness, correctness, clarity</string>
+
+    <string name="mode_guide_assist_cases">Ambiguous intents, multiple targets/apps/files, irreversible choices — whenever guessing wrong is expensive</string>
+    <string name="mode_guide_assist_flow">Build loop + automatic decision-point detection: if the answer text lays out \"option A vs option B…\" a choice menu pops automatically; your pick is fed back as the next instruction</string>
+    <string name="mode_guide_assist_tools">Full CORE toolset; the model is also instructed to call ask_user_choice proactively — detection is the safety net for when it doesn\'t</string>
+    <string name="mode_guide_assist_human">Every detected decision point pauses execution until you choose (or the 5-minute timeout falls back to the draft)</string>
+    <string name="mode_guide_assist_prompt">\"## Mode: HUMAN_ASSIST\" — never guess when the choice materially changes the result</string>
+
+    <string name="mode_guide_custom_cases">Reusable behaviors: translator, code reviewer, brainstormer, rigorous scientist — or your own presets</string>
+    <string name="mode_guide_custom_flow">Build loop with the selected preset\'s instruction appended — identical engine, different persona</string>
+    <string name="mode_guide_custom_tools">Same as Build; the preset may add tool-usage constraints of its own (e.g. reviewer reads before judging)</string>
+    <string name="mode_guide_custom_human">Preset management: Settings → Agent → Custom Mode Presets (built-ins locked, duplicate to customize)</string>
+    <string name="mode_guide_custom_prompt">\"## Mode: CUSTOM\" + \"## Custom Instructions\" = the selected preset\'s instruction</string>
+
+    <!-- ═══ Thinking levels quick table (same sheet, data from ThinkingProfile) ═══ -->
+    <string name="mode_guide_thinking_title">Thinking levels at a glance</string>
+    <string name="mode_guide_thinking_subtitle">Execution profiles per level (iterations scale / verification / tool-output budget) — details in the mode guide docs</string>
+    <string name="mode_guide_thinking_col_level">Level</string>
+    <string name="mode_guide_thinking_col_iters">Iters</string>
+    <string name="mode_guide_thinking_col_verify">Verification</string>
+    <string name="mode_guide_thinking_col_budget">Budget</string>
+    <string name="mode_guide_thinking_follow">follows pick</string>
+    <string name="mode_guide_thinking_self_check">post-tool + final</string>
+    <string name="mode_guide_thinking_post_tool">post-tool</string>
+</resources>

@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.assist.HumanAssistFlow
 import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
@@ -65,7 +66,8 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class ApexAgentEngine(
     private val llmClient: LlmClient,
-    private val toolRegistry: ToolRegistry,
+    // #168：internal —— EnginePromptDelegates.kt 同包扩展需要工具清单桥接。
+    internal val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
     private var config: AgentConfig = AgentConfig.STANDARD,
     private val memory: ConversationMemory? = null,
@@ -810,6 +812,29 @@ class ApexAgentEngine(
                 }
 
                 contentBuilder.isNotEmpty() -> {
+                    // ═══ #168 HUMAN_ASSIST 模式：决策点检测（真实执行差异）═══
+                    // 提示词只“要求”模型调 ask_user_choice，但模型常直接写出
+                    // 「方案A…方案B…你选哪个？」的对比文本而不调工具——旧引擎
+                    // 在纯文本轮直接 ResponseComplete，人工介入落空。现在对响应
+                    // 文本做后置检测：
+                    // - 检出决策点 → 发 UserInputRequired(CHOICE) 挂起等待用户
+                    //   选择 → 用户答复匹配回选项（label→key→序号）→ 以
+                    //   「用户选择：…——请按该选择继续」回填 User 消息 → continue
+                    //   下一轮按人工决策继续（不走 ResponseComplete：任务未定案）；
+                    // - 无决策点 / 用户超时或取消（空答复）→ 返回 null，照常收尾
+                    //   （安全降级：绝不因拦截失败而丢掉已生成的回复）。
+                    // 检测规则（编号方案/疑问选择/显式请求降级）见
+                    // assist/DecisionPointDetector.kt；流程见 assist/HumanAssistFlow.kt。
+                    if (config.mode == AgentMode.HUMAN_ASSIST) {
+                        val followUp = HumanAssistFlow(emit) { awaitUserInput() }
+                            .interceptResponse(contentBuilder.toString())
+                        if (followUp != null) {
+                            addMessage(LlmMessage.Assistant(contentBuilder.toString()))
+                            addMessage(LlmMessage.User(followUp))
+                            continue
+                        }
+                    }
+
                     // ═══ Reflection 模式：生成 → 评审 → 修正 ═══
                     // 最终纯文本轮次时，草稿已作为 ResponseChunk 流式呈现（UI 显示"生成"），
                     // 随后执行 config.reflectionRounds 轮"评审 + 修正"：
@@ -1094,32 +1119,7 @@ class ApexAgentEngine(
         globalRules = globalRulesText
     )
 
-    // ═══════════════════════════════════════════════════════
-    // SPEC mode prompt builders — delegated to [EnginePrompts]
-    // ═══════════════════════════════════════════════════════
-
-    private fun buildSpecPrompt(input: String): String =
-        EnginePrompts.buildSpecPrompt(input, toolRegistry.getAllTools())
-
-    private fun buildSpecStepPrompt(
-        spec: ExecutionSpec,
-        stepText: String,
-        stepIndex: Int
-    ): String = EnginePrompts.buildSpecStepPrompt(spec, stepText, stepIndex)
-
-    private fun buildSpecReflectionPrompt(spec: ExecutionSpec): String =
-        EnginePrompts.buildSpecReflectionPrompt(spec)
-
-    // ═══════════════════════════════════════════════════════
-    // Reflection mode prompt builders — delegated to [EnginePrompts]
-    // ═══════════════════════════════════════════════════════
-
-    private fun buildReviewPrompt(draft: String): String =
-        EnginePrompts.buildReviewPrompt(draft)
-
-    private fun buildRevisePrompt(draft: String, review: String, round: Int): String =
-        EnginePrompts.buildRevisePrompt(draft, review, round)
-
+    // SPEC / Reflection 模式 prompt 包装器已迁至 EnginePromptDelegates.kt（#168 零净增腾挪，调用点零改动）。
     // ═══════════════════════════════════════════════════════
     // Plan / Spec parsing — delegated to [EngineResponseParsers]
     // ═══════════════════════════════════════════════════════

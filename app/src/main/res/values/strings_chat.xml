@@ -211,6 +211,8 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
+    <!-- #168 CUSTOM 模式预设 chip（顶栏当前预设名） -->
+    <string name="chat_mode_preset_cd">Custom mode preset: %1$s. Tap to edit</string>
     <string name="chat_role_selector_cd">Agent role: %1$s. Tap to switch</string>
     <string name="chat_role_builtin_cd">Built-in role</string>
     <string name="chat_mode_build_desc">Think and act in real time</string>

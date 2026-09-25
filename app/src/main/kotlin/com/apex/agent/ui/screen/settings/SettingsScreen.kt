@@ -252,6 +252,10 @@ private fun AgentTab(
         AgentRulesAndHooksSections(agent, onAgent, viewModel)
 
         AgentSection(agent, onAgent)
+
+        // ═══ #168 自定义模式预设：多套命名指令，单选即用（CUSTOM 模式）═══
+        ModePresetEditorSection(agent, onAgent)
+
         CompressionSection(agent, onAgent)
         VisionSection(agent, roles, profiles, viewModel)
     }

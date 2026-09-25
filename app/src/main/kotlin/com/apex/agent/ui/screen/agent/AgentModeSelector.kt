@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
@@ -52,48 +54,68 @@ import com.apex.agent.R
  * 点击弹出菜单列出全部 6 个模式（名称 + 一句话说明 + 选中勾）。
  * 任何屏宽下切换入口都完整可见、单次点击直达 —— 模式切换从
  * 「隐藏横滑手势」变成「显式下拉菜单」。
+ *
+ * #168：胶囊右侧新增「?」图标 —— 打开模式指南底部弹层（[ModeGuideSheet]：
+ * 六模式行为矩阵 + 思考档位简表），让「Plan/Spec 差在哪」「Assist 什么时候
+ * 打断我」有处可意。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun AgentModeSelector(
     current: AgentMode,
-    onSelect: (AgentMode) -> Unit
+    onSelect: (AgentMode) -> Unit,
+    onOpenGuide: (() -> Unit)? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     // i18n：semantics 块非组合上下文，无障碍描述在组合内预取
     val selectorDescription = stringResource(R.string.chat_mode_selector_cd, current.displayName)
 
     Box {
-        // ── 触发器：当前模式胶囊 ──
-        Surface(
-            onClick = { expanded = true },
-            shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-            modifier = Modifier
-                .heightIn(min = 36.dp)
-                .semantics { contentDescription = selectorDescription }
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // ── 触发器：当前模式胶囊 ──
+            Surface(
+                onClick = { expanded = true },
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .heightIn(min = 36.dp)
+                    .semantics { contentDescription = selectorDescription }
             ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = agentModeIcon(current),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = current.displayName,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            // ── #168 模式指南入口：「?」小图标（ModeGuideSheet 弹层）──
+            if (onOpenGuide != null) {
                 Icon(
-                    imageVector = agentModeIcon(current),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = current.displayName,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    imageVector = Icons.Default.HelpOutline,
+                    contentDescription = stringResource(R.string.mode_guide_open_cd),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(start = 2.dp)
+                        .size(16.dp)
+                        .clickable { onOpenGuide() }
                 )
             }
         }

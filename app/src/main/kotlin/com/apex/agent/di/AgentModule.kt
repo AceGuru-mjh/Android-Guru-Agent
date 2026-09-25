@@ -96,6 +96,10 @@ object AgentModule {
             streaming = profile.streaming,
             temperature = profile.temperature,
             reflectionRounds = if (agent.reflection) agent.reflectionRounds.coerceIn(0, 5) else 0,
+            // #168 CUSTOM 模式预设：选中预设指令拍平进 customInstruction（启动快照；
+            // 运行时热切换由 AgentChatViewModel 的 agentSettings collector 处理，
+            // 选中预设优先，未选回退旧单串 custom_mode_instruction）。
+            customInstruction = repo.effectiveCustomInstruction().ifBlank { null },
             // Agent 角色字段（全部空 = 内置全能角色 = 历史行为零变化）
             agentName = if (activeRole.isBuiltIn) "" else activeRole.name,
             userTitle = activeRole.userTitle,

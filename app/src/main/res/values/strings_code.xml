@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coding 模式（Code 屏）字符串（英文默认）。中文在 values-zh/strings_code.xml。 -->
+<resources>
+    <!-- 抽屉目的地 -->
+    <string name="drawer_code">Code</string>
+
+    <!-- 工作区条 -->
+    <string name="code_no_workspace">No workspace</string>
+    <string name="code_switch_workspace">Switch workspace</string>
+    <string name="code_delete_workspace">Delete workspace</string>
+    <string name="code_new_workspace">New workspace…</string>
+    <string name="code_clear_chat">New chat</string>
+
+    <!-- Todo 面板 -->
+    <string name="code_todo_progress">Tasks %1$d/%2$d</string>
+
+    <!-- 消息流 / 输入 -->
+    <string name="code_working">Working…</string>
+    <string name="code_input_hint">Describe a coding task…</string>
+    <string name="code_send">Send</string>
+    <string name="code_stop">Stop</string>
+    <string name="code_dismiss">Dismiss</string>
+
+    <!-- ask_user 对话框 -->
+    <string name="code_question_title">Agent needs your input</string>
+    <string name="code_question_hint">Type your answer…</string>
+    <string name="code_question_default_yes">yes</string>
+    <string name="code_question_submit">Answer</string>
+
+    <!-- 新建工作区对话框 -->
+    <string name="code_new_workspace_title">New coding workspace</string>
+    <string name="code_workspace_name_hint">Workspace name (e.g. my-app)</string>
+    <string name="code_create">Create</string>
+    <string name="code_cancel">Cancel</string>
+</resources>

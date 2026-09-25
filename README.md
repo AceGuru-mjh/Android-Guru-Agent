@@ -475,6 +475,52 @@ UI 实时显示推理过程（正文与思维链严格分流，双引擎同语�
   `ModelCapabilityMismatch`（能力校验 + 诚实降级）；
 - `ModelProfileValidator` 校验档案，`ErrorClassifier` 分类运行时错误供重试决策。
 
+### 🧑‍💻 Coding 模式（Code 屏 —— 与 Agent 模式同级别的对等入口）
+
+与六种 `AgentMode`（会话行为开关）不同，**Coding 模式是一个独立的顶层工作面**：
+抽屉里的 Code 屏拥有自己的引擎实例、按工作区隔离的会话记忆、以及 opencode
+契约的编码工具集 —— 但与 Agent 模式**共享全部能力基础设施**（工具注册表 +
+v3 执行硬化 + v4 目录 / 技能注入 / MCP 一等工具 / 插件 / 多模型路由）。
+
+```text
+┌─ Code 屏（app/ui/screen/code）──────────────────────────────────┐
+│ 工作区条（切换/新建/删除 + 环境探测摘要）                          │
+│ Todo 面板（code_todo 实时快照 → checklist 渲染）                  │
+│ 消息流（用户 / 助手 Markdown / 工具卡 diff 着色 +/-）              │
+│ 输入栏（发送 / 停止 / ask_user 应答）                             │
+└──────────────────────────────────────────────────────────────────┘
+        │ @Named("code") 独立引擎实例（CodeAgentEngine）
+        ▼
+┌─ core/code-engine ──────────┐   ┌─ core/code-tools（6 工具）────┐
+│ CodePrompts（编码行为注入）   │   │ code_read   行号契约+目录+纠错  │
+│ CodeConversationMemory      │   │ code_edit   7级模糊替换链+护栏   │
+│ （per-workspace 会话记忆）    │   │ code_write  全量写+diff 回显    │
+│ JIT 上下文（环境/统计注入）    │   │ code_grep   ripgrep 语义搜索    │
+└─────────────────────────────┘   │ code_glob   递归模式匹配        │
+        │ 共享单例                 │ code_todo   任务清单状态机      │
+        ▼                         └────────────────────────────────┘
+┌─ platform/code-workspace ───┐   ┌─ MCP（BUILTIN 进程内服务器）────┐
+│ 工作区生命周期 + 环境探测      │   │ search：web_search/web_fetch    │
+│ 默认工作区=Agent 沙箱同源目录  │   │ （Agent/Code 两模式互用）       │
+│ host↔guest(/workspace) 同一文件│  └────────────────────────────────┘
+└─────────────────────────────┘
+```
+
+**关键设计**：
+
+- **不重写 Agent Loop** —— `CodeAgentEngine` 是 `ApexAgentEngine` 的薄包装，
+  编码行为经 `additionalSystemContext` 通道注入（BUILD 循环 + opencode 风格
+  编码行为段落），Agent 模式零影响；
+- **code_edit 的成功率就是编码循环的效率** —— 精确匹配失败后依次尝试
+  行 trim / 块锚点+Levenshtein / 空白归一 / 缩进平移 / 边界 trim / replaceAll
+  七级回退；失衡护栏（模糊命中 span 远大于 old_string 时拒绝）防止"吞代码"；
+- **工作区即沙箱** —— code_* 工具的根经 `CodeWorkspaceRoots` 动态解析，
+  切换工作区即时生效；默认工作区与 Agent 文件工具、Ubuntu 终端会话三方
+  看同一份文件（`linux/workspaces/default` ↔ guest `/workspace`）；
+- **网络搜索 MCP 本地运行** —— `BuiltinSearchMcpTransport` 把成熟搜索栈
+  （DuckDuckGo/Bing 三级回退 + 智能正文提取）包装为进程内 MCP 服务器，
+  Agent 与 Coding 两模式共享 `mcp__search__web_search` 一等工具。
+
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 
 ---

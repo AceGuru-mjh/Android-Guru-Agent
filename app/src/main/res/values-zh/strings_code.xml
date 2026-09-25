@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Coding 模式（Code 屏）字符串（中文）。 -->
+<resources>
+    <!-- 抽屉目的地 -->
+    <string name="drawer_code">代码</string>
+
+    <!-- 工作区条 -->
+    <string name="code_no_workspace">无工作区</string>
+    <string name="code_switch_workspace">切换工作区</string>
+    <string name="code_delete_workspace">删除工作区</string>
+    <string name="code_new_workspace">新建工作区…</string>
+    <string name="code_clear_chat">新会话</string>
+
+    <!-- Todo 面板 -->
+    <string name="code_todo_progress">任务 %1$d/%2$d</string>
+
+    <!-- 消息流 / 输入 -->
+    <string name="code_working">执行中…</string>
+    <string name="code_input_hint">描述一个编码任务…</string>
+    <string name="code_send">发送</string>
+    <string name="code_stop">停止</string>
+    <string name="code_dismiss">关闭</string>
+
+    <!-- ask_user 对话框 -->
+    <string name="code_question_title">智能体需要你的输入</string>
+    <string name="code_question_hint">输入你的回答…</string>
+    <string name="code_question_default_yes">是</string>
+    <string name="code_question_submit">回答</string>
+
+    <!-- 新建工作区对话框 -->
+    <string name="code_new_workspace_title">新建编码工作区</string>
+    <string name="code_workspace_name_hint">工作区名称（如 my-app）</string>
+    <string name="code_create">创建</string>
+    <string name="code_cancel">取消</string>
+</resources>

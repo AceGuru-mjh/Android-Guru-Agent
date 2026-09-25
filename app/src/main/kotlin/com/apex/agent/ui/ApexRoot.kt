@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
@@ -60,6 +61,7 @@ import com.apex.agent.ui.component.ContextMeterBar
 import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.screen.agent.AgentChatScreen
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
+import com.apex.agent.ui.screen.code.CodeScreen
 import com.apex.agent.ui.screen.glass.GlassLabScreen
 import com.apex.agent.ui.screen.log.LogViewerScreen
 import com.apex.agent.ui.screen.market.MarketScreen
@@ -83,6 +85,9 @@ sealed class DrawerDestination(
     val icon: ImageVector
 ) {
     data object Agent : DrawerDestination("agent", R.string.drawer_agent, Icons.Default.SmartToy)
+    // Coding 模式（与 Agent 模式同级别）：独立引擎实例 + 工作区 + code_* 工具集，
+    // 与 Agent 模式共享 ToolRegistry/Skills/MCP/插件 —— 能力互用。
+    data object Code : DrawerDestination("code", R.string.drawer_code, Icons.Default.Code)
     data object Terminal : DrawerDestination("terminal", R.string.drawer_terminal, Icons.Default.Terminal)
     // Skill 屏已移除 —— 技能的安装/启停统一由「市场 · Skills」页承担，
     // 抽屉里再放一个只读列表是重复入口（两者数据源同一份 SkillRegistry）。
@@ -108,6 +113,7 @@ private val DestinationSaver = Saver<DrawerDestination, String>(
     save = { it.route },
     restore = { route ->
         when (route) {
+            DrawerDestination.Code.route -> DrawerDestination.Code
             DrawerDestination.Terminal.route -> DrawerDestination.Terminal
             // "skill" route 保留兜底：老用户重建时若停留在原 Skill 页，落到市场
             "skill" -> DrawerDestination.Market
@@ -233,6 +239,9 @@ fun ApexRoot() {
                             // "小大脑"菜单 → 配置模型：跳转设置页模型配置区
                             // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
                             onOpenSettings = { currentDestination = DrawerDestination.Settings }
+                        )
+                        DrawerDestination.Code -> CodeScreen(
+                            viewModel = hiltViewModel()
                         )
                         DrawerDestination.Terminal -> TerminalScreen(
                             onOpenNavDrawer = { scope.launch { drawerState.open() } }

@@ -106,6 +106,30 @@ jobs:
             $(find core/agent-engine/src/main/kotlin -name "*.kt") \
             -jvm-target 17
 
+      - name: Compile core:code-tools (Coding 模式工具集)
+        run: |
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/tool-registry:/tmp/build/llm-adapter:/tmp/build/logging"
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/code-tools \
+            $(find core/code-tools/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
+      - name: Compile core:code-engine (Coding 模式引擎)
+        run: |
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/agent-engine:/tmp/build/tool-registry:/tmp/build/llm-adapter:/tmp/build/logging"
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/code-engine \
+            $(find core/code-engine/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
+      - name: Compile platform:code-workspace (编码工作区管理)
+        run: |
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/code-tools:/tmp/build/logging"
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/code-workspace \
+            $(find platform/code-workspace/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
       - name: Check tool ID uniqueness
         run: |
           # Tool System v2: also covers app/src/main (app-level tool classes —

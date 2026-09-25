@@ -160,6 +160,8 @@ dependencies {
 
     // Coil (image loading)
     implementation(libs.coil.compose)
+    // 模型品牌图标：SimpleIcons CDN 的 SVG 官方标解码（#174）
+    implementation(libs.coil.svg)
 
     // Security (encrypted SharedPreferences for GitHub token)
     implementation(libs.security.crypto)

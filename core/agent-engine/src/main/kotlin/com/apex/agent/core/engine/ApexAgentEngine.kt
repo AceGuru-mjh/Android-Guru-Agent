@@ -1063,17 +1063,11 @@ class ApexAgentEngine(
     /**
      * P0 修复（会话级报废根因）：发送前修补悬空 tool_call 历史。
      *
-     * 场景：引擎在 `addMessage(Assistant(toolCalls))` 持久化之后、全部
-     * `ToolResult` 补齐之前被中断（用户发送新消息触发 cancel / 进程被杀 /
-     * ask_user 等待中退出）→ 历史末尾留下无配对 ToolResult 的 tool_calls
-     * → OpenAI 兼容端点对后续**每一次**请求都返回 400
-     * （"tool_calls must be followed by tool messages"）→ 该会话所有后续
-     * 消息全部失败，表象即"工具全坏了"。
-     *
-     * 原有的 [DanglingToolCallRepair] 只在崩溃恢复路径（TaskRuntime/
-     * Orchestrator）调用，普通取消场景不经过。现改在每次构建请求消息前
-     * 幂等修补：无悬空时零开销（纯扫描），有悬空时就地改写内存历史并同步
-     * 持久化，合成文本提示模型"结果未知、重做前先验证"。
+     * 引擎在 `addMessage(Assistant(toolCalls))` 后、ToolResult 补齐前被中断
+     * （cancel/进程被杀/ask_user 等待中退出）→ 历史末尾留下无配对 tool_calls
+     * → OpenAI 兼容端点对后续每次请求都 400，会话级报废。现每次构建请求前
+     * 幂等修补（[DanglingToolCallRepair]）：无悬空零开销，有则改写内存历史
+     * 并持久化，合成文本提示模型"结果未知、重做前先验证"。
      */
     private fun repairDanglingToolCalls() {
         val report = DanglingToolCallRepair.repair(conversationHistory)
@@ -1091,12 +1085,7 @@ class ApexAgentEngine(
     }
 
 
-    /**
-     * T76 — 把当前 executionTags（taskId/stepId）填入 LlmRequestContext。
-     *
-     * TaskRuntime 未接线时（executionTags == null）返回原 context，
-     * 行为与 T76 之前完全一致（既有测试不受影响）。
-     */
+    /** T76 — executionTags（taskId/stepId）填入 LlmRequestContext；未接线时原样返回。 */
     private fun tagged(ctx: LlmRequestContext): LlmRequestContext {
         val tags = executionTags ?: return ctx
         return ctx.copy(taskId = tags.first, stepId = tags.second)

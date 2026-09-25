@@ -137,7 +137,6 @@ class AgentChatViewModel @Inject constructor(
                     }
                 }
         }
-        }
     }
 
     /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */

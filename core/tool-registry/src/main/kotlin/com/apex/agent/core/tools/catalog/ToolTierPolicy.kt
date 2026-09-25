@@ -54,6 +54,9 @@ object ToolTierPolicy {
         "code_read", "code_edit", "code_write", "code_grep", "code_glob", "code_todo",
         "code_task", "code_check",
 
+        // ── git (v1.0 #153；经 PRoot Ubuntu 沙箱执行，两模式互用) ──
+        "code_git_status", "code_git_diff", "code_git_log", "code_git_commit", "code_git_branch",
+
         // ── web ──
         "web_search", "web_fetch", "http_request", "download_file",
 

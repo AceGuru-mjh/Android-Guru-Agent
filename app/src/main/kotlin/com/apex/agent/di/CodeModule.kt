@@ -5,7 +5,10 @@ import com.apex.agent.core.code.CodeAgentEngine
 import com.apex.agent.core.code.CodeContextProvider
 import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.tools.CodeTodoTool
+import com.apex.agent.git.ProotGitCommandRunner
+import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.core.engine.AgentConfig
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentMode
@@ -20,6 +23,7 @@ import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.catalog.ToolActivationStore
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.platform.code.ws.CodeWorkspaceManager
+import com.apex.agent.ui.screen.code.session.CodeSessionStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -54,6 +58,42 @@ object CodeModule {
     @Provides
     @Singleton
     fun provideCodeTodoTool(): CodeTodoTool = CodeTodoTool()
+
+    /**
+     * 编码会话 UI 快照仓库（#152）：按 workspaceId 存消息/todos/lastActiveFile。
+     *
+     * ⚠️ baseDir 必须与引擎记忆目录（code_memory）隔离——两者都以 ws_<id>.json
+     * 命名，同目录会静默互相覆盖（引擎侧存 API 级完整历史，本仓库存 UI 展示态）。
+     */
+    @Provides
+    @Singleton
+    fun provideCodeSessionStore(@ApplicationContext context: Context): CodeSessionStore {
+        return CodeSessionStore(File(context.filesDir, "code_sessions"))
+    }
+
+    /**
+     * git 命令执行通道（#153）：宿主无 git 二进制，git 预装在 PRoot Ubuntu
+     * rootfs 内；工作区恒定 bind 为 guest /workspace（与终端会话同源）。
+     * rootfsBaseDir / hostEnvironment / persistentHome 与 McpModule 的
+     * ProotMcpProcessLauncher 接线同款约定（TerminalModule 提供）。
+     */
+    @Provides
+    @Singleton
+    fun provideProotGitCommandRunner(
+        @ApplicationContext context: Context,
+        hostEnvironment: PRootHostEnvironment,
+        rootfsBaseDir: File,
+        workspaceRoots: CodeWorkspaceRoots
+    ): GitCommandRunner {
+        return ProotGitCommandRunner(
+            hostEnv = hostEnvironment.hostEnv(),
+            libprootPath = hostEnvironment.prootBinary.absolutePath,
+            rootfsDir = rootfsBaseDir,
+            isRootfsReady = { File(rootfsBaseDir, "current").exists() },
+            workspaceRoots = workspaceRoots,
+            persistentHomeDir = File(context.filesDir, "linux/home")
+        )
+    }
 
     /** 工作区管理器（创建/列出/删除/激活 + 环境探测）。 */
     @Provides

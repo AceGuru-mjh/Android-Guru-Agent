@@ -32,4 +32,38 @@
     <string name="code_workspace_name_hint">Workspace name (e.g. my-app)</string>
     <string name="code_create">Create</string>
     <string name="code_cancel">Cancel</string>
+
+    <!-- 编辑器面板（v1.0 #154） -->
+    <string name="code_editor_close">Close editor</string>
+    <string name="code_editor_loading">Loading…</string>
+    <string name="code_editor_binary">Binary file — preview not supported</string>
+    <string name="code_editor_empty">Empty file</string>
+    <string name="code_editor_lines_fmt">%1$d lines</string>
+    <string name="code_editor_truncated_fmt">Showing first %1$d of %2$d lines</string>
+
+    <!-- 工具权限（v1.0 #155） -->
+    <string name="code_perm_section_title">Tool permissions</string>
+    <string name="code_perm_section_subtitle">opencode-style permission mode and rules</string>
+    <string name="code_perm_mode_label">Permission mode</string>
+    <string name="code_perm_mode_bypass">Bypass</string>
+    <string name="code_perm_mode_default">Default</string>
+    <string name="code_perm_mode_accept_edits">Accept Edits</string>
+    <string name="code_perm_mode_plan">Plan</string>
+    <string name="code_perm_mode_bypass_desc">All tools run without asking (use with care)</string>
+    <string name="code_perm_mode_default_desc">Read-only tools are allowed; everything else asks first</string>
+    <string name="code_perm_mode_accept_edits_desc">File edits and git commits are allowed; everything else asks first</string>
+    <string name="code_perm_mode_plan_desc">Read-only planning: any tool that mutates the environment is denied</string>
+    <string name="code_perm_rules_title">Tool permission rules (first match wins)</string>
+    <string name="code_perm_rules_empty">No rules yet. Rules can override the mode for matching tools — allow, ask, or deny.</string>
+    <string name="code_perm_rule_add">Add rule</string>
+    <string name="code_perm_dialog_title">Add permission rule</string>
+    <string name="code_perm_rule_pattern_label">Tool id pattern</string>
+    <string name="code_perm_rule_pattern_hint">Exact id, or prefix with a trailing star (e.g. code_git_ + star, mcp__ + star). A single star matches everything.</string>
+    <string name="code_perm_effect_label">On match</string>
+    <string name="code_perm_effect_allow">Allow</string>
+    <string name="code_perm_effect_ask">Ask</string>
+    <string name="code_perm_effect_deny">Deny</string>
+    <string name="code_perm_rule_delete">Delete rule</string>
+    <string name="code_perm_save">Save</string>
+    <string name="code_perm_cancel">Cancel</string>
 </resources>

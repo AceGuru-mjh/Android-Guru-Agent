@@ -62,6 +62,8 @@ import com.apex.agent.R
 import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.component.MarkdownText
+import com.apex.agent.ui.screen.agent.QuestionCard
+import com.apex.agent.ui.screen.code.editor.CodeEditorPanel
 
 /**
  * # Code Screen — Coding 模式主屏（与 Agent 聊天屏同级别）
@@ -75,6 +77,7 @@ fun CodeScreen(
     viewModel: CodeViewModel
 ) {
     val state by viewModel.uiState.collectAsState()
+    val pendingAgentQuestion by viewModel.pendingAgentQuestion.collectAsState()
     var showNewWorkspace by remember { mutableStateOf(false) }
 
     Column(
@@ -95,6 +98,18 @@ fun CodeScreen(
             TodoPanel(todos = state.todos)
         }
 
+        // v1.0 #154：编辑器面板——当前文件预览（行号/着色/行点击回填 @file:line）
+        state.editorFilePath?.let { editorPath ->
+            CodeEditorPanel(
+                filePath = editorPath,
+                file = state.editorFile,
+                isLoading = state.editorLoading,
+                errorText = state.editorError,
+                onClose = viewModel::closeEditor,
+                onLineClick = { line -> viewModel.insertAtRef("@$editorPath:$line") }
+            )
+        }
+
         Box(modifier = Modifier.weight(1f)) {
             CodeMessageList(
                 messages = state.messages,
@@ -103,17 +118,32 @@ fun CodeScreen(
             )
         }
 
+        // v1.0 #155：工具/权限门的结构化提问卡（与 ask_user 的纯文本对话框并存；
+        // 工具执行已挂起，用户必须作答才能继续）
+        pendingAgentQuestion?.let { question ->
+            QuestionCard(
+                question = question,
+                onAnswer = { optionIds, customText ->
+                    viewModel.answerAgentQuestion(optionIds, customText)
+                },
+                onCancel = viewModel::cancelAgentQuestion
+            )
+        }
+
         state.error?.let { err ->
             ErrorBar(message = err, onDismiss = viewModel::dismissError)
         }
 
         CodeInputBar(
+            draft = state.inputDraft,
+            onDraftChange = viewModel::updateInputDraft,
             isRunning = state.isRunning,
             onSend = viewModel::sendMessage,
             onAbort = viewModel::abort
         )
     }
 
+    // v1.0 #155：工具/权限门的结构化提问已在上方 Column 内渲染
     state.pendingQuestion?.let { question ->
         PendingQuestionDialog(
             question = question,
@@ -430,7 +460,9 @@ private fun SystemNote(text: String) {
 @Composable
 private fun ToolCard(message: CodeChatMessage) {
     var expanded by remember { mutableStateOf(false) }
-    val isDiffTool = message.toolName == "code_edit" || message.toolName == "code_write"
+    // v1.0 #153：code_git_diff 输出统一 diff 原文，与 code_edit/write 共用 diff 着色
+    val isDiffTool = message.toolName == "code_edit" || message.toolName == "code_write" ||
+        message.toolName == "code_git_diff"
 
     Card(
         colors = CardDefaults.cardColors(
@@ -532,12 +564,12 @@ private fun DiffOutput(text: String) {
 
 @Composable
 private fun CodeInputBar(
+    draft: String,
+    onDraftChange: (String) -> Unit,
     isRunning: Boolean,
     onSend: (String) -> Unit,
     onAbort: () -> Unit
 ) {
-    var input by remember { mutableStateOf("") }
-
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth()
@@ -547,8 +579,8 @@ private fun CodeInputBar(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
         ) {
             OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
+                value = draft,
+                onValueChange = onDraftChange,
                 placeholder = { Text(stringResource(R.string.code_input_hint), style = MaterialTheme.typography.bodyMedium) },
                 modifier = Modifier.weight(1f),
                 maxLines = 5,
@@ -566,17 +598,16 @@ private fun CodeInputBar(
             } else {
                 IconButton(
                     onClick = {
-                        if (input.isNotBlank()) {
-                            onSend(input)
-                            input = ""
+                        if (draft.isNotBlank()) {
+                            onSend(draft)
                         }
                     },
-                    enabled = input.isNotBlank()
+                    enabled = draft.isNotBlank()
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = stringResource(R.string.code_send),
-                        tint = if (input.isNotBlank()) MaterialTheme.colorScheme.primary
+                        tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }

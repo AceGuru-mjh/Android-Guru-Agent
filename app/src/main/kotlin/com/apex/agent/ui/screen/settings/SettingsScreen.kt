@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.R
 import com.apex.agent.core.llm.*
+import com.apex.agent.permission.PermissionSettingsSection
 import com.apex.agent.ui.theme.AccentPalette
 import com.apex.agent.ui.theme.accentSwatchColor
 import kotlinx.coroutines.launch
@@ -238,6 +239,15 @@ private fun AgentTab(
     ) {
         // ═══ Agent 角色（人设层）：内置全能 + 用户自定义；激活即热切换 ═══
         AgentRolesSection(agent, onAgent)
+
+        // ═══ 工具权限（v1.0 #155）：opencode 式模式 + 规则三元组，改即生效 ═══
+        PermissionSettingsSection(
+            mode = agent.permissionMode,
+            rules = agent.permissionRules,
+            onModeChange = { m -> onAgent(agent.copy(permissionMode = m)) },
+            onRulesChange = { rs -> onAgent(agent.copy(permissionRules = rs)) }
+        )
+
         AgentSection(agent, onAgent)
         CompressionSection(agent, onAgent)
         VisionSection(agent, roles, profiles, viewModel)

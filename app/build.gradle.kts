@@ -114,6 +114,10 @@ dependencies {
     // platform:terminal 对 :terminal-emulator 是 implementation（不传递），app 需显式声明。
     implementation(project(":terminal-emulator"))
     implementation(project(":platform:cs-mem"))
+    // Coding 模式（与 Agent 模式同级别）：编码工具集 / 编码引擎 / 工作区管理
+    implementation(project(":core:code-tools"))
+    implementation(project(":core:code-engine"))
+    implementation(project(":platform:code-workspace"))
     implementation(project(":plugin-sdk:plugin-host"))
 
     // Compose

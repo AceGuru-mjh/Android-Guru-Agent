@@ -78,6 +78,9 @@ import com.apex.agent.core.tools.builtin.ShortcutRunTool
 import com.apex.agent.core.tools.builtin.ToolBatchRunTool
 import com.apex.agent.core.tools.builtin.VersionCompareTool
 import com.apex.agent.core.tools.builtin.WaitTool
+import com.apex.agent.core.codetools.CodeTools
+import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -293,7 +296,10 @@ object ToolModule {
         circuitBreaker: ToolCircuitBreaker,
         shortcutRegistry: ShortcutRegistry,
         // 消息连接器（微信/飞书/Telegram）：注册表 + 发送器，注册 connector_* 工具
-        connectorRegistry: ConnectorRegistry
+        connectorRegistry: ConnectorRegistry,
+        // Coding 模式：工作区根解析（code_* 工具的动态沙箱根）+ 共享 todo 单例
+        codeWorkspaceRoots: CodeWorkspaceRoots,
+        codeTodoTool: CodeTodoTool
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -383,6 +389,15 @@ object ToolModule {
         registry.register(SafeAgentTool(FileGlobTool(workspaceDir)))
         // P83：edit_file 已建成但从未注册（搜索-替换块编辑，原子失败语义）—— 补接线
         registry.register(SafeAgentTool(FileEditTool(workspaceDir)))
+
+        // ═══ 2b. Coding 模式工具（Code Mode 与 Agent 模式互用）═══
+        // code_read/edit/write/grep/glob/todo —— opencode 契约的编码工具集。
+        // 根目录经 CodeWorkspaceRoots 动态解析（Code 屏切换工作区即时生效），
+        // 默认工作区与上方 workspaceDir 同源（linux/workspaces/default），
+        // 两模式看到同一份文件。CORE 集已加入（ToolTierPolicy），两模式默认可见。
+        CodeTools.all(roots = codeWorkspaceRoots, todo = codeTodoTool).forEach {
+            registry.register(SafeAgentTool(it))
+        }
 
         // ═══ 3. 网络 (4) ═══
         registry.register(SafeAgentTool(WebFetchTool(httpClient)))

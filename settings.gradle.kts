@@ -34,11 +34,16 @@ include(":core:llm-adapter")
 include(":core:tool-registry")
 include(":core:logging")
 
+// Coding 模式（与 Agent 模式同级别）：编码工具集 + 编码引擎
+include(":core:code-tools")
+include(":core:code-engine")
+
 // Android平台层
 include(":platform:privilege")
 include(":platform:persistence")
 include(":platform:terminal")
 include(":platform:cs-mem")
+include(":platform:code-workspace")
 
 // Terminal Runtime 2.0 — vendored VT100/ANSI emulator (ATR Phase 2)
 include(":terminal-emulator")

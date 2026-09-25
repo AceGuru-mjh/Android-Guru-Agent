@@ -49,6 +49,9 @@ object ToolTierPolicy {
         "read_file", "write_file", "edit_file", "list_files",
         "glob_files", "search_files", "copy_move_file", "delete_file",
 
+        // ── coding (Code 模式；Agent 模式同样可见 —— 工具规则互用) ──
+        "code_read", "code_edit", "code_write", "code_grep", "code_glob", "code_todo",
+
         // ── web ──
         "web_search", "web_fetch", "http_request", "download_file",
 

@@ -71,13 +71,16 @@ object AgentModule {
             "chat" -> AgentMode.REFLECTION   // 旧值兼容：chat 偏重质量评审
             else -> AgentMode.BUILD          // "auto" 及未知旧值走自主构建
         }
-        // 思考深度（全档位映射；#168 新增 auto → AUTO 自适应选档）
+        // 思考深度（全档位映射；#168 新增 auto → AUTO 自适应选档；
+        // v1.2 新增 ultracode/apexcode → 编码深水档/巅峰架构档）
         val thinkingLevel = when (agent.thinkLevel) {
             "auto" -> ThinkingLevel.AUTO
             "minimal" -> ThinkingLevel.NONE
             "light" -> ThinkingLevel.LIGHT
             "deep" -> ThinkingLevel.DEEP
             "maximum" -> ThinkingLevel.MAXIMUM
+            "ultracode" -> ThinkingLevel.ULTRACODE
+            "apexcode" -> ThinkingLevel.APEXCODE
             else -> ThinkingLevel.STANDARD
         }
         // ═══ Agent 角色（人设层）：激活角色拍平进引擎配置 ═══

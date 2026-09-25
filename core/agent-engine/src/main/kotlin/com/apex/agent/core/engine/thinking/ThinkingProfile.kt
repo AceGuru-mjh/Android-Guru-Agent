@@ -3,7 +3,8 @@ package com.apex.agent.core.engine.thinking
 import com.apex.agent.core.engine.ThinkingLevel
 
 /**
- * 六档思考档位的完整执行画像（#168）—— 提示词 + 参数 + 执行策略三合一。
+ * 思考档位的完整执行画像（#168 六档 → v1.2 扩为 **7 深度档 + AUTO 元档**）——
+ * 提示词 + 参数 + 执行策略三合一。
  *
  * 旧版 [ThinkingLevel] 只提供提示词（[ThinkingLevel.toPromptInstruction]）与
  * 模型参数（[ThinkingLevel.toThinkingBudget] / [ThinkingLevel.toReasoningEffortName]），
@@ -16,13 +17,16 @@ import com.apex.agent.core.engine.ThinkingLevel
  *    （工具失败或 HIGH 风险工具执行后注入反思问题，见
  *    [ThinkingModeController.postToolCheckPrompt]）；
  *  - [finalSelfCheck]：最终响应前是否注入自评清单（目标达成 / 副作用 /
- *    遗漏），经 system prompt 的 Thinking 段下发（[SELF_CHECK_CHECKLIST]）；
+ *    遗漏），经 system prompt 的 Thinking 段下发（[SELF_CHECK_CHECKLIST]；
+ *    APEXCODE 档独占更狠的五问清单 [APEX_SELF_CHECK_CHECKLIST]）；
  *  - [compressionAggressiveness]：压缩阈值倍率（1.0 = 默认；> 1 = 更早压缩
- *    省 token，如 NONE 档 1.2 → 有效阈值 = base / 1.2）；
+ *    省 token，如 NONE 档 1.2 → 有效阈值 = base / 1.2；**< 1 = 更晚压缩**，
+ *    如 APEXCODE 档 0.9 → 有效阈值 = base / 0.9 ≈ 0.889 > base，巅峰档
+ *    保留更多上下文供架构级穷举推理）；
  *  - [toolOutputBudget]：工具输出截断预算字符数（深档给模型更多工具输出
  *    上下文供其推理）。
  *
- * 六档画像差异总表：
+ * 八档画像差异总表：
  *
  * | 档位      | 推理框架      | budget | effort  | 迭代倍率 | 工具自检 | 终检清单 | 压缩倍率 | 输出预算 |
  * |-----------|---------------|--------|---------|----------|----------|----------|----------|----------|
@@ -31,7 +35,14 @@ import com.apex.agent.core.engine.ThinkingLevel
  * | STANDARD  | CoT 三步      | 1024   | MEDIUM  | ×1.0     | ✗        | ✗        | 1.0      | 8000     |
  * | DEEP      | 多路径 5 步   | 4096   | HIGH    | ×1.2     | ✓        | ✗        | 1.0      | 9000     |
  * | MAXIMUM   | ToT 7 步      | 16384  | MAX     | ×1.5     | ✓        | ✓        | 1.0      | 10000    |
+ * | ULTRACODE | 编码闭环 7 步 | 32768  | MAX     | ×2.0     | ✓        | ✓        | 1.0      | 12000    |
+ * | APEXCODE  | 架构穷举 7 步 | 65536  | MAX     | ×3.0     | ✓        | ✓(APEX)  | 0.9      | 16000    |
  * | AUTO      | 委托选档器    | null   | null    | ×1.0*    | 跟随*    | 跟随*    | 1.0*     | 8000*    |
+ *
+ * ULTRACODE / APEXCODE 的 effort 同为 MAX（Provider 侧天花板）：两档与
+ * MAXIMUM 的真实差异由提示词 + budget + 迭代/验证/压缩/输出策略拉开。
+ * APEXCODE 终检清单为 [APEX_SELF_CHECK_CHECKLIST]（五问，由
+ * [ThinkingModeController.finalSelfCheckPrompt] 按档位切换）。
  *
  * \* AUTO 档自身不携带执行策略 —— 由 [AdaptiveThinkingSelector] 按轮次动态
  * 选出具体档位后，使用**该档**的画像（[ThinkingModeController.profileFor]）。
@@ -77,8 +88,27 @@ data class ThinkingProfile(
 If any check fails, fix the gap with tools first; only then deliver the final answer."""
 
         /**
-         * DEEP / MAXIMUM 档（[postToolVerification] = true）在**工具失败**后
-         * 注入的自检提示（[ThinkingModeController.postToolCheckPrompt]，
+         * APEXCODE 档专属终检清单（v1.2）：比 [SELF_CHECK_CHECKLIST] 更狠的
+         * **五问**对抗性自审 —— 在三问（目标/副作用/遗漏）之上追加了巅峰档
+         * 特有的不变量与回归两问，对应其提示词里的 invariants / verification
+         * matrix 闭环。
+         *
+         * 消费方式与三问清单不变：[ThinkingModeController.finalSelfCheckPrompt]
+         * 在 [finalSelfCheck] = true 时注入清单——APEXCODE 档优先返回本清单
+         * （MAXIMUM / ULTRACODE 仍用 [SELF_CHECK_CHECKLIST]），经 system
+         * prompt 的 Thinking 段在模型产出最终回复**之前**下发。
+         */
+        const val APEX_SELF_CHECK_CHECKLIST: String = """Before sending your final response, run this apex-grade adversarial self-check:
+1. Goal: is the user's actual goal fully achieved — every requirement, not just the easy parts?
+2. Side effects: did any change touch state, files, or behavior beyond what was explicitly requested?
+3. Omissions: is anything you promised or planned still missing? Is any success claim unverified by a tool?
+4. Invariants: are all invariants you identified upfront still holding after your changes?
+5. Regression: did you scan callers and similar patterns, and re-run the verification matrix (build / lint / test / re-read)?
+If any check fails, fix the gap with tools first; only then deliver the final answer."""
+
+        /**
+         * DEEP / MAXIMUM / ULTRACODE / APEXCODE 档（[postToolVerification] = true）
+         * 在**工具失败**后注入的自检提示（[ThinkingModeController.postToolCheckPrompt]，
          * `%s` = 工具 id）。
          */
         const val POST_TOOL_FAILURE_CHECK: String = """[Thinking-level verification] The tool `%s` just FAILED. Before your next action, briefly:
@@ -86,8 +116,8 @@ If any check fails, fix the gap with tools first; only then deliver the final an
 2. Decide: fix the arguments, switch to a different approach, or ask the user — do NOT repeat the identical call."""
 
         /**
-         * DEEP / MAXIMUM 档在 **HIGH 风险工具执行成功**后注入的确认提示
-         * （`%s` = 工具 id）。高风险工具即使成功也要回头验证副作用 ——
+         * DEEP / MAXIMUM / ULTRACODE / APEXCODE 档在 **HIGH 风险工具执行成功**后
+         * 注入的确认提示（`%s` = 工具 id）。高风险工具即使成功也要回头验证副作用 ——
          * "执行成功"不等于"效果符合预期"。
          */
         const val POST_TOOL_HIGH_RISK_CHECK: String = """[Thinking-level verification] You just ran the HIGH-RISK tool `%s` successfully. Before continuing, verify the effect matches intent: no unintended side effects, no extra state left behind. If unsure, confirm with a read-only tool first."""
@@ -193,6 +223,58 @@ If any check fails, fix the gap with tools first; only then deliver the final an
                 toolOutputBudget = 10000,
                 uiDescriptionZh = "七步思维树穷举推理 + 工具自检 + 最终自评清单（目标/副作用/遗漏），迭代×1.5",
                 uiDescriptionEn = "7-step Tree-of-Thoughts + post-tool verification + final self-check, iterations x1.5"
+            )
+
+            ThinkingLevel.ULTRACODE -> ThinkingProfile(
+                level = ThinkingLevel.ULTRACODE,
+                promptInstruction = """
+                    Use coding-grade deep reasoning before any edit:
+                    1. Read-map-plan: re-read the relevant files and endpoints first; map the current state before changing it.
+                    2. State the invariants: what must remain true after the change (behavior, APIs, data, tests).
+                    3. Generate 2-3 candidate edits and rank them by risk of breaking the invariants.
+                    4. Choose the smallest change that satisfies the goal; prefer surgical edits over rewrites.
+                    5. Apply the edit, then immediately verify: re-read the changed region; run build/lint/test when available.
+                    6. Scan for regressions: callers, similar patterns, and side effects your edit may have introduced.
+                    7. If verification fails, diagnose the actual cause before retrying — never blind-retry the same edit.
+                    After any failed or high-risk tool call, re-examine your approach before the next action.
+                    Before your final answer, run the pre-response self-check (goal / side effects / omissions).
+                """.trimIndent(),
+                thinkingBudget = 32768,
+                reasoningEffortName = "MAX",
+                maxIterationsScale = 2.0f,
+                postToolVerification = true,
+                finalSelfCheck = true,
+                compressionAggressiveness = 1.0f,
+                toolOutputBudget = 12000,
+                uiDescriptionZh = "编码特化深推理：不变量→候选改法→风险排序→最小修改→即时验证；迭代×2.0、输出预算 12000",
+                uiDescriptionEn = "Coding-grade deep reasoning: invariants, candidate edits, risk-ranking, minimal change, immediate verification; iterations x2.0, output budget 12000"
+            )
+
+            ThinkingLevel.APEXCODE -> ThinkingProfile(
+                level = ThinkingLevel.APEXCODE,
+                promptInstruction = """
+                    Operate at architecture level with exhaustive rigor:
+                    1. Architecture-first decomposition: map components, layers, and data flow before touching any file.
+                    2. Blast-radius mapping: list every module, API, and test that the intended change can affect.
+                    3. Build 2-3 full plans (Tree-of-Thoughts style) and score them against a verification matrix (build / lint / test / re-read).
+                    4. Adversarial self-review: attack your own plan and diff as a hostile reviewer would; hunt the weakest assumption.
+                    5. Execute with checkpoints: after each stage, verify against the matrix before proceeding.
+                    6. Post-verification is exhaustive: run or re-run build, lint, and tests; re-read every file you changed end-to-end.
+                    7. Deliver an evidence-based summary: every claim backed by a verification result, not an impression.
+                    After any failed or high-risk tool call, re-examine your approach before the next action.
+                    Before your final answer, run the apex-grade adversarial self-check (goal / side effects / omissions / invariants / regression).
+                """.trimIndent(),
+                thinkingBudget = 65536,
+                reasoningEffortName = "MAX",
+                maxIterationsScale = 3.0f,
+                postToolVerification = true,
+                finalSelfCheck = true,
+                // < 1 = 更晚压缩（有效阈值 = base / 0.9 ≈ 0.889 > base）：巅峰档
+                // 保留更多上下文供架构级穷举推理，宁可多花 token 也不丢证据链。
+                compressionAggressiveness = 0.9f,
+                toolOutputBudget = 16000,
+                uiDescriptionZh = "架构级穷举推理 + 对抗性自审 + 全量验证矩阵；迭代×3.0、更晚压缩保留更多上下文",
+                uiDescriptionEn = "Architecture-level exhaustive reasoning + adversarial self-review + full verification matrix; iterations x3.0, later compression keeps more context"
             )
 
             ThinkingLevel.AUTO -> ThinkingProfile(

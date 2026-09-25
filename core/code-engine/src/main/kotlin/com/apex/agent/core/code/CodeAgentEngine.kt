@@ -3,6 +3,7 @@ package com.apex.agent.core.code
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.ApexAgentEngine
+import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
@@ -48,6 +49,13 @@ class CodeAgentEngine(
 
     /** 全局规则文本（设置层 AgentSettings.globalRules 的引擎侧缓存）。 */
     private var globalRules: String = ""
+
+    /**
+     * 当前思考档位（v1.2 七档思考系统：引擎侧缓存，refreshContext 时取
+     * 对应编码特化指令；引擎配置层的通用画像由 delegate.patchConfig
+     * 的 thinkingLevel 字段独立承载，两通道同步由 [updateThinkingLevel] 统一）。
+     */
+    private var currentThinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD
 
     // ═══ AgentEngine 委托 ═══
 
@@ -111,6 +119,30 @@ class CodeAgentEngine(
         globalRules = rules
     }
 
+    /**
+     * 更新思考档位（v1.2 七档思考系统）：双通道同步——
+     * 1. 引擎配置层：delegate.patchConfig(thinkingLevel) → 通用思考画像
+     *    （Thinking Instructions 段 + 迭代/压缩/输出预算倍率）随轮次生效；
+     * 2. 编码特化层：存字段，refreshContext 时把
+     *    [CodeThinkingPrompts.thinkingDirective] 拼进 additionalSystemContext。
+     *
+     * 与 updateGlobalRules 同款 JIT 语义：不立即刷上下文，下轮生效。
+     */
+    fun updateThinkingLevel(level: ThinkingLevel) {
+        currentThinkingLevel = level
+        delegate.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+    }
+
+    /** 当前思考档位（UI 回显用）。 */
+    fun thinkingLevel(): ThinkingLevel = currentThinkingLevel
+
+    /**
+     * AUTO 档最近一次自适应选档决策（"LEVEL: 因子→评分→档位"）；
+     * 非 AUTO 档或尚无决策 → null。VM 在 IterationStart 后拉取展示
+     * （镜像 Agent 模式 EventApplier 的可解释性通道）。
+     */
+    fun currentThinkingDecision(): String? = delegate.currentThinkingDecision()
+
     /** 清当前工作区的对话历史（新会话）。 */
     fun clearConversation() {
         delegate.clearHistory()
@@ -135,6 +167,13 @@ class CodeAgentEngine(
         val root = currentRoot
         val name = currentWorkspaceName ?: return
         val segments = mutableListOf(CodePrompts.codingIdentity())
+
+        // ═══ v1.2 七档思考系统：编码特化思考指令（NONE 档返回空串自动跳过）═══
+        // 通用思考画像（推理框架 + 预算倍率）由引擎配置层的 thinkingLevel
+        // 承载（updateThinkingLevel 双通道同步），此处只补编码方法论。
+        CodeThinkingPrompts.thinkingDirective(currentThinkingLevel)
+            .takeIf { it.isNotEmpty() }
+            ?.let { segments += it }
 
         if (root != null) {
             segments += CodePrompts.workspaceContext(

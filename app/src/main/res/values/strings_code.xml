@@ -79,4 +79,81 @@
     <string name="code_rules_project_status_no_workspace">No workspace — create or select one on the Code screen first</string>
     <string name="code_rules_project_create">Create template</string>
     <string name="code_rules_section_note">Priority: project rules (AGENTS.md) &gt; global rules &gt; general preferences; all sit below safety and permission constraints</string>
+
+    <!-- ═══ v1.2 七档思考系统（coding 模式专属文案；ULTRACODE/APEXCODE 与聊天页共享键） ═══ -->
+    <string name="code_thinking_selector_title">Thinking depth (7 tiers + Auto)</string>
+    <string name="code_thinking_none_desc">Act directly: skip reasoning, fast in-and-out (iterations x0.8)</string>
+    <string name="code_thinking_light_desc">Glance-edit: read the spot, patch, glance the result — token-light</string>
+    <string name="code_thinking_standard_desc">Standard coding loop: read → edit → verify → re-read, minimal diff</string>
+    <string name="code_thinking_deep_desc">Changeset mindset: list every change before acting, tie each to its verification</string>
+    <string name="code_thinking_maximum_desc">Invariant guarding: identify invariants &amp; ripple effects, re-check the whole chain after edits</string>
+    <string name="code_thinking_auto_desc">Adaptive: engine picks the tier per turn from task complexity (coding discipline baseline: DEEP)</string>
+
+    <!-- v1.2 思考档位指南（CodeThinkingGuideSheet） -->
+    <string name="code_thinking_guide_title">Thinking tier guide</string>
+    <string name="code_thinking_guide_subtitle">7 depth tiers (NONE up to APEXCODE) plus an AUTO meta tier that re-picks per turn; switching a tier changes the prompt, model params and execution policy together</string>
+    <string name="code_thinking_guide_table_title">Tier ladder</string>
+    <string name="code_thinking_guide_col_level">Tier</string>
+    <string name="code_thinking_guide_col_budget">Budget</string>
+    <string name="code_thinking_guide_col_effort">Effort</string>
+    <string name="code_thinking_guide_col_iters">Iters</string>
+    <string name="code_thinking_guide_col_output">Output</string>
+    <string name="code_thinking_guide_auto_row">adaptive</string>
+    <string name="code_thinking_guide_tap_hint">Tap any tier card to switch right here</string>
+    <string name="code_thinking_guide_current_badge">current</string>
+    <string name="code_thinking_guide_coding_view">Coding view</string>
+    <string name="code_thinking_guide_footer_linkage">A tier drives more than the prompt: iteration cap, compression threshold and tool-output budget all scale with it (see the ladder above).</string>
+    <string name="code_thinking_guide_footer_apex">APEXCODE is manual-only: the adaptive selector never picks it, and its token cost sits at the top of the whole ladder.</string>
+
+    <!-- ═══ v1.2 长任务中心 ═══ -->
+    <string name="code_longtask_open">Long-task center</string>
+    <string name="code_longtask_sheet_title">Long Tasks</string>
+    <string name="code_longtask_tab_tasks">Task records</string>
+    <string name="code_longtask_tab_templates">Templates</string>
+    <string name="code_longtask_empty">No long-task records yet</string>
+    <string name="code_longtask_empty_hint">Coding runs beyond a threshold (iterations / tools / duration / files) are archived automatically</string>
+    <string name="code_longtask_status_completed">Completed</string>
+    <string name="code_longtask_status_failed">Failed</string>
+    <string name="code_longtask_status_aborted">Aborted</string>
+    <string name="code_longtask_status_running">Running</string>
+    <string name="code_longtask_copies_fmt">copied x%1$d</string>
+    <string name="code_longtask_stats_fmt">%1$d iters · %2$d tools · %3$s · %4$d files</string>
+    <string name="code_longtask_goal_label">Goal</string>
+    <string name="code_longtask_files_header">Files touched (%1$d)</string>
+    <string name="code_longtask_todos_header">Todo snapshot</string>
+    <string name="code_longtask_checkpoints_fmt">Checkpoints x%1$d (every 5 iters / 60s)</string>
+    <string name="code_longtask_error_label">Error: </string>
+    <string name="code_longtask_copy">Copy task</string>
+    <string name="code_longtask_relaunch">Rerun</string>
+    <string name="code_longtask_compare">Diff vs last</string>
+    <string name="code_longtask_delete">Delete</string>
+    <string name="code_longtask_delete_confirm_fmt">Delete task record \"%1$s\"? This cannot be undone.</string>
+    <string name="code_longtask_confirm">Confirm</string>
+    <string name="code_longtask_cancel">Cancel</string>
+    <string name="code_longtask_copy_dialog_title">Copy-task options</string>
+    <string name="code_longtask_option_conversation">Carry last run context</string>
+    <string name="code_longtask_option_todos">Carry todo snapshot</string>
+    <string name="code_longtask_option_files">Carry files list</string>
+    <string name="code_longtask_option_relaunch">Rerun immediately after copying</string>
+    <string name="code_longtask_option_title">New title (optional)</string>
+    <string name="code_longtask_thinking_current_fmt">Thinking tier: %1$s</string>
+    <string name="code_longtask_thinking_follow">Follow source tier</string>
+    <string name="code_longtask_template_start">Start</string>
+    <string name="code_longtask_template_level_fmt">Recommended tier: %1$s</string>
+    <string name="code_longtask_tab_stats">Tier stats</string>
+    <string name="code_longtask_filter_all">All</string>
+    <string name="code_longtask_resume">Resume</string>
+    <string name="code_longtask_resume_latest">Resume from last checkpoint</string>
+    <string name="code_longtask_resume_at_fmt">Resume from iteration %1$d</string>
+    <string name="code_longtask_resume_fallback">No checkpoint — rerun with context</string>
+    <string name="code_longtask_stats_empty">No tier stats yet</string>
+    <string name="code_longtask_stats_empty_hint">Stats aggregate automatically from archived long tasks per tier</string>
+    <string name="code_longtask_stats_runs_fmt">%1$d runs</string>
+    <string name="code_longtask_stats_row_fmt">success %1$d%% · avg %2$d iters · %3$d tools · %4$s</string>
+
+    <!-- v1.2 检查点时间线（CodeLongTaskSheet 展开区） -->
+    <string name="code_longtask_cp_round_fmt">Round %1$d</string>
+    <string name="code_longtask_cp_counts_fmt">%1$d tools · %2$d files</string>
+    <string name="code_longtask_cp_todos_fmt">☑%1$d ☐%2$d</string>
+    <string name="code_thinking_guide_open">View tier guide</string>
 </resources>

@@ -166,6 +166,8 @@ fun ApexDrawerContent(
                     DrawerDestination.Tasks,
                     DrawerDestination.Storage,
                     DrawerDestination.Permissions,
+                    // #167 加密剪切板金库：与权限页相邻（同为安全入口）
+                    DrawerDestination.Vault,
                     DrawerDestination.Log,
                     DrawerDestination.Settings,
                     DrawerDestination.GlassLab

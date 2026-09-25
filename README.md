@@ -692,6 +692,35 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 → `skill_list` 确认，全程 LLM 自主闭环。市场货架含**工具 / 技能 / MCP /
 插件 / 连接器**五类。
 
+内置模板现共 11 个：`web_scraper` `file_organizer` `code_runner`
+`data_analyzer` `coding_principles` + 新增的 `deep_research`（多源检索 → 抓取 →
+带引用报告）、`code_review`（严重度分级评审清单）、`crash_triage`（崩溃/ANR
+根因定位）、`git_workflow`（Conventional Commits + PR 模板）、`standup_report`
+（结论先行日报/周报）、`im_notify`（结果推送到 IM 通道）。
+
+### 📡 消息通道连接器：微信 / 飞书 / QQ
+
+连接器里有一类 `messaging` 通道，对话中用 `connector_list` 查看、
+`connector_send_message` 发送（`verify_only=true` 只校验凭据），凭据在市场页
+**已安装管理 → 连接器 → 配置** 里填写，并可「发送测试消息」真发一条验收：
+
+| 通道 | 模式 | 凭据 |
+|------|------|------|
+| 微信 | `wecom`（默认，企业微信群机器人） / `clawbot`（微信官方 ClawBot 插件 → OpenClaw Gateway） | Webhook key ／ Gateway 地址 + hooks token |
+| 飞书 | `webhook`（默认，群自定义机器人，支持签名校验） / `app`（自建应用） | hook token（+ `sign_secret`）／ App ID + App Secret + target |
+| QQ | `openapi`（QQ 开放平台官方机器人） | AppID + clientSecret + target（`group:`/`user:`/`channel:`） |
+
+同一套凭据同时被内置 `im` MCP 服务器（`im_list_channels` / `im_send` /
+`im_verify`）复用。详见 [docs/im-connectors.md](docs/im-connectors.md)。
+
+### 🧩 内置 MCP 服务器（进程内 BUILTIN）
+
+除用户自建的 HTTP/SSE/STDIO 工具源外，App 预置 8 台**进程内 MCP 服务器**：
+`github` `search` `fs` `memory` `thinking` + `im`（消息通道）、`tasks`（跨会话
+任务看板）、`http`（带护栏的 HTTP 客户端）。连接后经 `McpToolRegistrar`
+注册为 `mcp__<server>__<tool>` 一等工具。详见
+[docs/builtin-mcp.md](docs/builtin-mcp.md)。
+
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 
 ---
@@ -965,6 +994,8 @@ Android-Guru-Agent/
 | 文档 | 内容 |
 |------|------|
 | [docs/tool-system-v3.md](docs/tool-system-v3.md) | **工具系统 v3**：执行硬化八层（超时/重试/限流/熔断/追踪/批量/组合动作/环境门控），MCP·LangGraph·Anthropic CU·Mobile-Agent-E 对标 |
+| [docs/builtin-mcp.md](docs/builtin-mcp.md) | **内置 MCP 服务器**：BUILTIN 进程内传输 · 8 台服务器清单 · 新增一台的三件套模式与护栏 |
+| [docs/im-connectors.md](docs/im-connectors.md) | **消息通道连接器**：微信（ClawBot/企业微信）· 飞书（自定义机器人/自建应用）· QQ 官方机器人的接入步骤、字段与排错 |
 | [docs/TESTING.md](docs/TESTING.md) | **测试总指南**：理念/矩阵/替身规范/FAQ/74 文件清单 |
 | [docs/liquid-glass-system.md](docs/liquid-glass-system.md) | **Liquid Glass 玻璃组件系统**：架构/七档材质/组件 API/真实性验收矩阵 |
 | [docs/memory-and-workflow-research.md](docs/memory-and-workflow-research.md) | **记忆与工作流调研报告**：对标 MemGPT/Mem0/A-MEM/Zep/Voyager/Claude Code/OpenHands/SWE-agent |

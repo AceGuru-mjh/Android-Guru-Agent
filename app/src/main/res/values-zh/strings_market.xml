@@ -17,6 +17,7 @@
     <string name="market_action_cancel">取消</string>
     <string name="market_action_close">关闭</string>
     <string name="market_action_add">添加</string>
+    <string name="market_action_save">保存</string>
     <string name="market_action_import">导入</string>
     <string name="market_action_install">安装</string>
     <string name="market_action_uninstall">卸载</string>
@@ -186,6 +187,13 @@
     <string name="market_connector_name_label">显示名（如 我的服务）</string>
     <string name="market_connector_type_label">类型</string>
     <string name="market_connector_endpoint_label">端点（URL / host，可选）</string>
+    <string name="market_connector_apikey_label">凭据 / API Key（Webhook key、Bot token、App Secret 等）</string>
+    <string name="market_connector_extra_label">扩展配置（每行一条 key=value，如 mode=clawbot / app_id=cli_xxx / target=group:xxx）</string>
+    <string name="market_connector_config_title">配置连接器</string>
+    <string name="market_connector_action_config">配置</string>
+    <string name="market_connector_action_test">发送测试消息</string>
+    <string name="market_connector_test_sending">正在发送测试消息…</string>
+    <string name="market_connector_config_saved">已保存连接器凭据：%1$s</string>
 
     <!-- ═══ 对话框 · Skill JSON / URL / GitHub ═══ -->
     <string name="market_skill_json_title">导入 Skill JSON</string>

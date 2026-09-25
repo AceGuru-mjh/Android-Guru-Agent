@@ -2,6 +2,8 @@ package com.apex.agent.di
 
 import android.content.Context
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.tools.connector.ConnectorMessenger
+import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.github.GithubApiService
 import com.apex.agent.github.GithubTokenManager
@@ -11,9 +13,18 @@ import com.apex.agent.github.mcp.BuiltinGithubMcpTransport
 import com.apex.agent.mcp.builtin.fs.BuiltinFsMcpBootstrap
 import com.apex.agent.mcp.builtin.fs.BuiltinFsMcpServer
 import com.apex.agent.mcp.builtin.fs.BuiltinFsMcpTransport
+import com.apex.agent.mcp.builtin.http.BuiltinHttpMcpBootstrap
+import com.apex.agent.mcp.builtin.http.BuiltinHttpMcpServer
+import com.apex.agent.mcp.builtin.http.BuiltinHttpMcpTransport
+import com.apex.agent.mcp.builtin.im.BuiltinImMcpBootstrap
+import com.apex.agent.mcp.builtin.im.BuiltinImMcpServer
+import com.apex.agent.mcp.builtin.im.BuiltinImMcpTransport
 import com.apex.agent.mcp.builtin.memory.BuiltinMemoryMcpBootstrap
 import com.apex.agent.mcp.builtin.memory.BuiltinMemoryMcpServer
 import com.apex.agent.mcp.builtin.memory.BuiltinMemoryMcpTransport
+import com.apex.agent.mcp.builtin.tasks.BuiltinTasksMcpBootstrap
+import com.apex.agent.mcp.builtin.tasks.BuiltinTasksMcpServer
+import com.apex.agent.mcp.builtin.tasks.BuiltinTasksMcpTransport
 import com.apex.agent.mcp.builtin.thinking.BuiltinThinkingMcpBootstrap
 import com.apex.agent.mcp.builtin.thinking.BuiltinThinkingMcpServer
 import com.apex.agent.mcp.builtin.thinking.BuiltinThinkingMcpTransport
@@ -46,7 +57,10 @@ object McpModule {
         codeWorkspaceRoots: CodeWorkspaceRoots,
         // v0.2 #149：PRoot 沙箱 launcher 的宿主环境（libproot 路径 + host env）
         hostEnvironment: PRootHostEnvironment,
-        rootfsBaseDir: File
+        rootfsBaseDir: File,
+        // 新增内置服务器依赖：im 复用市场页配好的消息连接器与消息发送器
+        connectorRegistry: ConnectorRegistry,
+        connectorMessenger: ConnectorMessenger
     ): McpManager {
         val configDir = File(context.filesDir, "mcp_config")
         val manager = McpManager(
@@ -62,6 +76,10 @@ object McpModule {
             //   官方 server-memory 语义，持久化 mcp_memory/memory.json）
             // - thinking（#150）：顺序思考链（官方 server-sequential-thinking
             //   语义，per-connection 状态零持久化）
+            // - im：消息通道（微信 ClawBot/企业微信、飞书、QQ、Telegram）—— 复用
+            //   市场页「连接器」里配好的凭据，Agent 与外部 MCP 客户端共享一条通道
+            // - tasks：跨会话持久化的任务看板（todo/doing/done，长任务进度账本）
+            // - http：带协议白名单 + 响应截断护栏的 HTTP 客户端（调 API / 打 webhook）
             builtinTransports = mapOf(
                 BuiltinGithubMcpServer.ID to { BuiltinGithubMcpTransport(githubApi, githubTokens) },
                 BuiltinSearchMcpServer.ID to { BuiltinSearchMcpTransport(httpClient) },
@@ -69,7 +87,14 @@ object McpModule {
                 BuiltinMemoryMcpServer.ID to {
                     BuiltinMemoryMcpTransport(File(context.filesDir, "mcp_memory"))
                 },
-                BuiltinThinkingMcpServer.ID to { BuiltinThinkingMcpTransport() }
+                BuiltinThinkingMcpServer.ID to { BuiltinThinkingMcpTransport() },
+                BuiltinImMcpServer.ID to {
+                    BuiltinImMcpTransport(connectorRegistry, connectorMessenger)
+                },
+                BuiltinTasksMcpServer.ID to {
+                    BuiltinTasksMcpTransport(File(context.filesDir, BUILTIN_TASKS_DIR))
+                },
+                BuiltinHttpMcpServer.ID to { BuiltinHttpMcpTransport(httpClient) }
             ),
             // v0.2 #149：PRoot 沙箱 STDIO launcher —— runInSandbox=true 的
             // STDIO 服务器在 Ubuntu rootfs 内启动（npx -y @modelcontextprotocol/
@@ -94,6 +119,12 @@ object McpModule {
         BuiltinFsMcpBootstrap.ensureAndConnect(manager)
         BuiltinMemoryMcpBootstrap.ensureAndConnect(manager)
         BuiltinThinkingMcpBootstrap.ensureAndConnect(manager)
+        // 消息通道 / 任务看板 / HTTP 三台（同款幂等预置 + 自动连接）
+        BuiltinImMcpBootstrap.ensureAndConnect(manager)
+        BuiltinTasksMcpBootstrap.ensureAndConnect(manager)
+        BuiltinHttpMcpBootstrap.ensureAndConnect(manager)
         return manager
     }
+
+    private const val BUILTIN_TASKS_DIR = "mcp_tasks"
 }

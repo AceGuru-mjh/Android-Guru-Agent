@@ -188,21 +188,47 @@ class ConnectorRegistry(
                 endpoint = "",
                 builtin = true
             ),
-            // 消息推送连接器：ConnectorMessenger 可直接发送文本（connector_send_message）
+            // ── 消息通道连接器（OpenClaw 同款 channel 模型）─────────────
+            // ConnectorMessenger 可按 id 直接发消息（connector_send_message /
+            // mcp__im__im_send）；每种通道支持两种 mode（extra.mode）：
+            //   wechat : wecom(默认，群机器人 webhook) | clawbot(微信 ClawBot 插件 → OpenClaw Gateway)
+            //   feishu : webhook(默认，群机器人)       | app(自建应用：App ID + App Secret)
+            //   qq     : QQ 开放平台官方机器人（AppID + clientSecret）
+            // 详见 docs/im-connectors.md。
             ConnectorDef(
                 id = "wechat",
-                name = "微信（企业微信群机器人）",
+                name = "微信（ClawBot / 企业微信群机器人）",
                 type = "messaging",
                 endpoint = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send",
-                extra = mapOf("hint" to "apiKey 填机器人 Webhook key（或 endpoint 直接填完整 webhook URL）"),
+                extra = mapOf(
+                    "hint" to "默认企业微信群机器人：apiKey 填 Webhook key（或 endpoint 填完整 webhook URL）。" +
+                        "用微信 ClawBot 插件时改填 extra.mode=clawbot 并把 endpoint 换成 OpenClaw Gateway 地址",
+                    "mode" to "wecom"
+                ),
                 builtin = true
             ),
             ConnectorDef(
                 id = "feishu",
-                name = "飞书（自定义机器人）",
+                name = "飞书（自建应用 / 自定义机器人）",
                 type = "messaging",
                 endpoint = "https://open.feishu.cn/open-apis/bot/v2/hook/",
-                extra = mapOf("hint" to "apiKey 填机器人 hook token（或 endpoint 直接填完整 hook URL）"),
+                extra = mapOf(
+                    "hint" to "默认自定义机器人：apiKey 填 hook token（开启签名校验时补 extra.sign_secret）。" +
+                        "自建应用填 extra.mode=app + extra.app_id + apiKey(App Secret) + extra.target",
+                    "mode" to "webhook"
+                ),
+                builtin = true
+            ),
+            ConnectorDef(
+                id = "qq",
+                name = "QQ 机器人（QQ 开放平台）",
+                type = "messaging",
+                endpoint = "https://api.bot.qq.com",
+                extra = mapOf(
+                    "hint" to "QQ 开放平台创建机器人后填 extra.app_id(AppID) + apiKey(clientSecret) + " +
+                        "extra.target(group:<群 openid> / user:<用户 openid> / channel:<子频道 id>)",
+                    "mode" to "openapi"
+                ),
                 builtin = true
             ),
             ConnectorDef(

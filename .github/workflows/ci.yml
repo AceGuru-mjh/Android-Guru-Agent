@@ -358,6 +358,26 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
+      - name: Run core:code-tools unit tests (Coding 模式工具集)
+        run: |
+          # Coding 模式 v0.2：code_* 工具 + 诊断引擎（#148 进程内 LSP 诊断回注
+          # 的 CodeDiagnostics / 5 Provider / CodeCheckTool / 编辑回注链路）。
+          # Pure JVM。本地 kotlinc+JUnitCore 已验证 37/37；进 CI 防回归。
+          ./gradlew :core:code-tools:test \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
+      - name: Run core:code-engine unit tests (Coding 模式引擎)
+        run: |
+          # Coding 模式 v0.2：#147 子代理（SubAgentRunner 事件收集/超时/并发
+          # 闸门 + CodeTaskTool 参数解析 + allowedToolIds 通道规格断言）。
+          # Pure JVM（脚本化假引擎，无 Android 依赖）。
+          ./gradlew :core:code-engine:test \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
       - name: Run core:tool-registry unit tests
         run: |
           # Quality gate restored: DomParserTest / BrowserScriptTest compile

@@ -1,6 +1,8 @@
 package com.apex.agent.core.codetools.tools
 
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.codetools.diagnostics.CodeDiagnostics
+import com.apex.agent.core.codetools.diagnostics.appendDiagnostics
 import com.apex.agent.core.tools.ToolArguments
 import com.apex.agent.core.tools.ToolErrorCode
 import com.apex.agent.core.tools.ToolMetadata
@@ -18,10 +20,12 @@ import java.io.File
  * - 局部修改 → code_edit（省 token 且更安全）。
  *
  * 行为：全量覆盖；存在文件必须显式确认（overwrite=true）——防止模型在没读过
- * 文件的情况下盲目覆盖。写入后回显统一 diff 摘要（存在时）。
+ * 文件的情况下盲目覆盖。写入后回显统一 diff 摘要（存在时），并附带即时诊断
+ * 回注（注入 [diagnostics] 时，发现以「⚠️ 诊断」块追加在成功输出尾部）。
  */
 class CodeWriteTool(
-    private val roots: CodeWorkspaceRoots
+    private val roots: CodeWorkspaceRoots,
+    private val diagnostics: CodeDiagnostics? = null
 ) : BaseTool(
     id = "code_write",
     name = "Code Write",
@@ -84,7 +88,9 @@ class CodeWriteTool(
             val before = file.readText(Charsets.UTF_8)
             file.writeText(content, Charsets.UTF_8)
             val diff = UnifiedDiff.mini(before, content, path, 4)
-            return ToolResult.ok("✅ overwrote $path (${content.length} chars)\n$diff")
+            return ToolResult.ok(
+                appendDiagnostics("✅ overwrote $path (${content.length} chars)\n$diff", content, diagnostics, root, file)
+            )
         }
 
         file.parentFile?.mkdirs()
@@ -94,7 +100,13 @@ class CodeWriteTool(
         }
         file.writeText(content, Charsets.UTF_8)
         return ToolResult.ok(
-            "✅ created $path (${content.count { it == '\n' } + 1} lines, ${content.length} chars)"
+            appendDiagnostics(
+                "✅ created $path (${content.count { it == '\n' } + 1} lines, ${content.length} chars)",
+                content,
+                diagnostics,
+                root,
+                file
+            )
         )
     }
 }

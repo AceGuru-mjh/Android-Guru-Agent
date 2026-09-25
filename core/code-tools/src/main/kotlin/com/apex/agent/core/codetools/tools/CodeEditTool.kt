@@ -1,6 +1,8 @@
 package com.apex.agent.core.codetools.tools
 
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.codetools.diagnostics.CodeDiagnostics
+import com.apex.agent.core.codetools.diagnostics.appendDiagnostics
 import com.apex.agent.core.codetools.edit.FuzzyReplacer
 import com.apex.agent.core.tools.ToolArguments
 import com.apex.agent.core.tools.ToolErrorCode
@@ -27,10 +29,12 @@ import java.util.concurrent.ConcurrentHashMap
  * - `old_string` 为空且文件不存在 → 允许创建新文件（write 语义兜底）。
  *
  * 工程细节：CRLF/LF 检测与还原、BOM 保留、按文件路径互斥锁（防并发编辑竞态）、
- * 统一 diff 摘要回显（模型自我验证改对了没有）。
+ * 统一 diff 摘要回显（模型自我验证改对了没有）、编辑成功后的即时诊断回注
+ * （注入 [diagnostics] 时，对编辑后的完整内容追加「⚠️ 诊断」块）。
  */
 class CodeEditTool(
-    private val roots: CodeWorkspaceRoots
+    private val roots: CodeWorkspaceRoots,
+    private val diagnostics: CodeDiagnostics? = null
 ) : BaseTool(
     id = "code_edit",
     name = "Code Edit",
@@ -118,7 +122,15 @@ class CodeEditTool(
             }
             file.parentFile?.mkdirs()
             file.writeText(newString, Charsets.UTF_8)
-            return ToolResult.ok("✅ created $path (${newString.count { it == '\n' } + 1} lines, ${newString.length} chars)")
+            return ToolResult.ok(
+                appendDiagnostics(
+                    "✅ created $path (${newString.count { it == '\n' } + 1} lines, ${newString.length} chars)",
+                    newString,
+                    diagnostics,
+                    root,
+                    file
+                )
+            )
         }
 
         if (!file.exists()) {
@@ -164,7 +176,13 @@ class CodeEditTool(
                 file.writeText(output, Charsets.UTF_8)
                 val diff = UnifiedDiff.mini(body, outcome.newContent, path, 6)
                 ToolResult.ok(
-                    "✅ edited $path (lines ${outcome.startLine}-${outcome.endLine}, strategy=${outcome.strategy})\n$diff"
+                    appendDiagnostics(
+                        "✅ edited $path (lines ${outcome.startLine}-${outcome.endLine}, strategy=${outcome.strategy})\n$diff",
+                        output,
+                        diagnostics,
+                        root,
+                        file
+                    )
                 )
             }
         }

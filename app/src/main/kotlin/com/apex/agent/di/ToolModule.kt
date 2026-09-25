@@ -11,7 +11,6 @@ import com.apex.agent.core.tools.catalog.ToolSearchTool
 import com.apex.agent.core.tools.connector.ConnectorMessenger
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.skill.SkillRegistry
-import com.apex.agent.core.tools.skill.SkillToolAdapter
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.github.GithubApiService
 import com.apex.agent.github.GithubTokenManager
@@ -80,7 +79,20 @@ import com.apex.agent.core.tools.builtin.VersionCompareTool
 import com.apex.agent.core.tools.builtin.WaitTool
 import com.apex.agent.core.codetools.CodeTools
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
+import com.apex.agent.core.codetools.diagnostics.CodeDiagnostics
 import com.apex.agent.core.codetools.tools.CodeTodoTool
+import com.apex.agent.core.code.subagent.CodeTaskTool
+import com.apex.agent.core.code.subagent.SubAgentRunner
+import com.apex.agent.core.engine.ApexAgentEngine
+import com.apex.agent.core.engine.EnvironmentInfoProvider
+import com.apex.agent.core.engine.PrivilegeInfoProvider
+import com.apex.agent.core.engine.compression.ContextCompressor
+import com.apex.agent.core.llm.LlmClient
+import com.apex.agent.core.llm.runtime.ModelRuntime
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.core.tools.skill.SkillHotReloadLogLevel
+import com.apex.agent.core.tools.skill.SkillHotReloader
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
@@ -338,7 +350,14 @@ object ToolModule {
         connectorRegistry: ConnectorRegistry,
         // Coding 模式：工作区根解析（code_* 工具的动态沙箱根）+ 共享 todo 单例
         codeWorkspaceRoots: CodeWorkspaceRoots,
-        codeTodoTool: CodeTodoTool
+        codeTodoTool: CodeTodoTool,
+        // v0.2 #147：子代理引擎工厂的共享单例集（每次 code_task 构造全新
+        // ApexAgentEngine 实例，隔离上下文；依赖均为无环叶子见各 Module）
+        llmClient: LlmClient,
+        modelRuntime: ModelRuntime,
+        contextCompressor: ContextCompressor,
+        privilegeInfoProvider: PrivilegeInfoProvider,
+        environmentInfoProvider: EnvironmentInfoProvider
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -430,11 +449,18 @@ object ToolModule {
         registry.register(SafeAgentTool(FileEditTool(workspaceDir)))
 
         // ═══ 2b. Coding 模式工具（Code Mode 与 Agent 模式互用）═══
-        // code_read/edit/write/grep/glob/todo —— opencode 契约的编码工具集。
+        // code_read/edit/write/grep/glob/todo/check —— opencode 契约的编码工具集。
         // 根目录经 CodeWorkspaceRoots 动态解析（Code 屏切换工作区即时生效），
         // 默认工作区与上方 workspaceDir 同源（linux/workspaces/default），
         // 两模式看到同一份文件。CORE 集已加入（ToolTierPolicy），两模式默认可见。
-        CodeTools.all(roots = codeWorkspaceRoots, todo = codeTodoTool).forEach {
+        // v0.2 #148：注入进程内诊断引擎 —— code_edit/code_write 成功后自动
+        // 附加语法诊断（JSON/XML/括号/缩进/死链），模型即错即修；code_check
+        // 随 CodeTools.all 一并注册，可主动检查任意文件。
+        CodeTools.all(
+            roots = codeWorkspaceRoots,
+            todo = codeTodoTool,
+            diagnostics = CodeDiagnostics()
+        ).forEach {
             registry.register(SafeAgentTool(it))
         }
 
@@ -646,12 +672,54 @@ object ToolModule {
             environmentState, traceRecorder, circuitBreaker
         )
 
-        // composite/script 工具：随注册表构建时快照注册；新装技能后重启 App 生效
-        // （SkillToolAdapter 的复合步骤同样过主执行器：门控/校验/统计全覆盖）
-        val skillStepExecutor: ToolExecutor = mainExecutor
-        skillRegistry.getActiveTools().forEach { def ->
-            registry.register(SafeAgentTool(SkillToolAdapter(def, skillStepExecutor)))
-        }
+        // ═══ 16. #151 技能热注册器：装/卸/开关技能免重启 ═══
+        // 旧实现是启动期快照注册（新装技能要重启 App 才有工具）。现改为
+        // SkillHotReloader：首次全量同步（吸收旧快照遗留，升级路径兼容）+
+        // 订阅 SkillRegistry.changes 增量 diff，安装/卸载/启停即时生效。
+        // prompt 注入本就是热的（引擎每轮读 getPromptInjections）。
+        // 防劫持：只管理自己注册的工具 id，绝不触碰核心工具（三层防线见其 KDoc）。
+        SkillHotReloader(
+            skillRegistry = skillRegistry,
+            toolRegistry = registry,
+            toolExecutor = mainExecutor,
+            scope = kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+            ),
+            logger = { level, message ->
+                when (level) {
+                    SkillHotReloadLogLevel.INFO -> AppLogger.instance.info(
+                        LogCategory.PLUGIN, "SkillHotReloader", message
+                    )
+                    SkillHotReloadLogLevel.WARN -> AppLogger.instance.warn(
+                        LogCategory.PLUGIN, "SkillHotReloader", message
+                    )
+                }
+            }
+        ).start()
+
+        // ═══ 17. #147 子代理 task 工具（code_task）═══
+        // 主代理把探索/调研类工作委派给隔离上下文的子代理：全新引擎实例跑
+        // 完整 ReAct 循环，结论作为工具结果返回（中间过程不进入主对话）。
+        // 工厂每次构造全新 ApexAgentEngine（共享单例依赖；memory=null 会话即焚，
+        // CS-Mem 不旁路不观察）；registry/mainExecutor 此刻已装配完毕，lambda
+        // 惰性求值安全。工具集经 allowedToolIds 收窄（不附带 tool_choice=required，
+        // 子代理最终轮能输出纯文本结论）。
+        val subAgentRunner = SubAgentRunner(
+            engineFactory = { cfg ->
+                ApexAgentEngine(
+                    llmClient = llmClient,
+                    toolRegistry = registry,
+                    toolExecutor = mainExecutor,
+                    config = cfg,
+                    contextCompressor = contextCompressor,
+                    skillRegistry = skillRegistry,
+                    privilegeInfoProvider = privilegeInfoProvider,
+                    environmentInfoProvider = environmentInfoProvider,
+                    modelRuntime = modelRuntime
+                )
+            }
+        )
+        registry.register(SafeAgentTool(CodeTaskTool(subAgentRunner)))
 
         // ═══ 15. v3 批量执行 + 组合动作（依赖主执行器，循环依赖断点在此）═══
         // tool_batch_run：模型一次性声明有序步骤（首错即停 + NOT_EXECUTED 标记 +

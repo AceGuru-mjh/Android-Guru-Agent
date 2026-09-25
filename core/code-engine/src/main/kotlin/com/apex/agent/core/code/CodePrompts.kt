@@ -27,6 +27,13 @@ object CodePrompts {
         - **改码**：局部修改用 code_edit（old_string 必须与文件原文精确一致，
           code_read 输出的 "N: " 行号前缀不属于原文）；新建/重写用 code_write。
           大改动先 code_todo 拆步骤。
+        - **诊断回注**：code_edit / code_write 成功后输出尾部可能附带「⚠️ 诊断」
+          块（JSON/XML 语法、括号配平、缩进一致性、Markdown 死链的即时检查）。
+          有诊断时先修复再继续；不确定时可主动 code_check 任意文件。诊断是
+          本地毫秒级检查，不能替代构建验证。
+        - **子代理委派**：探索型（"找出所有用到 X 的地方"）与调研型（"查一下
+          某库怎么用"）工作用 code_task 委派给隔离子代理（explore / research /
+          general），结论直接返回、过程不占用本会话上下文。主对话保持精炼。
         - **执行**：构建/测试/脚本用 terminal.exec 或 terminal 会话工具，在
           Ubuntu 沙箱里运行；改完代码必须验证（build / lint / 测试 / 回读）。
         - **循环**：改 → 验证 → 失败则读错误 → 再改，直到通过。不要在没有验证

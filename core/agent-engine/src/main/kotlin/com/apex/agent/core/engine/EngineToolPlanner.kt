@@ -54,10 +54,15 @@ internal object EngineToolPlanner {
         degradationLevel: Int
     ): ToolRequestBudget.RequestToolPlan {
         val forced = config.forcedToolIds
+        val allowed = config.allowedToolIds
         return when {
             degradationLevel >= DEGRADATION_NO_TOOLS -> EMPTY_TOOL_PLAN
             forced.isNotEmpty() && degradationLevel == 0 ->
                 ToolRequestBudget.planForced(registry, forced)
+            // #147 子代理：仅收窄工具集，不附带 tool_choice=required —— 子代理的
+            // 最终轮需要能输出纯文本结论（forced 语义会迫使每轮调用工具）。
+            allowed.isNotEmpty() && degradationLevel == 0 ->
+                ToolRequestBudget.planForced(registry, allowed)
             else -> ToolRequestBudget.planDefault(
                 registry = registry,
                 activation = activation,

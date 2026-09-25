@@ -50,7 +50,9 @@ object ToolTierPolicy {
         "glob_files", "search_files", "copy_move_file", "delete_file",
 
         // ── coding (Code 模式；Agent 模式同样可见 —— 工具规则互用) ──
+        // v0.2：code_task（#147 子代理委派）与 code_check（#148 即时诊断）入 CORE。
         "code_read", "code_edit", "code_write", "code_grep", "code_glob", "code_todo",
+        "code_task", "code_check",
 
         // ── web ──
         "web_search", "web_fetch", "http_request", "download_file",

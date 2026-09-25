@@ -43,6 +43,10 @@ include(":platform:cs-mem")
 // Terminal Runtime 2.0 — vendored VT100/ANSI emulator (ATR Phase 2)
 include(":terminal-emulator")
 
+// Terminal native hot path — vendored apex-vt-native C++17 VT engine (JNI)
+// 上游：AceGuru-mjh/apex-vt-native（129 项奇偶校验测试 + NDK CI）
+include(":terminal-native")
+
 // 插件SDK
 include(":plugin-sdk:plugin-api")
 include(":plugin-sdk:plugin-host")

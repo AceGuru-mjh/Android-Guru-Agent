@@ -60,7 +60,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 <a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-109-ff69b4" alt="109 Tools"/></a>
 <a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
-<a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-13-8A2BE2" alt="13 Modules"/></a>
+<a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-14-8A2BE2" alt="14 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-74_files-2EA44F" alt="74 Tests"/></a>
 <a href="#cs-mem"><img src="https://img.shields.io/badge/🧠_memory-cs--mem-00C2D1" alt="cs-mem"/></a>
 <a href="#terminal-runtime"><img src="https://img.shields.io/badge/sandbox-PRoot_Ubuntu_24.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu"/></a>
@@ -267,6 +267,7 @@ flowchart TB
     end
 
     VTE["🖥️ terminal-emulator<br/>自研 VT100 / ANSI 模拟器"]
+    VTN["🚀 terminal-native<br/>apex-vt-native C++17 引擎<br/>（JNI 零分配热路径）"]
 
     subgraph PLUG["🧩 plugin-sdk — AIDL 跨进程"]
         PAPI["plugin-api · IApexPlugin"]
@@ -284,13 +285,14 @@ flowchart TB
     CSMEM -->|记忆召回工具| TOOLS
     ENGINE -->|会话记忆观察| CSMEM
     TERM --> VTE
+    VTE -.native 加速.-> VTN
     PHOST -->|插件工具注册| TOOLS
     PERSIST -.前台保活.-> APP
     PAPI -.契约.-> PHOST
     PLUGINS -.实现.-> PAPI
 ```
 
-**13 个 Gradle 模块**（单一仓库 `settings.gradle.kts`）：
+**14 个 Gradle 模块**（单一仓库 `settings.gradle.kts`）：
 
 | 模块 | 类型 | 职责 |
 |------|:---:|------|
@@ -303,7 +305,8 @@ flowchart TB
 | `:platform:persistence` | Android Lib | 前台服务 + WorkManager 看门狗（被杀自动拉起） |
 | `:platform:terminal` | Android Lib | 终端运行时 2.0：rootfs 供给、PRoot 后端、原生 PTY、Ubuntu 生命周期编排、18 个工具 |
 | `:platform:cs-mem` | Android Lib | 认知记忆系统（本仓库的差异化核心，见下节） |
-| `:terminal-emulator` | Android Lib | 自研 VT100/ANSI 终端模拟器（vendored，ATR Phase 2） |
+| `:terminal-emulator` | Android Lib | 自研 VT100/ANSI 终端模拟器（vendored，ATR Phase 2）+ `TerminalEngine` 引擎抽象 |
+| `:terminal-native` | Android Lib | apex-vt-native C++17 零分配 VT 引擎（vendored + JNI，运行时回退 Kotlin） |
 | `:plugin-sdk:plugin-api` | Android Lib | AIDL `IApexPlugin` + PluginContract 常量 |
 | `:plugin-sdk:plugin-host` | Android Lib | 插件发现/绑定/工具桥接 |
 | `:plugins:plugin-workflow` | Android App | 参考插件 APK（`workflow/save、execute、list` 三工具） |
@@ -517,7 +520,7 @@ flowchart TD
 | rootfs 供给 | `RootfsDownloader/Extractor/Configurator` + `UbuntuBootstrapManager` | 官方 Ubuntu 24.04.4 归档（sha256 锁定）、断点续装、`sources.list` 配置、基础包档案 |
 | 执行后端 | `LinuxPRootBackend` + `ProotExecutor` | PRoot 用户态沙箱（无需 root！）、预编译 so 随包分发（指纹校验防篡改）、Fake 后端供测试 |
 | PTY | C++ `forkpty`（`pty_engine.cpp` / `jni_bridge.cpp`） | 原生伪终端、argv 编组、进程组信号、会话隔离 |
-| 终端模拟 | `terminal-emulator` 模块 | 自研 VT100/ANSI：转义序列解析、滚动区、24 位色、UTF-8 解码 |
+| 终端模拟 | `terminal-emulator` + `terminal-native` | 自研 VT100/ANSI：转义序列解析、滚动区、24 位色、UTF-8 解码；热路径由 C++17 引擎（`apex-vt-native`，每字符零堆分配）加速，Kotlin 实现保留为语义基准与 JVM 回退 |
 | 背压 IO | `PtyOutputPump` + `BackpressureConfig` | 有界输出泵、EOF 语义、丢帧保护 |
 | 观察引擎 | `ObservationEngine2` + `SemanticStateReducer` | 把 ANSI 噪音降维成语义状态（等待输入/运行中/完成/错误），`InputWaitingDetector` 识别提示符 |
 | 包管理 | `UbuntuAptPackageManager` + `PackageOperationLock` | 设备上 `apt install`，并发锁防交错 |
@@ -864,7 +867,10 @@ Android-Guru-Agent/
 │   │   ├── src/main/cpp/         #   C++ forkpty/JNI 桥
 │   │   └── src/main/jniLibs/     #   预编译 PRoot 二进制（sha256 锁定）
 │   └── cs-mem/                   # 认知记忆系统（本仓库差异化核心）
-├── terminal-emulator/            # 自研 VT100/ANSI 模拟器
+├── terminal-emulator/            # 自研 VT100/ANSI 模拟器（TerminalEngine 接口 + Kotlin 基准实现）
+├── terminal-native/              # apex-vt-native C++17 VT 引擎（vendored，见 VENDOR.md）
+│   ├── src/main/cpp/vt-native/   #   C++ 核心 + JNI 桥（上游 CI 跑 129 项奇偶校验）
+│   └── src/main/kotlin/          #   NativeVtCore 包装器 + VtEngineFactory 回退工厂
 ├── plugin-sdk/                   # AIDL 插件 SDK（api + host）
 ├── plugins/plugin-workflow/      # 参考插件 APK
 ├── ComposeFoundry/               # 独立工程：UI DSL 预览器

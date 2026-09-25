@@ -1,16 +1,23 @@
 package com.apex.agent.platform.terminal.screen
 
 import com.apex.agent.terminalemulator.ScreenMutation
-import com.apex.agent.terminalemulator.TerminalCore
+import com.apex.agent.terminalemulator.TerminalEngine
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
+import com.apex.agent.vtnative.VtEngineFactory
 
 /**
- * RealVirtualTerminal — backed by TerminalCore 2.0 (Spec PR #53).
+ * RealVirtualTerminal — backed by a [TerminalEngine] (Spec PR #53).
  *
  * Adapter implementing the [VirtualTerminal] interface. Runtime/UI contract unchanged;
  * internals upgraded from the removed VT100Emulator fallback to TerminalCore
  * (incremental parser, UTF-8 decoder, wide chars, scroll region, alternate screen,
  * modes, dirty mutations).
+ *
+ * Engine backend (terminal-native):
+ *  - 设备端：libvt_native.so（C++17 零分配引擎，:terminal-native 模块），
+ *    由 [VtEngineFactory] 运行时选择；
+ *  - JVM 单测 / CI / 加载失败：无缝回退纯 Kotlin [com.apex.agent.terminalemulator.TerminalCore]，
+ *    两者为语义等价的姊妹实现（上游 129 项奇偶校验测试保证）。
  *
  * P83 hardening:
  *  - **Snapshot caching** — every property getter used to trigger a full
@@ -30,7 +37,7 @@ class RealVirtualTerminal(
     initialCols: Int
 ) : VirtualTerminal {
 
-    private val core = TerminalCore(initialRows, initialCols)
+    private val core: TerminalEngine = VtEngineFactory.create(initialRows, initialCols)
 
     /** Cached plain-text snapshot — invalidated by feed/resize/reset. */
     @Volatile

@@ -19,7 +19,7 @@ class TerminalCore(
     initialRows: Int,
     initialCols: Int,
     private val maxScrollback: Int = 1000
-) {
+) : TerminalEngine {
     companion object {
         /** P1 fix：待消费 mutation 上限（超过即折叠为 FULL），见 [BoundedMutationList]。 */
         private const val MAX_PENDING_MUTATIONS = 4096
@@ -80,7 +80,7 @@ class TerminalCore(
      * null（默认）= 应答丢弃（单元测试/无 PTY 场景）。
      */
     @Volatile
-    var responseSink: ((ByteArray) -> Unit)? = null
+    override var responseSink: ((ByteArray) -> Unit)? = null
 
     /** 应答序列回写（仅 DA/DSR 等终端自生应答；非用户/Agent 输入，不过策略门禁）。 */
     private fun respond(seq: String) {
@@ -91,8 +91,8 @@ class TerminalCore(
     private var lastBaseRow = 0
     private var lastBaseCol = 0
 
-    var rows: Int = initialRows; private set
-    var cols: Int = initialCols; private set
+    override var rows: Int = initialRows; private set
+    override var cols: Int = initialCols; private set
 
     // P1 fix（边界值）：生产路径（PtyOutputPumpImpl.feed）从不调用 drainMutations()，
     // 旧实现无界 mutableListOf 会随每个可打印字符累积 ScreenMutation（cat 50MB 文件
@@ -101,14 +101,14 @@ class TerminalCore(
     private val mutations = BoundedMutationList(MAX_PENDING_MUTATIONS)
 
     /** Feed raw PTY bytes. Emits mutations via [onMutation] (batched). */
-    fun feed(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
+    override fun feed(bytes: ByteArray, offset: Int, length: Int) {
         utf8.feed(bytes, offset, length) { cp ->
             parser.feed(cp) { ev -> handleEvent(ev) }
         }
     }
 
     /** Flush pending UTF-8 (call when stream ends). */
-    fun flush() {
+    override fun flush() {
         utf8.feed(ByteArray(0), 0, 0) {}
         utf8.flush { cp -> parser.feed(cp) { ev -> handleEvent(ev) } }
     }
@@ -639,7 +639,7 @@ class TerminalCore(
 
     // ─── public API ───
 
-    fun resize(newRows: Int, newCols: Int) {
+    override fun resize(newRows: Int, newCols: Int) {
         mainBuffer.resize(newRows, newCols)
         altBuffer.resize(newRows, newCols)
         rows = newRows; cols = newCols
@@ -654,7 +654,7 @@ class TerminalCore(
      *  reverseVideo/tabStops/g0Charset/savedCursor/savedStyle/cursorStyle/
      *  lastPrintableCp/pendingClipboardRequests。旧实现残留半套模式，RIS 后
      *  DECCKM/反显/制表位可能带病存活。 */
-    fun reset() {
+    override fun reset() {
         mainBuffer.clear(); altBuffer.clear()
         currentBuffer = mainBuffer
         cursor.row = 0; cursor.column = 0; cursor.wrapPending = false
@@ -682,7 +682,7 @@ class TerminalCore(
     }
 
     /** Snapshot for observation/UI (NOT Android-bound). */
-    fun snapshot(): TerminalScreenSnapshot = TerminalScreenSnapshot(
+    override fun snapshot(): TerminalScreenSnapshot = TerminalScreenSnapshot(
         rows = rows, cols = cols,
         cursorRow = cursor.row, cursorCol = cursor.column,
         alternateScreen = modes.alternateScreen,
@@ -694,7 +694,7 @@ class TerminalCore(
 
 
     /** Current cursor visibility (DECTCEM, CSI ?25 h/l). */
-    val cursorVisible: Boolean get() = modes.cursorVisible
+    override val cursorVisible: Boolean get() = modes.cursorVisible
 
     /** DECCKM application cursor keys mode (CSI ?1 h/l) — arrow-key encoding hint for the input layer. */
     val applicationCursor: Boolean get() = modes.applicationCursor
@@ -714,7 +714,7 @@ class TerminalCore(
      * @param maxScrollbackLines render at most this many most-recent scrollback lines
      *        (0 = none). Only the main screen has scrollback; alternate screen ignores it.
      */
-    fun renderSnapshot(maxScrollbackLines: Int = 0): TerminalRenderSnapshot {
+    override fun renderSnapshot(maxScrollbackLines: Int): TerminalRenderSnapshot {
         val visible = (0 until rows).map { renderRow(currentBuffer.row(it)) }
         // T85（P-2）：scrollback 批量取行 —— 旧实现逐行 elementAt（ArrayDeque 迭代
         // 器 O(n)，400 行 ×O(n) ≈ 每帧 32 万元素遍历），改为一次遍历切片。
@@ -800,16 +800,16 @@ class TerminalCore(
     // ─── T82: capability exposure（函数式访问器，与上方 P83 属性访问器共存）───
 
     /** DECCKM (mode 1): arrows/home/end must be sent as SS3 when set. */
-    fun applicationCursorKeys(): Boolean = modes.applicationCursor
+    override fun applicationCursorKeys(): Boolean = modes.applicationCursor
 
     /** Bracketed paste (mode 2004): paste writes must wrap 200~/201~. */
-    fun bracketedPasteMode(): Boolean = modes.bracketedPaste
+    override fun bracketedPasteMode(): Boolean = modes.bracketedPaste
 
     /** Number of saved scrollback lines (main screen only). */
-    fun scrollbackLineCount(): Int = mainBuffer.scrollbackLineCount
+    override fun scrollbackLineCount(): Int = mainBuffer.scrollbackLineCount
 
     /** The last [maxLines] scrollback lines, oldest first (main screen only). */
-    fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
+    override fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
 
     /**
      * 消费式读出"刚响过铃"（BEL）。
@@ -817,7 +817,7 @@ class TerminalCore(
      * 每次调用返回一个新的序号 —— 宿主据此判断"这一帧有新铃"，
      * 而不是靠布尔值去重（连续两声铃必须都能被感知）。
      */
-    fun drainBell(): Long {
+    override fun drainBell(): Long {
         if (!bellPending) return bellSeq
         bellPending = false
         bellSeq += 1
@@ -825,14 +825,14 @@ class TerminalCore(
     }
 
     /** Drain OSC 52 clipboard-write requests (host may apply to platform clipboard). */
-    fun drainClipboardRequests(): List<String> {
+    override fun drainClipboardRequests(): List<String> {
         val out = pendingClipboardRequests.toList()
         pendingClipboardRequests.clear()
         return out
     }
 
     /** Drain pending mutations (for dirty-region UI/observation). */
-    fun drainMutations(): List<ScreenMutation> {
+    override fun drainMutations(): List<ScreenMutation> {
         val out = mutations.toList()
         mutations.clear()
         return out

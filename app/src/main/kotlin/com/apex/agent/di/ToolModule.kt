@@ -102,6 +102,15 @@ import com.apex.agent.core.tools.skill.SkillHotReloader
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserAgentTools
 import com.apex.agent.browser.BrowserTracer
+// #167 加密剪切板金库：仓库/脱敏器/工具集/执行器装饰器
+import com.apex.agent.platform.terminal.io.InputOwner
+import com.apex.agent.vault.EncryptedPrefsVaultStore
+import com.apex.agent.vault.SecretRedactor
+import com.apex.agent.vault.SecretRedactingExecutor
+import com.apex.agent.vault.VaultAgentTools
+import com.apex.agent.vault.VaultRepository
+import android.content.ClipData
+import android.content.ClipboardManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -211,6 +220,23 @@ object ToolModule {
     @Provides
     @Singleton
     fun provideBrowserTracer(): BrowserTracer = BrowserTracer(capacity = 100)
+
+    // ═══ #167 加密剪切板金库：仓库单例 + 全局脱敏器单例 ═══
+    // 存储层 EncryptedPrefsVaultStore（EncryptedSharedPreferences，失败退化普通 SP）；
+    // SecretRedactor 与仓库登记表同源（save/delete 后全量重建），供
+    // SecretRedactingExecutor 兜底擦洗所有工具输出。
+
+    @Provides
+    @Singleton
+    fun provideVaultRepository(
+        @ApplicationContext context: Context
+    ): VaultRepository = VaultRepository(EncryptedPrefsVaultStore(context))
+
+    @Provides
+    @Singleton
+    fun provideSecretRedactor(
+        vaultRepository: VaultRepository
+    ): SecretRedactor = vaultRepository.secretRedactor
 
     @Provides
     @Singleton
@@ -396,7 +422,9 @@ object ToolModule {
         modelRuntime: ModelRuntime,
         contextCompressor: ContextCompressor,
         privilegeInfoProvider: PrivilegeInfoProvider,
-        environmentInfoProvider: EnvironmentInfoProvider
+        environmentInfoProvider: EnvironmentInfoProvider,
+        // #167 加密剪切板金库（vault_* 工具族 + 执行器脱敏装饰）
+        vaultRepository: VaultRepository
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -677,6 +705,32 @@ object ToolModule {
         registry.register(SafeAgentTool(ConnectorListTool(connectorRegistry)))
         registry.register(SafeAgentTool(ConnectorSendMessageTool(connectorRegistry, connectorMessenger)))
 
+        // ═══ 11c. 加密剪切板金库（#167，4 个工具）═══
+        // 安全契约：Agent 只见标签与备注 —— vault_list 输出脱敏快照；
+        // vault_save write-only（成功返回仅 label+id，写完自己也读不回）；
+        // vault_paste 三通道直投（clipboard/terminal/http），返回仅字节数/
+        // 状态码/脱敏响应体，内容永不回显；vault_delete HIGH 风险门控。
+        // 人类可经抽屉「保险库」页储放 GitHub token / AI API 密钥。
+        VaultAgentTools.all(
+            repository = vaultRepository,
+            clipboardSetter = { text ->
+                // Android 10+ 前台限制：后台写入剪贴板可能抛异常 ——
+                // 由 VaultPasteTool 捕获并转成可自修复的 Error 文本。
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("vault", text))
+            },
+            terminalWriter = { sessionId, text ->
+                // kind=RAW：密钥按字节原样进入 PTY（换行已在工具层拼接）。
+                terminalRuntime.write(
+                    sessionId = sessionId,
+                    owner = InputOwner.AGENT,
+                    kind = TerminalRuntime.WriteKind.RAW,
+                    text = text
+                ).fold(onSuccess = { it.written }, onFailure = { false })
+            },
+            httpClient = httpClient
+        ).forEach { registry.register(SafeAgentTool(it)) }
+
         // ═══ MCP 服务器工具 ═══
         // v3+P83 联合收敛：原实现把 McpCallTool/McpListTool/McpConnectTool 注册了
         // 三次（第 12 节前后各一次 + 尾部重复块）——REPLACE 策略下静默互踩。
@@ -715,9 +769,15 @@ object ToolModule {
         // ═══ 主执行器（v3：环境门+风险门 → 校验 → 限流 → 熔断 → 超时/重试 → 追踪）═══
         // 所有工具调用统一过门：环境前置不满足/用户拒绝在执行前拦截；参数违规
         // 同样前置拦截；成败/耗时/逐调用 span 全部入账。
-        val mainExecutor: ToolExecutor = buildV3Executor(
-            registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
-            environmentState, traceRecorder, circuitBreaker
+        // #167：外层再包 SecretRedactingExecutor —— 批量步骤 / 技能步骤 /
+        // 子代理工具链的输出同样被金库脱敏器兜底擦洗（双保险：引擎主入口的
+        // provideToolExecutor 另有一层；脱敏幂等，叠加无害）。
+        val mainExecutor: ToolExecutor = SecretRedactingExecutor(
+            delegate = buildV3Executor(
+                registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
+                environmentState, traceRecorder, circuitBreaker
+            ),
+            redactor = vaultRepository.secretRedactor
         )
 
         // ═══ 16. #151 技能热注册器：装/卸/开关技能免重启 ═══
@@ -782,7 +842,8 @@ object ToolModule {
         // 4 T76 + 5 Skill 管理 + 3 v3 新工具（wait/json_transform/version_compare）+
         // 4 v3 编排工具（tool_batch_run + shortcut_define/list/run）+
         // N 已启用技能 composite + 9 GitHub（无条件注册，未连接时返回明确错误引导）+
-        // 2 消息连接器（connector_list / connector_send_message：微信/飞书/Telegram）。
+        // 2 消息连接器（connector_list / connector_send_message：微信/飞书/Telegram）+
+        // 4 金库工具（vault_list/save/paste/delete：#167 加密剪切板金库，Agent 只见标签不见明文）。
         // P83 修正：edit_file 补注册（文件工具 7→8）；MCP 重复块移除（计数不变）。
         // 插件注册：PluginManager 加载插件后动态注册（plugin-web-automation → 15 个 browser_*，
         // REPLACE 覆盖内置注册；卸载时降级为 HostFallbackTool 宿主直调，不挖空）。
@@ -797,9 +858,14 @@ object ToolModule {
         toolUsageTracker: ToolUsageTracker,
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
-        circuitBreaker: ToolCircuitBreaker
-    ): ToolExecutor = buildV3Executor(
-        registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
-        environmentState, traceRecorder, circuitBreaker
+        circuitBreaker: ToolCircuitBreaker,
+        // #167：金库脱敏器 —— 引擎主入口的工具输出统一擦洗（纵深防御）。
+        secretRedactor: SecretRedactor
+    ): ToolExecutor = SecretRedactingExecutor(
+        delegate = buildV3Executor(
+            registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
+            environmentState, traceRecorder, circuitBreaker
+        ),
+        redactor = secretRedactor
     )
 }

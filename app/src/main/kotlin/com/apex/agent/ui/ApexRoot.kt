@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -71,6 +72,7 @@ import com.apex.agent.ui.screen.memory.MemoryScreen
 import com.apex.agent.ui.screen.storage.StorageScreen
 import com.apex.agent.ui.screen.tasks.TaskHistoryScreen
 import com.apex.agent.ui.screen.terminal.TerminalScreen
+import com.apex.agent.ui.screen.vault.VaultScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -98,6 +100,8 @@ sealed class DrawerDestination(
     // 存储与数据管理（附件/rootfs 占用/会话历史导出清空 —— 均为真实数据源）
     data object Storage : DrawerDestination("storage", R.string.drawer_storage, Icons.Default.FolderOpen)
     data object Permissions : DrawerDestination("permissions", R.string.drawer_permissions, Icons.Default.Security)
+    // #167 加密剪切板金库：人工储放 GitHub token / AI 密钥，Agent 只见标签不见明文
+    data object Vault : DrawerDestination("vault", R.string.drawer_vault, Icons.Default.Lock)
     data object Log : DrawerDestination("log", R.string.drawer_log, Icons.Filled.Info)
     data object Settings : DrawerDestination("settings", R.string.drawer_settings, Icons.Default.Settings)
     // 玻璃实验室 —— 内部 Liquid Glass 验收页（Spec §20：背景变化/网格/高对比文字/移动元素）
@@ -122,6 +126,7 @@ private val DestinationSaver = Saver<DrawerDestination, String>(
             DrawerDestination.Tasks.route -> DrawerDestination.Tasks
             DrawerDestination.Storage.route -> DrawerDestination.Storage
             DrawerDestination.Permissions.route -> DrawerDestination.Permissions
+            DrawerDestination.Vault.route -> DrawerDestination.Vault
             DrawerDestination.Log.route -> DrawerDestination.Log
             DrawerDestination.Settings.route -> DrawerDestination.Settings
             else -> DrawerDestination.Agent
@@ -251,6 +256,7 @@ fun ApexRoot() {
                         DrawerDestination.Tasks -> TaskHistoryScreen()
                         DrawerDestination.Storage -> StorageScreen()
                         DrawerDestination.Permissions -> PermissionsScreen()
+                        DrawerDestination.Vault -> VaultScreen()
                         DrawerDestination.Log -> LogViewerScreen()
                         DrawerDestination.Settings -> SettingsScreen(
                             // P2-6（6-c）：最小修复双顶栏返回链——SettingsScreen 自带

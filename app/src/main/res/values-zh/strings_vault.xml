@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 保险库 UI 中文文案（与 values/strings_vault.xml 英文默认一一对应，#167）。 -->
+<resources>
+    <!-- ═══ 安全说明 / 空态 ═══ -->
+    <string name="vault_security_note_title">金库工作原理</string>
+    <string name="vault_security_note_body">密钥加密存储。Agent 只能看到标签与备注，永远看不到内容；使用时经 vault_paste 直接投递到剪贴板、终端会话或 HTTP 请求，全程不回显明文。</string>
+    <string name="vault_empty">还没有密钥。点击「新增密钥」储放 GitHub Token 或 AI API 密钥。</string>
+
+    <!-- ═══ 条目卡 ═══ -->
+    <string name="vault_origin_human">人工</string>
+    <string name="vault_origin_agent">Agent</string>
+    <string name="vault_used_count">已用 %1$d 次</string>
+    <string name="vault_never_used">从未使用</string>
+    <string name="vault_updated_at">更新于 %1$s</string>
+    <string name="vault_copy">复制到剪贴板</string>
+    <string name="vault_show">显示内容</string>
+    <string name="vault_hide">隐藏内容</string>
+    <string name="vault_edit">编辑</string>
+    <string name="vault_delete">删除</string>
+    <string name="vault_delete_confirm_title">删除该密钥？</string>
+    <string name="vault_delete_confirm_body">条目「%1$s」将被永久删除，不可恢复。</string>
+
+    <!-- ═══ 新增 / 编辑对话框 ═══ -->
+    <string name="vault_add">新增密钥</string>
+    <string name="vault_add_title">新增密钥</string>
+    <string name="vault_edit_title">编辑密钥</string>
+    <string name="vault_label">标签</string>
+    <string name="vault_label_hint">唯一标签，如 github-token（Agent 可见）</string>
+    <string name="vault_note">备注</string>
+    <string name="vault_note_hint">可选描述（Agent 可见）</string>
+    <string name="vault_secret">密钥内容</string>
+    <string name="vault_secret_hint">加密存储，Agent 永远看不到</string>
+    <string name="vault_save_action">保存</string>
+    <string name="vault_cancel">取消</string>
+
+    <!-- ═══ 事件提示 ═══ -->
+    <string name="vault_copied">已复制到剪贴板</string>
+    <string name="vault_saved">已保存</string>
+    <string name="vault_deleted">已删除</string>
+    <string name="vault_err_label_empty">标签不能为空</string>
+    <string name="vault_err_label_exists">该标签已被其他条目使用</string>
+    <string name="vault_err_secret_empty">密钥内容不能为空</string>
+    <string name="vault_err_generic">操作失败</string>
+    <string name="vault_got_it">知道了</string>
+</resources>

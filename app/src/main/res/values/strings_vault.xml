@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 保险库 UI 英文文案（#167 加密剪切板金库）。
+     中文在 values-zh/strings_vault.xml；语言切换经 LanguageManager +
+     MainActivity attachBaseContext/recreate 生效。 -->
+<resources>
+    <!-- ═══ 安全说明 / 空态 ═══ -->
+    <string name="vault_security_note_title">How the vault works</string>
+    <string name="vault_security_note_body">Secrets are encrypted at rest. The agent can only see labels and notes — never the content. It can deliver a secret directly to the clipboard, a terminal session or an HTTP request (vault_paste) without ever reading it back.</string>
+    <string name="vault_empty">No secrets yet. Tap \"Add secret\" to store a GitHub token or an AI API key.</string>
+
+    <!-- ═══ 条目卡 ═══ -->
+    <string name="vault_origin_human">Human</string>
+    <string name="vault_origin_agent">Agent</string>
+    <string name="vault_used_count">Used %1$d times</string>
+    <string name="vault_never_used">Never used</string>
+    <string name="vault_updated_at">Updated %1$s</string>
+    <string name="vault_copy">Copy to clipboard</string>
+    <string name="vault_show">Show secret</string>
+    <string name="vault_hide">Hide secret</string>
+    <string name="vault_edit">Edit</string>
+    <string name="vault_delete">Delete</string>
+    <string name="vault_delete_confirm_title">Delete this secret?</string>
+    <string name="vault_delete_confirm_body">Entry \"%1$s\" will be permanently removed. This cannot be undone.</string>
+
+    <!-- ═══ 新增 / 编辑对话框 ═══ -->
+    <string name="vault_add">Add secret</string>
+    <string name="vault_add_title">Add secret</string>
+    <string name="vault_edit_title">Edit secret</string>
+    <string name="vault_label">Label</string>
+    <string name="vault_label_hint">Unique label, e.g. github-token (visible to the agent)</string>
+    <string name="vault_note">Note</string>
+    <string name="vault_note_hint">Optional description (visible to the agent)</string>
+    <string name="vault_secret">Secret</string>
+    <string name="vault_secret_hint">Encrypted at rest — the agent can never see it</string>
+    <string name="vault_save_action">Save</string>
+    <string name="vault_cancel">Cancel</string>
+
+    <!-- ═══ 事件提示 ═══ -->
+    <string name="vault_copied">Copied to clipboard</string>
+    <string name="vault_saved">Saved</string>
+    <string name="vault_deleted">Deleted</string>
+    <string name="vault_err_label_empty">Label cannot be empty</string>
+    <string name="vault_err_label_exists">This label is already used by another entry</string>
+    <string name="vault_err_secret_empty">Secret content cannot be empty</string>
+    <string name="vault_err_generic">Operation failed</string>
+    <string name="vault_got_it">OK</string>
+</resources>

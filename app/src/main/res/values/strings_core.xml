@@ -11,6 +11,7 @@
     <string name="drawer_tasks">Tasks</string>
     <string name="drawer_storage">Storage</string>
     <string name="drawer_permissions">Permissions</string>
+    <string name="drawer_vault">Vault</string>
     <string name="drawer_log">Logs</string>
     <string name="drawer_settings">Settings</string>
     <string name="drawer_glasslab">Glass Lab</string>

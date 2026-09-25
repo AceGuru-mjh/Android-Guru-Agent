@@ -81,6 +81,33 @@ import com.apex.agent.core.tools.builtin.ShortcutRunTool
 import com.apex.agent.core.tools.builtin.ToolBatchRunTool
 import com.apex.agent.core.tools.builtin.VersionCompareTool
 import com.apex.agent.core.tools.builtin.WaitTool
+// #171 四族合并（merged 包）+ #172 上下文回顾三件套（context 包）
+import com.apex.agent.core.tools.builtin.merged.TimeTool
+import com.apex.agent.core.tools.builtin.merged.RandomTool
+import com.apex.agent.core.tools.builtin.merged.RegexTool
+import com.apex.agent.core.tools.builtin.merged.JsonTool
+import com.apex.agent.core.tools.builtin.context.SessionContextProvider
+import com.apex.agent.core.tools.builtin.context.ConversationMemoryContextProvider
+import com.apex.agent.core.tools.builtin.context.ContextRecapTool
+import com.apex.agent.core.tools.builtin.context.ContextSearchTool
+import com.apex.agent.core.tools.builtin.context.SessionStatsTool
+// #172 高级设备工具包（lambda 注入，生产接线在各工具文件底部）
+import com.apex.agent.tools.TorchTool
+import com.apex.agent.tools.VibrateTool
+import com.apex.agent.tools.BatteryStatusTool
+import com.apex.agent.tools.NetworkInfoTool
+import com.apex.agent.tools.TtsSpeakTool
+import com.apex.agent.tools.ShareContentTool
+import com.apex.agent.tools.DeepLinkTool
+import com.apex.agent.tools.ImageInfoTool
+import com.apex.agent.tools.ImageConvertTool
+import com.apex.agent.tools.AndroidBatteryReader
+import com.apex.agent.tools.AndroidImageIo
+import com.apex.agent.tools.AndroidIntents
+import com.apex.agent.tools.AndroidNetworkInfoReader
+import com.apex.agent.tools.AndroidVibrator
+import com.apex.agent.tools.CameraTorchController
+import com.apex.agent.tools.TtsSpeaker
 import com.apex.agent.core.codetools.CodeTools
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.diagnostics.CodeDiagnostics
@@ -486,7 +513,9 @@ object ToolModule {
         privilegeInfoProvider: PrivilegeInfoProvider,
         environmentInfoProvider: EnvironmentInfoProvider,
         // #167 加密剪切板金库（vault_* 工具族 + 执行器脱敏装饰）
-        vaultRepository: VaultRepository
+        vaultRepository: VaultRepository,
+        // #172 上下文回顾三件套的数据源：当前会话持久化消息（SharedPrefs 单例）。
+        conversationMemory: com.apex.agent.core.engine.ConversationMemory
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -828,6 +857,49 @@ object ToolModule {
         registry.register(SafeAgentTool(JsonTransformTool()))
         registry.register(SafeAgentTool(VersionCompareTool()))
 
+        // ═══ 14b. Tool System v5 —— #171 四族合并（merged 包，旧工具上方保留）═══
+        // time（now/format/parse/add/diff/convert_tz/duration/cron_next，合并
+        // get_time+datetime+cron_next+duration_convert）、random（uuid_v4/v7+
+        // int/float/string/pick，合并 uuid_generate+random_generate）、
+        // regex（test/extract/replace/match_all/split，合并 regex_extract+
+        // regex_replace）、json（query/transform/validate/format，合并
+        // json_path+json_transform）。旧 id 已进 LEGACY_ALIAS_IDS，不再随请求
+        // 下发；此处注册的是新会话模型看到的唯一入口。
+        registry.register(SafeAgentTool(TimeTool()))
+        registry.register(SafeAgentTool(RandomTool()))
+        registry.register(SafeAgentTool(RegexTool()))
+        registry.register(SafeAgentTool(JsonTool()))
+
+        // ═══ 14c. Tool System v5 —— #172 上下文回顾三件套（context 包）═══
+        // 会话内自救：context_recap（结构化全景，CORE）/ context_search
+        // （子串定位）/ session_stats（画像）。数据源接线到 SharedPrefs
+        // ConversationMemory 单例（LlmMessage→ContextRecord，System 保留、
+        // content 截断 2000、assistant 工具调用补 [tool_call] 标记行）。
+        val sessionContext: SessionContextProvider =
+            ConversationMemoryContextProvider { conversationMemory.load() }
+        registry.register(SafeAgentTool(ContextRecapTool(sessionContext)))
+        registry.register(SafeAgentTool(ContextSearchTool(sessionContext)))
+        registry.register(SafeAgentTool(SessionStatsTool(sessionContext)))
+
+        // ═══ 14d. Tool System v5 —— #172 高级设备工具包（lambda 注入）═══
+        // torch/vibrate/battery_status/network_info/tts_speak（SYSTEM）+
+        // share_content（SYSTEM）/ deep_link（APP）+ image_info（只读）/
+        // image_convert（MEDIUM）。工具本体只做参数解析（companion 纯函数
+        // 可测），Android 侧实现见各工具文件底部的生产接线类（operator
+        // invoke 类经 ::invoke 绑定为函数引用注入）。
+        val torchController = CameraTorchController(context)
+        val androidVibrator = AndroidVibrator(context)
+        val ttsSpeaker = TtsSpeaker(context)
+        registry.register(SafeAgentTool(TorchTool(torchController::invoke)))
+        registry.register(SafeAgentTool(VibrateTool(androidVibrator::invoke)))
+        registry.register(SafeAgentTool(BatteryStatusTool { AndroidBatteryReader.read(context) }))
+        registry.register(SafeAgentTool(NetworkInfoTool { AndroidNetworkInfoReader.read(context) }))
+        registry.register(SafeAgentTool(TtsSpeakTool(ttsSpeaker::invoke)))
+        registry.register(SafeAgentTool(ShareContentTool { text, title -> AndroidIntents.share(context, text, title) }))
+        registry.register(SafeAgentTool(DeepLinkTool { uri -> AndroidIntents.openUri(context, uri) }))
+        registry.register(SafeAgentTool(ImageInfoTool { path -> AndroidImageIo.info(path) }))
+        registry.register(SafeAgentTool(ImageConvertTool { request -> AndroidImageIo.convert(request) }))
+
         // ═══ 主执行器（v3：环境门+风险门 → 校验 → 限流 → 熔断 → 超时/重试 → 追踪）═══
         // 所有工具调用统一过门：环境前置不满足/用户拒绝在执行前拦截；参数违规
         // 同样前置拦截；成败/耗时/逐调用 span 全部入账。
@@ -919,8 +991,11 @@ object ToolModule {
         // 4 v3 编排工具（tool_batch_run + shortcut_define/list/run）+
         // N 已启用技能 composite + 9 GitHub（无条件注册，未连接时返回明确错误引导）+
         // 2 消息连接器（connector_list / connector_send_message：微信/飞书/Telegram）+
-        // 4 金库工具（vault_list/save/paste/delete：#167 加密剪切板金库，Agent 只见标签不见明文）。
-        // P83 修正：edit_file 补注册（文件工具 7→8）；MCP 重复块移除（计数不变）。
+        // 4 金库工具（vault_list/save/paste/delete：#167 加密剪切板金库，Agent 只见标签不见明文）+
+        // v5（#171+#172）：4 合并工具（time/random/regex/json，旧 10 个 id 转 legacy alias
+        // 仍注册不下发）+ 3 上下文回顾（context_recap/context_search/session_stats）+
+        // 9 高级设备（torch/vibrate/battery_status/network_info/tts_speak/share_content/
+        // deep_link/image_info/image_convert）。
         // 插件注册：PluginManager 加载插件后动态注册（plugin-web-automation → 15 个 browser_*，
         // REPLACE 覆盖内置注册；卸载时降级为 HostFallbackTool 宿主直调，不挖空）。
     }

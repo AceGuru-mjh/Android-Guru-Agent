@@ -29,7 +29,13 @@ object ToolTierPolicy {
     /** The deprecated alias ids (old flat names kept only for compat). */
     val LEGACY_ALIAS_IDS: Set<String> = setOf(
         "terminal_exec", "terminal_send", "terminal_read",
-        "terminal_list", "terminal_signal", "terminal_close"
+        "terminal_list", "terminal_signal", "terminal_close",
+        // #171 四族合并：旧工具 id 降为 legacy alias（类保留注册，向后兼容
+        // 既有会话/技能；不再随请求下发，模型一律用合并后的新入口）。
+        "get_time", "datetime", "cron_next", "duration_convert",
+        "uuid_generate", "random_generate",
+        "regex_extract", "regex_replace",
+        "json_path", "json_transform"
     )
 
     /**
@@ -71,7 +77,10 @@ object ToolTierPolicy {
 
         // ── apps & device ──
         "app_list", "app_info", "app_launch",
-        "get_device_info", "get_time", "clipboard", "screenshot", "calculate",
+        // #171：get_time → time（四族合并后唯一时间入口）；
+        // #172：context_recap 入 CORE —— 长会话自救的关键工具（迷路时一次
+        // 调用重建全景，无需 tool_search 两跳）。
+        "get_device_info", "time", "context_recap", "clipboard", "screenshot", "calculate",
 
         // ── MCP (first-class tools register as mcp__server__tool) ──
         "mcp_list", "mcp_connect", "mcp_call",

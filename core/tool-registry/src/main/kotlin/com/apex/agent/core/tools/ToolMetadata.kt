@@ -28,6 +28,9 @@ enum class ToolCategory(
     /** Long-term memory recall (CS-Mem). */
     MEMORY("记忆", 60),
 
+    /** In-session context review tools (`context_*` / `session_stats`) — #172. */
+    CONTEXT("上下文回顾", 62),
+
     /** Installed app management (list/launch/install/uninstall). */
     APP("应用管理", 70),
 
@@ -210,9 +213,16 @@ data class ToolMetadata(
                 id.startsWith("memorize") || id.startsWith("forget") ||
                 id.startsWith("episode") -> ToolCategory.MEMORY
 
-            id.startsWith("app_") -> ToolCategory.APP
+            // #172：会话内上下文回顾（区别于跨会话的 MEMORY）。
+            id.startsWith("context_") || id.startsWith("session_stats") -> ToolCategory.CONTEXT
 
-            id.startsWith("device_") || id.startsWith("settings_") ||
+            id.startsWith("app_") || id == "deep_link" -> ToolCategory.APP
+
+            // #172：高级设备工具（tts/手电筒/振动/电池/网络/分享）归系统控制。
+            id.startsWith("tts_") || id.startsWith("torch") ||
+                id.startsWith("vibrate") || id.startsWith("battery_") ||
+                id.startsWith("network_") || id.startsWith("share_") ||
+                id.startsWith("device_") || id.startsWith("settings_") ||
                 id.startsWith("media_") || id.startsWith("clipboard_") ||
                 id.startsWith("get_time") || id.startsWith("logcat") ||
                 id.startsWith("screenshot") -> ToolCategory.SYSTEM

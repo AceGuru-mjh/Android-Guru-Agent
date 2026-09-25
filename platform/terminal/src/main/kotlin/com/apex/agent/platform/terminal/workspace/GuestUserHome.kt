@@ -28,7 +28,7 @@ class GuestUserHome(
 ) {
 
     /**
-     * 确保 home 就绪（mkdirs + 首次播种）。
+     * 确保 home 就绪（mkdirs + 首次播种 + 工具链环境块幂等注入）。
      * @param rootfsDir 当前 rootfs 目录（skel 来源；仅播种时读取）
      * @return host home 目录
      */
@@ -39,11 +39,43 @@ class GuestUserHome(
         if (isEmptyDir(hostHomeDir)) {
             seed(rootfsDir)
         }
+        // 工具链环境块（JAVA_HOME/ANDROID_HOME/…）：无论 home 来自播种还是
+        // 历史版本，都幂等补齐 —— 旧用户的 .bashrc 没有 -d 探测脚本，
+        // JDK 装了 gradle/sdkmanager 依然找不到 JAVA_HOME。
+        ensureToolchainEnvBlock()
         hostHomeDir
     }
 
     /** host home 绝对路径（bind 源；不触发初始化）。 */
     fun hostDir(): File = hostHomeDir
+
+    /**
+     * 幂等注入工具链环境探测块到 guest `~/.bashrc`。
+     *
+     * 背景（Ubuntu 环境探索验证，docs/ubuntu-environment-exploration.md §7）：
+     * `terminal.linux.capabilities ensure` / `terminal.workspace.environment ensure`
+     * 能经 apt 装上 default-jdk / golang 等，但 guest 环境从不导出 JAVA_HOME ——
+     * PATH 里 `java` 能跑，而 gradle / sdkmanager / 一切 `JAVA_HOME` 依赖脚本
+     * 全部失败（能力矩阵 7.6 规划了 env profile 持久化，此前未实现）。
+     *
+     * 实现：往持久 home 的 `.bashrc` 追加一个**受管代码块**（标记对包裹），
+     * 块内是 `-d` 目录探测的动态 export —— 装了才导出，未装静默跳过；
+     * 用户显式设置过的变量（-z 守卫）永不覆盖。bash -i（PTY 会话）每次
+     * 启动 source .bashrc → 新装工具链对**新会话**即时生效；已存活的旧会话
+     * 可 `source ~/.bashrc` 立即生效。host 侧 home 跨 rootfs 版本存活 →
+     * rootfs 升级不丢配置。
+     */
+    fun ensureToolchainEnvBlock() {
+        val bashrc = File(hostHomeDir, BASHRC)
+        if (!bashrc.exists()) {
+            // ensureReady 先播种（必然创建 .bashrc），此处防御并发删除的窗口：
+            // 拿最小兜底重建，再走统一注入路径。
+            bashrc.writeText(MINIMAL_BASHRC + "\n")
+        }
+        val content = bashrc.readText()
+        if (content.contains(BLOCK_END_MARKER)) return  // 已注入（幂等）
+        bashrc.writeText(content.trimEnd() + "\n\n" + TOOLCHAIN_ENV_BLOCK + "\n")
+    }
 
     private fun seed(rootfsDir: File) {
         val skel = File(rootfsDir, SKEL_PATH)
@@ -78,6 +110,7 @@ class GuestUserHome(
         /** guest 侧 home 路径（bind 目标）。 */
         const val GUEST_PATH = "/root"
         private const val SKEL_PATH = "etc/skel"
+        private const val BASHRC = ".bashrc"
 
         /** 无 skel 时的最小 .bashrc —— 交互提示符 + 最常用别名，仅此而已。 */
         internal val MINIMAL_BASHRC = """
@@ -89,5 +122,41 @@ class GuestUserHome(
             export HISTCONTROL=ignoreboth
             export HISTSIZE=500
         """.trimIndent()
+
+        /**
+         * 工具链环境探测块（受管，[ensureToolchainEnvBlock] 幂等注入）。
+         *
+         * 设计要点：
+         *  - 动态 `-d` 探测：包什么时候装上，下一个 shell 启动就导出（无需
+         *    host 侧回写）；未装静默跳过，永不产生悬空路径。
+         *  - `-z` 守卫：用户/Agent 显式 export 过的变量绝不被覆盖。
+         *  - PATH 追加带去重（case 守卫），重复 source 不膨胀。
+         *  - 覆盖 apt（/usr/lib/jvm/default-java）与手工安装（~/android-sdk、
+         *    /usr/local/go）两类安装位置 —— Android SDK cmdline-tools 没有
+         *    apt 包，官方形态就是解压到用户目录。
+         */
+        internal val TOOLCHAIN_ENV_BLOCK = """
+            # >>> apex-toolchain-env (managed by Android-Guru-Agent) >>>
+            # Toolchain homes discovered at shell startup — installed-then-export.
+            if [ -z "${'$'}JAVA_HOME" ] && [ -d /usr/lib/jvm/default-java ]; then
+                export JAVA_HOME="/usr/lib/jvm/default-java"
+            fi
+            if [ -z "${'$'}GOROOT" ] && [ -x /usr/local/go/bin/go ]; then
+                export GOROOT="/usr/local/go"
+                case ":${'$'}PATH:" in *":${'$'}GOROOT/bin:"*) ;; *) export PATH="${'$'}GOROOT/bin:${'$'}PATH";; esac
+            fi
+            if [ -z "${'$'}ANDROID_HOME" ] && [ -d "${'$'}HOME/android-sdk/cmdline-tools" ]; then
+                export ANDROID_HOME="${'$'}HOME/android-sdk"
+                export ANDROID_SDK_ROOT="${'$'}ANDROID_HOME"
+                case ":${'$'}PATH:" in
+                    *":${'$'}ANDROID_HOME/cmdline-tools/latest/bin:"*) ;;
+                    *) export PATH="${'$'}ANDROID_HOME/cmdline-tools/latest/bin:${'$'}ANDROID_HOME/platform-tools:${'$'}PATH";;
+                esac
+            fi
+            # <<< apex-toolchain-env (managed by Android-Guru-Agent) <<<
+        """.trimIndent()
+
+        /** 受管块结束标记（幂等检测锚点；起始标记为同款 BEGIN）。 */
+        internal const val BLOCK_END_MARKER = "apex-toolchain-env (managed by Android-Guru-Agent)"
     }
 }

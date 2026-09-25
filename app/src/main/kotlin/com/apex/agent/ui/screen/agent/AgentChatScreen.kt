@@ -374,6 +374,8 @@ fun AgentChatScreen(
                 AgentMessageItem(
                     message = message,
                     vm = viewModel,
+                    // #169：当前执行步骤 → 锁定计划卡（PlanCard）当前步高亮
+                    currentStepIndex = uiState.currentStepIndex,
                     // UX-1：流式生成中禁用消息删除/重生成（菜单内对应条目置灰，复制仍可用）
                     actionsEnabled = !uiState.isLoading,
                     // 任务总结卡按设置显隐：showRunSummary=false 时完全不渲染（不占位）
@@ -409,12 +411,14 @@ fun AgentChatScreen(
                 item(key = "active-tool-call") { RunningToolCallCard(toolCall) }
             }
 
-            // Plan 确认
+            // Plan 确认（#169 人控：勾选/重排经 onConfirm 回传引擎）
             if (uiState.awaitingPlanConfirmation && uiState.plan != null) {
                 item(key = "plan-confirmation") {
                     PlanConfirmationCard(
                         plan = uiState.plan!!,
-                        onConfirm = { viewModel.confirmPlan(true) },
+                        onConfirm = { enabledSteps, order ->
+                            viewModel.confirmPlan(true, enabledSteps, order)
+                        },
                         onReject = { viewModel.confirmPlan(false) }
                     )
                 }

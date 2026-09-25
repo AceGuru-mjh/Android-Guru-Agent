@@ -69,6 +69,10 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update { state ->
                 state.copy(
                     awaitingPlanConfirmation = false,
+                    // #169：锁定后的计划（已应用用户勾选/重排 + 拓扑排序）——
+                    // uiState.plan 同步为锁定版，锁定卡（PlanMessage）只读展示。
+                    planConfirmed = true,
+                    plan = event.plan,
                     messages = state.messages + AgentUiMessage.PlanMessage(event.plan)
                 )
             }
@@ -274,10 +278,12 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
         }
 
         // ═══ Plan 模式：步骤开始（流水线分隔卡，长任务进度可视化）═══
+        // #169：currentStepIndex 同步驱动锁定计划卡（PlanCard）的当前步高亮。
         is AgentEvent.StepStart -> {
             streamBuffers.flush()
             _uiState.update { state ->
                 state.copy(
+                    currentStepIndex = event.stepIndex,
                     messages = state.messages + AgentUiMessage.StepMarker(
                         stepIndex = event.stepIndex,
                         description = event.description
@@ -326,6 +332,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
                         ),
                     currentResponse = "",
                     currentThinking = "",
+                    currentStepIndex = -1,
                     isLoading = false
                 )
             }
@@ -347,6 +354,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update {
                 it.copy(
                     isLoading = false,
+                    currentStepIndex = -1,
                     messages = it.messages + AgentUiMessage.RunSummary(
                         summary = event.summary,
                         totalIterations = event.totalIterations,
@@ -364,7 +372,8 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update { state ->
                 state.copy(
                     messages = state.messages + AgentUiMessage.System(str(R.string.chat_aborted)),
-                    isLoading = false
+                    isLoading = false,
+                    currentStepIndex = -1
                 )
             }
         }

@@ -416,8 +416,12 @@ private fun SessionChip(
 ) {
     // 标题优先显示 shell 自己设的窗口名（OSC 0/1/2 —— vim/tmux/ssh 都会设），
     // 没有才退回 "#id 后端"。对齐 Termux / JuiceSSH：多会话靠标题分辨在跑什么。
+    // #170：Agent 创建的会话（backendId=="agent"，见 TerminalViewModel 的推断）
+    // 加「Agent·」徽标 —— 会话列表本就不按 owner 过滤，Agent 的 PTY 会话与
+    // 用户会话同列展示，徽标让来源一目了然（用户接管输入仍走 USER owner）。
+    val agentBadge = if (tab.backendId == "agent") "Agent·" else ""
     val title = tab.title?.take(MAX_TAB_TITLE)
-        ?: "#${tab.id} ${if (tab.isUbuntu) "Ubuntu" else "Android"}"
+        ?: "#${tab.id} $agentBadge${if (tab.isUbuntu) "Ubuntu" else "Android"}"
     val chipBg by animateColorAsState(
         targetValue = if (active) ConsoleTheme.accentSoft else ConsoleTheme.chip,
         label = "chip-bg"
@@ -450,7 +454,7 @@ private fun SessionChip(
                 color = ConsoleTheme.text
             )
             Text(
-                if (tab.title != null) "#${tab.id} ${if (tab.isUbuntu) "Ubuntu" else "Android"}" else tab.state,
+                if (tab.title != null) "#${tab.id} $agentBadge${if (tab.isUbuntu) "Ubuntu" else "Android"}" else tab.state,
                 fontSize = 9.sp,
                 fontFamily = FontFamily.Monospace,
                 color = ConsoleTheme.dim,

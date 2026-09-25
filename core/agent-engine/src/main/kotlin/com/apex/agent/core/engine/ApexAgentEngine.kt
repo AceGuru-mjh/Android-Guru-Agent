@@ -5,6 +5,11 @@ import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.engine.task.DanglingToolCallRepair
+import com.apex.agent.core.engine.plan.PLAN_CONFIRMATION_TIMEOUT_MS
+import com.apex.agent.core.engine.plan.PlanDecision
+import com.apex.agent.core.engine.plan.PlanGraph
+import com.apex.agent.core.engine.plan.awaitPlanConfirmationDecision
+import com.apex.agent.core.engine.terminal.TerminalProactivityAdvisor
 import com.apex.agent.core.engine.thinking.ThinkingModeController
 import com.apex.agent.core.llm.*
 import com.apex.agent.core.llm.runtime.LlmRequestContext
@@ -141,6 +146,9 @@ class ApexAgentEngine(
         maxChars = config.maxToolOutputLength
     )
 
+    /** #170 终端主动性顾问：一次性 shell 连击 / 工具链任务 / 失败连击 → 轮次级 System 建议（纯状态机，引擎仅两钩子）。 */
+    private val terminalAdvisor = TerminalProactivityAdvisor()
+
     // ═══ Tool System v4 — 请求工具计划 / 名称映射 / 降级状态 ═══
 
     /**
@@ -178,11 +186,13 @@ class ApexAgentEngine(
 
     /**
      * Channel for the UI to deliver plan-confirmation decisions back to the engine
-     * while [executePlanMode] is suspended on [awaitPlanConfirmation].
+     * while [executePlanMode] is suspended on `awaitPlanConfirmationDecision`.
      *
+     * #169：Boolean → [PlanDecision]（可携带步骤勾选/重排）。internal 供
+     * plan/PlanExecutionSupport.kt 扩展注册与清理（同模块拆分模式）。
      * Reset to a fresh [CompletableDeferred] every time a new plan is awaiting confirmation.
      */
-    private var planConfirmationDeferred: CompletableDeferred<Boolean>? = null
+    internal var planConfirmationDeferred: CompletableDeferred<PlanDecision>? = null
 
     /**
      * Channel for the UI to deliver spec-confirmation decisions back to the engine
@@ -287,7 +297,12 @@ class ApexAgentEngine(
      * Exposed to the orchestrator via the [ConfirmationSink] interface.
      */
     override fun submitPlanConfirmation(confirmed: Boolean) {
-        planConfirmationDeferred?.complete(confirmed)
+        planConfirmationDeferred?.complete(PlanDecision.legacy(confirmed))
+    }
+
+    /** #169：带步骤勾选/重排的确认重载（UI 人控透传，语义见 [PlanDecision]）。 */
+    fun submitPlanConfirmation(confirmed: Boolean, enabledSteps: List<Int>?, order: List<Int>?) {
+        planConfirmationDeferred?.complete(PlanDecision(confirmed, enabledSteps, order))
     }
 
     /**
@@ -438,7 +453,7 @@ class ApexAgentEngine(
                 )
             }
             // Cancel any dangling plan-confirmation deferred so it doesn't leak.
-            planConfirmationDeferred?.complete(false)
+            planConfirmationDeferred?.complete(PlanDecision.legacy(false))
             planConfirmationDeferred = null
             specConfirmationDeferred?.complete(false)
             specConfirmationDeferred = null
@@ -453,12 +468,6 @@ class ApexAgentEngine(
         }
     }
 
-    /**
-     * 构造进入 LLM 的用户文本。
-     *
-     * 无附件时原样返回 [UserInput.text]；有附件时在文本前拼接文件清单上下文
-     * （图片不在此处列出 —— 它们走 `LlmMessage.User.images` 直接 Vision）。
-     */
     // ═══════════════════════════════════════════════════════
     // PLAN mode
     // ═══════════════════════════════════════════════════════
@@ -467,17 +476,19 @@ class ApexAgentEngine(
         input: String,
         emit: suspend (AgentEvent) -> Unit
     ): Int {
-        // Phase 1: think + generate plan (streamed as ThinkingChunk)
+        // Phase 1: think + generate plan (streamed as ThinkingChunk).
+        // 规划期只读显式化（#169）：planningPhase=true 注入「仅产出计划 JSON、
+        // 不执行任何工具/写操作」约束段；本阶段本就不携带 tools。
         emit(AgentEvent.ThinkingStart(0, config.thinkingLevel))
 
-        val planPrompt = buildPlanPrompt(input)
         val planResponseBuilder = StringBuilder()
 
         // B1：不再显式传 temperature —— 哨兵（-1）回退到 Profile 值，
         // 设置页/小大脑菜单改参数对下一次请求真实生效。
         runtime.chatStream(
             context = tagged(LlmRequestContext.reasoning("plan_generation")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(planPrompt)
+            messages = listOf(LlmMessage.System(buildSystemPrompt(planningPhase = true))) +
+                LlmMessage.User(EnginePrompts.buildPlanPrompt(input, toolRegistry.getAllTools()))
         ).collect { chunk ->
             chunk.content?.let {
                 planResponseBuilder.append(it)
@@ -492,35 +503,42 @@ class ApexAgentEngine(
         val plan = EngineResponseParsers.parseExecutionPlan(planResponse, input)
         emit(AgentEvent.PlanGenerated(plan))
 
-        // Phase 3: await user confirmation
+        // Phase 3: await user confirmation（#169：Boolean → PlanDecision，
+        // 可携带步骤勾选 enabledSteps 与重排 order，见 plan/PlanConfirmationRequest）。
         emit(AgentEvent.PlanAwaitingConfirmation(plan))
-        val confirmed = awaitPlanConfirmation()
-        if (!confirmed) {
+        val decision = awaitPlanConfirmationDecision()
+        if (!decision.confirmed) {
             emit(AgentEvent.Aborted)
             return 0
         }
-        emit(AgentEvent.PlanConfirmed(plan))
 
-        // Phase 4: execute each step sequentially.
+        // Phase 3.5 (#169)：应用用户勾选/重排 + dependsOn 拓扑排序 → 锁定计划。
+        // locked 为局部 val，执行期间不可变（“计划锁定”语义）；锁定播报经
+        // addMessage 写入历史（自动持久化 ConversationMemory），后续每轮 LLM
+        // 请求都能看到这份不可变契约。
+        val locked = PlanGraph.lock(plan, decision.enabledSteps, decision.order)
+        addMessage(LlmMessage.System(locked.lockMessage))
+        emit(AgentEvent.PlanConfirmed(locked.plan))
+
+        // Phase 4: execute each step in locked order.
         // Each step is a single iteration of the Build loop with a step-scoped user message.
         var iterations = 0
-        for ((index, step) in plan.steps.withIndex()) {
+        for ((index, step) in locked.plan.steps.withIndex()) {
             if (!isRunning) break
             emit(AgentEvent.StepStart(index, step.description))
 
-            val stepPrompt = buildStepExecutionPrompt(plan, step, index)
-            addMessage(LlmMessage.User(stepPrompt))
+            addMessage(LlmMessage.User(EnginePrompts.buildStepExecutionPrompt(locked.plan, step, index)))
 
             val stepIters = executeBuildLoop { event -> emit(event) }
             iterations += stepIters
         }
 
-        // Phase 5: reflection
-        val reflectPrompt = buildReflectionPrompt(plan)
+        // Phase 5: reflection（只读总结，同样生效 planningPhase 约束）
         val reflectionBuilder = StringBuilder()
         runtime.chatStream(
             context = tagged(LlmRequestContext.primary("plan_reflection")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt)
+            messages = listOf(LlmMessage.System(buildSystemPrompt(planningPhase = true))) +
+                LlmMessage.User(EnginePrompts.buildReflectionPrompt(locked.plan))
         ).collect { chunk ->
             chunk.content?.let {
                 reflectionBuilder.append(it)
@@ -532,16 +550,7 @@ class ApexAgentEngine(
         return iterations
     }
 
-    private suspend fun awaitPlanConfirmation(): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        planConfirmationDeferred = deferred
-        return try {
-            withTimeout(PLAN_CONFIRMATION_TIMEOUT_MS) { deferred.await() }
-        } finally {
-            planConfirmationDeferred = null
-        }
-    }
-
+    // awaitPlanConfirmation 已迁至 plan/PlanExecutionSupport.kt（#169：Boolean → PlanDecision）。
     // ═══════════════════════════════════════════════════════
     // SPEC mode
     // ═══════════════════════════════════════════════════════
@@ -644,6 +653,9 @@ class ApexAgentEngine(
             iteration++
             // #168：解析本轮生效思考档位（AUTO → 复杂度选档；工具计数由控制器自持）。
             thinkingController.onIterationStart(config, iteration, userText = lastUserPromptText(conversationHistory))
+            // #170：终端主动性 —— 轮次级建议注入（会话流切换/Ubuntu 预备/失败恢复）。
+            terminalAdvisor.onIterationStart(lastUserPromptText(conversationHistory) ?: "")
+                ?.let { addMessage(LlmMessage.System(it.systemNote)) }
             // 每轮迭代都需要重新触发 ThinkingStart，否则 UI 的思考指示器
             // 在第 2..N 轮迭代不会刷新（与 orchestrator 路径行为一致）。
             var thinkingEmittedForIteration = false
@@ -999,6 +1011,9 @@ class ApexAgentEngine(
             registryToolId, actionSuccess, toolRegistry.metadataOf(registryToolId)?.isHighRisk == true
         )?.let { addMessage(LlmMessage.System(it)) }
 
+        // #170：终端主动性 —— 一次性 shell 连击/失败连击滑窗（下一迭代判定建议）。
+        terminalAdvisor.onToolCallCompleted(registryToolId, actionSuccess, toolCall.arguments)
+
         // 隐式记忆采集（报告 P2）：记录每个已执行动作及其成败。
         // 传入 actionSuccess 供 CS-Mem 蒸馏时过滤失败动作（避免"鼠标连点失败"
         // 也被压进 FSM 宏技能，使学到的宏技能必然无法回放）。
@@ -1062,9 +1077,10 @@ class ApexAgentEngine(
         return ctx.copy(taskId = tags.first, stepId = tags.second)
     }
 
-    private fun buildSystemPrompt(): String = EnginePrompts.buildSystemPrompt(
+    private fun buildSystemPrompt(planningPhase: Boolean = false): String = EnginePrompts.buildSystemPrompt(
         config = config,
         currentProfile = thinkingController.profileFor(config),
+        planningPhase = planningPhase,
         privilegeLevel = privilegeInfoProvider?.currentLevel() ?: "NORMAL_SHELL",
         visibleTools = EngineToolPlanner.visibleToolsFor(currentToolPlan, toolRegistry),
         catalogTools = EngineToolPlanner.catalogToolsFor(currentToolPlan, toolRegistry),
@@ -1077,18 +1093,6 @@ class ApexAgentEngine(
         // Issue #164：全局规则（Agent 模式通道；coding 实例不设值，见 updateGlobalRules KDoc）
         globalRules = globalRulesText
     )
-
-    private fun buildPlanPrompt(input: String): String =
-        EnginePrompts.buildPlanPrompt(input, toolRegistry.getAllTools())
-
-    private fun buildStepExecutionPrompt(
-        plan: ExecutionPlan,
-        step: PlanStep,
-        stepIndex: Int
-    ): String = EnginePrompts.buildStepExecutionPrompt(plan, step, stepIndex)
-
-    private fun buildReflectionPrompt(plan: ExecutionPlan): String =
-        EnginePrompts.buildReflectionPrompt(plan)
 
     // ═══════════════════════════════════════════════════════
     // SPEC mode prompt builders — delegated to [EnginePrompts]
@@ -1122,7 +1126,7 @@ class ApexAgentEngine(
 
     override suspend fun abort() {
         isRunning = false
-        planConfirmationDeferred?.complete(false)
+        planConfirmationDeferred?.complete(PlanDecision.legacy(false))
         planConfirmationDeferred = null
         specConfirmationDeferred?.complete(false)
         specConfirmationDeferred = null
@@ -1204,8 +1208,4 @@ class ApexAgentEngine(
         )
     }
 
-    private companion object {
-        /** How long to wait for the user to confirm/reject a plan before giving up. */
-        const val PLAN_CONFIRMATION_TIMEOUT_MS: Long = 5L * 60 * 1000 // 5 minutes
-    }
 }

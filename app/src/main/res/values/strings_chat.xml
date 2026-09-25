@@ -54,6 +54,13 @@
     <string name="chat_confirm_plan_title">Run this plan?</string>
     <string name="chat_cancel">Cancel</string>
     <string name="chat_execute">Run</string>
+    <!-- #169 Plan-mode hardening (plan_* prefix) -->
+    <string name="plan_locked">Locked</string>
+    <string name="plan_step_enable">Enable this step</string>
+    <string name="plan_move_up">Move step up</string>
+    <string name="plan_move_down">Move step down</string>
+    <string name="plan_adjust_hint">Adjust before running: uncheck to skip a step, arrows to reorder</string>
+    <string name="plan_planning_readonly">Planning · read-only</string>
     <string name="chat_spec_title">📐 Requirements spec</string>
     <string name="chat_risk_level">Risk %1$s</string>
     <string name="chat_spec_goal">Goal</string>

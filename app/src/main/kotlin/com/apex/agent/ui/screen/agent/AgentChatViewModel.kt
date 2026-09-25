@@ -708,9 +708,14 @@ class AgentChatViewModel @Inject constructor(
     private fun thinkingLevelFromOverride(value: String): ThinkingLevel? =
         runCatching { ThinkingLevel.valueOf(value.trim().uppercase()) }.getOrNull()
 
-    fun confirmPlan(confirmed: Boolean) {
+    /**
+     * #169 计划确认（人控升级）：confirmed=false 取消；true 时可携带步骤勾选
+     * （enabledSteps：原 index 清单，null = 全量）与重排（order：原 index 顺序，
+     * null = 声明顺序）。引擎 Phase 3.5 应用调整 + 拓扑排序后锁定计划。
+     */
+    fun confirmPlan(confirmed: Boolean, enabledSteps: List<Int>? = null, order: List<Int>? = null) {
         _uiState.update { it.copy(awaitingPlanConfirmation = false) }
-        (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed)
+        (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed, enabledSteps, order)
     }
 
     /** 用户回答了 Agent 的提问，恢复引擎执行。 */

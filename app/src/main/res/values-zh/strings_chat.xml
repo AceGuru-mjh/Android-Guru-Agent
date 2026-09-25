@@ -54,6 +54,13 @@
     <string name="chat_confirm_plan_title">确认执行此计划？</string>
     <string name="chat_cancel">取消</string>
     <string name="chat_execute">执行</string>
+    <!-- #169 Plan 模式强化（plan_ 前缀） -->
+    <string name="plan_locked">已锁定</string>
+    <string name="plan_step_enable">启用此步骤</string>
+    <string name="plan_move_up">上移步骤</string>
+    <string name="plan_move_down">下移步骤</string>
+    <string name="plan_adjust_hint">执行前可调整：取消勾选跳过步骤，箭头调整顺序</string>
+    <string name="plan_planning_readonly">规划中 · 只读</string>
     <string name="chat_spec_title">📐 需求规格</string>
     <string name="chat_risk_level">风险 %1$s</string>
     <string name="chat_spec_goal">目标</string>

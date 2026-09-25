@@ -723,7 +723,7 @@ class AgentChatViewModel @Inject constructor(
     fun setThinkingLevel(level: ThinkingLevel) {
         // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）；
         // AUTO 档不动模型原生 reasoning effort——逐轮档位由引擎侧选档器决定。
-        settingsRepository.updateAgentSettings { it.copy(thinkingLevelOverride = level.name.lowercase()) }
+        settingsRepository.updateAgentSettings { copy(thinkingLevelOverride = level.name.lowercase()) }
         applyThinkingLevel(level)
         if (level == ThinkingLevel.AUTO) {
             _lastAdaptiveDecision.value = null // 决策理由由下一轮 IterationStart 刷新

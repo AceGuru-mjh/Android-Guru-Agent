@@ -37,7 +37,7 @@ import kotlinx.serialization.Serializable
 data class ModePreset(
     val id: String,
     val name: String,
-    val instruction: String,
+    val instruction: String = "",
     val builtin: Boolean = false,
     val createdAt: Long = 0
 ) {

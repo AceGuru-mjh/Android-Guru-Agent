@@ -59,6 +59,9 @@ import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.RiskAwareToolGate
+import com.apex.agent.permission.PermissionModeGate
+import com.apex.agent.permission.PermissionAwareToolGate
+import com.apex.agent.ui.screen.settings.SettingsRepository
 import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.core.tools.CompositeToolGate
 import com.apex.agent.core.tools.DefaultToolRunPolicyResolver
@@ -80,6 +83,8 @@ import com.apex.agent.core.tools.builtin.WaitTool
 import com.apex.agent.core.codetools.CodeTools
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.diagnostics.CodeDiagnostics
+import com.apex.agent.core.codetools.git.GitCommandRunner
+import com.apex.agent.core.codetools.git.GitTools
 import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.core.code.subagent.CodeTaskTool
 import com.apex.agent.core.code.subagent.SubAgentRunner
@@ -221,6 +226,25 @@ object ToolModule {
     ): RiskAwareToolGate = RiskAwareToolGate(gateway)
 
     /**
+     * v1.0 #155：opencode 式权限模式门——模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
+     * + 规则三元组经设置流实时读取（改设置即时生效，无需重启）。
+     * 与 RiskAwareToolGate 的分工见 PermissionAwareToolGate KDoc：权限门先表态，
+     * 显式放行/会话记忆命中跳过风险门（防双弹窗），仅默认放行才落风险门。
+     */
+    @Provides
+    @Singleton
+    fun providePermissionModeGate(
+        gateway: UserQuestionGateway,
+        settingsRepository: SettingsRepository
+    ): PermissionModeGate = PermissionModeGate(gateway) {
+        val agent = settingsRepository.agentSettings.value
+        com.apex.agent.permission.PermissionSnapshot(
+            mode = agent.permissionMode,
+            rules = agent.permissionRules
+        )
+    }
+
+    /**
      * 工具使用统计（v2）：DefaultToolExecutor 每次调用后记录
      * 成败/耗时；设置页与诊断报告从这读取。单例，随进程存活。
      */
@@ -284,12 +308,19 @@ object ToolModule {
     private fun buildV3Executor(
         registry: com.apex.agent.core.tools.ToolRegistry,
         riskAwareToolGate: RiskAwareToolGate,
+        permissionModeGate: PermissionModeGate,
         toolUsageTracker: ToolUsageTracker,
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
         breaker: ToolCircuitBreaker
     ): com.apex.agent.core.tools.ToolExecutor = ToolExecutorBuilder(registry)
-        .gate(CompositeToolGate(ToolEnvironmentGate(environmentState), riskAwareToolGate))
+        // v1.0 #55 门控链：环境门 →（权限门 → 风险门）—— PermissionAwareToolGate
+        // 把权限模式与风险确认合成一门：权限门显式放行/会话记忆命中时跳过
+        // 风险门（防双弹窗），仅默认放行才落风险门继续把关。
+        .gate(CompositeToolGate(
+            ToolEnvironmentGate(environmentState),
+            PermissionAwareToolGate(permissionModeGate, riskAwareToolGate)
+        ))
         .usageTracker(toolUsageTracker)
         .policyResolver(
             DefaultToolRunPolicyResolver(TERMINAL_TOOL_RUN_POLICIES)
@@ -340,6 +371,10 @@ object ToolModule {
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
         mcpManager: McpManager,
         riskAwareToolGate: RiskAwareToolGate,
+        // v1.0 #155：权限模式门（与风险门合成 PermissionAwareToolGate 入链）。
+        permissionModeGate: PermissionModeGate,
+        // v1.0 #153：git 工具执行通道（PRoot Ubuntu 沙箱）。
+        gitRunner: GitCommandRunner,
         toolUsageTracker: ToolUsageTracker,
         // v3 单例注入：环境态 / 追踪 / 熔断 / 组合动作。
         environmentState: ToolEnvironmentState,
@@ -461,6 +496,15 @@ object ToolModule {
             todo = codeTodoTool,
             diagnostics = CodeDiagnostics()
         ).forEach {
+            registry.register(SafeAgentTool(it))
+        }
+
+        // ═══ 2c. Git 工具（v1.0 #153，两模式互用）═══
+        // code_git_status/diff/log/commit/branch —— git 二进制经 PRoot Ubuntu
+        // 沙箱执行（rootfs 预装），工作区恒定 bind 为 guest /workspace；
+        // diff 输出统一 diff 原文，UI 侧 DiffOutput 复用 +/- 行着色；
+        // commit 幂等自动 init + -c 注入身份。沙箱未装时降级为引导文本。
+        GitTools.all(runner = gitRunner).forEach {
             registry.register(SafeAgentTool(it))
         }
 
@@ -668,7 +712,7 @@ object ToolModule {
         // 所有工具调用统一过门：环境前置不满足/用户拒绝在执行前拦截；参数违规
         // 同样前置拦截；成败/耗时/逐调用 span 全部入账。
         val mainExecutor: ToolExecutor = buildV3Executor(
-            registry, riskAwareToolGate, toolUsageTracker,
+            registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
             environmentState, traceRecorder, circuitBreaker
         )
 
@@ -745,12 +789,13 @@ object ToolModule {
     fun provideToolExecutor(
         registry: ToolRegistry,
         riskAwareToolGate: RiskAwareToolGate,
+        permissionModeGate: PermissionModeGate,
         toolUsageTracker: ToolUsageTracker,
         environmentState: ToolEnvironmentState,
         traceRecorder: ToolTraceRecorder,
         circuitBreaker: ToolCircuitBreaker
     ): ToolExecutor = buildV3Executor(
-        registry, riskAwareToolGate, toolUsageTracker,
+        registry, riskAwareToolGate, permissionModeGate, toolUsageTracker,
         environmentState, traceRecorder, circuitBreaker
     )
 }

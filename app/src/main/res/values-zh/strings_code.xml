@@ -32,4 +32,38 @@
     <string name="code_workspace_name_hint">工作区名称（如 my-app）</string>
     <string name="code_create">创建</string>
     <string name="code_cancel">取消</string>
+
+    <!-- 编辑器面板（v1.0 #154） -->
+    <string name="code_editor_close">关闭编辑器</string>
+    <string name="code_editor_loading">加载中…</string>
+    <string name="code_editor_binary">二进制文件，不支持预览</string>
+    <string name="code_editor_empty">空文件</string>
+    <string name="code_editor_lines_fmt">%1$d 行</string>
+    <string name="code_editor_truncated_fmt">仅显示前 %1$d 行，共 %2$d 行</string>
+
+    <!-- 工具权限（v1.0 #155） -->
+    <string name="code_perm_section_title">工具权限</string>
+    <string name="code_perm_section_subtitle">opencode 式权限模式与规则</string>
+    <string name="code_perm_mode_label">权限模式</string>
+    <string name="code_perm_mode_bypass">全放行</string>
+    <string name="code_perm_mode_default">默认</string>
+    <string name="code_perm_mode_accept_edits">接受编辑</string>
+    <string name="code_perm_mode_plan">规划模式</string>
+    <string name="code_perm_mode_bypass_desc">所有工具直接放行，不再询问（请谨慎使用）</string>
+    <string name="code_perm_mode_default_desc">只读工具自动放行，其余一律先询问</string>
+    <string name="code_perm_mode_accept_edits_desc">文件编辑与 git 提交自动放行，其余先询问</string>
+    <string name="code_perm_mode_plan_desc">只读规划：任何会修改环境的工具都会被拒绝</string>
+    <string name="code_perm_rules_title">工具权限规则（按序首匹配）</string>
+    <string name="code_perm_rules_empty">暂无规则；规则可对匹配的工具越级放行或收紧</string>
+    <string name="code_perm_rule_add">添加规则</string>
+    <string name="code_perm_dialog_title">添加权限规则</string>
+    <string name="code_perm_rule_pattern_label">工具 ID 模式</string>
+    <string name="code_perm_rule_pattern_hint">精确 ID，或前缀加尾星（如 code_git_ 加星、mcp__ 加星）；单独一个星号匹配全部</string>
+    <string name="code_perm_effect_label">匹配后动作</string>
+    <string name="code_perm_effect_allow">允许</string>
+    <string name="code_perm_effect_ask">询问</string>
+    <string name="code_perm_effect_deny">拒绝</string>
+    <string name="code_perm_rule_delete">删除规则</string>
+    <string name="code_perm_save">保存</string>
+    <string name="code_perm_cancel">取消</string>
 </resources>

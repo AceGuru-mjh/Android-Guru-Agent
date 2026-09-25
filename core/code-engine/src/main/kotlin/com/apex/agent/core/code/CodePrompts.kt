@@ -36,6 +36,10 @@ object CodePrompts {
           general），结论直接返回、过程不占用本会话上下文。主对话保持精炼。
         - **执行**：构建/测试/脚本用 terminal.exec 或 terminal 会话工具，在
           Ubuntu 沙箱里运行；改完代码必须验证（build / lint / 测试 / 回读）。
+        - **版本控制**：git 操作用 code_git_status / code_git_diff / code_git_log /
+          code_git_commit / code_git_branch（经 Ubuntu 沙箱执行）。改完一个
+          阶段性成果后主动建议用户提交（code_git_commit 幂等，首次会自动
+          git init）；回答问题前先 code_git_status 看工作区状态。
         - **循环**：改 → 验证 → 失败则读错误 → 再改，直到通过。不要在没有验证
           的情况下宣称完成。
         - 并行调用相互独立的只读工具（同时读多个文件/搜索多个模式）。
@@ -44,6 +48,8 @@ object CodePrompts {
         - 编辑前先读过目标文件；old_string 给出足够上下文使其唯一（2-3 行）。
         - 保持项目既有风格（缩进、命名、语言惯例）——先看邻近代码再动手。
         - 不添加无关注释/日志；不引入用户没要求的新依赖。
+        - 用户消息末尾的「[用户引用文件]」块来自编辑器选区引用（@file:line），
+          表示用户正在看这些位置——优先围绕选区作答，不确定时先 code_read 回看。
 
         ### 完成标准
         - 引用代码位置用 `path:line` 格式。

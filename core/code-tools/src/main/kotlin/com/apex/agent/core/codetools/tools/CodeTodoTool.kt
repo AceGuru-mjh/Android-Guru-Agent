@@ -131,6 +131,15 @@ class CodeTodoTool : BaseTool(
     /** 会话重置。 */
     fun clear() = state.set(emptyList())
 
+    /**
+     * 会话恢复（#152）：用持久层快照整体替换当前清单。
+     *
+     * 与 [clear] 对称的写入口——CodeViewModel 恢复编码会话时回填 todos，
+     * 使进程被杀后 Todo 面板与持久快照一致（防御性 toList 拷贝，
+     * 与 execute 的写入语义一致）。
+     */
+    fun restore(todos: List<Todo>) = state.set(todos.toList())
+
     private fun render(todos: List<Todo>): String {
         if (todos.isEmpty()) return "todo list cleared"
         val lines = todos.mapIndexed { i, t ->

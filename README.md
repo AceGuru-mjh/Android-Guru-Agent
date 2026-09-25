@@ -1,7 +1,7 @@
 <a id="readme-top"></a>
 <div align="center">
 
-<img src="docs/assets/banner.svg" alt="Android Guru Agent" width="880"/>
+<img src="docs/assets/banner.svg" alt="Android Guru Agent" width="900"/>
 
 <a href="#quickstart"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&amp;weight=600&amp;size=20&amp;pause=1200&amp;color=00C2D1&amp;center=true&amp;vCenter=true&amp;width=820&amp;height=64&amp;lines=An+autonomous+AI+agent+that+lives+entirely+on+your+Android+device.;109+tools+%C2%B7+6+agent+modes+%C2%B7+PRoot+Ubuntu+24.04+%C2%B7+cs-mem;No+server.+No+PC.+Bring+your+own+LLM." alt="Android Guru Agent — typing"/></a>
 

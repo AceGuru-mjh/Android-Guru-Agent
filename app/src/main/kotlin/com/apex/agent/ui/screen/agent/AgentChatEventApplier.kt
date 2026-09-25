@@ -48,6 +48,13 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             }
         }
 
+        // ═══ #168 六档思考：AUTO 档逐轮拉取引擎侧自适应选档理由 ═══
+        is AgentEvent.IterationStart -> {
+            // 引擎在 emit IterationStart 前已解析本轮档位，此处拉取即最新决策；
+            // 非 AUTO 档引擎返回 null → 覆盖旧值，UI 不再显示过期理由。
+            _lastAdaptiveDecision.value = (agentEngine as? ApexAgentEngine)?.currentThinkingDecision()
+        }
+
         // ═══ Plan模式 ═══
         is AgentEvent.PlanGenerated -> {
             _uiState.update { it.copy(plan = event.plan) }
@@ -56,12 +63,33 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update { it.copy(awaitingPlanConfirmation = true) }
         }
         is AgentEvent.UserInputRequired -> {
-            _uiState.update { it.copy(pendingUserInput = UserInputRequest(event.prompt, event.type)) }
+            // #168 HUMAN_ASSIST 决策点拦截：把已流出的草稿（方案对比文本）先落为
+            // 一条独立 Agent 消息（用户需要看到模型摆出的选项才能决策），并清空
+            // currentResponse——避免拦截后的下一轮回答与草稿拼接成一条消息。
+            // 选择菜单由 pendingUserInput 驱动（UserInputDialog，CHOICE 类型
+            // 按编号行渲染单选卡，与 HumanAssistFlow.formatQuestion 的编码对齐）。
+            streamBuffers.flush()
+            val draft = _uiState.value.currentResponse
+            _uiState.update { state ->
+                state.copy(
+                    messages = if (draft.isNotBlank()) {
+                        state.messages + AgentUiMessage.Agent(draft)
+                    } else {
+                        state.messages
+                    },
+                    currentResponse = "",
+                    pendingUserInput = UserInputRequest(event.prompt, event.type)
+                )
+            }
         }
         is AgentEvent.PlanConfirmed -> {
             _uiState.update { state ->
                 state.copy(
                     awaitingPlanConfirmation = false,
+                    // #169：锁定后的计划（已应用用户勾选/重排 + 拓扑排序）——
+                    // uiState.plan 同步为锁定版，锁定卡（PlanMessage）只读展示。
+                    planConfirmed = true,
+                    plan = event.plan,
                     messages = state.messages + AgentUiMessage.PlanMessage(event.plan)
                 )
             }
@@ -267,10 +295,12 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
         }
 
         // ═══ Plan 模式：步骤开始（流水线分隔卡，长任务进度可视化）═══
+        // #169：currentStepIndex 同步驱动锁定计划卡（PlanCard）的当前步高亮。
         is AgentEvent.StepStart -> {
             streamBuffers.flush()
             _uiState.update { state ->
                 state.copy(
+                    currentStepIndex = event.stepIndex,
                     messages = state.messages + AgentUiMessage.StepMarker(
                         stepIndex = event.stepIndex,
                         description = event.description
@@ -319,6 +349,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
                         ),
                     currentResponse = "",
                     currentThinking = "",
+                    currentStepIndex = -1,
                     isLoading = false
                 )
             }
@@ -340,6 +371,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update {
                 it.copy(
                     isLoading = false,
+                    currentStepIndex = -1,
                     messages = it.messages + AgentUiMessage.RunSummary(
                         summary = event.summary,
                         totalIterations = event.totalIterations,
@@ -357,7 +389,8 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _uiState.update { state ->
                 state.copy(
                     messages = state.messages + AgentUiMessage.System(str(R.string.chat_aborted)),
-                    isLoading = false
+                    isLoading = false,
+                    currentStepIndex = -1
                 )
             }
         }

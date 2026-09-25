@@ -71,6 +71,8 @@ internal fun AgentMessageItem(
     vm: AgentChatViewModel,
     // UX-1：消息操作菜单门禁（流式生成中禁用删除/重生成，复制仍可用）。
     actionsEnabled: Boolean = true,
+    // #169：Plan 模式当前执行步骤（锁定计划卡高亮用；-1 = 非步骤执行中）。
+    currentStepIndex: Int = -1,
     onImageClick: (MessageAttachment) -> Unit = {},
     onFileClick: (MessageAttachment) -> Unit = {},
     // 多模态输出：Agent 回复 markdown 里的生成图片点击 → Lightbox（URL/data URI）。
@@ -111,7 +113,7 @@ internal fun AgentMessageItem(
             onRetry = retryLastUser(vm)
         )
         is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought, finished = true)
-        is AgentUiMessage.PlanMessage -> PlanCard(message.plan)
+        is AgentUiMessage.PlanMessage -> PlanCard(message.plan, currentStepIndex = currentStepIndex)
         is AgentUiMessage.SpecMessage -> SpecCard(message.spec)
         is AgentUiMessage.ReflectionReviewMessage -> ReflectionReviewBlock(message.text)
     }

@@ -162,3 +162,13 @@ internal fun buildUserText(input: UserInput): String {
 /** 判定当前消息列表是否含图片（用户附件 / 历史 Vision 上下文）。纯函数。 */
 internal fun messagesContainImages(messages: List<LlmMessage>): Boolean =
     messages.any { it is LlmMessage.User && it.images.isNotEmpty() }
+
+/**
+ * 提取最近一条用户消息文本（#168 AUTO 档复杂度分类的输入信号）。
+ *
+ * 自消息列表尾部向前找第一条 [LlmMessage.User]——ReAct 循环中工具结果/
+ * 助手消息会不断追加，用户原始诉求始终是最后一条 User 消息。
+ * 无用户消息（如 TaskRuntime 注入的 system-only 恢复路径）返回 null。
+ */
+internal fun lastUserPromptText(messages: List<LlmMessage>): String? =
+    (messages.lastOrNull { it is LlmMessage.User } as? LlmMessage.User)?.content

@@ -3,7 +3,6 @@ package com.apex.agent.core.engine.orchestrator
 import com.apex.agent.core.engine.AgentConfig
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.PrivilegeInfoProvider
-import com.apex.agent.core.engine.ThinkingLevel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -32,8 +31,10 @@ internal object OrchestratorPrompts {
         val sb = StringBuilder()
         sb.append("You are ApexAgent, a capable AI assistant running on Android.")
         sb.append("\n\nMode: ${config.mode.displayName} — ${config.mode.description}")
-        if (config.thinkingLevel != ThinkingLevel.NONE) {
-            sb.append("\n\n${config.thinkingLevel.toPromptInstruction()}")
+        // #168：AUTO/NONE 的 toPromptInstruction 为空串——不再注入空段落
+        //（编排器路径暂不接 ThinkingModeController，AUTO 由引擎主循环路径承载）。
+        config.thinkingLevel.toPromptInstruction().takeIf { it.isNotBlank() }?.let {
+            sb.append("\n\n$it")
         }
         if (config.mode == AgentMode.CUSTOM && config.customInstruction != null) {
             sb.append("\n\n## Custom Instructions\n${config.customInstruction}")

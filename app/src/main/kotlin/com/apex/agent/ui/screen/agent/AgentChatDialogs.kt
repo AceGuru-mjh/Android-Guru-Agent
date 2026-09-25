@@ -96,9 +96,16 @@ internal fun CustomInstructionDialog(
 
 // ═══ 思考深度选择器 ═══
 
+/**
+ * 思考深度选择器（#168 六档：NONE/LIGHT/STANDARD/DEEP/MAXIMUM/AUTO）。
+ *
+ * @param adaptiveDecision AUTO 档最近一次引擎侧自适应选档理由
+ *   （"LEVEL: 因子→评分→档位"；仅 AUTO 选中且有决策时展示）。
+ */
 @Composable
 internal fun ThinkingLevelSelector(
     current: ThinkingLevel,
+    adaptiveDecision: String? = null,
     onSelect: (ThinkingLevel) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -118,7 +125,19 @@ internal fun ThinkingLevelSelector(
         ) {
             ThinkingLevel.entries.forEach { level ->
                 DropdownMenuItem(
-                    text = { Text("${level.name} - " + thinkingLevelDescription(level)) },
+                    text = {
+                        Column {
+                            Text("${level.name} - " + thinkingLevelDescription(level))
+                            // AUTO：展示引擎侧最近一次自适应选档理由（可解释性）
+                            if (level == ThinkingLevel.AUTO && !adaptiveDecision.isNullOrBlank()) {
+                                Text(
+                                    text = adaptiveDecision,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
                     onClick = {
                         onSelect(level)
                         expanded = false
@@ -135,15 +154,17 @@ internal fun ThinkingLevelSelector(
 }
 
 /**
- * 思考深度描述（UI 层本地化映射；core 枚举 description 保持引擎侧不动）。
+ * 思考深度描述（UI 层本地化映射；#168 六档文案 = ThinkingProfile.uiDescription
+ * 的 i18n 版，含执行策略差异说明；core 枚举 description 保持引擎侧不动）。
  */
 @Composable
 private fun thinkingLevelDescription(level: ThinkingLevel): String = when (level) {
-    ThinkingLevel.NONE -> stringResource(R.string.chat_thinking_none_desc)
-    ThinkingLevel.LIGHT -> stringResource(R.string.chat_thinking_light_desc)
-    ThinkingLevel.STANDARD -> stringResource(R.string.chat_thinking_standard_desc)
-    ThinkingLevel.DEEP -> stringResource(R.string.chat_thinking_deep_desc)
-    ThinkingLevel.MAXIMUM -> stringResource(R.string.chat_thinking_maximum_desc)
+    ThinkingLevel.NONE -> stringResource(R.string.thinking_level_none_desc)
+    ThinkingLevel.LIGHT -> stringResource(R.string.thinking_level_light_desc)
+    ThinkingLevel.STANDARD -> stringResource(R.string.thinking_level_standard_desc)
+    ThinkingLevel.DEEP -> stringResource(R.string.thinking_level_deep_desc)
+    ThinkingLevel.MAXIMUM -> stringResource(R.string.thinking_level_maximum_desc)
+    ThinkingLevel.AUTO -> stringResource(R.string.thinking_level_auto_desc)
 }
 
 /**

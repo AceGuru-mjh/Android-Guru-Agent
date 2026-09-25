@@ -21,6 +21,10 @@ data class AgentChatUiState(
     val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
+    /** #169：计划已确认锁定（PlanConfirmed 后置 true；锁定后执行期间不可改）。 */
+    val planConfirmed: Boolean = false,
+    /** #169：当前执行到的计划步骤（StepStart 的 stepIndex；-1 = 未在步骤执行中）。 */
+    val currentStepIndex: Int = -1,
     /** Spec 模式的当前规格与确认状态。 */
     val spec: ExecutionSpec? = null,
     val awaitingSpecConfirmation: Boolean = false,

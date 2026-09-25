@@ -54,6 +54,13 @@
     <string name="chat_confirm_plan_title">确认执行此计划？</string>
     <string name="chat_cancel">取消</string>
     <string name="chat_execute">执行</string>
+    <!-- #169 Plan 模式强化（plan_ 前缀） -->
+    <string name="plan_locked">已锁定</string>
+    <string name="plan_step_enable">启用此步骤</string>
+    <string name="plan_move_up">上移步骤</string>
+    <string name="plan_move_down">下移步骤</string>
+    <string name="plan_adjust_hint">执行前可调整：取消勾选跳过步骤，箭头调整顺序</string>
+    <string name="plan_planning_readonly">规划中 · 只读</string>
     <string name="chat_spec_title">📐 需求规格</string>
     <string name="chat_risk_level">风险 %1$s</string>
     <string name="chat_spec_goal">目标</string>
@@ -138,6 +145,13 @@
     <string name="chat_thinking_standard_desc">分析任务→选择方案→执行</string>
     <string name="chat_thinking_deep_desc">多方案对比→风险评估→最优选择</string>
     <string name="chat_thinking_maximum_desc">完整推理链+自我反思+多轮验证</string>
+    <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionZh，含执行策略差异） -->
+    <string name="thinking_level_none_desc">直接执行，不生成推理；快进快出（迭代×0.8、更早压缩省 token）</string>
+    <string name="thinking_level_light_desc">1-2 句简短思考后立即行动，省 token 的轻量推理</string>
+    <string name="thinking_level_standard_desc">标准三步思维链：拆解任务→逐步推理→执行观察</string>
+    <string name="thinking_level_deep_desc">多路径五步推理（候选方案→评估→批评→择优）；工具失败/高风险后追加自检，迭代×1.2</string>
+    <string name="thinking_level_maximum_desc">七步思维树穷举推理 + 工具自检 + 最终自评清单（目标/副作用/遗漏），迭代×1.5</string>
+    <string name="thinking_level_auto_desc">自动：按任务复杂度（长度/多步指示/代码含量/风险词/错误史）逐轮动态选档</string>
     <string name="chat_question_title">🧩 Agent 需要你选择</string>
     <string name="chat_multi_select">可多选</string>
     <string name="chat_recommended">推荐</string>
@@ -197,6 +211,8 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">任务模式：%1$s，点击切换</string>
+    <!-- #168 CUSTOM 模式预设 chip（顶栏当前预设名） -->
+    <string name="chat_mode_preset_cd">自定义模式预设：%1$s，点击编辑</string>
     <string name="chat_role_selector_cd">Agent 角色：%1$s，点击切换</string>
     <string name="chat_role_builtin_cd">内置角色</string>
     <string name="chat_mode_build_desc">边想边做，实时执行</string>

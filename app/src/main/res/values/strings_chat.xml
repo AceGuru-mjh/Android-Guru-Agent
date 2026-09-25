@@ -54,6 +54,13 @@
     <string name="chat_confirm_plan_title">Run this plan?</string>
     <string name="chat_cancel">Cancel</string>
     <string name="chat_execute">Run</string>
+    <!-- #169 Plan-mode hardening (plan_* prefix) -->
+    <string name="plan_locked">Locked</string>
+    <string name="plan_step_enable">Enable this step</string>
+    <string name="plan_move_up">Move step up</string>
+    <string name="plan_move_down">Move step down</string>
+    <string name="plan_adjust_hint">Adjust before running: uncheck to skip a step, arrows to reorder</string>
+    <string name="plan_planning_readonly">Planning · read-only</string>
     <string name="chat_spec_title">📐 Requirements spec</string>
     <string name="chat_risk_level">Risk %1$s</string>
     <string name="chat_spec_goal">Goal</string>
@@ -138,6 +145,13 @@
     <string name="chat_thinking_standard_desc">Analyze → pick approach → execute</string>
     <string name="chat_thinking_deep_desc">Compare options → assess risks → pick best</string>
     <string name="chat_thinking_maximum_desc">Full reasoning chain + self-review + multi-round validation</string>
+    <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionEn，含执行策略差异） -->
+    <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
+    <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>
+    <string name="thinking_level_standard_desc">Standard 3-step Chain-of-Thought: decompose, reason, execute and observe</string>
+    <string name="thinking_level_deep_desc">Multi-path 5-step reasoning; self-check after failed or high-risk tool calls, iterations ×1.2</string>
+    <string name="thinking_level_maximum_desc">7-step Tree-of-Thoughts + post-tool verification + final self-check (goal / side effects / omissions), iterations ×1.5</string>
+    <string name="thinking_level_auto_desc">Auto: pick the level per turn from task complexity (length / steps / code / risk / errors)</string>
     <string name="chat_question_title">🧩 The agent needs your choice</string>
     <string name="chat_multi_select">Multi-select</string>
     <string name="chat_recommended">Recommended</string>
@@ -197,6 +211,8 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
+    <!-- #168 CUSTOM 模式预设 chip（顶栏当前预设名） -->
+    <string name="chat_mode_preset_cd">Custom mode preset: %1$s. Tap to edit</string>
     <string name="chat_role_selector_cd">Agent role: %1$s. Tap to switch</string>
     <string name="chat_role_builtin_cd">Built-in role</string>
     <string name="chat_mode_build_desc">Think and act in real time</string>

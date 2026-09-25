@@ -42,8 +42,13 @@ enum class AgentMode(val displayName: String, val description: String) {
 }
 
 /**
- * 思考深度等级
- * 控制Agent在每次决策前的推理深度
+ * 思考深度等级（#168 起六档）
+ * 控制Agent在每次决策前的推理深度。
+ *
+ * 各档的完整执行画像（提示词 + 参数 + 迭代/验证/压缩/输出策略）见
+ * [com.apex.agent.core.engine.thinking.ThinkingProfile]；AUTO 档的逐轮
+ * 动态选档由 [com.apex.agent.core.engine.thinking.ThinkingModeController]
+ * 驱动。
  */
 enum class ThinkingLevel(val level: Int, val description: String) {
     /** 不思考，直接行动 */
@@ -59,17 +64,27 @@ enum class ThinkingLevel(val level: Int, val description: String) {
     DEEP(3, "多方案对比→风险评估→最优选择"),
     
     /** 极深思考：完整思维链+自我质疑 */
-    MAXIMUM(4, "完整推理链+自我反思+多轮验证");
+    MAXIMUM(4, "完整推理链+自我反思+多轮验证"),
+
+    /**
+     * 自动档（#168）：按任务复杂度（文本长度/多步指示词/代码含量/风险词/
+     * 错误史/迭代深水区）逐轮动态选档，委托
+     * [com.apex.agent.core.engine.thinking.AdaptiveThinkingSelector]。
+     */
+    AUTO(5, "自动：按任务复杂度动态选档");
     
     /**
      * 转换为 system prompt 中的思考指令。
      *
      * 推理框架参考自失败项目 [Apex-agent] 的 ChainOfThoughtSkill / TreeOfThoughtsSkill /
      * ReActSkill：将其中"分解-逐步推理-综合"与"多路径探索评估"的结构化骨架提炼为
-     * 思考提示词，融入本项目的思考深度控制。仅调提示词文本，不改引擎主循环。
+     * 思考提示词。#168 起该文本已迁移/增强到
+     * [com.apex.agent.core.engine.thinking.ThinkingProfile]（含执行策略差异），
+     * 本方法保留作为无画像路径的兼容回退。
      */
     fun toPromptInstruction(): String = when (this) {
         NONE -> ""
+        AUTO -> "" // AUTO 不携带静态指令：由 ThinkingModeController 选档后注入该档指令+理由
         LIGHT -> "Briefly think about what to do next in 1-2 sentences, then act."
         STANDARD -> """
             Use Chain-of-Thought before acting:
@@ -102,6 +117,7 @@ enum class ThinkingLevel(val level: Int, val description: String) {
      */
     fun toThinkingBudget(): Int? = when (this) {
         NONE -> 0
+        AUTO -> null // AUTO 不直接映射：选档后用该档画像的 budget（ThinkingProfile.forLevel）
         LIGHT -> 256
         STANDARD -> 1024
         DEEP -> 4096
@@ -124,6 +140,7 @@ enum class ThinkingLevel(val level: Int, val description: String) {
      */
     fun toReasoningEffortName(): String? = when (this) {
         NONE -> null
+        AUTO -> "adaptive" // 哨兵值：调用方（AgentChatViewModel 等）必须特判 AUTO，不回退 ReasoningEffort.NONE
         LIGHT -> "LOW"
         STANDARD -> "MEDIUM"
         DEEP -> "HIGH"

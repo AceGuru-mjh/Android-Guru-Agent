@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.thinking.ThinkingProfile
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.ToolCategory
 import com.apex.agent.core.tools.ToolRisk
@@ -72,9 +73,22 @@ internal object EnginePrompts {
         /** v4 — 降级到无工具时告知模型本轮纯文本作答。 */
         toolsUnavailable: Boolean = false,
         /** #164 — 全局行为规则（见上 KDoc 双注防线；默认空串 = 段落省略）。 */
-        globalRules: String = ""
+        globalRules: String = "",
+        /**
+         * #168 六档思考 — 当前生效档位画像（null = 兼容旧调用：退回
+         * [ThinkingLevel.toPromptInstruction] 的 5 档行为，既有测试零改动）。
+         * 非空时 Thinking 段注入：档位声明 + AUTO 决策理由 + 档位推理框架 +
+         * MAXIMUM 档的响应前自评清单。
+         */
+        currentProfile: ThinkingProfile? = null,
+        /**
+         * #169 Plan 强化 — 规划期只读显式化。true 时追加「Planning Phase
+         * (READ-ONLY)」约束段（仅产出计划 JSON、不执行任何工具/写操作）。
+         * 仅 executePlanMode 的计划生成/反思两处置 true，其余调用方默认 false。
+         */
+        planningPhase: Boolean = false
     ): String {
-        val thinking = config.thinkingLevel.toPromptInstruction()
+        val thinking = currentProfile?.promptInstruction ?: config.thinkingLevel.toPromptInstruction()
         return buildString {
             // ═══ Agent 角色：身份行（agentName 空 = 历史行为零变化）═══
             appendLine("You are ${config.agentName.ifBlank { "Apex Agent" }}, an AI AGENT running on an Android device.")
@@ -108,6 +122,23 @@ internal object EnginePrompts {
             appendLine("   use shell when no dedicated tool fits. Prefer parallel tool calls for independent reads.")
             appendLine("8. Not every capability is pre-loaded: when no listed tool fits, call tool_search to find")
             appendLine("   the right tool in the catalog, then tool_open to load it — it becomes callable immediately.")
+            appendLine()
+
+            // ═══ #170 终端主动性：Terminal-Use Policy（静态策略层）═══
+            // 与 TerminalProactivityAdvisor（轮次级动态提醒）互补：这里告诉模型
+            // “什么场景该用什么终端形态”，顾问在模型违背时按滑窗计数提醒。
+            appendLine("## Terminal-Use Policy (MANDATORY)")
+            appendLine("- One-shot commands → terminal.exec (structured stdout/stderr/exit_code).")
+            appendLine("- You have started N consecutive one-shot shell commands → STOP. Switch to a session")
+            appendLine("  flow: terminal.create → terminal.run (background if long) → terminal.observe/terminal.wait.")
+            appendLine("  Sessions preserve cwd/env/state across commands.")
+            appendLine("- Interactive programs (gh auth login, python REPL, vim, apt prompts) REQUIRE a session:")
+            appendLine("  terminal.create + terminal.write.")
+            appendLine("- Toolchain tasks (apt install / git clone / npm / pip / cargo / make / gcc): check")
+            appendLine("  terminal.backends, if Ubuntu not ready call terminal.ubuntu.ensure FIRST — report progress")
+            appendLine("  to the user.")
+            appendLine("- Never re-run a failed one-shot command more than twice — inspect output, open a session,")
+            appendLine("  or ask the user.")
             appendLine()
 
             // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
@@ -195,16 +226,40 @@ internal object EnginePrompts {
                     appendLine("Be efficient: batch independent reads, verify results between destructive steps.")
                 }
             }
+            // ═══ #169 规划期只读约束（planningPhase=true 时注入）═══
+            // Plan 生成本就不携带 tools（无工具可调）；本段把“只读”显式写进
+            // 提示词，防止模型在计划 JSON 外自作主张输出“顺手执行了”的假动作，
+            // 同时约束 Phase 5 反思仅做只读总结。
+            if (planningPhase) {
+                appendLine()
+                appendLine("## Planning Phase (READ-ONLY)")
+                appendLine("You are in the PLANNING phase of this task. Produce the requested plan JSON only.")
+                appendLine("- Do NOT execute any tools, commands, or write operations in this phase.")
+                appendLine("- Do NOT modify files, settings, or device state. Read-only reasoning only.")
+                appendLine("- Output ONLY the JSON structure requested — no prose around it, no markdown fences.")
+            }
             // 自定义模式：附加用户指令（拼入 system prompt）。
             if (config.mode == AgentMode.CUSTOM && !config.customInstruction.isNullOrBlank()) {
                 appendLine()
                 appendLine("## Custom Instructions")
                 appendLine(config.customInstruction)
             }
-            if (thinking.isNotBlank()) {
+            // ═══ #168 六档思考：档位声明 + AUTO 决策理由 + MAXIMUM 自评清单 ═══
+            // currentProfile = null → 旧 5 档行为（仅指令文本，既有测试零改动）。
+            if (thinking.isNotBlank() || currentProfile != null) {
                 appendLine()
                 appendLine("## Thinking Instructions")
-                appendLine(thinking)
+                currentProfile?.let { profile ->
+                    appendLine("Current thinking level: ${profile.level.name}.")
+                    profile.decisionReason?.let { reason ->
+                        appendLine("Adaptive selection for this turn: $reason")
+                    }
+                }
+                if (thinking.isNotBlank()) appendLine(thinking)
+                // MAXIMUM 档：响应前自评清单（模型在产出最终回复前看到，真实影响本轮输出）
+                if (currentProfile?.finalSelfCheck == true) {
+                    appendLine(ThinkingProfile.SELF_CHECK_CHECKLIST)
+                }
             }
             // 「函数调用」白名单：system prompt 工具清单与实际下发的 ToolDefinition 保持一致
             // Tool System v2：按类别分组 + 高风险 ⚠ 标记 —— 40+ 工具的字母序长列表

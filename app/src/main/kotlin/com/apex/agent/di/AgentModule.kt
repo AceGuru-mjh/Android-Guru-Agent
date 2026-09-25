@@ -71,8 +71,9 @@ object AgentModule {
             "chat" -> AgentMode.REFLECTION   // 旧值兼容：chat 偏重质量评审
             else -> AgentMode.BUILD          // "auto" 及未知旧值走自主构建
         }
-        // 思考深度（全档位映射）
+        // 思考深度（全档位映射；#168 新增 auto → AUTO 自适应选档）
         val thinkingLevel = when (agent.thinkLevel) {
+            "auto" -> ThinkingLevel.AUTO
             "minimal" -> ThinkingLevel.NONE
             "light" -> ThinkingLevel.LIGHT
             "deep" -> ThinkingLevel.DEEP
@@ -95,6 +96,10 @@ object AgentModule {
             streaming = profile.streaming,
             temperature = profile.temperature,
             reflectionRounds = if (agent.reflection) agent.reflectionRounds.coerceIn(0, 5) else 0,
+            // #168 CUSTOM 模式预设：选中预设指令拍平进 customInstruction（启动快照；
+            // 运行时热切换由 AgentChatViewModel 的 agentSettings collector 处理，
+            // 选中预设优先，未选回退旧单串 custom_mode_instruction）。
+            customInstruction = repo.effectiveCustomInstruction().ifBlank { null },
             // Agent 角色字段（全部空 = 内置全能角色 = 历史行为零变化）
             agentName = if (activeRole.isBuiltIn) "" else activeRole.name,
             userTitle = activeRole.userTitle,

@@ -252,6 +252,10 @@ private fun AgentTab(
         AgentRulesAndHooksSections(agent, onAgent, viewModel)
 
         AgentSection(agent, onAgent)
+
+        // ═══ #168 自定义模式预设：多套命名指令，单选即用（CUSTOM 模式）═══
+        ModePresetEditorSection(agent, onAgent)
+
         CompressionSection(agent, onAgent)
         VisionSection(agent, roles, profiles, viewModel)
     }
@@ -800,6 +804,7 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
         }
         DropdownRow("Think Level",
             listOf(
+                "auto" to stringResource(R.string.settings_think_auto),
                 "minimal" to stringResource(R.string.settings_think_minimal),
                 "light" to stringResource(R.string.settings_think_light),
                 "standard" to stringResource(R.string.settings_think_standard),

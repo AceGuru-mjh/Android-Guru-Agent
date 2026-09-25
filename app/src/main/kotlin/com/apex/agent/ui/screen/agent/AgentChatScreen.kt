@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -56,6 +57,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -147,6 +150,13 @@ fun AgentChatScreen(
     // ═══ 自定义模式指令对话框（点击 Custom 模式 chip 时打开）═══
     var showCustomInstructionDialog by remember { mutableStateOf(false) }
     val customInstruction by viewModel.customInstruction.collectAsStateWithLifecycle()
+
+    // ═══ #168 CUSTOM 模式预设：当前选中预设（顶栏 chip 展示/点击编辑）═══
+    val activeModePreset by viewModel.activeModePreset.collectAsStateWithLifecycle()
+    var editingPreset by remember { mutableStateOf<com.apex.agent.core.engine.modes.ModePreset?>(null) }
+
+    // ═══ #168 模式指南底部弹层（AgentModeSelector 的「?」图标打开）═══
+    var showModeGuide by remember { mutableStateOf(false) }
 
     // ═══ 历史对话：会话列表 + 抽屉开关（顶栏「历史」按钮唤起）═══
     val chatSessions by viewModel.chatSessions.collectAsStateWithLifecycle()
@@ -278,16 +288,40 @@ fun AgentChatScreen(
                     current = uiState.mode,
                     onSelect = { mode ->
                         viewModel.setMode(mode)
-                        // Custom 模式：弹出指令编辑对话框（可反复点击修改）
+                        // Custom 模式：有选中预设 → 弹预设编辑（改的是预设本体）；
+                        // 无预设 → 旧单串指令对话框（兼容路径）
                         if (mode == AgentMode.CUSTOM) {
-                            showCustomInstructionDialog = true
+                            val preset = activeModePreset
+                            if (preset != null) editingPreset = preset
+                            else showCustomInstructionDialog = true
                         }
-                    }
+                    },
+                    onOpenGuide = { showModeGuide = true }
                 )
 
-                // 思考深度
+                // ═══ #168 CUSTOM 模式：当前预设名 chip（选中预设的可见锚点）═══
+                // 让「现在跑的是哪套指令」一眼可见；点击直接编辑该预设。
+                activeModePreset?.let { preset ->
+                    val presetChipCd = stringResource(R.string.chat_mode_preset_cd, preset.name)
+                    androidx.compose.material3.AssistChip(
+                        onClick = { editingPreset = preset },
+                        label = {
+                            Text(
+                                text = preset.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1
+                            )
+                        },
+                        modifier = Modifier
+                            .heightIn(min = 32.dp)
+                            .semantics { contentDescription = presetChipCd }
+                    )
+                }
+
+                // 思考深度（#168 六档：AUTO 自适应 + 决策理由展示）
                 ThinkingLevelSelector(
                     current = uiState.thinkingLevel,
+                    adaptiveDecision = viewModel.lastAdaptiveDecision.collectAsStateWithLifecycle().value,
                     onSelect = { viewModel.setThinkingLevel(it) }
                 )
 
@@ -373,6 +407,8 @@ fun AgentChatScreen(
                 AgentMessageItem(
                     message = message,
                     vm = viewModel,
+                    // #169：当前执行步骤 → 锁定计划卡（PlanCard）当前步高亮
+                    currentStepIndex = uiState.currentStepIndex,
                     // UX-1：流式生成中禁用消息删除/重生成（菜单内对应条目置灰，复制仍可用）
                     actionsEnabled = !uiState.isLoading,
                     // 任务总结卡按设置显隐：showRunSummary=false 时完全不渲染（不占位）
@@ -408,12 +444,14 @@ fun AgentChatScreen(
                 item(key = "active-tool-call") { RunningToolCallCard(toolCall) }
             }
 
-            // Plan 确认
+            // Plan 确认（#169 人控：勾选/重排经 onConfirm 回传引擎）
             if (uiState.awaitingPlanConfirmation && uiState.plan != null) {
                 item(key = "plan-confirmation") {
                     PlanConfirmationCard(
                         plan = uiState.plan!!,
-                        onConfirm = { viewModel.confirmPlan(true) },
+                        onConfirm = { enabledSteps, order ->
+                            viewModel.confirmPlan(true, enabledSteps, order)
+                        },
                         onReject = { viewModel.confirmPlan(false) }
                     )
                 }
@@ -736,6 +774,26 @@ fun AgentChatScreen(
             onSuccess = { token, username ->
                 viewModel.githubTokenManager.saveToken(token, username)
                 showGithubConnectDialog = false
+            }
+        )
+    }
+
+    // ═══ #168 模式指南底部弹层（六模式行为矩阵 + 思考档位简表）═══
+    if (showModeGuide) {
+        ModeGuideSheet(onDismiss = { showModeGuide = false })
+    }
+
+    // ═══ #168 CUSTOM 模式预设编辑（顶栏 chip /切模式入口打开）═══
+    // 复用设置页同款编辑器（名称 + 多行指令）；保存经 ViewModel upsert
+    // 到 agentSettings，选中即生效（init collector patchConfig）。
+    editingPreset?.let { preset ->
+        com.apex.agent.ui.screen.settings.ModePresetEditorDialog(
+            initial = preset,
+            isNew = false,
+            onDismiss = { editingPreset = null },
+            onSave = { updated ->
+                viewModel.upsertModePreset(updated)
+                editingPreset = null
             }
         )
     }

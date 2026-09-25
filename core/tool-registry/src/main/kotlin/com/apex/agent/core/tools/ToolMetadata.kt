@@ -34,6 +34,9 @@ enum class ToolCategory(
     /** Device/system state control (settings/clipboard/logcat/time). */
     SYSTEM("系统控制", 80),
 
+    /** Encrypted clipboard vault (`vault_*`) — secret storage & blind paste. */
+    SECURITY("安全金库", 85),
+
     /** Accessibility/UI-tree interaction (tap/swipe/dump/input). */
     UI("界面操作", 90),
 
@@ -214,6 +217,9 @@ data class ToolMetadata(
                 id.startsWith("get_time") || id.startsWith("logcat") ||
                 id.startsWith("screenshot") -> ToolCategory.SYSTEM
 
+            // #167 金库工具族：密钥存取与盲投递。
+            id.startsWith("vault_") -> ToolCategory.SECURITY
+
             id.startsWith("ui_") || id.startsWith("input_text") ||
                 id.startsWith("tap_") || id.startsWith("swipe_") ||
                 id.startsWith("dump_") -> ToolCategory.UI
@@ -241,7 +247,9 @@ data class ToolMetadata(
         @JvmStatic
         fun inferRisk(id: String, category: ToolCategory): ToolRisk = when {
             // Destructive or irreversible operations → HIGH.
-            id == "shell_execute" ||
+            // #167：金库删除 = 不可逆销毁密钥。
+            id.startsWith("vault_delete") ||
+                id == "shell_execute" ||
                 id.startsWith("app_uninstall") || id.startsWith("app_install") ||
                 id.startsWith("app_force") ||
                 id.startsWith("settings_put") || id.startsWith("settings_") && id.endsWith("_put") ||
@@ -250,7 +258,9 @@ data class ToolMetadata(
                 id.startsWith("move_") -> ToolRisk.HIGH
 
             // Mutating but recoverable / sandbox-scoped operations → MEDIUM.
-            id.startsWith("write_file") || id.startsWith("edit_file") ||
+            // #167：金库写入（覆写式）与盲投递（剪贴板/终端/HTTP 副作用）。
+            id.startsWith("vault_save") || id.startsWith("vault_paste") ||
+                id.startsWith("write_file") || id.startsWith("edit_file") ||
                 id.startsWith("file_write") || id.startsWith("file_edit") ||
                 id.startsWith("terminal.") || id == "download_file" ||
                 id.startsWith("clipboard_") || id.startsWith("ui_") ||

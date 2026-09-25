@@ -64,6 +64,8 @@ dependencies {
     // a pure (coroutines + serialization + terminal-emulator) JVM library — the
     // graduation prerequisite recorded in docs/terminal/TERMINAL_SDK_BOUNDARY.md.
     implementation(project(":terminal-emulator"))  // ATR 2.0 VT100/ANSI emulator
+    // Native VT hot path（C++17 零分配引擎 + Kotlin 回退工厂）
+    implementation(project(":terminal-native"))
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.hilt.android)

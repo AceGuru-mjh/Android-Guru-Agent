@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 逆向 MCP Host（issue #173）：手机作为 MCP Server 供 PC 端 AI 接入。中文文案。 -->
+<resources>
+    <!-- ═══ 卡片头 / 状态 ═══ -->
+    <string name="mcphost_title">MCP Host（外部 AI 接入）</string>
+    <string name="mcphost_subtitle">让 PC 端 AI（Cline / Claude Desktop）通过 streamable HTTP 控制这台手机</string>
+    <string name="mcphost_status_running">运行中 · %1$d 个会话</string>
+    <string name="mcphost_status_stopped">已停止</string>
+    <string name="mcphost_error_prefix">错误：%1$s</string>
+
+    <!-- ═══ 端口 / 限速 ═══ -->
+    <string name="mcphost_port_label">端口</string>
+    <string name="mcphost_rate_label">限速（请求/分钟）</string>
+    <string name="mcphost_field_range">请输入 %1$d–%2$d</string>
+
+    <!-- ═══ Token 行 ═══ -->
+    <string name="mcphost_token_label">访问令牌（Bearer）</string>
+    <string name="mcphost_token_show">显示令牌</string>
+    <string name="mcphost_token_hide">隐藏令牌</string>
+    <string name="mcphost_token_copy">复制令牌</string>
+    <string name="mcphost_token_copied">令牌已复制</string>
+    <string name="mcphost_token_regenerate">重新生成</string>
+    <string name="mcphost_token_regen_title">重新生成令牌？</string>
+    <string name="mcphost_token_regen_text">已连接的客户端下一次请求将被拒绝，需在每个客户端配置中更新令牌。</string>
+    <string name="mcphost_regen_cancel">取消</string>
+
+    <!-- ═══ 分类白名单 ═══ -->
+    <string name="mcphost_categories_title">工具分类白名单</string>
+    <string name="mcphost_categories_hint">仅白名单分类内的工具会暴露给外部 AI。默认只读友好集，高风险分类默认关闭。</string>
+    <string name="mcphost_categories_risky">⚠ 已启用高风险分类（SHELL / TERMINAL / APP / UI / GITHUB / SECURITY）：外部 AI 将可直接操控手机，请谨慎开启。</string>
+
+    <!-- ═══ 硬黑名单 ═══ -->
+    <string name="mcphost_blacklist_title">强制禁用工具（只读）</string>
+    <string name="mcphost_blacklist_hint">vault_* 工具一律本地强制拦截（金库数据绝不出手机）。配置黑名单：%1$s</string>
+
+    <!-- ═══ 审计日志 ═══ -->
+    <string name="mcphost_audit_title">最近请求</string>
+    <string name="mcphost_audit_empty">暂无请求</string>
+    <string name="mcphost_audit_duration">%1$d 毫秒</string>
+
+    <!-- ═══ 如何连接 ═══ -->
+    <string name="mcphost_connect_title">如何连接（PC 端）</string>
+    <string name="mcphost_connect_hint">在 Cline / Claude Desktop（mcp-remote）中按下述 JSON 添加本服务器。手机与 PC 需在同一局域网；使用期间请保持本应用存活。</string>
+    <string name="mcphost_connect_ip_placeholder">手机IP</string>
+    <string name="mcphost_connect_json">{
+  \"mcpServers\": {
+    \"android-guru\": {
+      \"url\": \"http://%1$s:%2$d/mcp\",
+      \"headers\": {
+        \"Authorization\": \"Bearer %3$s\"
+      }
+    }
+  }
+}</string>
+</resources>

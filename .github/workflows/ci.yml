@@ -187,6 +187,17 @@ jobs:
             echo "⚠️ sha256sum unavailable — skipping digest verification"
           fi
 
+      - name: Compile platform:mcp-host (reverse MCP host)
+        run: |
+          # #173 逆向 MCP Host：手机作为 MCP Server（streamable HTTP 子集）。
+          # 纯 Kotlin JVM（ServerSocket + 协程 + kotlinx.serialization，零新第三方依赖），
+          # 依赖 tool-registry（其自身依赖 llm-adapter，一并提供）。
+          SER_PLUGIN=$HOME/kotlinc/lib/kotlinx-serialization-compiler-plugin.jar
+          CLASSPATH="$(find /tmp/apex-libs -name '*.jar' | tr '\n' ':')/tmp/build/tool-registry:/tmp/build/llm-adapter"
+          kotlinc -Xplugin=$SER_PLUGIN -cp "$CLASSPATH" -d /tmp/build/mcp-host \
+            $(find platform/mcp-host/src/main/kotlin -name "*.kt") \
+            -jvm-target 17
+
   app-compile:
     name: App Module Compile (Android SDK + Gradle)
     runs-on: ubuntu-latest

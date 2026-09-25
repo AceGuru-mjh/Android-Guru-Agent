@@ -626,6 +626,11 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
         item {
             MarketHeader(stringResource(R.string.market_mcp_header))
         }
+        // #173 逆向 MCP Host：手机作为 MCP Server（外部 AI 接入）——与下方
+        //「添加工具源」卡片方向互补（接出 ↔ 接入），同页认知聚合。
+        item {
+            McpHostSection()
+        }
         item {
             MarketInstallActionCard(
                 title = stringResource(R.string.market_mcp_add_title),

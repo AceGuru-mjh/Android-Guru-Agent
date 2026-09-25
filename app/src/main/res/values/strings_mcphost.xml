@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reverse MCP Host (issue #173): phone as MCP server for PC-side AI.
+     English defaults; Chinese in values-zh/strings_mcphost.xml. -->
+<resources>
+    <!-- ═══ Card header / status ═══ -->
+    <string name="mcphost_title">MCP Host (external AI access)</string>
+    <string name="mcphost_subtitle">Let PC-side AI (Cline / Claude Desktop) control this phone over streamable HTTP</string>
+    <string name="mcphost_status_running">Running · %1$d session(s)</string>
+    <string name="mcphost_status_stopped">Stopped</string>
+    <string name="mcphost_error_prefix">Error: %1$s</string>
+
+    <!-- ═══ Port / rate limit fields ═══ -->
+    <string name="mcphost_port_label">Port</string>
+    <string name="mcphost_rate_label">Rate limit (req/min)</string>
+    <string name="mcphost_field_range">Enter %1$d–%2$d</string>
+
+    <!-- ═══ Token row ═══ -->
+    <string name="mcphost_token_label">Access token (bearer)</string>
+    <string name="mcphost_token_show">Show token</string>
+    <string name="mcphost_token_hide">Hide token</string>
+    <string name="mcphost_token_copy">Copy token</string>
+    <string name="mcphost_token_copied">Token copied</string>
+    <string name="mcphost_token_regenerate">Regenerate token</string>
+    <string name="mcphost_token_regen_title">Regenerate token?</string>
+    <string name="mcphost_token_regen_text">Connected clients will be rejected on their next request. You must update the token in every client config.</string>
+    <string name="mcphost_regen_cancel">Cancel</string>
+
+    <!-- ═══ Category whitelist ═══ -->
+    <string name="mcphost_categories_title">Tool category whitelist</string>
+    <string name="mcphost_categories_hint">Only tools in allowed categories are exposed to external AI. Default set is read-friendly; high-risk categories are off.</string>
+    <string name="mcphost_categories_risky">⚠ High-risk categories enabled (SHELL / TERMINAL / APP / UI / GITHUB / SECURITY): external AI can act directly on your phone. Enable with care.</string>
+
+    <!-- ═══ Hard blacklist ═══ -->
+    <string name="mcphost_blacklist_title">Blocked tools (read-only)</string>
+    <string name="mcphost_blacklist_hint">vault_* tools are ALWAYS blocked locally (security vault never leaves the phone). Config blacklist: %1$s</string>
+
+    <!-- ═══ Audit log ═══ -->
+    <string name="mcphost_audit_title">Recent requests</string>
+    <string name="mcphost_audit_empty">No requests yet</string>
+    <string name="mcphost_audit_duration">%1$d ms</string>
+
+    <!-- ═══ How to connect ═══ -->
+    <string name="mcphost_connect_title">How to connect (PC side)</string>
+    <string name="mcphost_connect_hint">Add this server in Cline / Claude Desktop (mcp-remote) with the JSON below. Phone and PC must be on the same LAN; keep this app alive while connected.</string>
+    <string name="mcphost_connect_ip_placeholder">phone-ip</string>
+    <string name="mcphost_connect_json">{
+  \"mcpServers\": {
+    \"android-guru\": {
+      \"url\": \"http://%1$s:%2$d/mcp\",
+      \"headers\": {
+        \"Authorization\": \"Bearer %3$s\"
+      }
+    }
+  }
+}</string>
+</resources>

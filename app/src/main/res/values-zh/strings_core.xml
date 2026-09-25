@@ -107,6 +107,39 @@
     <string name="settings_strict_schema_desc">JSON Schema 严格模式（仅部分 Provider 支持）</string>
 
     <!-- Agent -->
+    <!-- Agent Roles (persona layer) -->
+    <string name="settings_roles_section">Agent 角色</string>
+    <string name="settings_roles_subtitle">Agent 是谁：内置全能角色 + 你的自定义人设；切换后下一轮请求即生效（无需重启）</string>
+    <string name="settings_roles_new">新建角色</string>
+    <string name="settings_roles_builtin">内置角色（不可编辑，可另存为自定义）</string>
+    <string name="settings_roles_active">当前使用</string>
+    <string name="settings_roles_edit">编辑角色</string>
+    <string name="settings_roles_duplicate">另存为自定义角色</string>
+    <string name="settings_roles_delete">删除角色</string>
+    <string name="settings_roles_editor_new_title">新建 Agent 角色</string>
+    <string name="settings_roles_editor_edit_title">编辑 Agent 角色</string>
+    <string name="settings_roles_field_name">Agent 名字</string>
+    <string name="settings_roles_field_name_desc">Agent 的自称与身份（必填）</string>
+    <string name="settings_roles_field_user_title">对你的称呼</string>
+    <string name="settings_roles_field_user_title_desc">如：老板、师傅、大神 —— 每次回复都会这样称呼你</string>
+    <string name="settings_roles_field_emoji">图标（emoji）</string>
+    <string name="settings_roles_field_definition">角色定义</string>
+    <string name="settings_roles_field_definition_desc">这个 agent 是谁、擅长什么、边界在哪</string>
+    <string name="settings_roles_field_prompt">提示词</string>
+    <string name="settings_roles_field_prompt_desc">自由格式人设提示词，原文拼入 Agent Role 段落</string>
+    <string name="settings_roles_more_options">更多自定义选项</string>
+    <string name="settings_roles_field_style">语气风格</string>
+    <string name="settings_roles_style_default">默认（不约束）</string>
+    <string name="settings_roles_style_professional">专业严谨</string>
+    <string name="settings_roles_style_friendly">亲切友好</string>
+    <string name="settings_roles_style_humorous">幽默风趣</string>
+    <string name="settings_roles_style_concise">极简扼要</string>
+    <string name="settings_roles_field_language">回复语言</string>
+    <string name="settings_roles_language_follow">跟随你的输入</string>
+    <string name="settings_roles_language_zh">始终中文</string>
+    <string name="settings_roles_language_en">始终英文</string>
+    <string name="settings_roles_save">保存</string>
+    <string name="settings_roles_cancel">取消</string>
     <string name="settings_section_agent">Agent · 运行参数</string>
     <string name="settings_mode_auto">Auto · 自动（旧）</string>
     <string name="settings_mode_build">Build · 边想边做</string>

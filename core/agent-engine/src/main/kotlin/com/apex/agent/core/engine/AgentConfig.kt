@@ -202,7 +202,30 @@ data class AgentConfig(
      * （仍受 [com.apex.agent.core.tools.catalog.ToolRequestBudget] 预算钳制）。
      * 默认 false = CORE + 激活集。电源用户/调试用。
      */
-    val exposeAllTools: Boolean = false
+    val exposeAllTools: Boolean = false,
+
+    // ═══ Agent 角色（人设层 · 可选，默认值 = 原有行为零变化）═══
+    // app 层「设置 → Agent 角色」激活的角色经 AgentModule（启动快照）/
+    // AgentChatViewModel（patchConfig 运行时热切换）拍平到这里 —— 引擎保持
+    // 纯字符串消费，不感知 AgentRole 数据模型（模块边界防腐）。
+
+    /** agent 自称（身份行 "You are X"）；空 = 默认 "Apex Agent"。 */
+    val agentName: String = "",
+
+    /** agent 对用户的称呼（如 "老板"/"Boss"）；空 = 不注入称呼约束。 */
+    val userTitle: String = "",
+
+    /** 角色定义（这个 agent 是谁、擅长什么、边界在哪）。 */
+    val roleDefinition: String = "",
+
+    /** 用户自定义提示词（原样拼入 Agent Role 段，最自由的一层）。 */
+    val rolePrompt: String = "",
+
+    /** 语气风格键（"" | professional | friendly | humorous | concise）。 */
+    val roleStyle: String = "",
+
+    /** 回复语言约束（"" 跟随用户输入 | "zh" | "en"）。 */
+    val roleLanguage: String = ""
 ) {
     companion object {
         /** 快速模式：Build + 无思考 */

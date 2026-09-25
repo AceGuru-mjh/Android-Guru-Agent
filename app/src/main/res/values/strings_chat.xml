@@ -197,6 +197,8 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
+    <string name="chat_role_selector_cd">Agent role: %1$s. Tap to switch</string>
+    <string name="chat_role_builtin_cd">Built-in role</string>
     <string name="chat_mode_build_desc">Think and act in real time</string>
     <string name="chat_mode_plan_desc">Full plan first, confirm, then execute</string>
     <string name="chat_mode_spec_desc">Produce a requirements spec first, confirm, then execute</string>

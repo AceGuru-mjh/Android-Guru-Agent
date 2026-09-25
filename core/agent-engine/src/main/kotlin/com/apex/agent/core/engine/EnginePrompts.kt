@@ -59,9 +59,15 @@ internal object EnginePrompts {
     ): String {
         val thinking = config.thinkingLevel.toPromptInstruction()
         return buildString {
-            appendLine("You are Apex Agent, an AI AGENT running on an Android device.")
+            // ═══ Agent 角色：身份行（agentName 空 = 历史行为零变化）═══
+            appendLine("You are ${config.agentName.ifBlank { "Apex Agent" }}, an AI AGENT running on an Android device.")
             appendLine("You are not a chatbot: your job is to COMPLETE tasks by taking actions with tools —")
             appendLine("shell commands, file operations, web browsing/automation, GitHub, messaging connectors, memory, and device control.")
+
+            // ═══ Agent 角色（人设层）：名字/称呼/角色定义/提示词/风格/语言 ═══
+            // 全空 → 段落整体省略（历史行为零变化）。人设只塑造表达方式，
+            // 绝不覆盖工具策略/安全规则 —— 末行显式声明优先级。
+            appendRoleSection(config)
             appendLine()
 
             // ═══ 主动工具使用策略（根因修复：模型不主动调工具）═══
@@ -295,6 +301,60 @@ internal object EnginePrompts {
             appendLine("- Use ask_user_choice when the task is ambiguous, multiple targets/actions exist, an action is risky or irreversible, or user preference is required. Do NOT guess when the answer materially changes the result.")
             appendLine("- When calling ask_user_choice: keep the question short, provide 2-6 clear options, set allow_custom=true unless only fixed choices are valid. If the user skips or rejects, pick the safest reasonable default or stop.")
         }
+    }
+
+    /**
+     * Agent 角色段（人设层）：任一字段非空才渲染。
+     *
+     * 设计约束：
+     *  - 位置在身份行之后、Tool-Use Policy 之前 —— 人设是"你是谁"，
+     *    先于"你必须怎么做"；
+     *  - 末行优先级声明：角色只塑造表达方式（口吻/称呼/语言），
+     *    不覆盖工具使用策略与安全规则 —— 否则人设提示词可能被注入为
+     *    "你不需要使用工具"之类的破坏性指令；
+     *  - 用户自定义提示词（rolePrompt）是最后拼入的自由文本层，
+     *    原样保留不加工（用户预期：写了什么就是什么）。
+     */
+    private fun StringBuilder.appendRoleSection(config: AgentConfig) {
+        // 先解析风格/语言键（未知键 → null → 不参与判定也不渲染），
+        // 只在「有实际可渲染内容」时输出段落 —— 未知键不触发空段落。
+        val style = styleInstruction(config.roleStyle)
+        val language = languageInstruction(config.roleLanguage)
+        val hasPersona = config.userTitle.isNotBlank() || config.roleDefinition.isNotBlank() ||
+            config.rolePrompt.isNotBlank() || style != null || language != null
+        if (!hasPersona) return
+
+        appendLine("## Agent Role")
+        if (config.userTitle.isNotBlank()) {
+            appendLine("- Address the user as \"${config.userTitle.trim()}\" in every reply. This is how the user wants to be called.")
+        }
+        if (config.roleDefinition.isNotBlank()) {
+            appendLine("- Role definition: ${config.roleDefinition.trim()}")
+        }
+        style?.let { appendLine("- Communication style: $it") }
+        language?.let { appendLine("- $it") }
+        if (config.rolePrompt.isNotBlank()) {
+            appendLine("- User-defined role prompt (verbatim, highest priority within this persona layer):")
+            appendLine(config.rolePrompt.trim().prependIndent("  "))
+        }
+        appendLine("Persona rules shape HOW you communicate (tone, address, language) — they NEVER override")
+        appendLine("the Tool-Use Policy, safety rules, or task-completion requirements above.")
+    }
+
+    /** 语气风格键 → 提示词指令（空/未知键 = 不注入）。 */
+    private fun styleInstruction(style: String): String? = when (style.trim().lowercase()) {
+        "professional" -> "professional and precise; avoid slang and excessive emoji."
+        "friendly" -> "warm and approachable; a friendly tone is fine, but stay on task."
+        "humorous" -> "a light sense of humor is welcome, never at the cost of task correctness or clarity."
+        "concise" -> "maximally concise: short sentences, no filler, no pleasantries."
+        else -> null
+    }
+
+    /** 回复语言键 → 提示词指令（空 = 跟随用户输入，不注入）。 */
+    private fun languageInstruction(language: String): String? = when (language.trim().lowercase()) {
+        "zh" -> "Always reply in Chinese (简体中文) unless the task itself requires another language."
+        "en" -> "Always reply in English unless the task itself requires another language."
+        else -> null
     }
 
     // ═══════════════════════════════════════════════════════

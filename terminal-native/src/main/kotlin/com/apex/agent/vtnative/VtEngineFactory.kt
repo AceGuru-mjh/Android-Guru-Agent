@@ -45,7 +45,11 @@ object VtEngineFactory {
         } catch (t: Throwable) {
             // UnsatisfiedLinkError / ExceptionInInitializerError / NoClassDefFoundError
             nativeAvailable = false
-            Log.w(TAG, "native VT engine unavailable — falling back to Kotlin TerminalCore", t)
+            // runCatching：宿主模块 JVM 单测未开 returnDefaultValues 时，
+            // android.util.Log.w 会抛 "not mocked" —— 回退路径绝不能因此二次失败。
+            runCatching {
+                Log.w(TAG, "native VT engine unavailable — falling back to Kotlin TerminalCore", t)
+            }
             TerminalCore(rows, cols, maxScrollback)
         }
     }

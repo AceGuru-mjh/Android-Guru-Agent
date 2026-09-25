@@ -17,6 +17,7 @@
     <string name="market_action_cancel">Cancel</string>
     <string name="market_action_close">Close</string>
     <string name="market_action_add">Add</string>
+    <string name="market_action_save">Save</string>
     <string name="market_action_import">Import</string>
     <string name="market_action_install">Install</string>
     <string name="market_action_uninstall">Uninstall</string>
@@ -186,6 +187,13 @@
     <string name="market_connector_name_label">Display name (e.g. My service)</string>
     <string name="market_connector_type_label">Type</string>
     <string name="market_connector_endpoint_label">Endpoint (URL / host, optional)</string>
+    <string name="market_connector_apikey_label">Credential / API Key (webhook key, bot token, App Secret …)</string>
+    <string name="market_connector_extra_label">Extra config (one key=value per line, e.g. mode=clawbot / app_id=cli_xxx / target=group:xxx)</string>
+    <string name="market_connector_config_title">Configure connector</string>
+    <string name="market_connector_action_config">Configure</string>
+    <string name="market_connector_action_test">Send test message</string>
+    <string name="market_connector_test_sending">Sending test message …</string>
+    <string name="market_connector_config_saved">Connector credentials saved: %1$s</string>
 
     <!-- ═══ Dialogs · Skill JSON / URL / GitHub ═══ -->
     <string name="market_skill_json_title">Import Skill JSON</string>

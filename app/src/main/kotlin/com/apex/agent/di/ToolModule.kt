@@ -385,8 +385,10 @@ object ToolModule {
         traceRecorder: ToolTraceRecorder,
         circuitBreaker: ToolCircuitBreaker,
         shortcutRegistry: ShortcutRegistry,
-        // 消息连接器（微信/飞书/Telegram）：注册表 + 发送器，注册 connector_* 工具
+        // 消息连接器（微信 ClawBot/企业微信、飞书、QQ、Telegram）：注册表 + 发送器，
+        // 注册 connector_* 工具
         connectorRegistry: ConnectorRegistry,
+        connectorMessenger: ConnectorMessenger,
         // Coding 模式：工作区根解析（code_* 工具的动态沙箱根）+ 共享 todo 单例
         codeWorkspaceRoots: CodeWorkspaceRoots,
         codeTodoTool: CodeTodoTool,
@@ -669,11 +671,11 @@ object ToolModule {
         registry.register(SafeAgentTool(GithubListBranchesTool(githubApiService)))
         registry.register(SafeAgentTool(GithubSearchReposTool(githubApiService)))
 
-        // ═══ 11b. 消息连接器（微信/飞书/Telegram，2 个工具）═══
+        // ═══ 11b. 消息连接器（微信 ClawBot/企业微信、飞书、QQ、Telegram，2 个工具）═══
         // connector_list：列出启用的连接器与凭据状态；connector_send_message：
-        // 经企业微信机器人/飞书机器人/Telegram Bot 发送文本消息。
+        // 经各通道发送文本/markdown 消息。
+        // messenger 由 DI 单例提供（与内置 IM MCP 共享 token 缓存），不再就地 new。
         // 与 Connected Services 段（系统提示词）联动：模型知道已连接后即可主动使用。
-        val connectorMessenger = ConnectorMessenger(httpClient)
         registry.register(SafeAgentTool(ConnectorListTool(connectorRegistry)))
         registry.register(SafeAgentTool(ConnectorSendMessageTool(connectorRegistry, connectorMessenger)))
 

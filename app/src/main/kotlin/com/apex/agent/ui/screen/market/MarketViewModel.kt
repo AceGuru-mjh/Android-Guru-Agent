@@ -7,6 +7,7 @@ import com.apex.agent.core.tools.ToolCircuitBreaker
 import com.apex.agent.core.tools.ToolTraceRecorder
 import com.apex.agent.core.tools.ToolUsageTracker
 import com.apex.agent.core.tools.connector.ConnectorDef
+import com.apex.agent.core.tools.connector.ConnectorMessenger
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.core.tools.marketplace.ClawHubSource
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
@@ -210,7 +211,9 @@ class MarketViewModel @Inject constructor(
     private val memoryGraphStore: MemoryGraphStore,
     private val usageTracker: ToolUsageTracker,
     private val circuitBreaker: ToolCircuitBreaker,
-    private val traceRecorder: ToolTraceRecorder
+    private val traceRecorder: ToolTraceRecorder,
+    // 消息通道发送器（连接器凭据配置页的「发送测试消息」走它真发一条验证配置）
+    private val connectorMessenger: ConnectorMessenger
 ) : ViewModel() {
 
     /** 技能分析投影器（聚合 cs-mem + 工具统计 + 熔断 + 轨迹 → 详情 UI 状态）。 */
@@ -220,6 +223,17 @@ class MarketViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(MarketUiState())
     val uiState: StateFlow<MarketUiState> = _uiState.asStateFlow()
+
+    /** 连接器测试发送进行中（对话框禁用按钮用）。 */
+    private val _connectorTestBusy = MutableStateFlow(false)
+    val connectorTestBusy: StateFlow<Boolean> = _connectorTestBusy.asStateFlow()
+
+    /** 最近一次连接器测试发送的结果（成功摘要 / 失败原因），对话框回显。 */
+    private val _connectorTestResult = MutableStateFlow<String?>(null)
+    val connectorTestResult: StateFlow<String?> = _connectorTestResult.asStateFlow()
+
+    /** 连接器测试消息正文（明确标注来源，避免被当成垃圾消息）。 */
+    private val TEST_MESSAGE = "✅ Android-Guru-Agent 连接器测试消息：配置已生效。"
 
     /** 魔搭全量列表（过滤基于全量，避免在已过滤结果上二次过滤后无法还原）。 */
     private var allModelScopeSkills: List<ModelScopeSource.ModelScopeSkill> = emptyList()
@@ -586,6 +600,67 @@ class MarketViewModel @Inject constructor(
                     message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
                 }
             )
+            refresh()
+        }
+    }
+
+    /**
+     * 保存连接器凭据（endpoint / apiKey / extra）。
+     *
+     * 走 [ConnectorRegistry.add] 的 upsert：内置条目被改写后 builtin 置 false 并
+     * 落盘（内置条目默认不持久化，否则用户填的凭据重启即丢）。type 与 name 沿用
+     * 原值，避免把用户改好的显示名重置。
+     */
+    fun saveConnectorCredentials(
+        id: String,
+        endpoint: String,
+        apiKey: String,
+        extra: Map<String, String>
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = connectorRegistry.get(id)
+            connectorRegistry.add(
+                ConnectorDef(
+                    id = id,
+                    name = existing?.name ?: id,
+                    type = existing?.type ?: "api",
+                    endpoint = endpoint.trim(),
+                    apiKey = apiKey.trim().takeIf { it.isNotEmpty() },
+                    extra = extra,
+                    enabled = existing?.enabled ?: true
+                )
+            ).fold(
+                onSuccess = {
+                    message(languageManager.getString(R.string.market_connector_config_saved).format(id))
+                },
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
+            )
+            refresh()
+        }
+    }
+
+    /**
+     * 发送一条测试消息验证通道配置（外部副作用：消息会真实出现在群里）。
+     *
+     * 结果（成功摘要 / 失败原因）写入 [connectorTestResult] 供对话框回显 ——
+     * 这是判断凭据是否配对的可信手段，比"配置看起来完整"可靠得多。
+     */
+    fun testConnector(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _connectorTestBusy.value = true
+            val def = connectorRegistry.get(id)
+            val result = if (def == null) {
+                "连接器不存在: $id"
+            } else {
+                when (val r = connectorMessenger.send(def, TEST_MESSAGE)) {
+                    is ConnectorMessenger.SendResult.Success -> "✅ ${r.detail}"
+                    is ConnectorMessenger.SendResult.Failure -> "❌ ${r.reason}"
+                }
+            }
+            _connectorTestResult.value = result
+            _connectorTestBusy.value = false
             refresh()
         }
     }

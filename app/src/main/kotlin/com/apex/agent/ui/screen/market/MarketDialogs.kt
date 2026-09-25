@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
+import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
 
@@ -303,7 +304,9 @@ fun AddConnectorDialog(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("api", "ssh", "database", "storage").forEach { t ->
+                    // messaging：消息通道（微信 ClawBot/企业微信、飞书、QQ、Telegram），
+                    // 保存后可在「配置」里填凭据并用 connector_send_message 推送。
+                    listOf("api", "ssh", "database", "storage", "messaging").forEach { t ->
                         FilterChip(
                             selected = type == t,
                             onClick = { type = t },
@@ -711,6 +714,7 @@ internal fun ManifestDryRunDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
                     Text(
                         preview.requirements.joinToString(", "),
                         style = MaterialTheme.typography.bodySmall,
@@ -749,3 +753,101 @@ private fun PreviewChip(label: String, value: String) {
         }
     }
 }
+
+/**
+ * 连接器凭据配置对话框（消息通道：微信 ClawBot/企业微信、飞书、QQ、Telegram）。
+ *
+ * 补齐此前"只能填 id/名称/类型/端点、凭据无处可填"的缺口 —— 没有凭据的消息通道
+ * 在 connector_send_message 里恒定失败，连接器等于不可用。
+ *
+ * - `endpoint`：平台端点（企业微信 webhook / 飞书 hook URL / OpenClaw Gateway 地址 / QQ API 基址）
+ * - `apiKey` ：机器人凭据（Webhook key / hook token / App Secret / clientSecret）
+ * - `extra`  ：扩展字段，每行一条 `key=value`（mode / app_id / target / sign_secret / chat_id …）
+ *
+ * 「发送测试消息」走 ConnectorMessenger 真发一条（外部副作用），结果直接回显，
+ * 是判断配置是否正确的唯一可信手段。
+ */
+@Composable
+fun ConnectorCredentialsDialog(
+    connector: ConnectorDef,
+    busy: Boolean = false,
+    testResult: String? = null,
+    onDismiss: () -> Unit,
+    onSave: (endpoint: String, apiKey: String, extra: Map<String, String>) -> Unit,
+    onTest: () -> Unit
+) {
+    var endpoint by remember(connector.id) { mutableStateOf(connector.endpoint) }
+    var apiKey by remember(connector.id) { mutableStateOf(connector.apiKey.orEmpty()) }
+    var extraText by remember(connector.id) {
+        mutableStateOf(connector.extra.filterKeys { it != "hint" }.entries.joinToString("\n") { "${it.key}=${it.value}" })
+    }
+    val hint = connector.extra["hint"]
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.market_connector_config_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    connector.name + " · " + connector.id,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = endpoint,
+                    onValueChange = { endpoint = it },
+                    label = { Text(stringResource(R.string.market_connector_endpoint_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text(stringResource(R.string.market_connector_apikey_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = extraText,
+                    onValueChange = { extraText = it },
+                    label = { Text(stringResource(R.string.market_connector_extra_label)) },
+                    minLines = 3,
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (!hint.isNullOrBlank()) {
+                    Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (busy) {
+                    Text(stringResource(R.string.market_connector_test_sending), style = MaterialTheme.typography.labelSmall)
+                } else if (!testResult.isNullOrBlank()) {
+                    Text(testResult, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(endpoint.trim(), apiKey.trim(), parseExtraLines(extraText)) }) {
+                Text(stringResource(R.string.market_action_save))
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onTest, enabled = !busy) { Text(stringResource(R.string.market_connector_action_test)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }
+            }
+        }
+    )
+}
+
+/** `key=value` 多行文本 → extra 映射（忽略空行与不含 `=` 的行）。 */
+internal fun parseExtraLines(text: String): Map<String, String> =
+    text.lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it.contains('=') }
+        .associate { line ->
+            val idx = line.indexOf('=')
+            line.substring(0, idx).trim() to line.substring(idx + 1).trim()
+        }

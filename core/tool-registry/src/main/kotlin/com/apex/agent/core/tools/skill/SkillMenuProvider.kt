@@ -53,7 +53,13 @@ class SkillMenuProvider(
             BuiltinTemplate("file_organizer", "文件自动整理", "按类型/日期自动分类整理文件", "FILE", listOf("file", "organize", "automation")),
             BuiltinTemplate("code_runner", "代码运行器", "编写并运行代码，自动修复错误", "SHELL", listOf("code", "execute", "python")),
             BuiltinTemplate("data_analyzer", "数据分析", "分析 CSV/JSON 数据，生成统计报告", "UTILITY", listOf("data", "analysis", "csv")),
-            BuiltinTemplate("coding_principles", "编码原则 (Karpathy)", "AI 编程协作九原则，约束 Agent 编码行为", "AGENT", listOf("prompt", "coding", "principles"))
+            BuiltinTemplate("coding_principles", "编码原则 (Karpathy)", "AI 编程协作九原则，约束 Agent 编码行为", "AGENT", listOf("prompt", "coding", "principles")),
+            BuiltinTemplate("deep_research", "深度调研", "多源检索 + 抓取 + 交叉验证，产出带引用的调研报告", "WEB", listOf("research", "web", "report")),
+            BuiltinTemplate("code_review", "代码评审", "按严重度分级的代码审查清单（正确性/安全/性能/可维护性）", "AGENT", listOf("review", "coding", "quality")),
+            BuiltinTemplate("crash_triage", "崩溃/ANR 定位", "Android 崩溃栈与 ANR 日志的根因定位流程", "SHELL", listOf("android", "crash", "logcat")),
+            BuiltinTemplate("git_workflow", "Git 提交与 PR 规范", "Conventional Commits + PR 描述模板，产出可评审的提交历史", "AGENT", listOf("git", "commit", "pr")),
+            BuiltinTemplate("standup_report", "日报/周报生成", "把零散进展整理成结论先行的日报/周报", "UTILITY", listOf("report", "standup", "summary")),
+            BuiltinTemplate("im_notify", "结果推送到 IM", "把执行结果推送到微信/飞书/QQ 等已配置的消息通道", "WEB", listOf("connector", "messaging", "notify"))
         )
     }
 

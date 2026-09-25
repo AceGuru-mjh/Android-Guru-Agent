@@ -20,6 +20,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -345,6 +346,10 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
 @Composable
 internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewModel) {
     var pendingDelete by remember { mutableStateOf<ConnectorDef?>(null) }
+    // 凭据配置：消息通道（微信/飞书/QQ/Telegram）只有填了凭据才能真正发消息
+    var pendingConfig by remember { mutableStateOf<ConnectorDef?>(null) }
+    val testBusy by viewModel.connectorTestBusy.collectAsState()
+    val testResult by viewModel.connectorTestResult.collectAsState()
 
     if (state.connectors.isEmpty()) {
         MarketEmptyState(
@@ -385,12 +390,31 @@ internal fun InstalledConnectorsTab(state: MarketUiState, viewModel: MarketViewM
                         onCheckedChange = { viewModel.toggleConnector(connector.id, it) }
                     )
                     TextButton(
+                        onClick = { pendingConfig = connector }
+                    ) {
+                        Text(stringResource(R.string.market_connector_action_config))
+                    }
+                    TextButton(
                         onClick = { pendingDelete = connector }
                     ) {
                         Text(stringResource(R.string.market_action_delete), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
+        )
+    }
+
+    pendingConfig?.let { connector ->
+        ConnectorCredentialsDialog(
+            connector = connector,
+            busy = testBusy,
+            testResult = testResult,
+            onDismiss = { pendingConfig = null },
+            onSave = { endpoint, apiKey, extra ->
+                viewModel.saveConnectorCredentials(connector.id, endpoint, apiKey, extra)
+                pendingConfig = null
+            },
+            onTest = { viewModel.testConnector(connector.id) }
         )
     }
 

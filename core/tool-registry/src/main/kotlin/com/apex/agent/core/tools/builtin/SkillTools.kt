@@ -262,7 +262,13 @@ class SkillInstallTool(
             "code_runner" -> CODE_RUNNER_TEMPLATE
             "data_analyzer" -> DATA_ANALYZER_TEMPLATE
             "coding_principles" -> CODING_PRINCIPLES_TEMPLATE
-            else -> "Error: Unknown template '$name'. Available: web_scraper, file_organizer, code_runner, data_analyzer, coding_principles"
+            "deep_research" -> DEEP_RESEARCH_TEMPLATE
+            "code_review" -> CODE_REVIEW_TEMPLATE
+            "crash_triage" -> CRASH_TRIAGE_TEMPLATE
+            "git_workflow" -> GIT_WORKFLOW_TEMPLATE
+            "standup_report" -> STANDUP_REPORT_TEMPLATE
+            "im_notify" -> IM_NOTIFY_TEMPLATE
+            else -> "Error: Unknown template '$name'. Available: web_scraper, file_organizer, code_runner, data_analyzer, coding_principles, deep_research, code_review, crash_triage, git_workflow, standup_report, im_notify"
         }
     }
 
@@ -378,6 +384,132 @@ class SkillInstallTool(
   "author": "apex-builtin",
   "promptInjection": "你遵循以下编码协作原则（源自 Andrej Karpathy），适用于一切读代码、写代码、改代码的任务：\n1. 写之前先读代码库：动笔前，务必阅读要修改的文件和项目中类似功能的实现方式，确保新代码与项目风格一致。\n2. 想清楚再动手：明确假设，说出权衡（例如「我假设你希望使用基于 JWT 的认证」）；存在歧义时先向用户确认。\n3. 保持简单：只编写解决问题所需的最少代码，不添加任何未被要求的功能。\n4. 外科手术式修改：只修改被要求的部分，避免附带修改或「顺便」重构。\n5. 先验证再交付：交付代码前先测试或验证，确保改动没有引入新问题。\n6. 目标驱动执行：以明确的验收标准为导向，自行寻找达标的路径，而非等待逐步指令。\n7. 不猜先调查：遇到不确定的事情，先调查清楚，而不是猜测。\n8. 谨慎加依赖：引入新依赖前要三思，尽量使用项目已有的库。\n9. 把沟通写清楚：与协作者（包括人类和其他 Agent）沟通时，要清晰、明确、结论先行。",
   "tools": [],
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        // ═══ 第二批内置技能（调研 / 评审 / 排障 / 协作 / 通知）═══
+
+        /** Composite 型：检索 → 抓取 → 落盘报告（promptInjection 约束报告结构）。 */
+        val DEEP_RESEARCH_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "deep_research",
+  "name": "深度调研",
+  "version": "1.0.0",
+  "description": "多源检索 + 抓取 + 交叉验证，产出带引用来源的调研报告",
+  "author": "apex-builtin",
+  "requirements": {"toolsRequired": ["web_search", "web_fetch", "write_file"]},
+  "tools": [{
+    "id": "deep_research",
+    "name": "Deep Research",
+    "description": "Research a topic: search the web, fetch the most relevant sources, then write a cited report to a file.",
+    "parameters": "{\"type\":\"object\",\"properties\":{\"topic\":{\"type\":\"string\",\"description\":\"调研主题或问题\"},\"output\":{\"type\":\"string\",\"description\":\"报告输出路径，默认 ./research_output/report.md\"}},\"required\":[\"topic\"]}",
+    "implementation": {"type": "composite", "steps": [
+      {"tool": "web_search", "args": {"query": "{{topic}}"}},
+      {"tool": "web_fetch", "args": {"url": "{{topic}}"}},
+      {"tool": "write_file", "args": {"path": "{{output}}", "content": "{{topic}}"}}
+    ]}
+  }],
+  "promptInjection": "执行调研类任务时按以下流程与规范产出：\n1. 先把主题拆成 3-5 个子问题，分别检索，避免一次性泛泛搜索。\n2. 每个结论必须能追溯到具体来源（标题 + URL），无法溯源的结论要显式标注为推测。\n3. 多源冲突时并列呈现不同说法与各自依据，不要擅自选边。\n4. 报告结构：结论先行（3-5 条要点）→ 关键证据 → 风险/不确定性 → 参考来源列表。\n5. 明确区分「事实」「推断」「待验证」三类信息，不要把推断写成事实。",
+  "configuration": {
+    "autoSetup": [
+      {"action": "create_directory", "path": "./research_output"}
+    ]
+  }
+}
+""".trimIndent()
+
+        /** Composite 型：列目录 → 读文件，配合 promptInjection 出分级问题清单。 */
+        val CODE_REVIEW_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "code_review",
+  "name": "代码评审",
+  "version": "1.0.0",
+  "description": "按严重度分级的代码审查：正确性 / 安全 / 性能 / 可维护性",
+  "author": "apex-builtin",
+  "requirements": {"toolsRequired": ["list_files", "read_file"]},
+  "tools": [{
+    "id": "review_path",
+    "name": "Review Path",
+    "description": "Collect the files under a path for review: list them, then read the entry files.",
+    "parameters": "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"要评审的文件或目录路径\"}},\"required\":[\"path\"]}",
+    "implementation": {"type": "composite", "steps": [
+      {"tool": "list_files", "args": {"path": "{{path}}"}},
+      {"tool": "read_file", "args": {"path": "{{path}}"}}
+    ]}
+  }],
+  "promptInjection": "执行代码评审时按以下规范输出：\n1. 按严重度分级：🔴 阻断（会出错/数据丢失/安全漏洞）、🟡 建议（性能/健壮性/可读性）、🟢 可选（风格/命名）。\n2. 每条问题给出：位置（文件:行）→ 问题 → 影响 → 具体改法（给出可直接应用的修改）。\n3. 不吹毛求疵：与本次改动无关的历史问题单独列为「顺带发现」，不混进主评审结论。\n4. 先确认理解代码意图再评价实现方式；意图不明就问，不要假定。\n5. 结尾给出一句总体结论：可以合并 / 需要修改后重审 / 需要重新设计。",
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        /** Prompt 型：Android 崩溃栈 / ANR 日志的根因定位流程。 */
+        val CRASH_TRIAGE_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "crash_triage",
+  "name": "崩溃/ANR 定位",
+  "version": "1.0.0",
+  "description": "Android 崩溃栈与 ANR 日志的根因定位流程（先看栈顶与主线程，再补上下文）",
+  "author": "apex-builtin",
+  "promptInjection": "分析 Android 崩溃/ANR 时按以下流程：\n1. 先区分类型：Java/Kotlin 异常栈、native tombstone、ANR（主线程阻塞）。三者定位路径不同。\n2. 崩溃：读最顶层「本项目包名」的帧（不是系统帧），确定真正触发点；注意 `Caused by` 链才是根因。\n3. ANR：看主线程栈顶与 `held by` / 锁等待关系，判断是锁竞争、IO 还是死循环；再看 CPU 占用与 Binder 调用。\n4. 补上下文：发生版本、机型/系统版本、是否首次启动/后台/低内存、复现频率——没有这些信息先向用户索要。\n5. 输出：根因一句话 → 证据（日志行）→ 修复方案（含代码位置）→ 验证方式 → 防复发建议（如加保护/监控）。",
+  "tools": [],
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        /** Prompt 型：Conventional Commits + PR 描述模板。 */
+        val GIT_WORKFLOW_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "git_workflow",
+  "name": "Git 提交与 PR 规范",
+  "version": "1.0.0",
+  "description": "Conventional Commits 提交规范 + 可评审的 PR 描述模板",
+  "author": "apex-builtin",
+  "promptInjection": "涉及 Git 提交、分支与 PR 时遵循以下规范：\n1. 提交信息用 Conventional Commits：`feat/fix/refactor/docs/test/chore/perf/build`（可选 scope）+ 简短祈使句标题；标题不超过 72 字符。\n2. 一个提交只做一件事；格式化/重构与功能改动分开提交，便于 review 与 revert。\n3. 正文说明「为什么」而不是「改了什么」（后者看 diff 就知道）；关联 issue 用 `Refs #123` / `Fixes #123`。\n4. 分支命名：`feat/`、`fix/`、`chore/` 前缀 + 短横线小写短语。\n5. PR 描述模板：## 背景与动机 / ## 改动内容 / ## 验证方式（命令 + 结果）/ ## 风险与回滚方案 / ## 待确认问题。\n6. 提交前自检：diff 里不留调试代码、Secret、无关格式化改动。",
+  "tools": [],
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        /** Prompt 型：日报/周报结构与写作规范。 */
+        val STANDUP_REPORT_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "standup_report",
+  "name": "日报/周报生成",
+  "version": "1.0.0",
+  "description": "把零散进展整理成结论先行的日报/周报（含阻塞与下一步）",
+  "author": "apex-builtin",
+  "promptInjection": "生成日报/周报时按以下规范：\n1. 结论先行：开头一段给出总体状态（进展/风险/是否按计划），再展开细节。\n2. 按「已完成 / 进行中 / 阻塞 / 下一步」四段组织；每条写清产出物而不只是动作（「完成接口联调」优于「做了联调」）。\n3. 阻塞项必须写清：阻塞什么、卡在谁/什么依赖、需要的帮助、预计解除时间。\n4. 量化优先：用数字与链接（提交、PR、Issue、报告路径）代替形容词。\n5. 不确定的信息标注来源与置信度，不把推测写成事实；信息不足时明确列出「待补充」。",
+  "tools": [],
+  "configuration": {"autoSetup": []}
+}
+""".trimIndent()
+
+        /** Composite 型：把执行结果推送到已配置的消息通道（微信/飞书/QQ/Telegram）。 */
+        val IM_NOTIFY_TEMPLATE = """
+{
+  "schema": "apex-skill-v1",
+  "id": "im_notify",
+  "name": "结果推送到 IM",
+  "version": "1.0.0",
+  "description": "把执行结果推送到微信/飞书/QQ/Telegram 等已配置的消息通道",
+  "author": "apex-builtin",
+  "requirements": {"toolsRequired": ["connector_list", "connector_send_message"]},
+  "tools": [{
+    "id": "im_notify",
+    "name": "Notify On IM",
+    "description": "Push a short result summary to a configured messaging connector (wechat / feishu / qq / telegram).",
+    "parameters": "{\"type\":\"object\",\"properties\":{\"connector_id\":{\"type\":\"string\",\"description\":\"通道 id（connector_list 查看）：wechat / feishu / qq / telegram\"},\"message\":{\"type\":\"string\",\"description\":\"要推送的摘要文本\"}},\"required\":[\"connector_id\",\"message\"]}",
+    "implementation": {"type": "composite", "steps": [
+      {"tool": "connector_send_message", "args": {"connector_id": "{{connector_id}}", "message": "{{message}}"}}
+    ]}
+  }],
+  "promptInjection": "需要把结果通知到人时：先用 connector_list 确认可用通道与凭据状态，未配置就引导用户去「市场 → 连接器」配置（微信 ClawBot/企业微信、飞书、QQ、Telegram）。推送内容要短：结论 + 关键数字 + 下一步，附上详情文件路径而不是全文粘贴。发送前确认通道与目标正确——消息一旦发出无法撤回。",
   "configuration": {"autoSetup": []}
 }
 """.trimIndent()

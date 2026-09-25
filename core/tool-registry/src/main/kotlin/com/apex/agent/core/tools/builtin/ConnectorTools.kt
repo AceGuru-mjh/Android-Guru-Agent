@@ -28,8 +28,11 @@ class ConnectorListTool(
     override val id = "connector_list"
     override val name = "List Connectors"
     override val description = """
-        List enabled messaging/service connectors (WeChat, Feishu, Telegram, ...) with their configuration status.
+        List enabled messaging/service connectors (WeChat, Feishu, QQ, Telegram, ...) with their configuration status.
         Use connector_send_message to send text through one of them.
+        WeChat supports mode=clawbot (微信 ClawBot 插件 via OpenClaw Gateway) and 企业微信群机器人;
+        Feishu supports mode=app (自建应用 App ID/App Secret) and 自定义机器人 webhook;
+        QQ uses the official QQ Bot OpenAPI (AppID + clientSecret).
 
         示例：
         - {} （无参数）
@@ -54,11 +57,13 @@ class ConnectorListTool(
                         val emoji = when (def.id) {
                             "wechat" -> "💬"
                             "feishu" -> "🐦"
+                            "qq" -> "🐧"
                             "telegram" -> "✈️"
                             else -> "🔌"
                         }
                         val credential = if (!def.apiKey.isNullOrBlank()) "已配置" else "未配置(去市场页配置)"
-                        appendLine("$emoji ${def.id} — ${def.name} [类型=${def.type}] 凭据: $credential")
+                        val mode = def.extra["mode"]?.takeIf { it.isNotBlank() }?.let { " mode=$it" }.orEmpty()
+                        appendLine("$emoji ${def.id} — ${def.name} [类型=${def.type}$mode] 凭据: $credential")
                     }
                     appendLine()
                     appendLine("用 connector_send_message 发送消息（可先 verify_only=true 校验凭据）。")
@@ -90,9 +95,10 @@ class ConnectorSendMessageTool(
     override val id = "connector_send_message"
     override val name = "Send Connector Message"
     override val description = """
-        Send a text message through a configured connector (WeChat Work bot / Feishu bot / Telegram bot). Call connector_list first to get connector ids.
+        Send a text message through a configured connector (WeChat / Feishu / QQ bot / Telegram bot). Call connector_list first to get connector ids.
         Set verify_only=true to check credentials without sending.
-        Currently supported connector ids: wechat / feishu / telegram.
+        Set markdown=true to send rich text where the platform supports it (企业微信 markdown / QQ markdown; others fall back to text).
+        Currently supported connector ids: wechat (企业微信群机器人 or clawbot via OpenClaw Gateway) / feishu (自定义机器人 or 自建应用) / qq (QQ 官方机器人) / telegram.
     """.trimIndent()
 
     override val parametersSchema = """
@@ -110,6 +116,10 @@ class ConnectorSendMessageTool(
                 "verify_only": {
                     "type": "boolean",
                     "description": "If true, only verify the connector credentials without sending (default false)"
+                },
+                "markdown": {
+                    "type": "boolean",
+                    "description": "Send as rich text where supported (WeCom markdown / QQ markdown); other platforms fall back to plain text (default false)"
                 }
             },
             "required": ["connector_id", "message"]
@@ -121,7 +131,7 @@ class ConnectorSendMessageTool(
     override val metadata: ToolMetadata = ToolMetadata.meta(id) {
         category(ToolCategory.WEB)
         risk(ToolRisk.MEDIUM)
-        tag("connector", "messaging", "wechat", "feishu", "telegram")
+        tag("connector", "messaging", "wechat", "feishu", "qq", "telegram")
         annotations {
             ToolAnnotations(
                 readOnlyHint = false,
@@ -140,6 +150,7 @@ class ConnectorSendMessageTool(
             val message = json["message"]?.jsonPrimitive?.contentOrNull
                 ?: return "Error: 'message' parameter is required"
             val verifyOnly = json["verify_only"]?.jsonPrimitive?.booleanOrNull ?: false
+            val markdown = json["markdown"]?.jsonPrimitive?.booleanOrNull ?: false
 
             val def = registry.get(connectorId)
                 ?: return "Error: 连接器 '$connectorId' 不存在。可用: ${availableIds()}"
@@ -154,7 +165,7 @@ class ConnectorSendMessageTool(
                 }
             }
 
-            when (val result = messenger.send(def, message)) {
+            when (val result = messenger.send(def, message, markdown)) {
                 is ConnectorMessenger.SendResult.Success ->
                     "✅ 已通过 ${def.name} 发送: ${message.take(80)}"
                 is ConnectorMessenger.SendResult.Failure ->

@@ -21,17 +21,17 @@ class SkillTemplatesTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     private val templates: Map<String, String> = mapOf(
-        "web_scraper" to SkillTools.WEB_SCRAPER_TEMPLATE,
-        "file_organizer" to SkillTools.FILE_ORGANIZER_TEMPLATE,
-        "code_runner" to SkillTools.CODE_RUNNER_TEMPLATE,
-        "data_analyzer" to SkillTools.DATA_ANALYZER_TEMPLATE,
-        "coding_principles" to SkillTools.CODING_PRINCIPLES_TEMPLATE,
-        "deep_research" to SkillTools.DEEP_RESEARCH_TEMPLATE,
-        "code_review" to SkillTools.CODE_REVIEW_TEMPLATE,
-        "crash_triage" to SkillTools.CRASH_TRIAGE_TEMPLATE,
-        "git_workflow" to SkillTools.GIT_WORKFLOW_TEMPLATE,
-        "standup_report" to SkillTools.STANDUP_REPORT_TEMPLATE,
-        "im_notify" to SkillTools.IM_NOTIFY_TEMPLATE
+        "web_scraper" to SkillInstallTool.WEB_SCRAPER_TEMPLATE,
+        "file_organizer" to SkillInstallTool.FILE_ORGANIZER_TEMPLATE,
+        "code_runner" to SkillInstallTool.CODE_RUNNER_TEMPLATE,
+        "data_analyzer" to SkillInstallTool.DATA_ANALYZER_TEMPLATE,
+        "coding_principles" to SkillInstallTool.CODING_PRINCIPLES_TEMPLATE,
+        "deep_research" to SkillInstallTool.DEEP_RESEARCH_TEMPLATE,
+        "code_review" to SkillInstallTool.CODE_REVIEW_TEMPLATE,
+        "crash_triage" to SkillInstallTool.CRASH_TRIAGE_TEMPLATE,
+        "git_workflow" to SkillInstallTool.GIT_WORKFLOW_TEMPLATE,
+        "standup_report" to SkillInstallTool.STANDUP_REPORT_TEMPLATE,
+        "im_notify" to SkillInstallTool.IM_NOTIFY_TEMPLATE
     )
 
     @Test

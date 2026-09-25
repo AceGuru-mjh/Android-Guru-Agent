@@ -241,7 +241,7 @@ class ImConnectorMessengerTest {
     fun `verify accepts complete clawbot config`() = runTest {
         val (m, _) = messenger(ok())
         val result = m.verifyConfig(
-            wechatDef(endpoint = "http://host:18789", apiKey = null, extra = mapOf("mode" to "clawbot"))
+            wechatDef(endpoint = "http://host:18789", apiKey = "", extra = mapOf("mode" to "clawbot"))
         )
         assertTrue(result is ConnectorMessenger.SendResult.Success)
     }

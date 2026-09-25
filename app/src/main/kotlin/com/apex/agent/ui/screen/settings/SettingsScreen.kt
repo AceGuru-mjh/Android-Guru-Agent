@@ -236,6 +236,8 @@ private fun AgentTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // ═══ Agent 角色（人设层）：内置全能 + 用户自定义；激活即热切换 ═══
+        AgentRolesSection(agent, onAgent)
         AgentSection(agent, onAgent)
         CompressionSection(agent, onAgent)
         VisionSection(agent, roles, profiles, viewModel)
@@ -403,7 +405,7 @@ private fun TextFieldRow(
 
 /** 只读下拉（ExposedDropdownMenuBox 实现，替代旧的 AlertDialog + RadioButton）。 */
 @Composable
-private fun <T> DropdownRow(
+internal fun <T> DropdownRow(
     label: String,
     options: List<Pair<T, String>>,
     selected: T,

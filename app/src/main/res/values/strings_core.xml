@@ -107,6 +107,39 @@
     <string name="settings_strict_schema_desc">Strict JSON Schema mode (supported by only some providers)</string>
 
     <!-- Agent -->
+    <!-- Agent Roles (persona layer) -->
+    <string name="settings_roles_section">Agent Roles</string>
+    <string name="settings_roles_subtitle">Who the agent is: built-in all-rounder + your custom personas; switching applies on the next request (no restart)</string>
+    <string name="settings_roles_new">New Role</string>
+    <string name="settings_roles_builtin">Built-in role (not editable, duplicate to customize)</string>
+    <string name="settings_roles_active">Active</string>
+    <string name="settings_roles_edit">Edit role</string>
+    <string name="settings_roles_duplicate">Duplicate as custom role</string>
+    <string name="settings_roles_delete">Delete role</string>
+    <string name="settings_roles_editor_new_title">New Agent Role</string>
+    <string name="settings_roles_editor_edit_title">Edit Agent Role</string>
+    <string name="settings_roles_field_name">Agent name</string>
+    <string name="settings_roles_field_name_desc">How the agent introduces itself (required)</string>
+    <string name="settings_roles_field_user_title">What the agent calls you</string>
+    <string name="settings_roles_field_user_title_desc">e.g. Boss, Master, Chief — used in every reply</string>
+    <string name="settings_roles_field_emoji">Icon (emoji)</string>
+    <string name="settings_roles_field_definition">Role definition</string>
+    <string name="settings_roles_field_definition_desc">Who this agent is, what it is good at, where its boundaries are</string>
+    <string name="settings_roles_field_prompt">System prompt</string>
+    <string name="settings_roles_field_prompt_desc">Free-form persona prompt; injected verbatim into the Agent Role section</string>
+    <string name="settings_roles_more_options">More options</string>
+    <string name="settings_roles_field_style">Tone / style</string>
+    <string name="settings_roles_style_default">Default (no constraint)</string>
+    <string name="settings_roles_style_professional">Professional</string>
+    <string name="settings_roles_style_friendly">Friendly</string>
+    <string name="settings_roles_style_humorous">Humorous</string>
+    <string name="settings_roles_style_concise">Concise</string>
+    <string name="settings_roles_field_language">Reply language</string>
+    <string name="settings_roles_language_follow">Follow your input</string>
+    <string name="settings_roles_language_zh">Always Chinese</string>
+    <string name="settings_roles_language_en">Always English</string>
+    <string name="settings_roles_save">Save</string>
+    <string name="settings_roles_cancel">Cancel</string>
     <string name="settings_section_agent">Agent · Runtime</string>
     <string name="settings_mode_auto">Auto (legacy)</string>
     <string name="settings_mode_build">Build · think and act</string>

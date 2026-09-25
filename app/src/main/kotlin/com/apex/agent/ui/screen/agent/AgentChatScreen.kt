@@ -120,6 +120,10 @@ fun AgentChatScreen(
     val currentProfileId by viewModel.currentProfileId.collectAsStateWithLifecycle()
     // 界面相关 Agent 设置（sendKeyBehavior / showRunSummary，即时生效）
     val uiSettings by viewModel.uiSettings.collectAsStateWithLifecycle()
+
+    // ═══ Agent 角色（人设）：当前角色 + 全量列表（顶栏 AgentRoleSelector）═══
+    val activeRole by viewModel.activeAgentRole.collectAsStateWithLifecycle()
+    val roles by viewModel.agentRoles.collectAsStateWithLifecycle()
     // ═══ UX-3：LLM 配置状态（未配置 && 空会话时在消息区顶部显示引导卡）═══
     val llmConfigured by viewModel.llmConfigured.collectAsStateWithLifecycle()
     // 函数调用二级菜单候选工具（注册表快照，v2：含类别/风险元数据）。
@@ -255,6 +259,16 @@ fun AgentChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // ═══ Agent 角色选择器（人设胶囊 + 下拉菜单）═══
+                // 选中即持久化 → VM collector patchConfig（下一轮请求生效，
+                // 无需重启）。自定义角色的创建/编辑入口在 设置 → Agent →
+                // Agent 角色分区。
+                AgentRoleSelector(
+                    current = activeRole,
+                    roles = roles,
+                    onSelect = { roleId -> viewModel.setAgentRole(roleId) }
+                )
+
                 // ═══ 任务模式选择器（v3：胶囊 + 下拉菜单）═══
                 // 旧实现 6 个 FilterChip 横排在 weight(1f, fill=false) 的滚动行里，
                 // 窄屏只露出第一个「Build」—— 其余模式被裁在视口外且无任何提示，

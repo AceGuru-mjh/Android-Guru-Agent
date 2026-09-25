@@ -197,6 +197,8 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">任务模式：%1$s，点击切换</string>
+    <string name="chat_role_selector_cd">Agent 角色：%1$s，点击切换</string>
+    <string name="chat_role_builtin_cd">内置角色</string>
     <string name="chat_mode_build_desc">边想边做，实时执行</string>
     <string name="chat_mode_plan_desc">先制定完整计划，确认后再执行</string>
     <string name="chat_mode_spec_desc">先产出需求规格，确认后再执行</string>

@@ -21,6 +21,7 @@ import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.catalog.ToolActivationStore
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.ui.screen.settings.SettingsRepository
+import com.apex.agent.ui.screen.settings.activeRole
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -78,6 +79,10 @@ object AgentModule {
             "maximum" -> ThinkingLevel.MAXIMUM
             else -> ThinkingLevel.STANDARD
         }
+        // ═══ Agent 角色（人设层）：激活角色拍平进引擎配置 ═══
+        // 启动快照（本方法 @Singleton 一次性）；运行时切换由 AgentChatViewModel
+        // 监听 agentSettings 热更新（patchConfig），两条路径字段一一对应。
+        val activeRole = agent.activeRole()
         return AgentConfig(
             mode = mode,
             thinkingLevel = thinkingLevel,
@@ -90,6 +95,13 @@ object AgentModule {
             streaming = profile.streaming,
             temperature = profile.temperature,
             reflectionRounds = if (agent.reflection) agent.reflectionRounds.coerceIn(0, 5) else 0,
+            // Agent 角色字段（全部空 = 内置全能角色 = 历史行为零变化）
+            agentName = if (activeRole.isBuiltIn) "" else activeRole.name,
+            userTitle = activeRole.userTitle,
+            roleDefinition = activeRole.roleDefinition,
+            rolePrompt = activeRole.systemPrompt,
+            roleStyle = activeRole.style,
+            roleLanguage = activeRole.replyLanguage,
         )
     }
 

@@ -432,4 +432,11 @@ data class AgentSettings(
     // 老版本升级用户也会看到一次（ignoreUnknownKeys 反序列化缺省 false），
     // 属预期行为 —— 引导页本身也承担新功能布道。
     val onboardingCompleted: Boolean = false,
+
+    // ═══ Agent 角色（人设层 · 运行时可热切换，无需重启）═══
+    // agentRoles 只存自定义角色；内置全能角色运行时合成（AgentRole.ALL_ROUNDER，
+    // 升级即最新且不可删）。activeRoleId 悬空/被删 → activeRole() 诚实回落内置。
+    // 操作助手见 AgentRole.kt（withRoleUpserted/withRoleRemoved/withRoleActivated）。
+    val agentRoles: List<AgentRole> = emptyList(),
+    val activeRoleId: String = AgentRole.BUILTIN_ALL_ROUNDER_ID,
 )

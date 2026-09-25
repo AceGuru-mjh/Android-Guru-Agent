@@ -18,6 +18,9 @@ import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore
 import com.apex.agent.ui.screen.settings.AgentSettings
 import com.apex.agent.ui.screen.settings.SettingsRepository
+import com.apex.agent.ui.screen.settings.activeRole
+import com.apex.agent.ui.screen.settings.allRoles
+import com.apex.agent.ui.screen.settings.withRoleActivated
 import com.apex.agent.ui.language.LanguageManager
 import com.apex.agent.R
 import androidx.annotation.StringRes
@@ -85,6 +88,56 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
         // 历史对话：会话列表初始加载 + 消息流防抖自动归档
         installChatHistoryAutoPersist()
+        // ═══ Agent 角色：监听激活角色变化 → 引擎配置热更新 ═══
+        // 设置页/聊天顶栏切换角色（持久化到 agentSettings）→ 此 collector
+        // patchConfig 拍平后的 6 个人设字段 —— 无需重启、下一轮请求即生效
+        // （与 setMode/setThinkingLevel 同款运行时通道，P1-1 语义：只改人设
+        // 字段，绝不重置其余引擎配置）。
+        viewModelScope.launch {
+            settingsRepository.agentSettings
+                .map { it.activeRole() }
+                .distinctUntilChanged()
+                .collect { role -> applyRoleToEngine(role) }
+        }
+    }
+
+    /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */
+    val agentRoles: StateFlow<List<com.apex.agent.ui.screen.settings.AgentRole>> =
+        settingsRepository.agentSettings
+            .map { it.allRoles() }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                listOf(com.apex.agent.ui.screen.settings.AgentRole.ALL_ROUNDER)
+            )
+
+    /** 当前激活角色（UI 展示）。 */
+    val activeAgentRole: StateFlow<com.apex.agent.ui.screen.settings.AgentRole> =
+        settingsRepository.agentSettings
+            .map { it.activeRole() }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                com.apex.agent.ui.screen.settings.AgentRole.ALL_ROUNDER
+            )
+
+    /** 激活角色（聊天顶栏 AgentRoleSelector 入口；持久化 + collector 负责引擎生效）。 */
+    fun setAgentRole(roleId: String) {
+        settingsRepository.updateAgentSettings { withRoleActivated(roleId) }
+    }
+
+    /** 角色数据模型 → 引擎 AgentConfig 人设字段（内置 = 全空 = 历史行为）。 */
+    private fun applyRoleToEngine(role: com.apex.agent.ui.screen.settings.AgentRole) {
+        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
+            cfg.copy(
+                agentName = if (role.isBuiltIn) "" else role.name,
+                userTitle = role.userTitle,
+                roleDefinition = role.roleDefinition,
+                rolePrompt = role.systemPrompt,
+                roleStyle = role.style,
+                roleLanguage = role.replyLanguage
+            )
+        }
     }
 
     /** 附件管理器：附件状态流 + 追加/移除/沙箱拷贝的唯一负责人（抽出的单一职责协作类；scope 即 viewModelScope）。 */

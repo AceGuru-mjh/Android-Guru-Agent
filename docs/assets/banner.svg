@@ -1,82 +1,136 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="230" viewBox="0 0 880 230" role="img" aria-label="Android Guru Agent banner">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="260" viewBox="0 0 900 260" role="img" aria-label="Android Guru Agent banner">
+
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0D1117"/>
-      <stop offset="0.55" stop-color="#161B27"/>
-      <stop offset="1" stop-color="#0B1E2D"/>
+      <stop offset="0" stop-color="#090D13"/>
+      <stop offset="0.5" stop-color="#111823"/>
+      <stop offset="1" stop-color="#0A1A26"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#3DDC84"/>
       <stop offset="0.5" stop-color="#00C2D1"/>
       <stop offset="1" stop-color="#7F52FF"/>
     </linearGradient>
-    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#E6EDF3"/>
+
+    <linearGradient id="titleg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F0F6FC"/>
+      <stop offset="0.6" stop-color="#DCF5E9"/>
       <stop offset="1" stop-color="#9FE8C4"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.15" cy="0.9" r="0.9">
-      <stop offset="0" stop-color="#3DDC84" stop-opacity="0.22"/>
-      <stop offset="0.5" stop-color="#00C2D1" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B2432" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#0E1520" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <radialGradient id="glowA" cx="0.16" cy="0.9" r="0.8">
+      <stop offset="0" stop-color="#00C2D1" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#00C2D1" stop-opacity="0"/>
     </radialGradient>
+
+    <radialGradient id="glowB" cx="0.92" cy="0.08" r="0.65">
+      <stop offset="0" stop-color="#7F52FF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#7F52FF" stop-opacity="0"/>
+    </radialGradient>
+
+    <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
+      <path d="M26 0 H0 V26" fill="none" stroke="#2A3441" stroke-opacity="0.30" stroke-width="1"/>
+    </pattern>
+
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.75" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="gridmask">
+      <rect width="900" height="260" fill="url(#fade)"/>
+    </mask>
+
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+
+    <filter id="soft2" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
   </defs>
 
   <!-- background -->
-  <rect width="880" height="230" rx="18" fill="url(#bg)"/>
-  <rect width="880" height="230" rx="18" fill="url(#glow)"/>
-  <rect x="1.5" y="1.5" width="877" height="227" rx="17" fill="none" stroke="#30363D" stroke-width="1.5"/>
+  <rect width="900" height="260" rx="20" fill="url(#bg)"/>
+  <rect width="900" height="260" rx="20" fill="url(#glowA)"/>
+  <rect width="900" height="260" rx="20" fill="url(#glowB)"/>
+  <rect width="900" height="260" rx="20" fill="url(#grid)" mask="url(#gridmask)"/>
+  <rect x="1" y="1" width="898" height="258" rx="19" fill="none" stroke="#28323F" stroke-width="1.5"/>
+  <rect x="1" y="1" width="898" height="258" rx="19" fill="none" stroke="url(#brand)" stroke-opacity="0.25" stroke-width="1.5"/>
 
-  <!-- robot head -->
-  <g transform="translate(64,52)">
-    <rect x="8" y="30" width="104" height="82" rx="20" fill="#101826" stroke="url(#accent)" stroke-width="2.5"/>
-    <line x1="60" y1="30" x2="60" y2="14" stroke="#00C2D1" stroke-width="2.5"/>
-    <circle cx="60" cy="11" r="6" fill="#3DDC84"/>
-    <!-- eyes -->
-    <circle cx="40" cy="66" r="9" fill="#3DDC84"/>
-    <circle cx="80" cy="66" r="9" fill="#3DDC84"/>
-    <circle cx="42.5" cy="63.5" r="3" fill="#0D1117"/>
-    <circle cx="82.5" cy="63.5" r="3" fill="#0D1117"/>
-    <!-- mouth -->
-    <rect x="38" y="88" width="44" height="8" rx="4" fill="none" stroke="#00C2D1" stroke-width="2.5"/>
-    <!-- antenna pulses -->
-    <circle cx="60" cy="11" r="11" fill="none" stroke="#3DDC84" stroke-opacity="0.35" stroke-width="1.5"/>
+  <!-- logo mark: glass tile + orbital agent core -->
+  <g>
+    <circle cx="110" cy="130" r="58" fill="#00C2D1" fill-opacity="0.16" filter="url(#soft)"/>
+    <rect x="42" y="62" width="136" height="136" rx="34" fill="url(#glass)" stroke="url(#brand)" stroke-width="2"/>
+    <rect x="52" y="72" width="116" height="46" rx="22" fill="#FFFFFF" fill-opacity="0.05"/>
+
+    <g transform="translate(110,130)" fill="none" stroke-linecap="round">
+      <ellipse rx="44" ry="17" stroke="#00C2D1" stroke-opacity="0.75" stroke-width="2"/>
+      <ellipse rx="44" ry="17" stroke="#3DDC84" stroke-opacity="0.75" stroke-width="2" transform="rotate(60)"/>
+      <ellipse rx="44" ry="17" stroke="#7F52FF" stroke-opacity="0.75" stroke-width="2" transform="rotate(120)"/>
+
+      <circle cx="44" cy="0" r="4.5" fill="#00C2D1" stroke="none"/>
+      <circle cx="22" cy="14.7" r="4.5" fill="#3DDC84" stroke="none"/>
+      <circle cx="-22" cy="14.7" r="4.5" fill="#7F52FF" stroke="none"/>
+
+      <circle r="20" fill="#0B1220"/>
+      <circle r="20" stroke="url(#brand)" stroke-width="2.5"/>
+      <circle r="9" fill="url(#brand)" stroke="none" filter="url(#soft2)"/>
+      <circle r="6" fill="#EAFFF6" stroke="none"/>
+    </g>
+
+    <text x="110" y="216" text-anchor="middle" font-family="Consolas,'Sarasa Mono SC',monospace" font-size="11" letter-spacing="2.5" fill="#6E7681">ON-DEVICE</text>
   </g>
 
-  <!-- circuit decoration -->
-  <g stroke="#00C2D1" stroke-opacity="0.35" stroke-width="1.5" fill="none">
-    <path d="M700 40 h90 v40 h60"/>
-    <path d="M700 190 h60 v-30 h90"/>
-    <circle cx="850" cy="80" r="3.5" fill="#00C2D1" fill-opacity="0.6" stroke="none"/>
-    <circle cx="850" cy="160" r="3.5" fill="#3DDC84" fill-opacity="0.6" stroke="none"/>
-    <path d="M560 18 h240"/>
-    <circle cx="800" cy="18" r="3" fill="#7F52FF" fill-opacity="0.7" stroke="none"/>
-  </g>
+  <!-- title block -->
+  <text x="215" y="112" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="46" font-weight="700" fill="url(#titleg)">Android Guru Agent</text>
 
-  <!-- title -->
-  <text x="205" y="92" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="44" font-weight="700" fill="url(#title)">Android Guru Agent</text>
-
-  <!-- subtitle -->
-  <text x="207" y="126" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="17" fill="#8B949E">Autonomous AI Agent · On-device LLM · Linux Terminal · Cognitive Memory</text>
+  <text x="217" y="146" font-family="'Segoe UI','PingFang SC','Noto Sans SC','Microsoft YaHei',Helvetica,Arial,sans-serif" font-size="15" fill="#8B949E">Autonomous AI agent · on-device LLM · PRoot Ubuntu terminal · cognitive memory</text>
 
   <!-- keyword chips -->
   <g font-family="'Segoe UI','PingFang SC','Noto Sans SC',Helvetica,Arial,sans-serif" font-size="13" font-weight="600">
-    <rect x="205" y="148" width="86" height="26" rx="13" fill="#3DDC84" fill-opacity="0.12" stroke="#3DDC84" stroke-opacity="0.55"/>
-    <text x="248" y="166" text-anchor="middle" fill="#3DDC84">Kotlin</text>
+    <rect x="215" y="164" width="86" height="28" rx="14" fill="#7F52FF" fill-opacity="0.12" stroke="#7F52FF" stroke-opacity="0.5"/>
+    <text x="258" y="183" text-anchor="middle" fill="#A78BFA">Kotlin</text>
 
-    <rect x="299" y="148" width="112" height="26" rx="13" fill="#4285F4" fill-opacity="0.12" stroke="#4285F4" stroke-opacity="0.55"/>
-    <text x="355" y="166" text-anchor="middle" fill="#7EA6F4">Compose UI</text>
+    <rect x="309" y="164" width="116" height="28" rx="14" fill="#4285F4" fill-opacity="0.12" stroke="#4285F4" stroke-opacity="0.5"/>
+    <text x="367" y="183" text-anchor="middle" fill="#7EA6F4">Compose UI</text>
 
-    <rect x="419" y="148" width="88" height="26" rx="13" fill="#E95420" fill-opacity="0.12" stroke="#E95420" stroke-opacity="0.55"/>
-    <text x="463" y="166" text-anchor="middle" fill="#F2931D">Ubuntu</text>
+    <rect x="433" y="164" width="126" height="28" rx="14" fill="#E95420" fill-opacity="0.12" stroke="#E95420" stroke-opacity="0.5"/>
+    <text x="496" y="183" text-anchor="middle" fill="#F2931D">PRoot Ubuntu</text>
 
-    <rect x="515" y="148" width="102" height="26" rx="13" fill="#00C2D1" fill-opacity="0.12" stroke="#00C2D1" stroke-opacity="0.55"/>
-    <text x="566" y="166" text-anchor="middle" fill="#00C2D1">83 Tools</text>
+    <rect x="567" y="164" width="110" height="28" rx="14" fill="#3DDC84" fill-opacity="0.12" stroke="#3DDC84" stroke-opacity="0.5"/>
+    <text x="622" y="183" text-anchor="middle" fill="#3DDC84">109 Tools</text>
 
-    <rect x="625" y="148" width="120" height="26" rx="13" fill="#7F52FF" fill-opacity="0.12" stroke="#7F52FF" stroke-opacity="0.55"/>
-    <text x="685" y="166" text-anchor="middle" fill="#A78BFA">FSM Memory</text>
+    <rect x="685" y="164" width="100" height="28" rx="14" fill="#00C2D1" fill-opacity="0.12" stroke="#00C2D1" stroke-opacity="0.5"/>
+    <text x="735" y="183" text-anchor="middle" fill="#00C2D1">cs-mem</text>
   </g>
 
-  <!-- bottom accent line -->
-  <rect x="205" y="196" width="430" height="4" rx="2" fill="url(#accent)"/>
-  <text x="205" y="222" font-family="Consolas,'Sarasa Mono SC',monospace" font-size="12" fill="#6E7681">apex-agent · runs entirely on your phone · no server required</text>
+  <!-- bottom accent -->
+  <rect x="215" y="212" width="430" height="4" rx="2" fill="url(#brand)"/>
+  <text x="215" y="238" font-family="Consolas,'Sarasa Mono SC',monospace" font-size="12" fill="#6E7681">109 tools · 6 agent modes · 13 modules · no server required</text>
+
+  <!-- right side decoration: cognitive graph + data stream -->
+  <g stroke-linecap="round">
+    <g transform="translate(838,78) scale(0.9)" fill="none" stroke-width="1.8">
+      <path d="M0 0 L34 20 M34 20 L-6 44 M-6 44 L0 0" stroke="#00C2D1" stroke-opacity="0.45"/>
+      <circle cx="0" cy="0" r="5" fill="#3DDC84" stroke="none"/>
+      <circle cx="34" cy="20" r="5" fill="#00C2D1" stroke="none"/>
+      <circle cx="-6" cy="44" r="5" fill="#7F52FF" stroke="none"/>
+    </g>
+
+    <g transform="translate(792,196)" stroke-opacity="0.5" stroke-width="1.6">
+      <path d="M0 0 h52" stroke="url(#brand)"/>
+      <path d="M14 14 h64" stroke="url(#brand)" stroke-opacity="0.35"/>
+      <path d="M0 28 h40" stroke="url(#brand)" stroke-opacity="0.25"/>
+      <circle cx="52" cy="0" r="3" fill="#3DDC84" stroke="none"/>
+      <circle cx="78" cy="14" r="3" fill="#00C2D1" stroke="none"/>
+      <circle cx="40" cy="28" r="3" fill="#7F52FF" stroke="none"/>
+    </g>
+  </g>
 </svg>

@@ -53,7 +53,16 @@ class McpClient(
      * 再在 connect 时传递到这里。`null` 时 BUILTIN 配置会在首次握手报
      * 「未注册工厂」的明确错误。其他传输形态不受影响。
      */
-    private val builtinTransportFactory: (() -> McpTransportHandle)? = null
+    private val builtinTransportFactory: (() -> McpTransportHandle)? = null,
+    /**
+     * STDIO 子进程启动器（沙箱注入点，Issue #149）。
+     *
+     * 默认 null → [JvmProcessLauncher]（宿主进程直接 fork，桌面 JVM 行为不变）。
+     * Android 的 app 进程里没有 node/npx/python 完整环境 —— 宿主可注入 PRoot
+     * 沙箱 launcher，把 stdio 命令放进内嵌 Ubuntu rootfs 里执行（配置项
+     * [McpServerConfig.runInSandbox] 为 true 时由 [McpManager] 启用注入）。
+     */
+    private val processLauncher: McpProcessLauncher? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val requestId = AtomicInteger(0)
@@ -93,7 +102,12 @@ class McpClient(
             if (cmdLine.isEmpty()) {
                 throw McpException("STDIO 传输需要填写命令（command + args），例如 npx -y @modelcontextprotocol/server-memory")
             }
-            McpStdioTransport(command = cmdLine, env = config.env)
+            // Issue #149：宿主未注入沙箱 launcher 时保持原行为（JvmProcessLauncher）。
+            McpStdioTransport(
+                command = cmdLine,
+                env = config.env,
+                launcher = processLauncher ?: JvmProcessLauncher
+            )
         }
         McpTransport.HTTP, McpTransport.SSE -> {
             if (config.url.isBlank()) throw McpException("${config.transport} 传输需要填写 URL")
@@ -385,6 +399,17 @@ data class McpServerConfig(
     val args: List<String> = emptyList(),
     /** 环境变量，如 `{"OPENAI_API_KEY": "..."}`。 */
     val env: Map<String, String> = emptyMap(),
+    /**
+     * true = 该 stdio 命令在 PRoot Ubuntu 沙箱内启动（Issue #149）。
+     *
+     * Android 的 app 进程里没有 node/npx/python 完整环境 —— 置 true 时
+     * [McpManager] 会改用宿主注入的沙箱 launcher（app 层的 PRoot 沙箱实现），
+     * 命令在内嵌 Ubuntu rootfs 里解析执行（如 npx -y
+     * @modelcontextprotocol/server-filesystem）。默认 false = 宿主直接 fork
+     * （桌面 JVM 行为）。@Serializable 默认值：旧配置 JSON 无此字段时反序列化
+     * 为 false，向后兼容。
+     */
+    val runInSandbox: Boolean = false,
 
     // ── 远端：自定义请求头（第三方网关常要求额外鉴权头）──────────────
     val headers: Map<String, String> = emptyMap(),

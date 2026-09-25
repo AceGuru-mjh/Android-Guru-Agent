@@ -198,6 +198,17 @@ data class AgentConfig(
     val forcedToolIds: Set<String> = emptySet(),
 
     /**
+     * **#147 子代理工具集限制**：非空时本轮请求**只**暴露这些工具（与
+     * [forcedToolIds] 同走 planForced 预算路径），但**不**附带
+     * `tool_choice = required` —— 子代理的最终轮需要能输出纯文本结论，
+     * 而 forced 语义会迫使模型每轮调用工具（严格 Provider 上将永远到不了
+     * 结论轮，跑到迭代上限后以 Error 收场）。
+     *
+     * 两者同时非空时 [forcedToolIds] 优先。空 = 不限制（默认计划）。
+     */
+    val allowedToolIds: Set<String> = emptySet(),
+
+    /**
      * **v4 全量模式**：true 时向模型暴露注册表内全部（非 legacy）工具
      * （仍受 [com.apex.agent.core.tools.catalog.ToolRequestBudget] 预算钳制）。
      * 默认 false = CORE + 激活集。电源用户/调试用。

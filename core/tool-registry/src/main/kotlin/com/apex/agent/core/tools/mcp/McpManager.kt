@@ -36,11 +36,23 @@ import java.io.File
  *   [McpClient]。core 内部默认构造（空 map）行为不变，向后兼容。
  * - App 预置的内置服务器条目用 [ensureBuiltinServer] 幂等写入：同名用户自建
  *   条目（HTTP/SSE/STDIO）绝不被动持；用户对 `enabled` 的偏好跨升级保留。
+ *
+ * ## 沙箱 stdio（Issue #149）
+ * - 宿主可注入 [sandboxProcessLauncher]（app 层 PRoot Ubuntu 沙箱实现）；
+ *   配置项 `runInSandbox=true` 的 STDIO 服务器在连接时改走沙箱 launcher，
+ *   在内嵌 rootfs 里解析执行 npx/python 等命令。未注入或配置未开启时，
+ *   行为与旧版完全一致（宿主直接 fork），core 内部默认构造零变化。
  */
 class McpManager(
     private val configDir: File,
     /** 内置 MCP 服务器注册表：服务器名 → transport 工厂（每次连接新实例）。 */
-    private val builtinTransports: Map<String, () -> McpTransportHandle> = emptyMap()
+    private val builtinTransports: Map<String, () -> McpTransportHandle> = emptyMap(),
+    /**
+     * PRoot 沙箱进程启动器（Issue #149）：`runInSandbox=true` 的 STDIO
+     * 服务器连接时注入 [McpClient]。null = 不支持沙箱（此类配置按旧版
+     * 宿主直接 fork 处理，通常随后在握手时报「命令不存在」）。
+     */
+    private val sandboxProcessLauncher: McpProcessLauncher? = null
 ) {
     private val clients = LinkedHashMap<String, McpClient>()
     private val configs = LinkedHashMap<String, McpServerConfig>()
@@ -139,7 +151,13 @@ class McpManager(
         synchronized(lock) { clients.remove(name) }?.let { runCatching { it.shutdown() } }
 
         // BUILTIN 传输按名取注入的工厂；HTTP/SSE/STDIO 传 null（工厂参数不参与）。
-        val client = McpClient(config, builtinTransportFactory = builtinTransports[name])
+        // Issue #149：runInSandbox=true 的 STDIO 配置改走宿主注入的沙箱 launcher
+        // （app 层 PRoot Ubuntu 实现）；其余情况传 null → McpClient 回退 JvmProcessLauncher。
+        val client = McpClient(
+            config,
+            builtinTransportFactory = builtinTransports[name],
+            processLauncher = if (config.runInSandbox) sandboxProcessLauncher else null
+        )
         val initResult = client.initialize()
 
         if (initResult.isSuccess) {

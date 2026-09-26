@@ -30,10 +30,10 @@ android {
         // 参考：developer.android.com/about/versions/10/privacy/changes
         //       （"Execute permission for app home directory" 一节）
         targetSdk = 28
-        // v1.4.0（Coding 引擎 v1.2）：七档思考系统（ULTRACODE/APEXCODE）+
-        // 长任务中心（追踪/检查点/复制/续跑/模板/档位效能）
-        versionCode = 7
-        versionName = "1.4.0"
+        // v1.4.1：双仓库发布架构（release.yml 跨仓库 PAT 发布到
+        // Android-Guru-Agent-Release）+ App 内更新检查（version.json）
+        versionCode = 8
+        versionName = "1.4.1"
 
         ndk {
             // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so

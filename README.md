@@ -72,7 +72,8 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **快速跳转**
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/📦_get_APK-CI_artifacts-2088FF?logo=githubactions&logoColor=white" alt="Get APK from CI"/></a>
+<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest"><img src="https://img.shields.io/badge/📦_下载_APK-发布仓库-2ea44f?logo=github&logoColor=white" alt="Download APK from Release Repo"/></a>
+<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/🧪_CI_artifacts-debug_构建-2088FF?logo=githubactions&logoColor=white" alt="Get debug APK from CI"/></a>
 <a href="#quickstart"><img src="https://img.shields.io/badge/🚀_quick_start-5_分钟-1F6FEB" alt="Quick Start"/></a>
 <a href="#docs-index"><img src="https://img.shields.io/badge/📚_docs-deep_dives-0077B5" alt="Docs"/></a>
 <a href="#faq"><img src="https://img.shields.io/badge/❓_FAQ-6_问答-8B5CF6" alt="FAQ"/></a>
@@ -844,9 +845,10 @@ chmod +x gradlew
 ```
 
 > [!TIP]
-> 没有本机 Gradle？CI 的 `app-debug-apk` 工件每次都产出 debug APK（保留
-> 14 天），可直接下载安装；或参考 `.github/workflows/ci.yml` 的
-> `Configure pre-installed Android SDK` 步骤配置环境。
+> 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest)
+> （arm64 / universal 两个变体，由 tag 触发 CI 自动发布）。
+> 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
+> `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`。
 

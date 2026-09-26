@@ -1,0 +1,407 @@
+name: Release (Cross-Repo)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 双仓库发布流水线 —— 开发仓库出代码，发布仓库出产物：
+#
+#   push tag v*.*.*  →  构建 APK（universal + arm64，复用 apk.yml 的成熟路径）
+#                       ├─ 生成 version.json（版本 / 下载地址 / SHA-256）
+#                       ├─ 与上一版本生成 xdelta3 增量补丁
+#                       └─ 经跨仓库 PAT（RELEASE_REPO_TOKEN）发布到
+#                          Android-Guru-Agent-Release：
+#                            ├─ 创建 Release + 上传 APK / 补丁 / version.json
+#                          └─ 提交 version.json 到 main 分支（App 内检查更新读取）
+#
+#   workflow_dispatch → 干跑：完整构建 + 工件上传，不对外发布（流水线健康验证）
+#
+# 设计要点：
+#   • 本仓库（dev）只用默认 GITHUB_TOKEN 做只读 checkout —— 跨仓库写操作
+#     全部走 PAT，避免默认 token 无跨仓库权限的问题。
+#   • version.json 走 raw.githubusercontent CDN，客户端无需任何鉴权即可检查更新。
+#   • 补丁来源优先发布仓库（后续版本的家），历史版本回退开发仓库 releases。
+# ═════════════════════════════════════════════════════════════════════════════
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  # 发布不互相取消 —— 排队执行，避免半成品 Release
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPO: AceGuru-mjh/Android-Guru-Agent-Release
+  DEV_REPO: AceGuru-mjh/Android-Guru-Agent
+
+jobs:
+  release:
+    name: Build & Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    # 双构建（universal + arm64 各一次 assembleRelease）+ 补丁生成，比 apk.yml 更宽裕
+    timeout-minutes: 90
+    permissions:
+      # 本仓库只读；跨仓库发布全部走 PAT（RELEASE_REPO_TOKEN）
+      contents: read
+    defaults:
+      run:
+        # bashisms 依赖：[[ ]] / ${VAR^} / 算术展开 —— runner 默认 sh(dash) 不支持
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release credentials (fail fast before 45-min build)
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_REPO_TOKEN secret 未配置（Settings → Secrets and variables → Actions）"
+            exit 1
+          fi
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token $RELEASE_TOKEN" \
+            "https://api.github.com/repos/${RELEASE_REPO}")
+          if [ "$CODE" != "200" ]; then
+            echo "::error::TOKEN 无法访问 ${RELEASE_REPO}（HTTP $CODE）—— 检查 PAT 仓库授权范围"
+            exit 1
+          fi
+          echo "✅ RELEASE_REPO_TOKEN 可访问发布仓库 ${RELEASE_REPO}"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Configure pre-installed Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          # AGP 8.7.3 默认需要 NDK 27.0.12077973，runner 自带 27.3.x
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
+          yes | $ANDROID_HOME/tools/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
+          echo "⚠️ Could not install NDK 27.0.12077973, will try with pre-installed"
+          ls "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK pre-installed"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version 8.10
+
+      - name: Stage bundled Ubuntu rootfs (T83 内置交付)
+        run: |
+          # T83/T84：Ubuntu rootfs 随 APK 内置。构建期拉取 → 双重 SHA-256 校验 →
+          # 暂存为 jniLibs 伪 .so。失败即阻断构建（绝不打包指纹不符的 rootfs）。
+          scripts/fetch_rootfs.sh
+
+      - name: Prewarm dependencies (retry on JitPack flakiness)
+        run: |
+          attempts=5
+          for i in $(seq 1 $attempts); do
+            if ./gradlew :app:dependencies \
+                --configuration debugCompileClasspath \
+                --write-locks \
+                --stacktrace; then
+              echo "✅ Dependency resolution succeeded on attempt $i"
+              exit 0
+            fi
+            echo "⚠️ Dependency resolution attempt $i failed, retrying..."
+            sleep $((i * 30))
+          done
+          echo "❌ Dependency resolution failed after $attempts attempts"
+          exit 1
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          VCODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts)
+          SHA8=$(echo "${{ github.sha }}" | cut -c1-8)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
+            # tag 与 versionName 一致性守卫 —— 防止打错 tag 出错包
+            if [ "v$VERSION" != "$TAG" ]; then
+              echo "::error::tag($TAG) 与 versionName(v$VERSION) 不一致 —— 先改 app/build.gradle.kts 再打 tag"
+              exit 1
+            fi
+          else
+            # 干跑（workflow_dispatch）：信息性 tag，不对外发布
+            TAG="v$VERSION"
+          fi
+          {
+            echo "version=$VERSION"
+            echo "vcode=$VCODE"
+            echo "sha8=$SHA8"
+            echo "tag=$TAG"
+            echo "publishing=$( [[ "$GITHUB_REF" == refs/tags/* ]] && echo true || echo false )"
+          } >> "$GITHUB_OUTPUT"
+          echo "🏷️  $TAG (versionName=$VERSION versionCode=$VCODE sha8=$SHA8 publishing=$( [[ "$GITHUB_REF" == refs/tags/* ]] && echo true || echo false ))"
+
+      - name: Build APK (universal + arm64)
+        run: |
+          echo "🚀 Building release APKs (universal → arm64)..."
+          # 与 apk.yml 相同的双产物路径（中间产物必须停在任务输出目录之外 ——
+          # Gradle 重跑 packageRelease 会把输出目录里的非本轮产物当 stale 清理）：
+          #   先 universal（含全 3 ABI rootfs，兼容旧设备/模拟器），
+          #   再 arm64 纯净包（-PapexAbi 收窄 app 级 abiFilters）。
+          ./gradlew ":app:assembleRelease" \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+          mv app/build/outputs/apk/release/app-release.apk \
+             app/build/outputs/apk/app-universal-release.apk
+          ./gradlew ":app:assembleRelease" \
+            -PapexAbi=arm64-v8a \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+          mv app/build/outputs/apk/release/app-release.apk \
+             app/build/outputs/apk/app-arm64-release.apk
+
+      - name: Stage artifacts + checksums
+        run: |
+          VERSION=${{ steps.meta.outputs.version }}
+          SHA8=${{ steps.meta.outputs.sha8 }}
+          mkdir -p dist
+          mv app/build/outputs/apk/app-arm64-release.apk \
+             "dist/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
+          mv app/build/outputs/apk/app-universal-release.apk \
+             "dist/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"
+          cd dist
+          sha256sum ./*.apk | tee SHA256SUMS.apk
+          ARM64_MB=$(du -m *arm64*.apk | cut -f1)
+          UNI_MB=$(du -m *universal*.apk | cut -f1)
+          echo "📦 arm64 — ${ARM64_MB} MB | universal — ${UNI_MB} MB"
+          {
+            echo "### 📦 发布产物"
+            echo ""
+            echo "- arm64: **${ARM64_MB} MB**（arm64-v8a，现代手机首选）"
+            echo "- universal: **${UNI_MB} MB**（全 3 ABI：旧设备 / 模拟器）"
+            echo ""
+            echo '```'
+            cat SHA256SUMS.apk
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate xdelta3 patches (vs previous release)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq xdelta3 >/dev/null
+          # 上一版本 tag：发布仓库优先（后续版本的家），回退开发仓库（历史版本）
+          find_prev_tag() {
+            local repo="$1"
+            gh api "repos/$repo/releases?per_page=50" --jq '.[].tag_name' 2>/dev/null \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${TAG}$" | head -1 || true
+          }
+          PREV_TAG=$(find_prev_tag "$RELEASE_REPO")
+          PREV_SRC="${RELEASE_REPO}"
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(find_prev_tag "$DEV_REPO")
+            PREV_SRC="${DEV_REPO}"
+          fi
+          if [ -z "$PREV_TAG" ]; then
+            echo "⚠️ 未找到上一版本 release —— 跳过补丁生成（首版正常）"
+            exit 0
+          fi
+          echo "🔗 上一版本：${PREV_TAG}（来源 ${PREV_SRC}）"
+          mkdir -p prev
+          : > dist/patch_meta.tsv
+          for VARIANT in arm64 universal; do
+            NEW_APK=$(ls dist/*-${VARIANT}-*.apk | head -1)
+            # 下载旧包 → 出补丁 → 立即删旧包（universal ~900MB，磁盘峰值控制）
+            gh release download "$PREV_TAG" --repo "$PREV_SRC" \
+              --pattern "*-${VARIANT}-*.apk" --dir prev/ --clobber >/dev/null 2>&1 || true
+            PREV_APK=$(ls prev/*-${VARIANT}-*.apk 2>/dev/null | head -1 || true)
+            if [ -z "$PREV_APK" ]; then
+              echo "⚠️ ${PREV_TAG} 无 ${VARIANT} 资产 —— 跳过该变体补丁"
+              continue
+            fi
+            PATCH_NAME="patch_${VARIANT}_${PREV_TAG}_to_${TAG}.vcdiff"
+            echo "⚙️  xdelta3: ${PREV_APK} + ${NEW_APK} → ${PATCH_NAME}"
+            if ! xdelta3 -e -f -s "$PREV_APK" "$NEW_APK" "dist/${PATCH_NAME}"; then
+              echo "⚠️ xdelta3 失败（${VARIANT}）—— 跳过该补丁"
+              continue
+            fi
+            # 补丁体积守卫：> 60% 新包即无意义（rootfs 大改时直接下全量）
+            NEW_SIZE=$(stat -c%s "$NEW_APK")
+            PATCH_SIZE=$(stat -c%s "dist/${PATCH_NAME}")
+            if (( PATCH_SIZE * 10 > NEW_SIZE * 6 )); then
+              echo "🗑️  补丁 ${PATCH_SIZE}B > 60% 新包 ${NEW_SIZE}B —— 丢弃（不发布）"
+              rm -f "dist/${PATCH_NAME}"
+              continue
+            fi
+            echo -n "${VARIANT}|${PREV_TAG}|${PATCH_NAME}" >> dist/patch_meta.tsv
+            echo "" >> dist/patch_meta.tsv
+            echo "✅ ${PATCH_NAME} — $((PATCH_SIZE / 1024 / 1024)) MB（$((PATCH_SIZE * 100 / NEW_SIZE))% of ${VARIANT}）"
+            rm -f prev/*.apk
+          done
+          rm -rf prev
+          # 补丁说明进 Job Summary
+          if [ -s dist/patch_meta.tsv ]; then
+            {
+              echo ""
+              echo "### 🔧 增量补丁（${PREV_TAG} → ${TAG}）"
+              while IFS='|' read -r VARIANT FROM NAME; do
+                echo "- \`${NAME}\` — $(( $(stat -c%s "dist/${NAME}") / 1024 / 1024 )) MB"
+              done < dist/patch_meta.tsv
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Generate version.json + release body
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          VCODE: ${{ steps.meta.outputs.vcode }}
+          SHA8: ${{ steps.meta.outputs.sha8 }}
+        run: |
+          python3 - <<'PYEOF'
+          import datetime, hashlib, json, os
+
+          tag, version, vcode = os.environ["TAG"], os.environ["VERSION"], int(os.environ["VCODE"])
+          sha8, repo = os.environ["SHA8"], os.environ["RELEASE_REPO"]
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          def asset(fname):
+              return {"url": f"{base}/{fname}",
+                      "sizeBytes": os.path.getsize(f"dist/{fname}"),
+                      "sha256": sha256(f"dist/{fname}")}
+
+          arm64 = asset(f"ApexAgent-v{version}-release-arm64-{sha8}.apk")
+          universal = asset(f"ApexAgent-v{version}-release-universal-{sha8}.apk")
+
+          patch = None
+          if os.path.exists("dist/patch_meta.tsv") and os.path.getsize("dist/patch_meta.tsv") > 0:
+              patch = {}
+              with open("dist/patch_meta.tsv") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line:
+                          continue
+                      variant, from_tag, fname = line.split("|")
+                      patch[variant] = {"fromTag": from_tag,
+                                        "url": f"{base}/{fname}",
+                                        "sizeBytes": os.path.getsize(f"dist/{fname}"),
+                                        "sha256": sha256(f"dist/{fname}")}
+
+          manifest = {
+              "versionName": version,
+              "versionCode": vcode,
+              "tag": tag,
+              "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "releasePage": f"https://github.com/{repo}/releases/tag/{tag}",
+              "download": {"arm64": arm64, "universal": universal},
+              "patch": patch,
+          }
+          with open("dist/version.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          print(json.dumps(manifest, indent=2, ensure_ascii=False))
+
+          # ── Release body（与 version.json 同源，避免两处手抄漂移）──
+          # 行列表而非三引号多行串：块标量内 0 列文本会撕裂 YAML 结构。
+          mb = lambda a: a["sizeBytes"] / 1024 / 1024
+          patch_lines = "无（首次发布或 rootfs 大改）"
+          if patch:
+              patch_lines = "\n".join(
+                  f"- `{v}`: {p['fromTag']} → {tag} — {p['sizeBytes']//1024//1024} MB（xdelta3 VCDIFF）"
+                  for v, p in patch.items())
+          body = "\n".join([
+              f"## Apex Agent {tag}",
+              "",
+              "> 开发仓库 tag 触发构建，跨仓库 PAT 自动发布 —— 本仓库只存产物，源码见",
+              f"> https://github.com/AceGuru-mjh/Android-Guru-Agent/tree/{tag}",
+              "",
+              "### 📦 下载（选适合你设备的）",
+              "| 变体 | 适用 | 体积 |",
+              "| --- | --- | --- |",
+              f"| `arm64` | 现代手机（arm64-v8a，**首选**） | {mb(arm64):.0f} MB |",
+              f"| `universal` | 旧设备 / 模拟器（全 3 ABI） | {mb(universal):.0f} MB |",
+              "",
+              "### 🔧 增量补丁",
+              patch_lines,
+              "",
+              "应用方式：`xdelta3 -d -s 旧版本.apk 补丁.vcdiff 新版本.apk`",
+              "",
+              "### 📋 版本清单",
+              "`version.json` —— App 内「设置 → 关于 → 检查更新」即读取此文件（含 SHA-256 校验）。",
+              "",
+              "> Ubuntu 24.04 完整 CLI 环境随 APK 内置 —— 首次离线解包约 2~5 分钟，零网络。",
+              f"> 提交：`{os.environ['SHA8']}` · versionCode：`{vcode}`",
+              "",
+          ])
+          with open("release_body.md", "w", encoding="utf-8") as f:
+              f.write(body)
+          PYEOF
+          cat release_body.md
+
+      - name: Upload workflow artifacts (backup / dry-run output)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist-${{ steps.meta.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Release to release repository
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          # 关键：目标为发布仓库（owner/repo），token 为跨仓库 PAT —— 默认
+          # GITHUB_TOKEN 无跨仓库权限。tag 由 action 在目标仓库自动创建。
+          repository: ${{ env.RELEASE_REPO }}
+          token: ${{ secrets.RELEASE_REPO_TOKEN }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "Release ${{ steps.meta.outputs.tag }}"
+          body_path: release_body.md
+          make_latest: true
+          files: dist/*
+
+      - name: Commit version.json to release repo main branch
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          SHA8: ${{ steps.meta.outputs.sha8 }}
+        run: |
+          # raw.githubusercontent.com 版本清单 —— App 内检查更新的固定读取点
+          git clone --depth 1 \
+            "https://x-access-token:${RELEASE_TOKEN}@github.com/${RELEASE_REPO}.git" relrepo
+          cp dist/version.json relrepo/version.json
+          cd relrepo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          git commit -m "chore: version.json → ${TAG}（dev repo ${SHA8}）"
+          git push origin main
+          echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json 已更新"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### 🚀 发布状态"
+            echo ""
+            if [ "${{ steps.meta.outputs.publishing }}" = "true" ]; then
+              echo "- 流水线: **正式发布**（tag ${{ steps.meta.outputs.tag }}）"
+              echo "- 产物页: https://github.com/${RELEASE_REPO}/releases/tag/${{ steps.meta.outputs.tag }}"
+              echo "- 版本清单: https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json"
+            else
+              echo "- 流水线: **干跑**（workflow_dispatch —— 仅构建与工件，未对外发布）"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

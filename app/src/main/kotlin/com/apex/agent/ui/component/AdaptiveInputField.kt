@@ -51,9 +51,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -89,6 +92,24 @@ import com.apex.agent.R
  * （用户点击 / 程序请求）即显式 show() —— 不挂 pointerInput/clickable，避免重蹈
  * 上方 KDoc 记载的「手势吃掉点击」旧 bug。
  *
+ * ## 修复：输入文字后输入框不显示（P0，用户反馈「有时候输入文字后输入框不显示文字」）
+ *
+ * 根因：旧实现的 `value` 直接绑定 ViewModel SavedStateHandle StateFlow —— 每次按键
+ * 都要经「VM 写 SavedStateHandle → StateFlow 发射 → collectAsStateWithLifecycle 重组」
+ * 一个异步往返才能回到 TextField。主线程被流式重组/工具事件挤占时（正是聊天页常态），
+ * 往返延迟被拉长：①快速连击时 IME 显示的字符与重组回落的旧 value 不一致，表现为
+ * 「打了字不显示」；②中文拼音组合段（composition）在 value 整串替换时被打断，
+ * 候选词上屏失败/丢字。
+ *
+ * 修复模式（本地镜像 + 回声抑制）：
+ * - 输入框改绑本地 `TextFieldValue`（含光标/组合段，按键即时上屏，零往返）；
+ * - `lastAnnounced` 记录「最近一次上报给外部的新值」，外部 value 仅在与它不同
+ *   时才回写本地（说明是外部变更：斜杠命令回填、发送后清空、草稿恢复），
+ *   自己按键的回声不会重置光标/组合段；
+ * - 全屏编辑对话框确认时同样走 onValueChange 上报，同步链路一致。
+ *
+ * 兼容性：对调用方 API（value/onValueChange 字符串）零变化。
+ *
  * @param value 输入文本
  * @param onValueChange 文本变化回调
  * @param modifier 外部 Modifier
@@ -109,6 +130,20 @@ fun AdaptiveInputField(
 ) {
     var isFullscreen by remember { mutableStateOf(false) }
 
+    // ── 本地镜像（按键即时上屏）+ 回声抑制（外部变更才回写）──
+    // 初始以外部 value 建镜像；lastAnnounced 记录最近上报值 —— 外部回声与它相同
+    // 则不重置本地（保留光标/组合段），不同说明是命令回填/发送清空等真外部变更。
+    var fieldValue by remember {
+        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
+    }
+    var lastAnnounced by remember { mutableStateOf(value) }
+    LaunchedEffect(value) {
+        if (value != lastAnnounced) {
+            fieldValue = TextFieldValue(value, TextRange(value.length))
+            lastAnnounced = value
+        }
+    }
+
     // 根据内容自动计算行数：内容行数 coerce 到 1-5 行（超出 5 行由 maxLines=5 内部滚动）。
     // P3-j（6-c）：修正注释——实现为 coerceIn(1, 5)，与旧注释"6-12 行展开"不符（选改注释，最小风险）。
     // newline 模式下固定允许 5 行：maxLines=1 会吞掉回车插入的换行符，
@@ -125,15 +160,29 @@ fun AdaptiveInputField(
     // 触发条件严格限定 false→true（避免隐藏键盘后又被动弹出）；失败静默
     //（controller 未挂载等时序异常不应炸 UI）。与 TerminalRenderer.showKeyboard 同款。
     val keyboardController = LocalSoftwareKeyboardController.current
+    // ── IME insets 重分发防御（用户反馈「键盘弹出时输入框有时不上抬」）──
+    // 根因：BottomSheet/Dialog/Popup 等弹层关闭后，Activity 窗口的 WindowInsets
+    // 分发链可能停留在旧值（弹层接管/归还焦点时吞掉了 IME insets 回调），
+    // Scaffold 的 contentWindowInsets=systemBars.union(ime) 拿不到最新键盘高度
+    // → 输入栏不被顶起。requestApplyInsets() 强制 View 树重新请求一次 insets
+    // 分发（Android 官方应对 stale insets 的标准手段）。
+    // 触发时机：① 焦点从无到有（点击输入框）②按下事件（早于焦点建立）。
+    val view = LocalView.current
     LaunchedEffect(isFocused) {
-        if (isFocused) keyboardController?.show()
+        if (isFocused) {
+            keyboardController?.show()
+            view.requestApplyInsets()
+        }
     }
     // ── Press 提前 show（不消费事件，安全）：按下瞬间即请求 IME，早于焦点建立 ──
     // 覆盖「点击后焦点到位但 IME 迟迟不弹」的设备；与上方 isFocused 兑底双保险。
     // 注意：不加 clickable / pointerInput（历史教训 c649934：父级手势会吃掉 TextField 点击）。
     LaunchedEffect(Unit) {
         interactionSource.interactions.collect { interaction ->
-            if (interaction is PressInteraction.Press) keyboardController?.show()
+            if (interaction is PressInteraction.Press) {
+                keyboardController?.show()
+                view.requestApplyInsets()
+            }
         }
     }
     val fieldBackground by animateColorAsState(
@@ -147,19 +196,37 @@ fun AdaptiveInputField(
 
     Column(modifier = modifier) {
         OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
+            value = fieldValue,
+            onValueChange = { new ->
+                // 本地即时上屏（含光标/组合段），再异步上报外部状态 ——
+                // 上屏不依赖 VM 往返，主线程繁忙时也不会「打了字不显示」。
+                fieldValue = new
+                lastAnnounced = new.text
+                onValueChange(new.text)
+            },
             interactionSource = interactionSource,
             // 不再叠加 clickable —— 交回文本框原生点击处理（聚焦 / 弹输入法 / 定位光标）
+            // 液态玻璃修复（用户反馈「圆角UI里有长方形」）：OutlinedTextField 默认
+            // 描边是近乎直角的 4dp 圆角框，嵌在圆角玻璃输入栏里形成生硬的「矩形贴片」。
+            // 改为：无边框（transparent）+ 12dp 圆角背景 —— 视觉融入玻璃材质层，
+            // 聚焦时仅以柔和背景色 + 光标提示（不再画硬边框）。
             modifier = Modifier
                 .fillMaxWidth()
-                .background(fieldBackground, RoundedCornerShape(8.dp))
+                .background(
+                    fieldBackground,
+                    RoundedCornerShape(12.dp)
+                )
                 .focusRequester(focusRequester),
             placeholder = placeholder,
             maxLines = effectiveMaxLines,
             minLines = 1,
+            shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                disabledBorderColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                unfocusedContainerColor = Color.Transparent,
                 focusedLabelColor = MaterialTheme.colorScheme.primary,
                 cursorColor = MaterialTheme.colorScheme.primary
             ),
@@ -322,7 +389,8 @@ private fun FullscreenEditorDialog(
                     onClick = { onConfirm(text) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("完成")
+                    // P2 i18n：全屏确认按钮文案随语言取词
+                    Text(stringResource(R.string.common_done))
                 }
             }
         }

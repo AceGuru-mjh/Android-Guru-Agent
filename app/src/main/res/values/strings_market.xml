@@ -173,6 +173,13 @@
     <string name="market_mcp_apikey_label">API Key (optional, sent as Bearer)</string>
     <string name="market_mcp_add_connect">Add &amp; connect</string>
 
+    <!-- ═══ Dialogs · Edit MCP（已安装管理 · 配置编辑）═══ -->
+    <string name="market_mcp_edit_title">Edit tool source</string>
+    <string name="market_mcp_edit_name_locked">Name is fixed after creation (delete &amp; re-add to rename)</string>
+    <string name="market_mcp_edit_save">Save &amp; reconnect</string>
+    <string name="market_mcp_edit_saved">Updated: %1$s (reconnecting…)</string>
+    <string name="market_mcp_edit_action">Edit</string>
+
     <!-- ═══ Dialogs · Add MCP · PRoot sandbox (Issue #163) ═══ -->
     <string name="market_mcp_sandbox_label">Run in PRoot sandbox</string>
     <string name="market_mcp_sandbox_desc">Runs the command inside the embedded Ubuntu environment (recommended for local commands \u2014 the Android host has no npx/node)</string>

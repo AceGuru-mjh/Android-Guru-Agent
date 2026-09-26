@@ -36,4 +36,24 @@ interface ConnectedServicesProvider {
      * ```
      */
     fun connectedServicesSummary(): String?
+
+    /**
+     * 已连接服务对应的工具 id 集 —— **连接即对模型可见**（P0 修复）。
+     *
+     * ## 为什么需要它（提示词与 tools 数组不一致的根因）
+     *
+     * `connectedServicesSummary` 告诉模型 "github_* tools are ready, use
+     * them directly"，但 github_* 不在 ToolTierPolicy.CORE_TOOL_IDS、也不在
+     * 会话激活集 → 请求的 tools 数组里**根本没有这些函数**。OpenAI 兼容
+     * provider 对未声明的函数调用一律拒绝（"tool not found" / 参数校验失败），
+     * 弱模型也不会主动走 tool_search → tool_open 两跳 —— 表现即用户反馈的
+     * "GitHub 密钥连接没有一点作用，agent 根本不会直接使用"。
+     *
+     * 引擎把这些 id 并入本轮工具计划（与 CORE 同待遇进请求），让
+     * "提示词宣称的能力"与"请求 tools 数组实际下发的函数"永远一致。
+     * 未注册的 id 自动忽略（assemble 阶段 mapNotNull 过滤）。
+     *
+     * 返回空集 = 无已连接服务（零行为变化）。
+     */
+    fun connectedToolIds(): Set<String> = emptySet()
 }

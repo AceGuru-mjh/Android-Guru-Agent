@@ -72,6 +72,7 @@ import com.apex.agent.ui.component.AttachmentPreviewBar
 import com.apex.agent.ui.component.FileOpener
 import com.apex.agent.ui.component.GithubIconButton
 import com.apex.agent.ui.component.GithubTokenDialog
+import com.apex.agent.ui.component.HtmlPreviewDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
@@ -100,7 +101,15 @@ fun AgentChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
-    val inputText by viewModel.inputText.collectAsStateWithLifecycle()
+    // P1 修复（每键全屏重组 → 打字卡顿）：旧写法 `val inputText by …collect…`
+    // 在根作用域读取 State —— 每次按键（updateInputText → StateFlow 发射）都会
+    // 重组整个 888 行 Screen 体（LazyColumn 脚架 + ~20 个状态收集 + 玻璃采样
+    // 输入栏 + 横滚工具栏全部 lambda 重建），中低端机打字明显卡顿。
+    // 现在只持有稳定的 State 对象；读取下沉到输入行 lambda（composable 作用域）
+    // 与点击回调（即时读 .value），按键只重组输入行本身。
+    val inputTextState = viewModel.inputText.collectAsStateWithLifecycle()
+    // 流水线指令胶囊：斜杠菜单选中项（[</> skill: 名字] 形态挂在输入栏上方）
+    val pendingCommand by viewModel.pendingCommand.collectAsStateWithLifecycle()
     val pendingQuestion by viewModel.pendingQuestion.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -138,6 +147,9 @@ fun AgentChatScreen(
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
+
+    // HTML 产物预览状态：工具卡「预览」钮打开应用内 WebView 对话框
+    var htmlPreviewPath by remember { mutableStateOf<String?>(null) }
 
     // ═══ T76：任务状态卡 + 崩溃恢复横幅状态 ═══
     val taskState by viewModel.taskState.collectAsStateWithLifecycle()
@@ -258,16 +270,20 @@ fun AgentChatScreen(
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ═══ 顶部模式栏（v3：模式选择器 + 思考深度 + 新会话，窄屏不裁切）═══
+        // ═══ 顶部模式栏（v4 紧凑化：用户反馈「上面那一部分太高」）═══
+        // 高度收敛三处：Row 垂直 padding 8→4、图标按钮 40→34dp、预设 chip 32→28dp；
+        // 内部胶囊统一 28dp（AgentModeSelector / AgentRoleSelector / ThinkingLevelSelector
+        // 已同步紧凑化）→ 整行 ~36dp（原 ~52dp），叠 TopAppBar+ContextMeter 后顶部
+        // 从 ~164dp 收敛到 ~114dp。
         Surface(
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // ═══ Agent 角色选择器（人设胶囊 + 下拉菜单）═══
                 // 选中即持久化 → VM collector patchConfig（下一轮请求生效，
@@ -313,16 +329,18 @@ fun AgentChatScreen(
                             )
                         },
                         modifier = Modifier
-                            .heightIn(min = 32.dp)
+                            .heightIn(min = 28.dp)
                             .semantics { contentDescription = presetChipCd }
                     )
                 }
 
-                // 思考深度（#168 六档：AUTO 自适应 + 决策理由展示）
-                ThinkingLevelSelector(
-                    current = uiState.thinkingLevel,
-                    adaptiveDecision = viewModel.lastAdaptiveDecision.collectAsStateWithLifecycle().value,
-                    onSelect = { viewModel.setThinkingLevel(it) }
+                // ═══ 双级思考控制（RikkaHub 式）：第一级 = 模型原生 reasoning effort（API 参数），
+                // 第二级 = 强制深度思考（提示词层，任何模型生效）═══
+                ThinkingControlMenu(
+                    reasoningEffort = uiState.reasoningEffort,
+                    forceDeepThinking = uiState.forceDeepThinking,
+                    onReasoningEffortSelect = { viewModel.setReasoningEffort(it) },
+                    onForceDeepThinkingChange = { viewModel.setForceDeepThinking(it) }
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -330,24 +348,24 @@ fun AgentChatScreen(
                 // 历史对话入口：消息流自动归档，点击恢复接续上下文
                 IconButton(
                     onClick = { showHistory = true },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         Icons.Outlined.History,
                         contentDescription = stringResource(R.string.chat_cd_chat_history),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
                 // 新会话按钮
                 IconButton(
                     onClick = { viewModel.newChat() },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         Icons.Default.Add,
                         contentDescription = stringResource(R.string.chat_cd_new_chat),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
@@ -420,13 +438,21 @@ fun AgentChatScreen(
                         att.localPath?.let { FileOpener.openFile(context, it, att.mimeType) }
                     },
                     // 多模态输出：markdown 生成图片（URL / data URI）→ Lightbox
-                    onMarkdownImageClick = { url -> lightboxImage = url }
+                    onMarkdownImageClick = { url -> lightboxImage = url },
+                    // HTML 产物：工具卡预览钮 → 应用内 WebView 对话框
+                    onPreviewHtml = { path -> htmlPreviewPath = path }
                 )
             }
 
-            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）
+            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）；
+            // 传入 elapsedRealtime 起点 → 头部实时秒数计时。
             if (uiState.currentThinking.isNotEmpty()) {
-                item(key = "streaming-thinking") { ThinkingBubble(uiState.currentThinking) }
+                item(key = "streaming-thinking") {
+                    ThinkingBubble(
+                        text = uiState.currentThinking,
+                        liveStartElapsed = uiState.currentThinkingStartElapsed
+                    )
+                }
             }
 
             // 流式回复中（多模态输出：生成图片直接可点开 Lightbox，与完成态一致）
@@ -556,6 +582,14 @@ fun AgentChatScreen(
                     onRemove = { index -> viewModel.removeAttachment(index) }
                 )
 
+                // ═══ 流水线指令胶囊行（[</> skill: 名字 ×] —— 无挂起指令时不占位）═══
+                // 斜杠菜单选中的 Skill / MCP / 连接器 / 插件以迷你胶囊挂在输入栏，
+                // 输入框不再出现 `/skill:xxx` 裸文本；发送时 VM 拼回斜杠管线。
+                PipelineCapsuleRow(
+                    pending = pendingCommand,
+                    onRemove = { viewModel.clearPendingCommand() }
+                )
+
                 // ═══ "小圆环"工具菜单状态标签行（可单独关闭）═══
                 ToolkitChipsRow(
                     webSearchEnabled = webSearchEnabled,
@@ -606,21 +640,25 @@ fun AgentChatScreen(
                     )
 
                     // ═══ / 斜杠指令按钮 ═══
+                    // 选中项挂成输入栏迷你胶囊（[</> skill: 名字]），不再裸文本入框；
+                    // 解析失败的非管线命令（理论上不存在）回退旧文本插入路径。
                     SlashCommandButton(
                         slashMenuProvider = slashMenuProvider,
-                        onCommandSelected = { command ->
-                            // Insert the command rather than overwriting existing input.
-                            // If the user has already typed something (e.g.
-                            // "请帮我用 ... 查询"), the selected command is space-joined
-                            // after it so the original intent is preserved. The command
-                            // itself carries a trailing space so the user can keep typing
-                            // arguments right away.
-                            val merged = if (inputText.isBlank()) {
-                                command
+                        onItemSelected = { item ->
+                            val capsule = PendingPipelineCommand.fromCommand(item.command, item.label)
+                            if (capsule != null) {
+                                viewModel.setPendingCommand(capsule)
                             } else {
-                                inputText.trimEnd() + " " + command
+                                // 插入而非覆盖：已输入内容时空格拼接保留原意图；
+                                // 指令自带尾随空格，选中后可继续输入参数。
+                                val command = item.command
+                                val merged = if (inputTextState.value.isBlank()) {
+                                    command
+                                } else {
+                                    inputTextState.value.trimEnd() + " " + command
+                                }
+                                viewModel.updateInputText(merged)
                             }
-                            viewModel.updateInputText(merged)
                         }
                     )
 
@@ -654,12 +692,9 @@ fun AgentChatScreen(
                         onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
                         onConfigure = onOpenSettings
                     )
-
-                    // ═══ 模型原生思考强度 chips（内嵌同行，超宽由本行横滚承接）═══
-                    ReasoningEffortChips(
-                        current = uiState.reasoningEffort,
-                        onSelect = { viewModel.setReasoningEffort(it) }
-                    )
+                    // 注：模型原生思考强度已并入顶栏「思考控制」菜单（ThinkingControlMenu
+                    // 第一级），不再在输入工具栏重复占位 —— 单一控制点，避免两处 UI
+                    // 控同一状态造成的困惑与行宽浪费。
                 }
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -667,6 +702,10 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // P1 修复（每键全屏重组）：inputText 在此 lambda 内读取 ——
+                    // State 读取订阅的是最近的 composable 作用域（本 Row content），
+                    // 按键只重组本行，不再牵动整个 Screen。
+                    val inputText = inputTextState.value
                     // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
                     //（斜杠实时联想收纳进输入框 Box：菜单锚定在文本框下方而非整行左缘）
                     Box(modifier = Modifier.weight(1f)) {
@@ -677,8 +716,9 @@ fun AgentChatScreen(
                             sendKeyBehavior = uiSettings.sendKeyBehavior,
                             onSend = {
                                 // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
+                                // 胶囊-only（输入框空文本）同样可发：VM 拼回 /type:id 走斜杠管线
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
-                                if ((inputText.isNotBlank() || hasUsableAttachment) && !uiState.isLoading) {
+                                if ((inputText.isNotBlank() || hasUsableAttachment || pendingCommand != null) && !uiState.isLoading) {
                                     viewModel.sendMessage(inputText.trim())
                                 }
                             },
@@ -696,11 +736,19 @@ fun AgentChatScreen(
                                 )
                             }
                         )
-                        // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击回填）═══
+                        // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击挂胶囊）═══
                         SlashAutoCompleteHost(
                             inputText = inputText,
                             slashMenuProvider = slashMenuProvider,
-                            onCommandSelected = { viewModel.updateInputText(it) }
+                            onItemSelected = { item ->
+                                val capsule = PendingPipelineCommand.fromCommand(item.command, item.label)
+                                if (capsule != null) {
+                                    // 选中即挂胶囊（VM 清掉框内 / 残文），附加要求直接继续打字
+                                    viewModel.setPendingCommand(capsule)
+                                } else {
+                                    viewModel.updateInputText(item.command)
+                                }
+                            }
                         )
                     }
 
@@ -726,12 +774,12 @@ fun AgentChatScreen(
                         FilledIconButton(
                             onClick = {
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
-                                if (inputText.isNotBlank() || hasUsableAttachment) {
+                                if (inputText.isNotBlank() || hasUsableAttachment || pendingCommand != null) {
                                     viewModel.sendMessage(inputText.trim())
-                                    // ★ viewModel.sendMessage 内部已调用 updateInputText("")
+                                    // ★ viewModel.sendMessage 内部已调用 updateInputText("") + 摘胶囊
                                 }
                             },
-                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR },
+                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR } || pendingCommand != null,
                             interactionSource = sendInteraction,
                             modifier = Modifier
                                 .size(40.dp)
@@ -763,6 +811,14 @@ fun AgentChatScreen(
         ImageLightbox(
             imageModel = lightboxImage!!,
             onDismiss = { lightboxImage = null }
+        )
+    }
+
+    // ═══ HTML 产物应用内预览（Agent 写出的 .html → WebView 即时渲染）═══
+    htmlPreviewPath?.let { path ->
+        HtmlPreviewDialog(
+            filePath = path,
+            onDismiss = { htmlPreviewPath = null }
         )
     }
 

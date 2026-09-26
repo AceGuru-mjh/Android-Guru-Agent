@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
+import android.os.SystemClock
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
 import com.apex.agent.core.engine.AgentEvent
@@ -30,20 +31,26 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
     when (event) {
         // ═══ 思考 ═══
         is AgentEvent.ThinkingStart -> {
-            // 新一轮思考：清掉上一轮可能残留的缓冲（防串轮）。
+            // 新一轮思考：清掉上一轮可能残留的缓冲（防串轮），并开始计时（秒数显示）。
             streamBuffers.clearThinking()
-            _uiState.update { it.copy(currentThinking = "") }
+            thinkingStartElapsed = SystemClock.elapsedRealtime()
+            _uiState.update { it.copy(currentThinking = "", currentThinkingStartElapsed = thinkingStartElapsed) }
         }
         is AgentEvent.ThinkingChunk -> {
             streamBuffers.appendThinking(event.text)
         }
         is AgentEvent.ThinkingComplete -> {
-            // 最终 flush：把仍在缓冲中的思考文本刷入 UI 后再收尾。
+            // 最终 flush：把仍在缓冲中的思考文本刷入 UI 后再收尾；实测耗时落盘秒数。
             streamBuffers.flush()
+            val durationMs = if (thinkingStartElapsed > 0) {
+                SystemClock.elapsedRealtime() - thinkingStartElapsed
+            } else 0L
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 state.copy(
-                    messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought),
-                    currentThinking = ""
+                    messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought, durationMs),
+                    currentThinking = "",
+                    currentThinkingStartElapsed = 0
                 )
             }
         }
@@ -53,6 +60,18 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             // 引擎在 emit IterationStart 前已解析本轮档位，此处拉取即最新决策；
             // 非 AUTO 档引擎返回 null → 覆盖旧值，UI 不再显示过期理由。
             _lastAdaptiveDecision.value = (agentEngine as? ApexAgentEngine)?.currentThinkingDecision()
+        }
+
+        // ═══ 真实用量：每轮 LLM 响应的 usage 统计帧直达仪表盘 ═══
+        // （此前仪表盘只在 Complete 时拿估算值刷新 —— 用户质疑「用完还是 0」。
+        //  现在流尾统计帧一到就更新，数字是服务端返回的真实值。）
+        is AgentEvent.UsageUpdated -> {
+            _uiState.update {
+                it.copy(
+                    contextUsedTokens = event.totalTokens,
+                    sessionTotalTokens = it.sessionTotalTokens + event.totalTokens
+                )
+            }
         }
 
         // ═══ Plan模式 ═══
@@ -157,13 +176,23 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             if (event.callId != activeToolCallId) return
 
             toolOutputBuffer.append(stripAnsi(event.chunk))
+            // ── P1（内存/卡顿）：尾部窗口截断 ──
+            // 旧实现缓冲无上限增长，且每次 flush 对全量缓冲 toString()（O(n) 拷贝）
+            // → 数 MB 级持续输出（长 shell / 日志尾部）在主线程形成 O(n²) 字符串
+            // 分配，GC 洪峰/ANR。展示层本就只取尾 4000 字符（takeLast 同款口径），
+            // 缓冲同步裁到尾窗即可 —— append 路径 O(chunk)，flush 路径 O(4000)。
+            if (toolOutputBuffer.length > AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS) {
+                toolOutputBuffer.delete(
+                    0,
+                    toolOutputBuffer.length - AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS
+                )
+            }
 
             // 16ms 内的多个 chunk 合并为一次 UI 更新（≈1 帧节流）。
             if (toolFlushJob == null) {
                 toolFlushJob = viewModelScope.launch {
                     delay(AgentChatViewModel.FLUSH_INTERVAL_MS)
                     val snapshot = toolOutputBuffer.toString()
-                        .takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
                     // 原地替换唯一的"活输出"步骤（不追加），避免重叠文本重复叠加。
                     upsertLiveOutputStep(snapshot)
                     _uiState.update { state ->
@@ -331,9 +360,11 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
 
         // ═══ 错误/完成 ═══
         is AgentEvent.Error -> {
-            // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂。
+            // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂；
+            // 思考计时同步收尾（避免残留 live 计时器）。
             streamBuffers.flush()
             finishActiveBanner()
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 val partial = state.currentResponse
                 state.copy(
@@ -349,6 +380,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
                         ),
                     currentResponse = "",
                     currentThinking = "",
+                    currentThinkingStartElapsed = 0,
                     currentStepIndex = -1,
                     isLoading = false
                 )
@@ -386,10 +418,13 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
         }
         is AgentEvent.Aborted -> {
             finishActiveBanner()
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 state.copy(
                     messages = state.messages + AgentUiMessage.System(str(R.string.chat_aborted)),
                     isLoading = false,
+                    currentThinking = "",
+                    currentThinkingStartElapsed = 0,
                     currentStepIndex = -1
                 )
             }

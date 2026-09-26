@@ -39,7 +39,14 @@ enum class AccentPalette(val key: String, val label: String) {
     CYAN("cyan", "冰碧青"),
     SUNSET("sunset", "日落"),
     GOLD("gold", "鎏金"),
-    CRIMSON("crimson", "绯红");
+    CRIMSON("crimson", "绯红"),
+    LAVENDER("lavender", "薰衣草"),
+    MAGENTA("magenta", "品红霓虹"),
+    LIME("lime", "电光青柠"),
+    SAKURA("sakura", "樱花"),
+    MATCHA("matcha", "抹茶"),
+    PEACH("peach", "蜜桃"),
+    PLUM("plum", "梅紫");
 
     companion object {
         /** 持久化 key → 枚举（未知值兜底 MINT，兼容旧版本数据）。 */
@@ -471,6 +478,244 @@ private val CrimsonLight = AccentSet(
     onTertiaryContainer = Color(0xFF001F26)
 )
 
+// ═══════════════════ LAVENDER · 薰衣草 ═══════════════════
+// 淡紫罗兰（非蓝非深紫）：深色态 #B39DDB 系柔光淡紫，区别于 VIOLET 的冷紫霓虹；
+// secondary 暖金、tertiary 薄荷 —— 花田清晨感。
+
+private val LavenderDark = AccentSet(
+    primary = Color(0xFFB39DDB),          // soft lavender
+    onPrimary = Color(0xFF2B2054),
+    primaryContainer = Color(0xFF4A3B8F),
+    onPrimaryContainer = Color(0xFFE8DFFF),
+    secondary = Color(0xFFFFD08A),        // warm gold accent
+    onSecondary = Color(0xFF4A2F00),
+    secondaryContainer = Color(0xFF5A4100),
+    onSecondaryContainer = Color(0xFFFFE9C4),
+    tertiary = Color(0xFF8AF0B4),         // field mint
+    onTertiary = Color(0xFF003922),
+    tertiaryContainer = Color(0xFF005231),
+    onTertiaryContainer = Color(0xFFB2FFD1)
+)
+
+private val LavenderLight = AccentSet(
+    primary = Color(0xFF5E60A8),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE4E1FF),
+    onPrimaryContainer = Color(0xFF25265C),
+    secondary = Color(0xFF7C5800),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFDF9C),
+    onSecondaryContainer = Color(0xFF261A00),
+    tertiary = Color(0xFF2A6E4C),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFADF0C6),
+    onTertiaryContainer = Color(0xFF002716)
+)
+
+// ═══════════════════ MAGENTA · 品红霓虹 ═══════════════════
+// 霓虹品红 #FF5FD7：比 ROSE 更偏紫、更电光；secondary 湖青、tertiary 暖金
+// （品红 × 青 = 经典霓虹对撞）。
+
+private val MagentaDark = AccentSet(
+    primary = Color(0xFFFF5FD7),          // neon magenta
+    onPrimary = Color(0xFF4A0744),
+    primaryContainer = Color(0xFF6A1F5E),
+    onPrimaryContainer = Color(0xFFFFD9F0),
+    secondary = Color(0xFF8AD8E8),        // lake cyan
+    onSecondary = Color(0xFF00323B),
+    secondaryContainer = Color(0xFF004956),
+    onSecondaryContainer = Color(0xFFB8EEF7),
+    tertiary = Color(0xFFFFD08A),         // warm gold
+    onTertiary = Color(0xFF4A2F00),
+    tertiaryContainer = Color(0xFF5A4100),
+    onTertiaryContainer = Color(0xFFFFE9C4)
+)
+
+private val MagentaLight = AccentSet(
+    primary = Color(0xFFA1036E),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFD6EC),
+    onPrimaryContainer = Color(0xFF4A0035),
+    secondary = Color(0xFF0E6E7D),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFC0ECF6),
+    onSecondaryContainer = Color(0xFF003640),
+    tertiary = Color(0xFF7C5800),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFFDF9C),
+    onTertiaryContainer = Color(0xFF261A00)
+)
+
+// ═══════════════════ LIME · 电光青柠 ═══════════════════
+// 青柠荧光 #A3E635：终端荧光信号感；secondary 暮紫、tertiary 霓虹粉
+// （青柠 × 品红 = 赛博对撞，区别于 FOREST 的柔和绿）。
+
+private val LimeDark = AccentSet(
+    primary = Color(0xFFA3E635),          // electric lime
+    onPrimary = Color(0xFF1F3200),
+    primaryContainer = Color(0xFF2F4D00),
+    onPrimaryContainer = Color(0xFFCDF68C),
+    secondary = Color(0xFFD8B4FE),        // dusk violet
+    onSecondary = Color(0xFF3A1D66),
+    secondaryContainer = Color(0xFF52378F),
+    onSecondaryContainer = Color(0xFFEBDCFF),
+    tertiary = Color(0xFFFF6B9D),         // neon pink (danger / highlight)
+    onTertiary = Color(0xFF3D0018),
+    tertiaryContainer = Color(0xFF52122E),
+    onTertiaryContainer = Color(0xFFFFB3CE)
+)
+
+private val LimeLight = AccentSet(
+    primary = Color(0xFF5A7A0B),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFDCF587),
+    onPrimaryContainer = Color(0xFF1A2D00),
+    secondary = Color(0xFF6B4FA0),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFEADDFF),
+    onSecondaryContainer = Color(0xFF271457),
+    tertiary = Color(0xFFB33A65),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFFD9E4),
+    onTertiaryContainer = Color(0xFF3F0018)
+)
+
+// ═══════════════════ SAKURA · 樱花 ═══════════════════
+// 樱花粉 #F9A8C9：比 ROSE 更柔更淡的春樱粉；secondary 嫩叶绿、tertiary 暮色淡紫
+// —— 花见时的樱吹雪配色。
+
+private val SakuraDark = AccentSet(
+    primary = Color(0xFFF9A8C9),          // sakura pink
+    onPrimary = Color(0xFF4A1B35),
+    primaryContainer = Color(0xFF62304C),
+    onPrimaryContainer = Color(0xFFFFDCE9),
+    secondary = Color(0xFF9BD98F),        // spring leaf
+    onSecondary = Color(0xFF1C3A14),
+    secondaryContainer = Color(0xFF325226),
+    onSecondaryContainer = Color(0xFFC5F0B5),
+    tertiary = Color(0xFFD8B4FE),        // twilight lavender
+    onTertiary = Color(0xFF3A1D66),
+    tertiaryContainer = Color(0xFF52378F),
+    onTertiaryContainer = Color(0xFFEBDCFF)
+)
+
+private val SakuraLight = AccentSet(
+    primary = Color(0xFFB0557E),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFD9E7),
+    onPrimaryContainer = Color(0xFF46112F),
+    secondary = Color(0xFF44682F),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFC4EFA6),
+    onSecondaryContainer = Color(0xFF1D3507),
+    tertiary = Color(0xFF6B4FA0),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFEADDFF),
+    onTertiaryContainer = Color(0xFF271457)
+)
+
+// ═══════════════════ MATCHA · 抹茶 ═══════════════════
+// 抹茶黄绿 #C7D86B：比 FOREST 偏黄、比 LIME 柔和的茶道绿；secondary 樱粉、
+// tertiary 暖金 —— 和果子配色（抹茶 × 樱 × 金箔）。
+
+private val MatchaDark = AccentSet(
+    primary = Color(0xFFC7D86B),          // matcha
+    onPrimary = Color(0xFF334000),
+    primaryContainer = Color(0xFF4C5400),
+    onPrimaryContainer = Color(0xFFE2F08C),
+    secondary = Color(0xFFF9A8C9),        // sakura pink
+    onSecondary = Color(0xFF4A1B35),
+    secondaryContainer = Color(0xFF62304C),
+    onSecondaryContainer = Color(0xFFFFDCE9),
+    tertiary = Color(0xFFFFD08A),         // gold leaf
+    onTertiary = Color(0xFF4A2F00),
+    tertiaryContainer = Color(0xFF5A4100),
+    onTertiaryContainer = Color(0xFFFFE9C4)
+)
+
+private val MatchaLight = AccentSet(
+    primary = Color(0xFF6B7C23),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFEAF0BC),
+    onPrimaryContainer = Color(0xFF242E00),
+    secondary = Color(0xFFB0557E),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFD9E7),
+    onSecondaryContainer = Color(0xFF46112F),
+    tertiary = Color(0xFF7C5800),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFFDF9C),
+    onTertiaryContainer = Color(0xFF261A00)
+)
+
+// ═══════════════════ PEACH · 蜜桃 ═══════════════════
+// 蜜桃暖粉橘 #FFB59E：比 CORAL 更浅更粉的绒毛桃色；secondary 湖青、tertiary 玫瑰
+// （蜜桃 × 青 = 果肉与果叶的清爽对比）。
+
+private val PeachDark = AccentSet(
+    primary = Color(0xFFFFB59E),          // juicy peach
+    onPrimary = Color(0xFF4B2114),
+    primaryContainer = Color(0xFF5F3527),
+    onPrimaryContainer = Color(0xFFFFD9CD),
+    secondary = Color(0xFF7FD3C1),        // soft teal
+    onSecondary = Color(0xFF00382E),
+    secondaryContainer = Color(0xFF005044),
+    onSecondaryContainer = Color(0xFFA5F2E4),
+    tertiary = Color(0xFFFDA4AF),         // rose highlight
+    onTertiary = Color(0xFF4A0723),
+    tertiaryContainer = Color(0xFF662338),
+    onTertiaryContainer = Color(0xFFFFD9E2)
+)
+
+private val PeachLight = AccentSet(
+    primary = Color(0xFFA65D45),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFFFDAD0),
+    onPrimaryContainer = Color(0xFF46200D),
+    secondary = Color(0xFF006B5C),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFF9CF2E0),
+    onSecondaryContainer = Color(0xFF003730),
+    tertiary = Color(0xFFA03A52),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFFFD9E2),
+    onTertiaryContainer = Color(0xFF3F0019)
+)
+
+// ═══════════════════ PLUM · 梅紫 ═══════════════════
+// 梅子紫粉 #E1B3E8：比 VIOLET/LAVENDER 更偏粉的梅子色；secondary 暖金、
+// tertiary 湖青（梅子 × 金 × 青 = 雅致东方感）。
+
+private val PlumDark = AccentSet(
+    primary = Color(0xFFE1B3E8),          // plum blossom
+    onPrimary = Color(0xFF471F49),
+    primaryContainer = Color(0xFF5F3A63),
+    onPrimaryContainer = Color(0xFFF8DCF6),
+    secondary = Color(0xFFFFD08A),        // warm gold
+    onSecondary = Color(0xFF4A2F00),
+    secondaryContainer = Color(0xFF5A4100),
+    onSecondaryContainer = Color(0xFFFFE9C4),
+    tertiary = Color(0xFF7FD3C1),         // soft teal
+    onTertiary = Color(0xFF00382E),
+    tertiaryContainer = Color(0xFF005044),
+    onTertiaryContainer = Color(0xFFA5F2E4)
+)
+
+private val PlumLight = AccentSet(
+    primary = Color(0xFF7D4F84),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFF5DCF4),
+    onPrimaryContainer = Color(0xFF401F46),
+    secondary = Color(0xFF7C5800),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFFFDF9C),
+    onSecondaryContainer = Color(0xFF261A00),
+    tertiary = Color(0xFF006B5C),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFF9CF2E0),
+    onTertiaryContainer = Color(0xFF003730)
+)
+
 /** 配色方案 → 当前深浅态的强调色组。 */
 private fun accentSetFor(palette: AccentPalette, dark: Boolean): AccentSet = when (palette) {
     AccentPalette.MINT -> if (dark) MintDark else MintLight
@@ -484,6 +729,13 @@ private fun accentSetFor(palette: AccentPalette, dark: Boolean): AccentSet = whe
     AccentPalette.SUNSET -> if (dark) SunsetDark else SunsetLight
     AccentPalette.GOLD -> if (dark) GoldDark else GoldLight
     AccentPalette.CRIMSON -> if (dark) CrimsonDark else CrimsonLight
+    AccentPalette.LAVENDER -> if (dark) LavenderDark else LavenderLight
+    AccentPalette.MAGENTA -> if (dark) MagentaDark else MagentaLight
+    AccentPalette.LIME -> if (dark) LimeDark else LimeLight
+    AccentPalette.SAKURA -> if (dark) SakuraDark else SakuraLight
+    AccentPalette.MATCHA -> if (dark) MatchaDark else MatchaLight
+    AccentPalette.PEACH -> if (dark) PeachDark else PeachLight
+    AccentPalette.PLUM -> if (dark) PlumDark else PlumLight
 }
 
 /**

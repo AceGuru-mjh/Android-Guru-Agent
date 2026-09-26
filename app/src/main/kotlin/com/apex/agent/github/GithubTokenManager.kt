@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +33,17 @@ class GithubTokenManager @Inject constructor(
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
+            // P2 修复（静默降级告警）：加密存储初始化失败（keystore 损坏/厂商
+            // ROM 异常）时降级明文 prefs —— 旧实现完全静默，用户不知道 Token
+            // 以明文落盘。至少留一条 WARN 日志（诊断与安全审计可见）。
+            runCatching {
+                AppLogger.instance.warn(
+                    LogCategory.SYSTEM, "GithubTokenManager",
+                    "EncryptedSharedPreferences 初始化失败，GitHub Token 将以明文存储" +
+                        "（${e.javaClass.simpleName}: ${e.message}）—— 建议在系统设置中" +
+                        "清除应用数据后重新连接 GitHub"
+                )
+            }
             context.getSharedPreferences("github_prefs_fallback", Context.MODE_PRIVATE)
         }
     }

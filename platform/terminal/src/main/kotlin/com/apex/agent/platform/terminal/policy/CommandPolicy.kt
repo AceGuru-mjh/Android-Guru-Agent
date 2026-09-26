@@ -198,6 +198,25 @@ object DefaultCommandPolicy {
     val DEFAULT_DENYLIST: Set<String> = setOf(
         "shutdown", "reboot", "mkfs", "dd", "halt", "poweroff"
     )
+
+    /**
+     * 包装器段 deep-scan 附加黑名单（T86 回归修复）：
+     *
+     * 语义：**直接调用** rm 等由用户黑白名单策略管理（用户敲 rm 是合法需求）；
+     * 但**经包装器间接调用**（`sh -c rm` / `env rm` / `xargs rm` —— Agent 试图
+     * 绕过首 token 检查的形态）按确认级处理：v1 无 Confirmation UI →
+     * fail-safe DENY（TerminalPolicyDecisionTest 契约：REQUIRE_CONFIRMATION-
+     * capable 路径永不出 Allow）。
+     *
+     * 取向「破坏面」而非「常用工具」：rm/unlink/shred/chmod/chown/kill 家族；
+     * mv/cp 等常用工具不进（`sh -c "cp a b"` 是正常工作流）。
+     */
+    val WRAPPER_DEEP_SCAN_DENYLIST: Set<String> = setOf(
+        "rm", "rmdir", "unlink", "shred", "truncate",
+        "chmod", "chown", "chgrp", "mkfs", "wipefs", "fdisk", "parted",
+        "kill", "killall", "pkill",
+        "reboot", "shutdown", "halt", "poweroff", "dd"
+    )
 }
 
 /**
@@ -304,10 +323,13 @@ data class CommandPolicy(
 
         // shell 包装器段：deep-scan 全部词（引号透明分词）
         // `bash -c "rm -rf /"` / `env rm` / `xargs rm` / `nohup dd …`
+        // T86：附加确认级表 —— 间接调用的破坏面命令 fail-safe DENY
+        // （直接调用仍由用户策略管理；见 WRAPPER_DEEP_SCAN_DENYLIST KDoc）。
         if (exe in CommandParser.shellWrappers) {
+            val deepDeny = deny + DefaultCommandPolicy.WRAPPER_DEEP_SCAN_DENYLIST
             for (word in tokenizeRest(rest)) {
                 val t = CommandParser.basename(word).lowercase()
-                if (t.isNotEmpty() && matchesDenylist(t, deny)) {
+                if (t.isNotEmpty() && matchesDenylist(t, deepDeny)) {
                     return CommandPolicyDecision.DENY
                 }
             }

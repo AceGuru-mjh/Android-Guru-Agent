@@ -82,6 +82,14 @@ class UbuntuLifecycleCoordinator(
      * 否则升级用户永远拿不到新环境。
      */
     private val bundledChecksumFn: (suspend () -> String?)? = null,
+    /**
+     * P1（DNS 快照刷新）端口：宿主 DNS 变化时重写 rootfs 内 resolv.conf
+     * （生产：RootfsConfigurator.refreshDnsIfChanged(current().location)；
+     * null=未接线，行为与旧版一致）。resolv.conf 是安装时刻的 DNS 快照，
+     * 切网后 guest 内 apt/pip/curl DNS 全灭且无修复通道 —— ensureReady
+     * 短路前刷一次（文件对比，毫秒级），切网自愈。
+     */
+    private val dnsRefreshFn: (suspend () -> Boolean)? = null,
     private val target: RootfsTarget,
     private val defaultTimeoutMs: Long = DEFAULT_ENSURE_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -263,20 +271,46 @@ class UbuntuLifecycleCoordinator(
      * - 超时 → [EnsureResult.InProgress]：进度不丢（解包 .part 续拷 + bootstrap
      *   evidence 续跑），再次调用续跑；
      * - [force]=true：绕过 READY 短路（版本迁移/修复用）。
+     *
+     * P1 修复（锁等待纳入超时）：旧实现 `withTimeoutOrNull` 在 `mutex.withLock`
+     * **内部** —— 第二个 caller 的 timeoutMs 不覆盖锁排队时间。首个 caller 解包
+     * 最长 30 分钟，期间 Agent 的 terminal.ubuntu.ensure（工具层 1,830s 策略）或
+     * UI 的任何 ensureReady 调用会挂在锁上直到外层 ToolRunPolicy 击杀（或无限
+     * 等待）。现在 timeout 包住「锁等待 + 编排步骤」全程：等待超锁预算一半即
+     * 诚实返回 InProgress（调用方可重试续跑），绝不无限阻塞。
      */
-    suspend fun ensureReady(force: Boolean = false, timeoutMs: Long = defaultTimeoutMs): EnsureResult = mutex.withLock {
-        // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
-        if (!force && _state.value.phase == Phase.READY) {
-            return EnsureResult.AlreadyReady(_state.value.capabilities ?: emptyList())
-        }
-        val startedAt = clock()
-        val fromPhase = _state.value.phase
-        val result = withTimeoutOrNull(timeoutMs) { runEnsureSteps(force, startedAt, fromPhase) }
-        result ?: EnsureResult.InProgress(
+    suspend fun ensureReady(force: Boolean = false, timeoutMs: Long = defaultTimeoutMs): EnsureResult =
+        withTimeoutOrNull(timeoutMs) {
+            mutex.withLock {
+                // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
+                // ★ 修复「每次都会显示 APT 引导未完成」（用户反馈）：T83 降级语义下
+                // phase=READY 但 bootstrapNote != null（引导失败降级）时，秒回会让
+                // bootstrap 永不重试、降级注记永不消失 —— 引导降级态不走短路，
+                // 继续走完整编排：bootstrap 幂等续跑（evidence 只含已完成阶段 +
+                // APT_UPDATE 镜像 fallback），网络恢复后下一次 ensureReady 即自愈
+                // 为完整 READY；引导本来就完整的设备不受影响。
+                if (!force &&
+                    _state.value.phase == Phase.READY &&
+                    _state.value.bootstrapNote == null
+                ) {
+                    // P1（DNS 快照刷新）：短路前对一次宿主 DNS —— resolv.conf 是安装时刻
+                    // 的快照，切网（Wi-Fi→蜂窝/VPN）后 guest DNS 全灭；文件对比毫秒级，
+                    // 失败静默（刷新失败不影响 AlreadyReady 语义，下次再试）。
+                    dnsRefreshFn?.let { refresh ->
+                        runCatching { refresh() }
+                    }
+                    return@withLock EnsureResult.AlreadyReady(
+                        _state.value.capabilities ?: emptyList()
+                    )
+                }
+                val startedAt = clock()
+                val fromPhase = _state.value.phase
+                runEnsureSteps(force, startedAt, fromPhase)
+            }
+        } ?: EnsureResult.InProgress(
             phase = _state.value.phase,
             message = "仍在 ${_state.value.phase.name} 阶段 — 再次调用继续等待，进度不会丢失"
         )
-    }
 
     private suspend fun runEnsureSteps(force: Boolean, startedAt: Long, fromPhase: Phase): EnsureResult {
         // ── Stage 1: rootfs（幂等判断由 provisioner 承担 —— 编排层不复制 rootfs 状态语义）──

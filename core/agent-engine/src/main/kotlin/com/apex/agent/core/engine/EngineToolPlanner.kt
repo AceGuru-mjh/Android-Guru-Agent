@@ -44,14 +44,19 @@ internal object EngineToolPlanner {
     )
 
     /**
-     * 本轮请求工具计划：强制（仅选中集）/ 默认（CORE+激活+可选全量）/
+     * 本轮请求工具计划：强制（仅选中集）/ 默认（CORE+激活+连接服务+可选全量）/
      * 降级（≥1=纯 CORE；≥2=空）。
+     *
+     * @param serviceToolIds 已连接服务对应的工具 id（ConnectedServicesProvider
+     *        .connectedToolIds）—— 与 CORE 同待遇进请求。降级路径不并入
+     *        （coreOnly 的语义就是收窄回最小集；空集 = 零行为变化）。
      */
     fun buildToolPlan(
         config: AgentConfig,
         registry: ToolRegistry,
         activation: ToolActivationStore,
-        degradationLevel: Int
+        degradationLevel: Int,
+        serviceToolIds: Set<String> = emptySet()
     ): ToolRequestBudget.RequestToolPlan {
         val forced = config.forcedToolIds
         val allowed = config.allowedToolIds
@@ -67,7 +72,8 @@ internal object EngineToolPlanner {
                 registry = registry,
                 activation = activation,
                 exposeAll = config.exposeAllTools && degradationLevel == 0,
-                coreOnly = degradationLevel >= DEGRADATION_CORE_ONLY
+                coreOnly = degradationLevel >= DEGRADATION_CORE_ONLY,
+                serviceToolIds = if (degradationLevel == 0) serviceToolIds else emptySet()
             )
         }
     }
@@ -91,16 +97,30 @@ internal object EngineToolPlanner {
      * 判定异常是否与工具负载相关（降级重试的前置条件）。
      *
      * 覆盖：①模型/网关拒绝带 tools 请求的典型报错文案（函数名/schema/
-     * tool_choice/parallel）；②400/413/422 请求级拒绝——请求体里只有
-     * tools 是 v4 新变量，用它当降级信号；若非工具问题，降级后仍会在
-     * 同一轮报错并上抛，不吞错。401/403（鉴权）明确排除。
+     * tool_choice/parallel）；②400/413/422 请求级拒绝且报错文案命中工具关键词。
+     *
+     * P1 修复（降级误判）：旧实现把**任何** HTTP 400/413/422 一律判为“工具被拒”
+     * —— 但请求体里还有 temperature / reasoning_effort / parallel_tool_calls /
+     * 图片载荷等大量可 400/413 的字段。误判一次 → 降级 1（纯 CORE），再误判
+     * → 降级 2 = 本任务余下轮次完全无工具（模型“突然只用嘴回答”）。
+     * 现在状态码命中后**还要求报错文案命中工具关键词**才降级；非工具问题
+     * 的 4xx 原样上抛（诚实暴露真实错误，而不是静默阉割工具集）。
+     * 401/403（鉴权）始终排除。
      */
     fun isToolsRelatedRejection(e: Throwable): Boolean {
-        if (e is LlmException.Http && (e.code == 400 || e.code == 413 || e.code == 422)) {
-            return true
-        }
         val msg = (e.message ?: "").lowercase()
-        return TOOLS_REJECTION_KEYWORDS.any { msg.contains(it) }
+        val msgHitsToolKeyword = TOOLS_REJECTION_KEYWORDS.any { msg.contains(it) }
+        if (e is LlmException.Http) {
+            // 413（载荷超限）：报错体常为空 —— 保留「降级探测」语义（去掉最大
+            // 载荷成分重试一次；若非工具问题，降级后同样报错并上抛，不吞错）。
+            if (e.code == 413) return true
+            // 400/422（校验失败）：请求体里 temperature / reasoning_effort /
+            // parallel_tool_calls / 图片等同样可触发 —— 必须文案命中工具关键词
+            // 才降级，否则原样上抛（诚实暴露真实错误，不静默阉割工具集）。
+            if (e.code == 400 || e.code == 422) return msgHitsToolKeyword
+        }
+        // 非 HTTP 异常：文案关键词判定（历史行为）。
+        return msgHitsToolKeyword
     }
 
     /** 模型回显的工具名 → 注册表 id（无映射时原样返回——registry id 直查）。 */
@@ -150,7 +170,14 @@ internal fun buildUserText(input: UserInput): String {
         if (input.files.isNotEmpty()) {
             appendLine("[用户附加文件]")
             input.files.forEach { f ->
-                appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes) path=${f.localPath}")
+                // 文档类附件标注「已支持文本提取」——引导模型放心用 read_file 读正文，
+                // 而不是看到 .pdf 就当作二进制放弃（旧链路确实读不了，现在能读）。
+                val docHint = when {
+                    f.mimeType.contains("pdf", ignoreCase = true) || f.name.endsWith(".pdf", true) -> "，read_file 可提取文本"
+                    f.mimeType.contains("wordprocessingml", ignoreCase = true) || f.name.endsWith(".docx", true) -> "，read_file 可提取文本"
+                    else -> ""
+                }
+                appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes$docHint) path=${f.localPath}")
             }
         }
         appendLine()

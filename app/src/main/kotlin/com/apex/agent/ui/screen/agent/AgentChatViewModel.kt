@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.attachment.AttachmentCleanupManager
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
@@ -13,6 +14,7 @@ import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.engine.modes.ModePreset
+import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
@@ -59,8 +61,15 @@ class AgentChatViewModel @Inject constructor(
     private val taskController: AgentTaskStatusController,
     // 历史对话仓库（归档/恢复/删除；逻辑主体在 AgentChatHistoryController.kt）
     internal val chatHistory: ChatHistoryManager,
+    // 工作区根解析（HTML 预览路径用）：code_* 工具写的 HTML 按此根解析相对路径；
+    // default 工作区即 Agent 沙箱根（终端会话 guest /workspace 同源）。
+    private val workspaceRoots: CodeWorkspaceRoots,
     // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
-    private val languageManager: LanguageManager
+    private val languageManager: LanguageManager,
+    // v2：斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）
+    private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
+    // P2：删除/清空历史会话时同步清理附件文件（AgentChatHistoryController 扩展使用）
+    internal val attachmentCleanup: AttachmentCleanupManager
 ) : ViewModel() {
 
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
@@ -92,10 +101,20 @@ class AgentChatViewModel @Inject constructor(
         viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
         // P2-8/P3（6-c）：reasoningEffort chip 初始跟随默认 Profile；contextMaxTokens 回填引擎真实值（原恒 1 → 仪表盘 0%/上限1）。
         settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let { p -> _uiState.update { it.copy(reasoningEffort = p.reasoningEffort) } }
-        // #168：恢复聊天页持久化的思考档位覆盖（"" = 跟随启动默认档位，不动）。
-        settingsRepository.agentSettings.value.thinkingLevelOverride
+        // 双级思考控制第二级：恢复强制深度思考开关（优先读新字段 forceDeepThinking；
+        // 旧版本仅存 thinkingLevelOverride —— deep/maximum 视为强制开；旧档位
+        // （如 auto 自适应）按原档回放，行为零回归）。
+        val agentSettingsSnapshot = settingsRepository.agentSettings.value
+        val savedOverrideLevel = agentSettingsSnapshot.thinkingLevelOverride
             .takeIf { it.isNotBlank() }
-            ?.let { saved -> thinkingLevelFromOverride(saved)?.let(::applyThinkingLevel) }
+            ?.let { thinkingLevelFromOverride(it) }
+        val forcedDeep = agentSettingsSnapshot.forceDeepThinking ||
+            savedOverrideLevel == ThinkingLevel.DEEP || savedOverrideLevel == ThinkingLevel.MAXIMUM
+        when {
+            forcedDeep -> applyThinkingLevel(ThinkingLevel.MAXIMUM)
+            savedOverrideLevel != null -> applyThinkingLevel(savedOverrideLevel)
+            else -> Unit // 未覆盖：跟随启动默认档位（AgentModule 快照）
+        }
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
         // 历史对话：会话列表初始加载 + 消息流防抖自动归档
         installChatHistoryAutoPersist()
@@ -288,6 +307,34 @@ class AgentChatViewModel @Inject constructor(
         savedStateHandle[KEY_DRAFT_INPUT] = text
     }
 
+    // ═══ 流水线指令胶囊（斜杠菜单选中 → 结构化挂起，不再裸文本入框）═══
+
+    private val _pendingCommand = MutableStateFlow<PendingPipelineCommand?>(null)
+
+    /** 当前挂在输入栏的流水线指令胶囊（null = 无）。发送时拼回 `/type:id` 走斜杠管线。 */
+    val pendingCommand: StateFlow<PendingPipelineCommand?> = _pendingCommand.asStateFlow()
+
+    /**
+     * 挂起一条流水线指令胶囊（Skill / MCP / 连接器 / 插件）。
+     *
+     * - 已有胶囊时**替换**（单条语义：一次发送触发一条流水线，避免多指令
+     *   组合出 `/skill:a /mcp:b` 这种解析器不认识的复合命令）；
+     * - 输入框里若已有同源斜杠残文（如手动输入了 `/skill:` 前缀），顺手清掉，
+     *   避免胶囊 + 残文双份指令。
+     */
+    fun setPendingCommand(command: PendingPipelineCommand) {
+        _pendingCommand.value = command
+        val draft = inputText.value
+        if (draft.isNotBlank() && draft.trimStart().startsWith("/")) {
+            updateInputText("")
+        }
+    }
+
+    /** 移除胶囊（胶囊行 × 按钮）。 */
+    fun clearPendingCommand() {
+        _pendingCommand.value = null
+    }
+
     /**
      * 自定义模式指令（持久化到 SharedPreferences）。
      *
@@ -423,12 +470,22 @@ class AgentChatViewModel @Inject constructor(
     /**
      * 运行期"活输出"步骤的唯一写入口：每次 flush 用最新尾部快照【原地替换】同一条
      * OUTPUT 步骤（而非追加新步骤），消除旧实现里逐次叠加重复文本的缺陷。
+     *
+     * 替换时**保留原步骤 id**：时间线以 s.id 作 LazyColumn key —— 每次换新 UUID
+     * 会让活输出行每 16ms 被 dispose/recreate（横滚位置重置、重组放大），
+     * 与「原地替换」的注释意图相悖。seq 仍然递增（时间线滚动感知更新靠它）。
      * （internal —— 事件归约已迁出至 AgentChatEventApplier.kt 扩展）
      */
     internal fun upsertLiveOutputStep(snapshot: String) {
-        val live = ToolStep(phase = StepPhase.OUTPUT, text = snapshot, seq = nextStepSeq())
-        val steps = currentToolCallSteps ?: emptyList()
         val existingId = liveOutputStepId
+        // 替换形态：沿用原 id（LazyColumn key 稳定）；新建形态：全新 id。
+        val live = ToolStep(
+            id = existingId ?: java.util.UUID.randomUUID().toString(),
+            phase = StepPhase.OUTPUT,
+            text = snapshot,
+            seq = nextStepSeq()
+        )
+        val steps = currentToolCallSteps ?: emptyList()
         if (existingId != null) {
             val idx = steps.indexOfFirst { it.id == existingId }
             if (idx >= 0) {
@@ -451,6 +508,12 @@ class AgentChatViewModel @Inject constructor(
 
     /** 正在展示中的流水线横幅 id（[AgentUiMessage.PipelineBanner]），收尾时原地置为完成态。 */
     internal var activeBannerId: String? = null
+
+    // ═══ 思考耗时计时（ThinkingBubble 秒数显示）═══
+    /** 当前一轮思考的起始时刻（SystemClock.elapsedRealtime 基；0 = 未在思考）。
+     *  [AgentEvent.ThinkingStart] 置位、[AgentEvent.ThinkingComplete]/abort 清零；
+     *  ThinkingComplete 用它与当前时刻差值落盘 ThinkingMessage.durationMs。 */
+    internal var thinkingStartElapsed: Long = 0
 
     /** 引擎一轮执行收尾时调用：把未完成的流水线横幅置为完成态（停止脉冲、显示耗时）。 */
     internal fun finishActiveBanner() {
@@ -480,7 +543,9 @@ class AgentChatViewModel @Inject constructor(
         // 二轮审计 A-1：不计入 ERROR 占位附件——「空文本 + 全部附件读取失败」时
         // 不应发出空消息（P2-9 的 enabled 判定与 drainAttachments 的过滤口径对齐）。
         val hasUsableAttachment = attachmentManager.attachments.value.any { it.status != UploadStatus.ERROR }
-        if (trimmedText.isEmpty() && !hasUsableAttachment) return
+        // 胶囊挂起时输入框文本视为"附加要求"（可为空）——胶囊本身即指令主体。
+        val pendingCmd = _pendingCommand.value
+        if (trimmedText.isEmpty() && !hasUsableAttachment && pendingCmd == null) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
@@ -491,11 +556,21 @@ class AgentChatViewModel @Inject constructor(
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
         val currentAttachments = attachmentManager.drainAttachments()
 
-        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）
+        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）+ 摘下胶囊
         updateInputText("")
+        _pendingCommand.value = null
+
+        // 胶囊 → 拼回斜杠命令：`/type:id` +（输入框有文本时）附加要求。
+        // 附件与斜杠指令互斥（下方分支提示后丢弃），胶囊路径同样遵循。
+        val effectiveText = if (pendingCmd != null) {
+            if (trimmedText.isEmpty()) pendingCmd.toCommandToken()
+            else pendingCmd.toCommandToken() + " " + trimmedText
+        } else {
+            trimmedText
+        }
 
         // 斜杠指令分支：附件已被收集，但不随指令发送（给出 System 提示）
-        if (trimmedText.startsWith("/")) {
+        if (effectiveText.startsWith("/")) {
             if (currentAttachments.isNotEmpty()) {
                 _uiState.update { s ->
                     s.copy(
@@ -505,11 +580,18 @@ class AgentChatViewModel @Inject constructor(
                     )
                 }
             }
-            handleSlashCommand(trimmedText)
+            handleSlashCommand(effectiveText)
             return
         }
 
         currentJob = viewModelScope.launch {
+            // P0 修复（互斥锁冲突丢消息）：旧实现只 cancel UI 收集器（currentJob），
+            // TaskRuntime 镜像收集器与执行锁不随 UI 生命周期走 —— 在途任务继续持锁。
+            // 下一轮 executeNormalMessage → taskController.execute 撞互斥锁 →
+            // "TaskRuntime rejects concurrent execution" 错误气泡，用户消息打水漂
+            //（abort 后快速重发的窗口期必现）。先 await cancel 完成再执行新消息
+            //（串行化，无竞态；无在途任务时 cancel 立即返回 false）。
+            taskController.cancel()
             executeNormalMessage(trimmedText, currentAttachments)
         }
     }
@@ -527,7 +609,8 @@ class AgentChatViewModel @Inject constructor(
         currentJob?.cancel()
         // 同 sendMessage：被取消的上一轮流水线横幅收尾，避免残留"运行中"脉冲。
         finishActiveBanner()
-        updateInputText("")
+        // P2：不清草稿 —— retry 的文本来自历史消息而非输入框；用户正在打的新草稿
+        // 不该被无声清掉（regenerateResponse 已特意保留草稿，此路径漏修对齐）。
         currentJob = viewModelScope.launch {
             runEngine(trimmed, attachments)
         }
@@ -554,7 +637,10 @@ class AgentChatViewModel @Inject constructor(
                 currentAttachments.map { att ->
                     // 尝试从预拷贝缓存获取（零等待）
                     val preprocessedPath = preprocessor.getSandboxPath(att.uri)
-                    val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
+                    // 命中预拷贝：晋升到正式 attachments 目录（生命周期归一，
+                    // 否则已发送附件留在 attachments_pre，进程重启后即成永久孤儿）
+                    val localPath = preprocessedPath?.let { attachmentCleanup.promoteToAttachments(it) }
+                        ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
 
                     MessageAttachment(
                         name = att.name,
@@ -598,15 +684,32 @@ class AgentChatViewModel @Inject constructor(
     private suspend fun runEngine(text: String, persistedAttachments: List<MessageAttachment>) {
         // 新一轮流式开始：清空上一轮可能残留的流式缓冲（防跨轮串字）；retry 路径同样受益。
         streamBuffers.reset()
+        // P1（旧工具卡悬挂）：runEngine/retry 覆盖新一轮时必须清掉上一轮的工具运行态
+        //（对比 abort() 的完整清理面）—— 否则被取消轮次的工具卡永久「运行中」脉冲
+        // + 计时器常跑；toolOutputBuffer/flush Job/activeToolCallId 同属该清理面。
+        toolFlushJob?.cancel()
+        toolFlushJob = null
+        activeToolCallId = null
+        toolOutputBuffer.setLength(0)
+        liveOutputStepId = null
+        currentToolCallSteps = null
+        // 在途部分回复保留为 isPartial（abort() 同款语义 —— 新发送取消旧任务时，
+        // 已流出的内容不该无声消失）。
+        val inFlightResponse = _uiState.value.currentResponse
         _uiState.update { state ->
             state.copy(
-                messages = state.messages + AgentUiMessage.User(
-                    text = text,
-                    attachments = persistedAttachments
-                ),
+                messages = state.messages +
+                    (if (inFlightResponse.isNotBlank())
+                        listOf(AgentUiMessage.Agent(text = inFlightResponse, isPartial = true))
+                    else emptyList()) +
+                    AgentUiMessage.User(
+                        text = text,
+                        attachments = persistedAttachments
+                    ),
                 isLoading = true,
                 currentThinking = "",
-                currentResponse = ""
+                currentResponse = "",
+                currentToolCall = null
             )
         }
 
@@ -720,35 +823,66 @@ class AgentChatViewModel @Inject constructor(
     }
 
     fun setThinkingLevel(level: ThinkingLevel) {
-        // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）；
-        // AUTO 档不动模型原生 reasoning effort——逐轮档位由引擎侧选档器决定。
+        // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）。
         settingsRepository.updateAgentSettings { copy(thinkingLevelOverride = level.name.lowercase()) }
         applyThinkingLevel(level)
         if (level == ThinkingLevel.AUTO) {
             _lastAdaptiveDecision.value = null // 决策理由由下一轮 IterationStart 刷新
-            return
         }
-        // T1（思考程度真实化）：思考档位同步映射为模型原生 reasoning 强度并
-        // 持久化到默认 Profile —— DynamicLlmClient 监听 profiles 即时重建，
-        // 配合能力位/差异化 body 修复后，下一次请求真实下发
-        // reasoning_effort / thinking.budget_tokens / enable_thinking。
-        // NONE 档 → ReasoningEffort.NONE（不发 reasoning 字段，覆盖旧档位）。
-        val effort = level.toReasoningEffortName()
-            ?.let { name -> runCatching { ReasoningEffort.valueOf(name) }.getOrNull() }
-            ?: ReasoningEffort.NONE
-        setReasoningEffort(effort)
+        // 双级思考控制（RikkaHub 式）：档位不再自动映射/覆写模型原生 reasoning effort ——
+        // 第一级（模型原生强度）由 ReasoningEffort chips 独立控制并持久化到 Profile，
+        // 与本档位（引擎提示词层）完全解耦，两者独立生效。
     }
 
     /** 档位 → UI 状态 + 引擎配置（setThinkingLevel 与启动恢复共用）。 */
     private fun applyThinkingLevel(level: ThinkingLevel) {
-        _uiState.update { it.copy(thinkingLevel = level) }
+        _uiState.update { it.copy(thinkingLevel = level, forceDeepThinking = level == ThinkingLevel.MAXIMUM) }
         // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+    }
+
+    /**
+     * 双级思考控制第二级：强制深度思考开关。
+     *
+     * ON → 引擎 ThinkingLevel 钉 MAXIMUM（七步 ToT 提示词 + 工具自检 + 终检清单，
+     * 提示词层强制，对任何模型生效）；OFF → 回退 STANDARD 三步 CoT。
+     * 与第一级（模型原生 reasoning effort，Profile 字段）互不干涉。
+     */
+    fun setForceDeepThinking(enabled: Boolean) {
+        settingsRepository.updateAgentSettings {
+            copy(forceDeepThinking = enabled, thinkingLevelOverride = if (enabled) "maximum" else "standard")
+        }
+        applyThinkingLevel(if (enabled) ThinkingLevel.MAXIMUM else ThinkingLevel.STANDARD)
     }
 
     /** #168：thinkingLevelOverride 字符串 → ThinkingLevel（未知/空值 → null = 不覆盖）。 */
     private fun thinkingLevelFromOverride(value: String): ThinkingLevel? =
         runCatching { ThinkingLevel.valueOf(value.trim().uppercase()) }.getOrNull()
+
+    // ═══ HTML 产物预览（应用内 WebView）═══
+
+    /**
+     * 把工具调用中提取的 HTML 路径（相对 / 绝对 / guest /workspace 前缀）
+     * 解析为宿主侧可读文件路径；解析失败（不存在/不可读）返回 null。
+     *
+     * 三段式判定：
+     * 1. guest `/workspace/...` → 工作区根替换（终端会话与 code_* 同源目录）；
+     * 2. 宿主绝对路径直接验证存在性；
+     * 3. 相对路径 → activeRoot（null 时兜底 default 工作区）下解析。
+     */
+    fun resolveHtmlPreviewPath(rawPath: String): String? {
+        val root = workspaceRoots.activeRoot()
+            ?: File(context.filesDir, "linux/workspaces/default")
+        val candidate: File = when {
+            rawPath.startsWith("/workspace/", ignoreCase = true) ->
+                File(root, rawPath.removePrefix("/workspace/"))
+            rawPath.startsWith("/") -> File(rawPath)
+            else -> File(root, rawPath)
+        }
+        return if (HtmlArtifactDetector.isPreviewableHostFile(candidate.absolutePath)) {
+            candidate.absolutePath
+        } else null
+    }
 
     /**
      * #169 计划确认（人控升级）：confirmed=false 取消；true 时可携带步骤勾选
@@ -795,15 +929,19 @@ class AgentChatViewModel @Inject constructor(
         // T76：取消走任务运行时（引擎 abort + CANCELLED 落盘，重启不复活）
         viewModelScope.launch { taskController.cancel() }
 
-        // 取消后：部分产物落盘 + 状态复位。
+        // 取消后：部分产物落盘 + 状态复位（部分思考附带实测秒数）。
         finishActiveBanner()
+        val partialThinkingDurationMs = if (thinkingStartElapsed > 0) {
+            android.os.SystemClock.elapsedRealtime() - thinkingStartElapsed
+        } else 0L
+        thinkingStartElapsed = 0
         _uiState.update { state ->
             val extra = buildList<AgentUiMessage> {
                 if (partialResponse.isNotBlank()) {
                     add(AgentUiMessage.Agent(text = partialResponse, isPartial = true))
                 }
                 if (partialThinking.isNotBlank()) {
-                    add(AgentUiMessage.ThinkingMessage(partialThinking))
+                    add(AgentUiMessage.ThinkingMessage(partialThinking, partialThinkingDurationMs))
                 }
                 add(AgentUiMessage.System(str(R.string.chat_aborted)))
             }
@@ -812,6 +950,7 @@ class AgentChatViewModel @Inject constructor(
                 isLoading = false,
                 currentResponse = "",
                 currentThinking = "",
+                currentThinkingStartElapsed = 0,
                 currentToolCall = null
             )
         }
@@ -870,6 +1009,9 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
             cfg.copy(temperature = target.temperature)
         }
+        // 修复：模型原生思考强度跟随当前模型（每 Profile 独立持久化）——
+        // 切换后同步 UI 状态，避免 chip 显示上一个模型的档位（旧实现遗漏）。
+        _uiState.update { it.copy(reasoningEffort = target.reasoningEffort) }
     }
 
     /**
@@ -962,7 +1104,13 @@ class AgentChatViewModel @Inject constructor(
      * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
-        val result = SlashCommands.handle(command, githubTokenManager)
+        // mcpConnected 快照：路由器据此对已连接的 /mcp:<id> 注入「用 mcp_call 调
+        // server=<id>」引导提示词（旧实现恒空集，模型面对 MCP 指令只能瞎猜）。
+        val result = SlashCommands.handle(
+            command,
+            githubTokenManager,
+            mcpConnected = runCatching { mcpManager.getConnectedServers().toSet() }.getOrDefault(emptySet())
+        )
 
         // 指令会取消上一个流式任务：先清空流式缓冲，防残留文本串入新一轮。
         streamBuffers.reset()
@@ -993,7 +1141,29 @@ class AgentChatViewModel @Inject constructor(
         activeBannerId = execute.banner.id
 
         currentJob = viewModelScope.launch {
-            collectEngineFlowSafely(taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt)))
+            // P0 修复（闪退）：taskController.execute 的互斥拒绝
+            // （IllegalStateException：上一轮执行仍在途）发生在作为参数求值时 ——
+            // 位于 collectEngineFlowSafely 的 try/catch **之前**，异常冒泡到
+            // viewModelScope（无 handler）直接闪退。这里先安全求值，拒绝时转
+            // 可读错误气泡（与 executeNormalMessage 的兑底一致）。
+            val flow = try {
+                taskController.cancel() // 先串行化释放（同 sendMessage）
+                taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { s ->
+                    s.copy(
+                        messages = s.messages + AgentUiMessage.Error(
+                            message = "执行失败：${e.message ?: e::class.simpleName}",
+                            canRetry = true
+                        ),
+                        isLoading = false
+                    )
+                }
+                return@launch
+            }
+            collectEngineFlowSafely(flow)
         }.apply {
             invokeOnCompletion {
                 routeContextKind = null

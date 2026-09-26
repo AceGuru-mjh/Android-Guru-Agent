@@ -193,7 +193,15 @@ class JobManagerImpl(
         val writeResult = inputManager.sendLine(sessionId, owner, lineToSend, policyCommand = command)
         if (writeResult.isFailure) {
             transition(jobId, JobState.FAILED)
-            return Result.failure(RuntimeException("TerminalError:WriteFailed"))
+            // P0 修复（错误归因）：透传 InputManager 的真实失败语义 —— 策略拒绝是
+            // "TerminalError:PermissionDenied"（模型可据此理解"命令被用户策略拦
+            // 截，应换命令或询问用户"），会话失效才是 "TerminalError:WriteFailed"。
+            // 旧实现统一折叠为 WriteFailed：Agent 无法分辨「会话坏了」还是「命令
+            // 被拦」，只会反复重试撞墙（用户观感"终端用不了"）。
+            val cause = writeResult.exceptionOrNull()?.message
+                ?: writeResult.exceptionOrNull()?.javaClass?.simpleName
+                ?: "unknown write failure"
+            return Result.failure(RuntimeException(cause))
         }
         val ev = TerminalEvent.ProcessStarted(
             id = 0, sessionId = sessionId, timestamp = System.currentTimeMillis(),

@@ -74,6 +74,20 @@ class TerminalCore(
     // T85：光标形状（DECSCUSR）。宿主经 [cursorStyle] 读取并绘制对应形状。
     private var cursorStyle = CursorStyle.BAR
 
+    // ── Termux 对齐（鼠标/焦点/超链接子系统）──
+    /** 鼠标报告模式（DECSET 1000/1002/1003/1005/1006/1015/1016/1007/10060 状态机）。 */
+    private var mouseReporting = MouseReportingState()
+
+    /** 焦点报告（DECSET 1004）—— UI 据此在窗口焦点变化时发送 ESC[I/ESC[O。 */
+    private var focusReporting = FocusReporting()
+
+    /** OSC 8 超链接注册表（RenderCell.link 编号 → URI）。 */
+    private val hyperlinks = HyperlinkRegistry()
+
+    /** 屏内文本搜索命中（[search] 后由 [searchHits] 读出；空 = 无命中/未搜）。 */
+    private var searchHits: List<TerminalSearchMatch> = emptyList()
+    private var activeSearchHitIndex: Int = -1
+
     /**
      * T85：宿主应答通道。DA1/DA2/DSR（CPR）需要向 PTY 回写响应序列 ——
      * 纯 JVM 的 TerminalCore 无法直接写 PTY，由宿主注入回调。
@@ -199,12 +213,16 @@ class TerminalCore(
     /** Shift cells right by [width] within the current row, starting at the cursor column (IRM). */
     private fun insertCharsAtCursor(width: Int) {
         val r = cursor.row
-        for (c in (cols - 1) downTo (cursor.column + width)) {
+        // P2：光标落在宽字符 trail 上时，操作起点左扩到 lead —— 整对一起右移，
+        // 防拆对（lead 留原地 trail 移走 = 双孤儿）。收尾 repairRow 兜底。
+        val start = wideAwareStart(r, cursor.column)
+        for (c in (cols - 1) downTo (start + width)) {
             currentBuffer.setCell(r, c, currentBuffer.get(r, c - width))
         }
-        for (c in cursor.column until (cursor.column + width).coerceAtMost(cols)) {
+        for (c in start until (start + width).coerceAtMost(cols)) {
             currentBuffer.setCell(r, c, TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
     }
 
     // ─── C0 controls (§4) ───
@@ -344,25 +362,57 @@ class TerminalCore(
     private fun insertChars(n: Int) {
         val count = n.coerceAtLeast(1)
         val r = cursor.row
-        for (c in (cols - 1) downTo (cursor.column + count)) {
+        // P2：同 IRM —— 起点宽字符配对感知（整对一起移，防拆对孤儿）。
+        val start = wideAwareStart(r, cursor.column)
+        for (c in (cols - 1) downTo (start + count)) {
             currentBuffer.setCell(r, c, currentBuffer.get(r, c - count))
         }
-        for (c in cursor.column until (cursor.column + count).coerceAtMost(cols)) {
+        for (c in start until (start + count).coerceAtMost(cols)) {
             currentBuffer.setCell(r, c, TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
         mutations += ScreenMutation.rows(r, r)
     }
 
-    /** DCH (§5): delete [n] cells at the cursor, shifting the rest of the row left. */
+    /**
+     * DCH (§5): delete [n] cells at the cursor, shifting the rest of the row left.
+     *
+     * P2：宽字符整对删除（xterm 语义：宽字符是占 2 列的 1 个字符）——
+     * 起点在 trail → 起点左扩到 lead；起点在 lead → count+1 吸收 trail。
+     * 只删半体会留孤儿（渲染跳 trail → 整行错列）。repairRow 兜底。
+     */
     private fun deleteChars(n: Int) {
         val count = n.coerceAtLeast(1)
         val r = cursor.row
-        for (c in cursor.column until cols) {
-            val src = c + count
+        var start = cursor.column
+        var effective = count
+        when {
+            cursor.column > 0 && currentBuffer.get(r, cursor.column).isWideTrail &&
+                currentBuffer.get(r, cursor.column - 1).isWideLead -> {
+                start = cursor.column - 1
+                effective = count + 1
+            }
+            currentBuffer.get(r, cursor.column).isWideLead &&
+                cursor.column + 1 < cols && currentBuffer.get(r, cursor.column + 1).isWideTrail -> {
+                effective = count + 1
+            }
+        }
+        for (c in start until cols) {
+            val src = c + effective
             currentBuffer.setCell(r, c, if (src < cols) currentBuffer.get(r, src) else TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
         mutations += ScreenMutation.rows(r, r)
     }
+
+    /**
+     * P2：插入类操作的宽字符感知起点 —— [col] 是某宽字符的 trail
+     *（lead 在 col-1）时返回 col-1，使插入位不拆散既有宽字符对。
+     */
+    private fun wideAwareStart(row: Int, col: Int): Int =
+        if (col > 0 && currentBuffer.get(row, col).isWideTrail &&
+            currentBuffer.get(row, col - 1).isWideLead
+        ) col - 1 else col
 
     private fun eraseDisplay(mode: Int) {
         when (mode) {
@@ -425,7 +475,7 @@ class TerminalCore(
                 }
                 i += subs.size - 1
             } else when (p) {
-                0 -> currentStyle = TerminalStyle.DEFAULT
+                0 -> currentStyle = TerminalStyle.DEFAULT.copy(linkIndex = currentStyle.linkIndex)
                 1 -> currentStyle = currentStyle.copy(bold = true)
                 2 -> currentStyle = currentStyle.copy(dim = true)
                 3 -> currentStyle = currentStyle.copy(italic = true)
@@ -523,6 +573,7 @@ class TerminalCore(
         savedStyle = TerminalStyle.DEFAULT
         scrollRegion.set(0, rows - 1, rows)
         cursorStyle = CursorStyle.BAR
+        // DECSTR：鼠标/焦点报告不重置（DEC STD 070 —— 非样式/光标类模式）。
         mutations += ScreenMutation.FULL
     }
 
@@ -530,7 +581,25 @@ class TerminalCore(
     private fun handleOsc(seq: VtParser.OSCSequence) {
         when (seq.code) {
             0, 1, 2 -> title = seq.data    // set title
-            8 -> { /* hyperlink — stored as flag on cell in future */ }
+            // ── Termux 对齐：OSC 8 超链接 ──
+            // data = "params;uri"（params 可为空，含 id=foo 显式键）或仅 "uri"。
+            // 空 URI（data 为 ";" 或空）= 闭链。链接编号进 TerminalStyle.linkIndex，
+            // 随落屏 cell 流入 RenderCell.link —— UI 查 [hyperlinks] 表得到 URI。
+            8 -> {
+                val semi = seq.data.indexOf(';')
+                val params: String
+                val uri: String
+                if (semi >= 0) {
+                    params = seq.data.substring(0, semi)
+                    uri = seq.data.substring(semi + 1)
+                } else {
+                    params = ""
+                    uri = seq.data
+                }
+                val newLink = hyperlinks.open(params, uri)
+                currentStyle = if (newLink == 0) currentStyle.copy(linkIndex = 0)
+                else currentStyle.copy(linkIndex = newLink)
+            }
             // T82: OSC 52 — clipboard write request (base64 payload). Format:
             //   OSC 52 ; [selection: c|p|s] ; [base64-data]  (selection part optional)
             // Empty payload = clipboard QUERY — we do not answer (host never
@@ -589,6 +658,8 @@ class TerminalCore(
                 cursor.column = 0
             }
             'H' -> tabStops.set(cursor.column)   // HTS — set horizontal tab stop at cursor column
+            '=' -> modes.applicationKeypad = true   // DECKPAM — application keypad
+            '>' -> modes.applicationKeypad = false  // DECKPNM — numeric keypad
             else -> { /* unknown ESC ignored */ }
         }
     }
@@ -613,6 +684,10 @@ class TerminalCore(
             2004 -> modes.bracketedPaste = enable
             47, 1047 -> switchAlternateScreen(enable, saveCursor = false)
             1049 -> switchAlternateScreen(enable, saveCursor = true)
+            // ── Termux 对齐：鼠标/焦点报告模式（vim/tmux/htop 触摸交互的前提）──
+            1004 -> focusReporting = FocusReporting.apply(focusReporting, enable)
+            1000, 1002, 1003, 1005, 1006, 1007, 1015, 1016, 10060 ->
+                mouseReporting = MouseReportingState.apply(mouseReporting, p, enable)
         }
     }
 
@@ -678,6 +753,10 @@ class TerminalCore(
         pendingClipboardRequests.clear()
         utf8.reset(); parser.reset()
         title = null
+        // Termux 对齐：RIS 全重置 —— 鼠标/焦点报告归零、超链接表清空
+        mouseReporting = MouseReportingState()
+        focusReporting = FocusReporting()
+        hyperlinks.reset()
         mutations += ScreenMutation.FULL
     }
 
@@ -701,6 +780,15 @@ class TerminalCore(
 
     /** Bracketed paste mode (CSI ?2004 h/l) — paste wrapper hint for the input layer. */
     val bracketedPaste: Boolean get() = modes.bracketedPaste
+
+    /** 当前鼠标报告模式（DECSET 1000/1002/… 状态）— UI 据此把触摸事件编码进 PTY。 */
+    val mouseMode: MouseReportingState get() = mouseReporting
+
+    /** 当前焦点报告模式（DECSET 1004）— UI 在窗口焦点变化时发送 ESC[I/ESC[O。 */
+    val focusMode: FocusReporting get() = focusReporting
+
+    /** 超链接编号 → URI（悬空编号返回 null；0 一律 null）。 */
+    fun hyperlinkUriOf(linkId: Int): String? = hyperlinks.uriOf(linkId)
 
     /** Total lines currently held in the main screen's scrollback. */
     val scrollbackCount: Int get() = mainBuffer.scrollbackLineCount
@@ -732,6 +820,7 @@ class TerminalCore(
             cursorStyle = cursorStyle,
             alternateScreen = modes.alternateScreen,
             applicationCursor = modes.applicationCursor,
+            applicationKeypad = modes.applicationKeypad,
             bracketedPaste = modes.bracketedPaste,
             reverseVideo = modes.reverseVideo,
             title = title,
@@ -739,8 +828,26 @@ class TerminalCore(
             scrollback = sb,
             scrollbackTotal = mainBuffer.scrollbackLineCount,
             scrollbackBase = mainBuffer.scrollbackLinesEver,
-            bellSeq = drainBell()
+            bellSeq = drainBell(),
+            mouseMode = mouseReporting,
+            focusMode = focusReporting,
+            // T86：屏内实际出现的 OSC 8 链接 id → URI（小表，UI 点击直查）
+            linkTable = buildLinkTable(visible, sb)
         )
+    }
+
+    /** 收集屏内/scrollback 渲染行里出现的链接 id → URI 映射（悬空 id 跳过）。 */
+    private fun buildLinkTable(
+        visible: List<List<RenderCell>>,
+        scrollback: List<List<RenderCell>>
+    ): Map<Int, String> {
+        val ids = HashSet<Int>()
+        for (row in visible) for (cell in row) if (cell.link != 0) ids.add(cell.link)
+        for (row in scrollback) for (cell in row) if (cell.link != 0) ids.add(cell.link)
+        if (ids.isEmpty()) return emptyMap()
+        val out = HashMap<Int, String>(ids.size)
+        for (id in ids) hyperlinks.uriOf(id)?.let { out[id] = it }
+        return out
     }
 
     /** Render one row of cells, trimming trailing default-blank cells (they are pure background). */
@@ -783,11 +890,13 @@ class TerminalCore(
         // by the UI (keeps default-vs-explicit color semantics in one place).
         if (c.style.inverse || modes.reverseVideo) flags = flags or RenderCell.FLAG_INVERSE
         if (c.width == 2) flags = flags or RenderCell.FLAG_WIDE
+        if (c.style.linkIndex != 0) flags = flags or RenderCell.FLAG_LINK
         return RenderCell(
             text = sb.toString(),
             fg = colorArgb(c.style.foreground),
             bg = colorArgb(c.style.background),
-            flags = flags
+            flags = flags,
+            link = c.style.linkIndex
         )
     }
 
@@ -810,6 +919,143 @@ class TerminalCore(
 
     /** The last [maxLines] scrollback lines, oldest first (main screen only). */
     override fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
+
+    // ═══ v0.2 capability overrides（Termux 对齐 —— native .so 加载失败回退
+    // 纯 Kotlin 引擎时，鼠标/焦点/按键/粘贴/链接能力不降级）═══
+
+    override fun mouseTrackingMode(): MouseTrackingMode = mouseReporting.tracking
+
+    override fun mouseWireEncoding(): MouseWireEncoding = mouseReporting.encoding
+
+    override fun focusReportEnabled(): Boolean = focusReporting.enabled
+
+    override fun altScrollEnabled(): Boolean = mouseReporting.altScroll
+
+    override fun applicationKeypadMode(): Boolean = modes.applicationKeypad
+
+    override fun encodeMouseEvent(
+        type: TerminalMouseEventType,
+        button: Int,
+        mods: Int,
+        col: Int,
+        row: Int
+    ): ByteArray? = MouseEncoder.encode(type, button, mods, col, row, mouseReporting)
+
+    override fun encodeFocus(focused: Boolean): ByteArray? =
+        encodeFocusEvent(focused, focusReporting)
+
+    /**
+     * 滚轮路由：鼠标跟踪开启 → 鼠标滚轮事件；否则备用屏 + 1007 → 方向键；
+     * 都不满足 → null（UI 滚动视口）。主屏滚轮恒为视口滚动（Termux 同语义）。
+     */
+    override fun encodeWheel(up: Boolean): ByteArray? {
+        if (mouseReporting.enabled) {
+            val t = if (up) TerminalMouseEventType.WHEEL_UP else TerminalMouseEventType.WHEEL_DOWN
+            return MouseEncoder.encode(t, 0, 0, cursor.column + 1, cursor.row + 1, mouseReporting)
+        }
+        if (mouseReporting.altScroll && modes.alternateScreen) {
+            return MouseEncoder.altScrollArrow(up)
+        }
+        return null
+    }
+
+    override fun encodeKey(key: TerminalKey, mods: Int): ByteArray? =
+        KeySequenceTables.encode(key, mods, modes.applicationCursor, modes.applicationKeypad)
+
+    override fun encodePaste(text: String): ByteArray? =
+        KeySequenceTables.encodePaste(text, modes.bracketedPaste)
+
+    /** 当前活跃链接表（id 升序快照；UI 主用 [linkAt] 单点查询）。 */
+    override fun links(): List<String> = hyperlinks.allUris()
+
+    /** 屏内坐标 → OSC 8 URI（备用屏同查；越界/无链接 → null）。 */
+    override fun linkAt(screenRow: Int, col: Int): String? {
+        if (screenRow !in 0 until rows || col !in 0 until cols) return null
+        val cell = currentBuffer.get(screenRow, col)
+        return hyperlinks.uriOf(cell.style.linkIndex)
+    }
+
+    // ═══ v0.2 屏内搜索（scrollback + 可见屏；全局行坐标）═══
+
+    /**
+     * 全局行文本（0 = 最老保留行）。备用屏无 scrollback —— 契约全局行
+     * 针对主屏；备用屏搜索仅覆盖可见区（行号以 scrollbackLineCount 偏移）。
+     */
+    private fun globalLineText(globalRow: Long): String? {
+        val sb = currentBuffer.let { if (modes.alternateScreen) 0 else mainBuffer.scrollbackLineCount }
+        return when {
+            globalRow < sb -> {
+                // scrollback 行（index 相对 scrollback 头）
+                val cells = mainBuffer.scrollbackLine(globalRow.toInt()) ?: return null
+                cellsToText(cells)
+            }
+            globalRow < sb + rows -> {
+                val cells = currentBuffer.row((globalRow - sb).toInt())
+                cellsToText(cells)
+            }
+            else -> null
+        }
+    }
+
+    private fun cellsToText(cells: Array<TerminalCell>): String {
+        val sb = StringBuilder(cells.size)
+        for (c in cells) {
+            if (c.isWideTrail) continue
+            sb.appendCodePoint(if (c.codePoint == 0) ' '.code else c.codePoint)
+            for (m in c.combining) sb.appendCodePoint(m)
+        }
+        return sb.toString()
+    }
+
+    /** [TerminalEngine.search]：朴素子串搜索（大小写/全词可控），全局行坐标命中。 */
+    override fun search(pattern: String, caseInsensitive: Boolean, wholeWord: Boolean): Int {
+        if (pattern.isEmpty()) { searchHits = emptyList(); activeSearchHitIndex = -1; return 0 }
+        val sbLines = if (modes.alternateScreen) 0 else mainBuffer.scrollbackLineCount
+        val totalLines = (sbLines + rows).toLong()
+        val needle = if (caseInsensitive) pattern.lowercase() else pattern
+        val found = ArrayList<TerminalSearchMatch>()
+        for (line in 0L until totalLines) {
+            val raw = globalLineText(line) ?: continue
+            val hay = if (caseInsensitive) raw.lowercase() else raw
+            var from = 0
+            while (true) {
+                val at = hay.indexOf(needle, from)
+                if (at < 0) break
+                val end = at + needle.length
+                if (wholeWord && !isWordBoundary(hay, at, end)) { from = at + 1; continue }
+                found.add(TerminalSearchMatch(line, at, line, end))
+                from = end
+            }
+        }
+        searchHits = found
+        activeSearchHitIndex = if (found.isEmpty()) -1 else 0
+        return found.size
+    }
+
+    private fun isWordBoundary(hay: String, start: Int, end: Int): Boolean {
+        fun wordChar(i: Int): Boolean {
+            val c = hay[i]
+            return c.isLetterOrDigit() || c == '_'
+        }
+        val before = start > 0 && wordChar(start - 1)
+        val after = end < hay.length && wordChar(end)
+        return !before && !after
+    }
+
+    override fun searchHitCount(): Int = searchHits.size
+
+    override fun searchHits(): List<TerminalSearchMatch> = searchHits
+
+    override fun clearSearch() {
+        searchHits = emptyList()
+        activeSearchHitIndex = -1
+    }
+
+    override fun setActiveSearchHit(index: Int) {
+        if (index in searchHits.indices) activeSearchHitIndex = index
+    }
+
+    override fun activeSearchHit(): Int = activeSearchHitIndex
 
     /**
      * 消费式读出"刚响过铃"（BEL）。
@@ -840,120 +1086,3 @@ class TerminalCore(
 
     private enum class CharsetStatus { ASCII, DEC_GRAPHICS }
 }
-
-/**
- * P1 fix：有界 mutation 累加器。超限时清空并折叠为 [ScreenMutation.FULL]，
- * 保证消费方至少收到一次全屏重绘信号，同时内存占用有界。
- */
-private class BoundedMutationList(private val capacity: Int) : AbstractMutableList<ScreenMutation>() {
-    private val delegate = ArrayList<ScreenMutation>(256)
-
-    override val size: Int get() = delegate.size
-    override fun get(index: Int): ScreenMutation = delegate[index]
-    override fun set(index: Int, element: ScreenMutation): ScreenMutation = delegate.set(index, element)
-    override fun removeAt(index: Int): ScreenMutation = delegate.removeAt(index)
-
-    override fun add(index: Int, element: ScreenMutation) {
-        if (delegate.size >= capacity) {
-            // 折叠：脏区信息丢失时保守降级为全屏重绘，而非无限增长
-            delegate.clear()
-            delegate.add(ScreenMutation.FULL)
-        }
-        delegate.add(index.coerceAtMost(delegate.size), element)
-    }
-
-    override fun clear() = delegate.clear()
-}
-
-/** Pure-JVM screen snapshot (no Android dependency). */
-data class TerminalScreenSnapshot(
-    val rows: Int, val cols: Int,
-    val cursorRow: Int, val cursorCol: Int,
-    val alternateScreen: Boolean,
-    val cursorVisible: Boolean,
-    val title: String?,
-    val renderedText: String,
-    /** T82: saved scrollback depth (main screen; 0 on alt screen). */
-    val scrollbackLineCount: Int = 0
-)
-
-/**
- * One renderable cell for the UI grid renderer.
- *
- * @param text  display text (base char + combining marks; wide chars carry FLAG_WIDE and
- *              occupy two columns visually — their trail cell is folded into this cell)
- * @param fg    foreground as opaque 0xAARRGGBB; **0 = theme default**
- * @param bg    background as opaque 0xAARRGGBB; **0 = transparent / theme default**
- * @param flags [RenderCell] FLAG_* bit set (bold/dim/italic/underline/blink/hidden/strike/inverse/wide)
- * @param link  OSC 8 hyperlink id — 1-based index into the session's URI table
- *              (0 = no link). v0.2 native capability; the Kotlin fallback never sets it.
- */
-data class RenderCell(
-    val text: String,
-    val fg: Long,
-    val bg: Long,
-    val flags: Int,
-    val link: Int = 0
-) {
-    companion object {
-        const val FLAG_BOLD = 1
-        const val FLAG_DIM = 1 shl 1
-        const val FLAG_ITALIC = 1 shl 2
-        const val FLAG_UNDERLINE = 1 shl 3
-        const val FLAG_BLINK = 1 shl 4
-        const val FLAG_HIDDEN = 1 shl 5
-        const val FLAG_STRIKE = 1 shl 6
-        /** SGR 7 (inverse) or global DECSCNM — UI swaps fg/bg (defaults become theme-inverted). */
-        const val FLAG_INVERSE = 1 shl 7
-        /** East-Asian wide char — occupies two columns; monospace CJK glyph advance ≈ 2 cells. */
-        const val FLAG_WIDE = 1 shl 8
-    }
-}
-
-/**
- * Styled render snapshot for the UI grid renderer (P83): full-fidelity screen state —
- * per-cell colors/attributes, cursor, DEC modes, and scrollback lines (styled too).
- *
- * Rendering contract: `scrollback` lines come FIRST (oldest→newest), then `lines`
- * (visible screen, top→bottom). Cursor position is relative to the visible screen
- * ([cursorRow] indexes [lines]); add `scrollback.size` when positioning in the full view.
- */
-data class TerminalRenderSnapshot(
-    val rows: Int,
-    val cols: Int,
-    val cursorRow: Int,
-    val cursorCol: Int,
-    val cursorVisible: Boolean,
-    /** T85：光标形状（DECSCUSR）—— UI 据此绘制块/下划线/竖杠。 */
-    val cursorStyle: CursorStyle = CursorStyle.BAR,
-    val alternateScreen: Boolean,
-    /** DECCKM — arrows should be encoded ESC O A instead of ESC [ A when true. */
-    val applicationCursor: Boolean,
-    /** Bracketed paste (CSI ?2004) — paste text should be wrapped in ESC[200~ … ESC[201~. */
-    val bracketedPaste: Boolean,
-    /** DECSCNM global reverse video — already folded into per-cell FLAG_INVERSE. */
-    val reverseVideo: Boolean,
-    val title: String?,
-    /** Visible screen rows, styled (trailing default-blank cells trimmed). */
-    val lines: List<List<RenderCell>>,
-    /** The [maxScrollbackLines] most recent scrollback rows, oldest first (main screen only). */
-    val scrollback: List<List<RenderCell>>,
-    /** Total scrollback lines held (may exceed [scrollback].size). */
-    val scrollbackTotal: Int,
-    /**
-     * T85（M-2）：scrollback 单调基准 —— 自会话起滚入 scrollback 的总行数，
-     * **只增不减**（超出容量被逐出的行也计入）。
-     *
-     * 行的稳定 id = scrollbackBase - scrollback.size + 行在合并列表中的下标。
-     * UI 用它做 LazyColumn 稳定 key：scrollback 淘汰/增长时行不再整体位移，
-     * 阅读历史不跳动、选区不错位。
-     */
-    val scrollbackBase: Long = 0L,
-    /**
-     * 响铃序号（BEL）：**只增不减**，宿主用「序号变了」判定刚响了一声。
-     *
-     * 用序号而不是布尔值，是因为 `yes`-类输出可能短时间连续发 BEL，
-     * 布尔去重会让第二声石沉大海；同时纯 JVM，不含任何 Android 依赖。
-     */
-    val bellSeq: Long = 0L
-)

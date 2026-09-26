@@ -1019,7 +1019,10 @@ private fun JsonLeafText(keyLabel: String?, value: String, depth: Int, color: Co
 
 /** 运行总结卡：Complete 事件的流水线收尾可视化。 */
 @Composable
-internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
+internal fun RunSummaryCard(
+    summary: AgentUiMessage.RunSummary,
+    onCopy: () -> Unit = {}
+) {
     val accent = MaterialTheme.colorScheme.primary
     val borderColor = MaterialTheme.colorScheme.outlineVariant
     Surface(
@@ -1053,14 +1056,24 @@ internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // 流水式输出收尾的复制入口：一键复制本轮最终回复（见 AgentMessageItem
+                // 的回填 —— 取本卡之前最后一条 Agent 消息文本）。
+                val copyCd = stringResource(R.string.chat_cd_copy)
+                IconButton(
+                    onClick = onCopy,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = copyCd,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SummaryStatChip(stringResource(R.string.chat_stat_iterations, summary.totalIterations))
-                SummaryStatChip(stringResource(R.string.chat_stat_tool_calls, summary.totalToolCalls))
-            }
+            // （收尾不再展示迭代次数/工具调用次数 —— 两项对用户价值低、噪音大；
+            // 耗时保留 + 复制入口补齐。）
 
             if (summary.summary.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -1073,22 +1086,6 @@ internal fun RunSummaryCard(summary: AgentUiMessage.RunSummary) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SummaryStatChip(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-        shape = RoundedCornerShape(6.dp)
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-        )
     }
 }
 

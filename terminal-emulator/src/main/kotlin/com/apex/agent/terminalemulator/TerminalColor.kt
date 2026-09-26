@@ -66,7 +66,15 @@ data class TerminalStyle(
     val blink: Boolean = false,
     val inverse: Boolean = false,
     val hidden: Boolean = false,
-    val strikethrough: Boolean = false
+    val strikethrough: Boolean = false,
+    /**
+     * OSC 8 活跃超链接编号（0 = 无链接）。
+     *
+     * 开链（`OSC 8;id=x;uri`）后所有落屏 cell 携带该编号，闭链归零。
+     * SGR 0（属性重置）**不清除**链接编号 —— xterm 语义：链接状态独立于
+     * 颜色属性，仅受 OSC 8 闭链影响（否则 `红字链接` 一过 SGR 0 就断链）。
+     */
+    val linkIndex: Int = 0
 ) {
     companion object { val DEFAULT = TerminalStyle() }
 }

@@ -274,6 +274,17 @@ class StreamingOpenAiClient(
                 put("max_tokens", effectiveMaxTokens)
             }
             put("stream", stream)
+            // ── 真实用量统计（stream_options.include_usage）──
+            // OpenAI 协议的流式响应默认**不携带** usage —— 不发这个开关，
+            // 顶部上下文仪表盘的「已用 Token」就永远是启发式估算值，用户会质疑
+            // 统计是假的。开启后服务端在流尾追加一帧 choices 为空 + usage 完整的
+            // 统计帧（OpenAI/vLLM/DeepSeek/OneAPI 等均已支持；对不认识该字段的
+            // 旧网关，OpenAI 协议要求未知字段应被忽略，风险可控）。
+            // 注意：统计帧 choices 为空 —— parseStreamChunk 对空 choices 原本直接
+            // 返回 null 丢弃，改为先提取 usage 再返回（见下方）。
+            if (stream) {
+                putJsonObject("stream_options") { put("include_usage", true) }
+            }
 
             // ── Sampling 参数（完整开放）─────────────────────────
             if (config.topP != 1.0f) put("top_p", config.topP)
@@ -609,8 +620,26 @@ class StreamingOpenAiClient(
     private fun parseStreamChunk(data: String): LlmStreamChunk? {
         return try {
             val json = Json.parseToJsonElement(data).jsonObject
-            val choices = json["choices"]?.jsonArray ?: return null
-            if (choices.isEmpty()) return null
+            // ── 真实用量统计帧（stream_options.include_usage）──
+            // 统计帧的形态：choices 为空数组 + usage 完整。旧实现首行就因空 choices
+            // 返回 null，统计被丢弃。先提取 usage；空 choices 且有 usage 的帧构造
+            // 仅携带 usage 的 chunk 返回（引擎据此刷新上下文仪表盘）。
+            // 安全转换（as? JsonObject）：OpenAI 协议下普通帧携带 "usage": null ——
+            // 直接 .jsonObject 会抛异常把整帧正文一起丢掉，绝不能用。
+            // DeepSeek 风格端点把 usage 放在末帧（choices 非空），下方正常帧构造
+            // 同样透传 usage，两种形态都覆盖。
+            val usage = (json["usage"] as? JsonObject)?.let { u ->
+                // intOrNull：容忍代理返回的 "1234.0" / 字符串数值（与非流式路径同口径）
+                Usage(
+                    promptTokens = u["prompt_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                    completionTokens = u["completion_tokens"]?.jsonPrimitive?.intOrNull ?: 0,
+                    totalTokens = u["total_tokens"]?.jsonPrimitive?.intOrNull ?: 0
+                )
+            }
+            val choices = json["choices"]?.jsonArray
+            if (choices == null || choices.isEmpty()) {
+                return if (usage != null) LlmStreamChunk(usage = usage) else null
+            }
 
             val choice = choices[0].jsonObject
             val delta = choice["delta"]?.jsonObject
@@ -671,6 +700,7 @@ class StreamingOpenAiClient(
                 reasoningContent = reasoningContent,
                 images = images,
                 videos = videos,
+                usage = usage,
                 isFinish = finishReason == "stop" || finishReason == "tool_calls"
             )
         } catch (e: Exception) {

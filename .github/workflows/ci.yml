@@ -134,17 +134,33 @@ jobs:
         run: |
           # Tool System v2: also covers app/src/main (app-level tool classes —
           # github/csmem/browser/ask_user — must not collide with core ids).
-          # The pattern matches literal id declarations only; dynamic ids
-          # (randomUUID/ID-constant references) are runtime values, not
-          # declarations, and are excluded by design.
-          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | sort | uniq -d)
+          # T86 修复：旧 grep 对整行做 uniq -d —— `override val id = PROVIDER_ID`
+          # 这类**常量引用**在不同类里字面相同（main 的 SearchProvider 系列），
+          # 被误判"重复"。语义 id 的唯一性只对**字面字符串声明**有判定意义：
+          # 常量引用的真实值在伴生对象里（PROVIDER_ID = "brave" 等），
+          # 本步骤改为对引用形式解析出常量值后再查重。
+          #
+          # 1) 字面声明：id = "literal" → 直接收集
+          # 2) 常量引用：id = CONST → 在同文件找 `const val CONST = "value"`
+          extract_ids() {
+            grep -rn "override val id = " "$1" | while IFS=: read -r file line rest; do
+              ref=$(echo "$rest" | sed -n 's/.*override val id = \([A-Z_][A-Z0-9_]*\)\s*$/\1/p' | tr -d ' ')
+              if [ -n "$ref" ]; then
+                val=$(grep -h "const val $ref = " "$file" | head -1 | sed 's/.*= *"\(.*\)".*/\1/')
+                echo "CONST_REF:${ref}=${val}"
+              else
+                echo "$rest" | sed -n 's/.*override val id = *"\(.*\)".*/LITERAL:\1/p'
+              fi
+            done
+          }
+          IDS=$( { extract_ids core/tool-registry/src/main/kotlin/; extract_ids platform/terminal/src/main/kotlin/; extract_ids app/src/main/kotlin/; } | sort | uniq -d)
           if [ -n "$IDS" ]; then
             echo "❌ Duplicate tool IDs found:"
             echo "$IDS"
             exit 1
           fi
           TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | wc -l)
-          echo "✅ $TOTAL unique tool IDs, no duplicates"
+          echo "✅ $TOTAL tool id declarations, no semantic duplicates"
 
       - name: Check duplicate classes
         run: |

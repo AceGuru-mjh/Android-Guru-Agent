@@ -257,14 +257,74 @@ class UbuntuBootstrapManager(
         }
 
         // ── 4. APT_UPDATE ──
+        // ★ 镜像自动 fallback（用户反馈「每次都会显示 APT 引导未完成」的根因之一）：
+        // 默认官方源（ports/archive.ubuntu.com）在大陆网络下普遍超时/被墙 →
+        // apt update 失败 → bootstrap FAILED → 降级 READY + bootstrapNote，
+        // 且 ensureReady 的 READY 短路让引导永不重试（见 Coordinator 侧修复）。
+        // 修复：官方源失败后依次尝试 TUNA → USTC → Aliyun（重写 sources 后重试），
+        // 任一成功即完成本阶段并记录所用镜像；全部失败才如实 stageFail。
         if (force || !evidence.containsKey(BootstrapState.APT_UPDATE.name)) {
             stageStart(BootstrapState.APT_UPDATE, "running apt-get update")
-            val updateResult = aptManager.update()
+            // 记录初始 sources 内容：镜像链全失败时恢复，避免 sources 永久停留在
+            // 最后一个镜像（官方源永不再被验证，海外/网络恢复用户可能更慢或被墙）
+            val rootfsDesc0 = provisioner.current()
+            val rootfsDir0 = rootfsDesc0?.location?.let { File(it.value) }
+            val originalSources: String? = rootfsDir0?.let { dir ->
+                runCatching { File(dir, "etc/apt/sources.list").readText() }.getOrNull()
+            }
+            var updateResult = aptManager.update()
+            var usedMirror: String? = null
             if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
-                val reason = updateResult.error?.message ?: updateResult.result?.stderr?.take(500) ?: "apt update failed"
+                val rootfsDesc = provisioner.current()
+                val rootfsDir = rootfsDesc?.location?.let { File(it.value) }
+                if (rootfsDir != null && rootfsDir.isDirectory) {
+                    for (mirrorId in MIRROR_FALLBACK_ORDER) {
+                        _progress.tryEmit(BootstrapProgress.StageStarted(
+                            BootstrapState.APT_UPDATE.name,
+                            "官方源 apt update 失败 — 切换镜像 $mirrorId 重试"
+                        ))
+                        val applied = sourcesList.apply(
+                            rootfsDir, rootfsDesc.architecture, mirrorId, force = true
+                        )
+                        if (!applied.written && applied.actions.any { it.startsWith("SourcesError") }) {
+                            continue
+                        }
+                        updateResult = aptManager.update()
+                        if (updateResult.state ==
+                            com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED
+                        ) {
+                            usedMirror = mirrorId
+                            break
+                        }
+                    }
+                    // P2（镜像回滚）：全部镜像失败 → 恢复原 sources（含官方源），
+                    // 下次重试从官方源重新起步而非钉死在 aliyun。
+                    if (usedMirror == null && originalSources != null && rootfsDir != null) {
+                        runCatching {
+                            File(rootfsDir, "etc/apt/sources.list").writeText(originalSources)
+                        }
+                    }
+                }
+            }
+            if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
+                val reason = updateResult.error?.message
+                    ?: updateResult.result?.stderr?.take(500)
+                    ?: "apt update failed (official + ${MIRROR_FALLBACK_ORDER.joinToString("/")} mirrors all failed)"
                 return stageFail(BootstrapState.APT_UPDATE, reason)
             }
-            stageDone(BootstrapState.APT_UPDATE)
+            if (usedMirror != null) {
+                evidence["APT_UPDATE_MIRROR"] = System.currentTimeMillis()
+                _progress.tryEmit(BootstrapProgress.StageCompleted(
+                    BootstrapState.APT_UPDATE.name,
+                    System.currentTimeMillis() - started
+                ))
+                completedStages.add("${BootstrapState.APT_UPDATE.name}@mirror=$usedMirror")
+                // P2（幂等）：镜像成功路径同样写入 APT_UPDATE 阶段证据 ——
+                // 旧实现漏写，超时/崩溃恢复时本阶段会被无意义地重跑（分钟级）。
+                evidence[BootstrapState.APT_UPDATE.name] = System.currentTimeMillis()
+            } else {
+                stageDone(BootstrapState.APT_UPDATE)
+            }
         }
 
         // ── 5. BASE_PACKAGES ──
@@ -435,5 +495,12 @@ class UbuntuBootstrapManager(
          */
         const val DEFAULT_BOOTSTRAP_TIMEOUT_MS: Long = 900_000L
         const val LOCK_FILENAME = ".bootstrap.lock"
+
+        /**
+         * ★ APT_UPDATE 失败时的镜像自动 fallback 顺序（AptMirrorRegistry id）。
+         * TUNA/USTC/Aliyun 均为大陆环境下 ports.ubuntu.com 的实际可用替代；
+         * 全球用户不受影响 —— 仅在官方源失败后才尝试。
+         */
+        val MIRROR_FALLBACK_ORDER: List<String> = listOf("tuna", "ustc", "aliyun")
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -330,6 +332,27 @@ private fun UbuntuEnvironmentCard(
                 color = Color(0xFFE0A63C),
                 maxLines = 3
             )
+            // ★ 引导降级一键重试：ensureReady 对降级 READY（note != null）不再短路
+            //（UbuntuLifecycleCoordinator 修复），点击即幂等续跑 bootstrap —— 现在
+            // 还带官方源失败后的 TUNA/USTC/Aliyun 镜像自动 fallback，大陆网络下
+            // 重试一次大概率直接修好，而不是永远挂着降级注记。
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.material3.OutlinedButton(
+                onClick = onInstall,
+                modifier = Modifier.heightIn(min = 32.dp)
+            ) {
+                androidx.compose.material3.Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = Color(0xFFE0A63C)
+                )
+                Text(
+                    stringResource(R.string.term_finish_bootstrap),
+                    color = Color(0xFFE0A63C),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
 
         // 操作按钮（状态驱动）

@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +92,20 @@ class McpHostServer(
         /** 并发连接上限（超出立即 503，防连接洪水）。 */
         const val MAX_CONCURRENT_CONNECTIONS = 64
 
+        /**
+         * P2：会话空闲超时（毫秒）。客户端崩溃/断网/忘记发 DELETE（PC 端
+         * Cline 重启即产生一个幽灵会话）时，旧实现条目永久驻留 —— 会话表
+         * 只增不减，「已连接客户端」计数虚高且内存泄漏。30 分钟无请求即回收
+         *（活跃会话每次请求都刷新 lastSeenAt，不受影响）。
+         */
+        const val SESSION_IDLE_TIMEOUT_MS = 30L * 60_000
+
+        /** P2：会话表容量上限（超出按 lastSeenAt 最旧淘汰，与空闲回收双保险）。 */
+        const val MAX_SESSIONS = 256
+
+        /** P2：空闲会话周期扫描间隔。 */
+        const val SESSION_SWEEP_INTERVAL_MS = 60_000L
+
         /** 审计日志保留条数。 */
         const val AUDIT_LOG_SIZE = 100
     }
@@ -132,7 +147,9 @@ class McpHostServer(
             serverSocket = socket
             _isRunning.value = true
             serverJob = scope.launch(Dispatchers.IO + SupervisorJob()) {
-                acceptLoop(socket)
+                launch { acceptLoop(socket) }
+                // P2：空闲会话/陈旧限速器周期扫描（serverJob 取消时连带取消）
+                launch { sessionSweepLoop() }
             }
         }
     }
@@ -336,8 +353,10 @@ class McpHostServer(
 
     /** initialize：新建会话 + 协议握手结果。 */
     private fun handleInitialize(remote: String, rpc: RpcRequest, started: Long): HttpResponse {
-        val sessionId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
+        // P2：插入前修剪空闲会话，防幽灵会话（客户端崩溃/断网不 DELETE）无限驻留
+        pruneStaleSessions(now)
+        val sessionId = UUID.randomUUID().toString()
         sessionMap[sessionId] = HostSessionInfo(
             sessionId = sessionId,
             remoteAddress = remote,
@@ -345,6 +364,12 @@ class McpHostServer(
             lastSeenAt = now,
             requestCount = 1
         )
+        // P2：容量上限 —— 超出按 lastSeenAt 最旧淘汰（正常客户端会重新 initialize）
+        if (sessionMap.size > MAX_SESSIONS) {
+            sessionMap.entries.sortedByDescending { it.value.lastSeenAt }
+                .drop(MAX_SESSIONS)
+                .forEach { sessionMap.remove(it.key) }
+        }
         publishSessions()
         val result = buildJsonObject {
             put("protocolVersion", PROTOCOL_VERSION)
@@ -448,6 +473,26 @@ class McpHostServer(
         }?.let { publishSessions() }
     }
 
+    /**
+     * P2：空闲会话/陈旧限速器修剪（幂等）。返回是否有变更（调用方决定是否
+     * 重发会话快照）。 ConcurrentHashMap 原子选代删除，无需额外锁。
+     */
+    private fun pruneStaleSessions(now: Long): Boolean {
+        val sessionsBefore = sessionMap.size
+        sessionMap.values.removeIf { now - it.lastSeenAt > SESSION_IDLE_TIMEOUT_MS }
+        val limitersBefore = rateLimiters.size
+        rateLimiters.entries.removeIf { it.value.isStale(now) }
+        return sessionMap.size != sessionsBefore || rateLimiters.size != limitersBefore
+    }
+
+    /** P2：周期扫描空闲会话（每 [SESSION_SWEEP_INTERVAL_MS]，与 accept 循环同生命周期）。 */
+    private suspend fun CoroutineScope.sessionSweepLoop() {
+        while (isActive && _isRunning.value) {
+            delay(SESSION_SWEEP_INTERVAL_MS)
+            if (pruneStaleSessions(System.currentTimeMillis())) publishSessions()
+        }
+    }
+
     private fun publishSessions() {
         _sessions.value = sessionMap.values.sortedByDescending { it.lastSeenAt }
     }
@@ -481,6 +526,13 @@ class McpHostServer(
     private class WindowCounter(private val limit: Int) {
         private var windowStartMinute: Long = -1
         private var count = 0
+
+        /** P2：窗口已落后当前 ≥2 分钟 → 无活跃流量，可从限速表回收（防只增不减）。 */
+        @Synchronized
+        fun isStale(nowMs: Long): Boolean {
+            val minute = nowMs / 60_000
+            return windowStartMinute in 0..(minute - 2)
+        }
 
         @Synchronized
         fun tryAcquire(): Boolean {

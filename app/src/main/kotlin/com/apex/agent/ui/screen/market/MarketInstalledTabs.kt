@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.R
 import com.apex.agent.core.tools.connector.ConnectorDef
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -46,6 +47,19 @@ import com.apex.agent.core.tools.mcp.McpTransport
 
 /** 空态统一动作 —— 跳回「市场」发现视图（保留当前子页签）。 */
 private val goToBrowse: (MarketViewModel) -> Unit = { it.selectScope(MarketScope.BROWSE) }
+
+/**
+ * 沙箱就绪态判定：与 ProotMcpProcessLauncher 门禁同源（rootfs current 链接存在）。
+ * 与 BrowseMcpTab 添加对话框的判定保持一致 —— 判定口径分叉会造成「添加能开沙箱、
+ * 编辑却提示不可用」的矛盾体验。
+ */
+@Composable
+private fun rememberSandboxAvailable(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.remember {
+        java.io.File(context.filesDir, "rootfs/ubuntu/current").exists()
+    }
+}
 
 // ═══ 已安装管理 · 插件 ═══
 
@@ -254,6 +268,8 @@ internal fun InstalledSkillsTab(state: MarketUiState, viewModel: MarketViewModel
 @Composable
 internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
     var pendingDelete by remember { mutableStateOf<MarketMcpRow?>(null) }
+    // 编辑器：VM 持有编辑快照（跨刷新存活，避免列表刷新把填一半的表单冲掉）
+    val editingConfig by viewModel.editingMcp.collectAsStateWithLifecycle()
 
     if (state.mcps.isEmpty()) {
         MarketEmptyState(
@@ -307,6 +323,16 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                         checked = server.enabled,
                         onCheckedChange = { viewModel.toggleMcp(server.name, it) }
                     )
+                    // 配置编辑：改 URL / 命令 / 参数 / 环境变量 / 沙箱开关。
+                    // BUILTIN 是进程内预置（无用户可配字段），不提供编辑。
+                    if (!server.builtin) {
+                        TextButton(
+                            enabled = state.mcpConnecting != server.name,
+                            onClick = { viewModel.openMcpEditor(server.name) }
+                        ) {
+                            Text(stringResource(R.string.market_mcp_edit_action))
+                        }
+                    }
                     TextButton(
                         // 连接中禁用该行按钮防双击并发重连（断开不受影响）
                         enabled = state.mcpConnecting != server.name,
@@ -355,6 +381,16 @@ internal fun InstalledMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                     Text(stringResource(R.string.market_action_cancel))
                 }
             }
+        )
+    }
+
+    // ═══ 配置编辑对话框（预填现有配置；保存后断开→覆盖→重连）═══
+    editingConfig?.let { config ->
+        EditMcpDialog(
+            initial = config,
+            sandboxAvailable = rememberSandboxAvailable(),
+            onSave = { updated -> viewModel.updateMcpServer(updated) },
+            onDismiss = { viewModel.closeMcpEditor() }
         )
     }
 }

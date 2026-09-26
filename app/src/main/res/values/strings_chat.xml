@@ -289,4 +289,35 @@
     <string name="chat_format_custom">Custom schema</string>
     <string name="chat_llm_not_configured">API is not configured yet (Base URL + API Key + Model). Open Settings to set it up.</string>
     <string name="chat_llm_not_configured_short">API is not configured yet</string>
+    <!-- ═══ P2 i18n: message actions menu (AgentMessageActions) ═══ -->
+    <string name="chat_msg_copy_full">Copy full text</string>
+    <string name="chat_msg_copied_full">Full text copied</string>
+    <string name="chat_msg_regenerate">Regenerate this reply</string>
+    <string name="chat_msg_delete">Delete this message</string>
+    <string name="chat_msg_delete_from">Delete this message and below</string>
+    <string name="chat_msg_delete_busy">Reply is being generated — try deleting later</string>
+    <string name="chat_msg_regenerate_busy">Reply is being generated — try regenerating later</string>
+    <string name="chat_msg_no_user_message">No user message before this reply to resend</string>
+    <string name="chat_msg_attachment_only_retry">Attachment-only messages cannot be regenerated yet</string>
+    <!-- ═══ P2 i18n: attach button menu (AttachButton) ═══ -->
+    <string name="chat_attach_file">Upload file</string>
+    <string name="chat_attach_image">Upload image</string>
+    <string name="chat_cd_attach_close">Close</string>
+    <string name="chat_cd_attach_add">Add attachment</string>
+
+    <!-- ═══ 双级思考控制（模型原生强度 + 强制深度思考）═══ -->
+    <string name="chat_cd_thinking_menu">Thinking controls</string>
+    <string name="chat_thinking_chip_default">💭 Thinking</string>
+    <string name="chat_thinking_chip_effort">💭 %1$s</string>
+    <string name="chat_thinking_chip_forced">🌀 Forced deep thinking</string>
+    <string name="chat_thinking_effort_title">Model reasoning effort (API-native)</string>
+    <string name="chat_thinking_effort_desc">Sent as native API params (reasoning_effort / thinking budget). Only models with a thinking mode respond to it; harmless for others.</string>
+    <string name="chat_thinking_force_title">Force deep thinking</string>
+    <string name="chat_thinking_force_desc">Prompt-level forcing for ANY model: injects exhaustive Tree-of-Thoughts reasoning, post-tool verification and a final self-check. Stacks with the effort above.</string>
+
+    <!-- ═══ HTML artifact in-app preview ═══ -->
+    <string name="chat_cd_preview_html">Preview HTML</string>
+    <string name="html_preview_refresh">Reload preview</string>
+    <string name="html_preview_close">Close preview</string>
+    <string name="html_preview_load_failed">Failed to load file</string>
 </resources>

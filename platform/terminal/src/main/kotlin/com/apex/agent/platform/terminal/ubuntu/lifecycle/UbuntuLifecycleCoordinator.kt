@@ -275,7 +275,16 @@ class UbuntuLifecycleCoordinator(
         withTimeoutOrNull(timeoutMs) {
             mutex.withLock {
                 // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
-                if (!force && _state.value.phase == Phase.READY) {
+                // ★ 修复「每次都会显示 APT 引导未完成」（用户反馈）：T83 降级语义下
+                // phase=READY 但 bootstrapNote != null（引导失败降级）时，秒回会让
+                // bootstrap 永不重试、降级注记永不消失 —— 引导降级态不走短路，
+                // 继续走完整编排：bootstrap 幂等续跑（evidence 只含已完成阶段 +
+                // APT_UPDATE 镜像 fallback），网络恢复后下一次 ensureReady 即自愈
+                // 为完整 READY；引导本来就完整的设备不受影响。
+                if (!force &&
+                    _state.value.phase == Phase.READY &&
+                    _state.value.bootstrapNote == null
+                ) {
                     return@withLock EnsureResult.AlreadyReady(
                         _state.value.capabilities ?: emptyList()
                     )
@@ -288,111 +297,6 @@ class UbuntuLifecycleCoordinator(
             phase = _state.value.phase,
             message = "仍在 ${_state.value.phase.name} 阶段 — 再次调用继续等待，进度不会丢失"
         )
-
-    private suspend fun runEnsureSteps(force: Boolean, startedAt: Long, fromPhase: Phase): EnsureResult {
-        // ── Stage 1: rootfs（幂等判断由 provisioner 承担 —— 编排层不复制 rootfs 状态语义）──
-        setPhase(Phase.INSTALLING)
-        // 契约防御：provisioner 契约是返回 ProvisioningResult；抛异常属契约破坏 ——
-        // 归一为结构化 Failed（信息保留，非吞错；与 BootstrapManager 的 bootstrap
-        // 异常处理模式一致）。CancellationException（含超时/调用方取消）始终透传。
-        val installResult = try {
-            provisioner.install(target, force)
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (e: Exception) {
-            return markFailed(Stage.INSTALL, "install crashed: ${e.message}", retryable = true)
-        }
-        when (installResult) {
-            is ProvisioningResult.Ready, is ProvisioningResult.AlreadyReady -> Unit
-            is ProvisioningResult.Failed -> {
-                return markFailed(
-                    Stage.INSTALL,
-                    "${installResult.error.code}: ${installResult.error.message}",
-                    installResult.error.recoverable
-                )
-            }
-            is ProvisioningResult.Cancelled -> {
-                return EnsureResult.Cancelled(_state.value.phase)
-            }
-            is ProvisioningResult.Busy -> {
-                return EnsureResult.InProgress(
-                    phase = Phase.INSTALLING,
-                    message = "另一 rootfs 安装正在进程内进行（${installResult.message}）— 稍后重试 ensure"
-                )
-            }
-            else -> {
-                // Removed/Invalidated 等非安装语义结果 —— 诚实上报为 install 阶段异常。
-                return markFailed(Stage.INSTALL, "unexpected install result: $installResult", retryable = true)
-            }
-        }
-
-        // ── Stage 2: bootstrap（sources → network → apt update → base packages）──
-        // T83 内置交付语义：rootfs 解包已就绪（离线可得），bootstrap 是需网络的
-        // **增强而非门槛** —— 失败降级为 READY（bootstrapNote 携带原因），环境照常可用；
-        // 网络恢复后 force=true 或 restart 后的 ensureReady 会重试引导。
-        setPhase(Phase.BOOTSTRAPPING)
-        var bootstrapDegraded = false
-        var bootstrapError: String? = null
-        val br = try {
-            bootstrapFn(force, defaultTimeoutMs)
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (e: Exception) {
-            // 端口异常与 FAILED 同语义降级：rootfs 健康（install 已验），
-            // 引导链路问题不阻断环境可用 —— 诚实记录原因。
-            bootstrapDegraded = true
-            bootstrapError = "bootstrap crashed: ${e.message}"
-            null
-        }
-        if (br != null) when (br.outcome) {
-            BootstrapOutcome.READY, BootstrapOutcome.ALREADY_READY -> Unit
-            BootstrapOutcome.IN_PROGRESS -> {
-                return EnsureResult.InProgress(
-                    phase = Phase.BOOTSTRAPPING,
-                    message = "bootstrap 仍在进行（state=${br.state}）— 再次调用继续等待"
-                )
-            }
-            BootstrapOutcome.FAILED -> {
-                bootstrapDegraded = true
-                bootstrapError = "${br.error ?: "bootstrap failed"}（failedStage=${br.failedStage}）"
-            }
-            BootstrapOutcome.CANCELLED, BootstrapOutcome.BUSY -> {
-                // 非终态 —— 上报进行中语义（诚实，不伪造失败）。
-                return EnsureResult.InProgress(
-                    phase = Phase.BOOTSTRAPPING,
-                    message = "bootstrap ${br.outcome.name}（state=${br.state}）— ${br.error ?: "稍后重试 ensure"}"
-                )
-            }
-        }
-
-        // ── Stage 3: capability 快照（诊断性 —— 探测失败不否定 READY）──
-        // Kotlin try/catch 的 definite assignment 规则禁止 val 双路径赋值 → var 局部。
-        var caps: List<CapabilityEntry> = emptyList()
-        var probeDegraded = false
-        var probeError: String? = null
-        try {
-            caps = probeFn()
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (e: Exception) {
-            // 环境已 READY；capability 快照是附加诊断（T81 §29：探测不可用 ≠ 环境不可用）。
-            probeDegraded = true
-            probeError = e.message ?: e::class.java.simpleName
-        }
-
-        lastReadyAt = clock()
-        lastFailure = null
-        setPhase(Phase.READY, capabilities = caps, bootstrapNote = bootstrapError)
-        return EnsureResult.Ready(
-            durationMs = (clock() - startedAt).coerceAtLeast(0L),
-            capabilities = caps,
-            fromPhase = fromPhase,
-            probeDegraded = probeDegraded,
-            probeError = probeError,
-            bootstrapDegraded = bootstrapDegraded,
-            bootstrapError = bootstrapError
-        )
-    }
 
     /**
      * T84：档案新鲜度迁移 —— 已装 rootfs 的 checksum ≠ 当前内置注册表指纹时，

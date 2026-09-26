@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,7 +58,9 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.theme.LocalShowTimestamps
+import kotlinx.coroutines.delay
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import com.apex.agent.R
 
 // ═══ 消息组件 ═══
@@ -78,7 +81,9 @@ internal fun AgentMessageItem(
     // 多模态输出：Agent 回复 markdown 里的生成图片点击 → Lightbox（URL/data URI）。
     onMarkdownImageClick: (String) -> Unit = {},
     // 任务总结卡显隐（设置 showRunSummary；false 时 RunSummary 完全不渲染、不占位）。
-    showRunSummary: Boolean = true
+    showRunSummary: Boolean = true,
+    // HTML 产物预览：工具卡预览钮回调（宿主绝对路径）→ 应用内 WebView。
+    onPreviewHtml: (String) -> Unit = {}
 ) {
     when (message) {
         is AgentUiMessage.User -> UserBubble(
@@ -98,21 +103,55 @@ internal fun AgentMessageItem(
             onDeleteFrom = { vm.deleteMessagesFrom(message.id) },
             onImageClick = onMarkdownImageClick
         )
-        is AgentUiMessage.ToolCall -> ToolCallCard(
-            toolCall = message,
-            onRetry = retryLastUser(vm)
-        )
+        is AgentUiMessage.ToolCall -> {
+            // HTML 产物检测：成功写入 .html 的调用给卡头挂「预览」钮（一次解析，按卡缓存）。
+            val htmlPath = remember(message.id, message.success) {
+                HtmlArtifactDetector.extractHtmlPath(message.toolName, message.args)
+                    ?.let { vm.resolveHtmlPreviewPath(it) }
+            }
+            ToolCallCard(
+                toolCall = message,
+                onRetry = retryLastUser(vm),
+                htmlPreviewPath = htmlPath,
+                onPreviewHtml = onPreviewHtml
+            )
+        }
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.PipelineBanner -> PipelineBannerCard(message)
         is AgentUiMessage.StepMarker -> StepMarkerCard(message)
         // 任务总结卡：默认隐藏（showRunSummary=false 时完全不渲染，不占空间）
-        is AgentUiMessage.RunSummary -> if (showRunSummary) RunSummaryCard(message)
+        // 收尾新增复制入口：一键复制本轮最后一条 Agent 回复（无回复时回退总结文本）。
+        is AgentUiMessage.RunSummary -> if (showRunSummary) {
+            val clipboard = LocalClipboardManager.current
+            val context = LocalContext.current
+            val copiedToast = stringResource(R.string.chat_copied)
+            RunSummaryCard(
+                summary = message,
+                onCopy = {
+                    val lastAgentText = vm.uiState.value.messages
+                        .asSequence()
+                        .takeWhile { it.id != message.id }
+                        .filterIsInstance<AgentUiMessage.Agent>()
+                        .lastOrNull { !it.isPartial }
+                        ?.text
+                        ?: message.summary
+                    if (lastAgentText.isNotBlank()) {
+                        clipboard.setText(AnnotatedString(lastAgentText))
+                        Toast.makeText(context, copiedToast, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
         is AgentUiMessage.Error -> ErrorBlock(
             message = message.message,
             canRetry = message.canRetry,
             onRetry = retryLastUser(vm)
         )
-        is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought, finished = true)
+        is AgentUiMessage.ThinkingMessage -> ThinkingBubble(
+            text = message.thought,
+            finished = true,
+            durationMs = message.durationMs
+        )
         is AgentUiMessage.PlanMessage -> PlanCard(message.plan, currentStepIndex = currentStepIndex)
         is AgentUiMessage.SpecMessage -> SpecCard(message.spec)
         is AgentUiMessage.ReflectionReviewMessage -> ReflectionReviewBlock(message.text)
@@ -489,9 +528,36 @@ internal fun StreamingResponseBubble(
     }
 }
 
+/** 秒数展示格式：①12.3s ②1m 02s（超过 60s）；0ms 兼容显示 0.0s。 */
+internal fun formatThinkingSeconds(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000.0
+    return if (durationMs >= 60_000) {
+        val m = durationMs / 60_000
+        val s = (durationMs % 60_000) / 1000.0
+        String.format(Locale.US, "%dm %04.1fs", m, s)
+    } else {
+        String.format(Locale.US, "%.1fs", totalSeconds)
+    }
+}
+
 @Composable
-internal fun ThinkingBubble(text: String, finished: Boolean = false) {
+internal fun ThinkingBubble(
+    text: String,
+    finished: Boolean = false,
+    durationMs: Long = 0,
+    liveStartElapsed: Long = 0
+) {
     var expanded by remember { mutableStateOf(finished) }
+
+    // 流式思考中：实时秒数计时器（每 200ms 刷新，低于重组节流频率，几乎无开销）。
+    val liveSeconds = if (!finished && liveStartElapsed > 0) {
+        produceState(initialValue = 0L, key1 = liveStartElapsed) {
+            while (true) {
+                value = android.os.SystemClock.elapsedRealtime() - liveStartElapsed
+                delay(200)
+            }
+        }.value
+    } else 0L
 
     val tertiaryColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
     Surface(
@@ -537,6 +603,20 @@ internal fun ThinkingBubble(text: String, finished: Boolean = false) {
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.weight(1f)
                 )
+                // 每一轮模型思考的秒数：流式中实时跳动，完成后定格实测值。
+                val secondsText = if (finished) {
+                    formatThinkingSeconds(durationMs)
+                } else if (liveStartElapsed > 0) {
+                    formatThinkingSeconds(liveSeconds)
+                } else null
+                if (secondsText != null) {
+                    Text(
+                        text = secondsText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 Icon(
                     imageVector = if (expanded) {
                         Icons.Default.KeyboardArrowUp

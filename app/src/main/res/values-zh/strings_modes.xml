@@ -78,6 +78,7 @@
     <!-- ═══ 思考档位速览（同弹层，数据来自 ThinkingProfile 静态表）═══ -->
     <string name="mode_guide_thinking_title">思考档位速览</string>
     <string name="mode_guide_thinking_subtitle">各档执行画像（迭代倍率 / 验证回路 / 工具输出预算）——详见模式系统文档</string>
+    <string name="mode_guide_thinking_dual_note">聊天页提供两个独立思考控制：模型原生思考强度（API 参数，仅带思考模式的模型生效）+ 强制深度思考开关（提示词层，任何模型生效 —— 档位钉在 MAXIMUM）。下表为引擎侧档案参考。</string>
     <string name="mode_guide_thinking_col_level">档位</string>
     <string name="mode_guide_thinking_col_iters">迭代</string>
     <string name="mode_guide_thinking_col_verify">验证</string>

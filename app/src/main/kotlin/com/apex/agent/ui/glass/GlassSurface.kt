@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeState
@@ -161,26 +162,46 @@ private fun DrawScope.drawGlassOverlays(
         style = Stroke(width = 1.5.dp.toPx())
     )
 
-    // ═══ 镜面高光：顶部 45% 高度的受光扫掠 ═══
+    // ═══ 镜面高光：斜向扫掠（Liquid Glass 标志性受光）═══
+    // 修复白天模式玻璃「一片死白没质感」：原纯垂直渐变在乳白底上几乎不可见。
+    // 改为左上→右下的斜向扫掠（真实玻璃面板的受光方向），白天在乳白底上
+    // 仍能看出光带流动；夜间在暗底上形成斜向光纹。
     val specular = palette.specular.copy(
         alpha = (palette.specular.alpha * boost).coerceAtMost(0.35f)
     )
     if (specular.alpha > 0.005f) {
         drawOutline(
             outline = outline,
-            brush = Brush.verticalGradient(
+            brush = Brush.linearGradient(
                 colors = listOf(specular, Color.Transparent),
-                startY = 0f,
-                endY = size.height * 0.45f
+                start = Offset(size.width * 0.08f, 0f),
+                end = Offset(size.width * 0.92f, size.height * 0.62f)
+            )
+        )
+    }
+
+    // ═══ 中带分隔高光：玻璃「厚度」层次 ═══
+    // 顶部受光带与底部定界之间加一条极淡的水平亮线（玻璃板中层的
+    // 内反射），白天模式下给乳白霜面提供纵深，不再是平面的白块。
+    if (!palette.dark) {
+        val mid = size.height * 0.55f
+        drawOutline(
+            outline = outline,
+            brush = Brush.verticalGradient(
+                colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.05f * boost), Color.Transparent),
+                startY = mid - size.height * 0.08f,
+                endY = mid + size.height * 0.08f
             )
         )
     }
 
     // ═══ 底部内阴影：自下而上的深度渐暗 ═══
+    // 白天模式减弱（暗色在乳白底上极易显脏，原 0.07 会被误读为灰框脏边）
+    val bottomShadeAlpha = if (palette.dark) 0.07f + activation * 0.05f else 0.035f + activation * 0.03f
     drawOutline(
         outline = outline,
         brush = Brush.verticalGradient(
-            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.07f + activation * 0.05f)),
+            colors = listOf(Color.Transparent, Color.Black.copy(alpha = bottomShadeAlpha)),
             startY = size.height * 0.65f,
             endY = size.height
         )

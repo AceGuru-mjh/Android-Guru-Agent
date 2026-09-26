@@ -191,16 +191,19 @@ private fun vibrateOnce(context: android.content.Context) {
 }
 
 /** 终端主题（深色底自含调色 —— 终端内容不受 app 主题影响；T85 对齐 ConsoleTheme
- * 的 mint 强调色，整页视觉连续：页 chrome 0xFF0C1210 / 内容区 0xFF0E1411）。 */
+ * 的 mint 强调色，整页视觉连续：页 chrome 0xFF0C1210 / 内容区 0xFF0E1411）。
+ * ★ 字色改纯白（用户反馈「终端应该用白色字体」）：原 0xFFD6E5DC 偏绿发暗，
+ * 在深色底上对比度不足（长输出阅读疲劳）。默认前景色改为纯白，错误/高亮
+ * 仍由 cell 级 ANSI 着色覆盖；选区/光标保持 mint 强调色不变。 */
 private object TerminalTheme {
     val background = Color(0xFF0E1411)
-    val foreground = Color(0xFFD6E5DC)
+    val foreground = Color(0xFFFFFFFF)
     val selection = Color(0x664EE9B0)
     val cursor = Color(0xFF7CF0C6)
     val toolbarBg = Color(0xFF111815)
     val toolbarKey = Color(0xFF1A2420)
     val toolbarKeyHi = Color(0xFF4EE9B0)
-    val toolbarKeyText = Color(0xFFAABBB1)
+    val toolbarKeyText = Color(0xFFE8F2ED)
 }
 
 /** cell 级选择区间（行/列；列区间左闭右开，含 from 至 to 前一列）。 */

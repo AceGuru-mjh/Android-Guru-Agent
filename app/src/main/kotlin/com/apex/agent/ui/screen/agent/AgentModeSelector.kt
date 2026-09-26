@@ -58,6 +58,10 @@ import com.apex.agent.R
  * #168：胶囊右侧新增「?」图标 —— 打开模式指南底部弹层（[ModeGuideSheet]：
  * 六模式行为矩阵 + 思考档位简表），让「Plan/Spec 差在哪」「Assist 什么时候
  * 打断我」有处可意。
+ *
+ * 紧凑化（用户反馈「调节build和plan模式和思考程度上面那一部分太高」）：
+ * 胶囊从 36dp 压到 28dp（padding 6→3、图标 16→13、字号 labelLarge→labelMedium），
+ * 顶部模式栏整行高度由胶囊决定 → 从 ~52dp 收敛到 ~36dp。
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -72,7 +76,7 @@ internal fun AgentModeSelector(
 
     Box {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // ── 触发器：当前模式胶囊 ──
+            // ── 触发器：当前模式胶囊（紧凑 28dp）──
             Surface(
                 onClick = { expanded = true },
                 shape = RoundedCornerShape(50),
@@ -80,28 +84,29 @@ internal fun AgentModeSelector(
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                 modifier = Modifier
-                    .heightIn(min = 36.dp)
+                    .heightIn(min = 28.dp)
                     .semantics { contentDescription = selectorDescription }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Icon(
                         imageVector = agentModeIcon(current),
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = current.displayName,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
                     )
                     Icon(
                         imageVector = Icons.Default.KeyboardArrowDown,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -114,7 +119,7 @@ internal fun AgentModeSelector(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .padding(start = 2.dp)
-                        .size(16.dp)
+                        .size(14.dp)
                         .clickable { onOpenGuide() }
                 )
             }

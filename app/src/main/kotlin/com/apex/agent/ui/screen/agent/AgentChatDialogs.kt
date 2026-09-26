@@ -11,14 +11,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ElevatedCard
@@ -99,6 +100,11 @@ internal fun CustomInstructionDialog(
 /**
  * 双级思考控制菜单（替换旧版六档单一选择器）。
  *
+ * 紧凑化（用户反馈「思考程度那一部分太高」）：原 AssistChip 默认 32dp 高 +
+ * 内部额外 padding，且 emoji 文案在部分字体下撑高。换成与 AgentModeSelector
+ * 同款的 28dp 紧凑胶囊（图标 13dp + labelMedium），顶栏高度由整行最高胶囊
+ * 决定 → 全行统一在 ~36dp 内。
+ *
  * 第一级「模型思考强度」：模型**原生**推理参数（reasoning_effort /
  * thinking.budget_tokens / enable_thinking，按 Provider 差异化下发）——
  * 仅对支持思考模式的模型生效，档位持久化到默认 ModelProfile。
@@ -117,9 +123,26 @@ internal fun ThinkingControlMenu(
     val thinkingMenuCd = stringResource(R.string.chat_cd_thinking_menu)
 
     Box {
-        AssistChip(
+        Surface(
             onClick = { expanded = true },
-            label = {
+            shape = RoundedCornerShape(50),
+            // 强制深度思考态换 tertiary 配色，对齐原 AssistChip 的 icon tint 语义
+            color = if (forceDeepThinking) MaterialTheme.colorScheme.tertiaryContainer
+            else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (forceDeepThinking) MaterialTheme.colorScheme.onTertiaryContainer
+            else MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.heightIn(min = 28.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Psychology,
+                    contentDescription = thinkingMenuCd,
+                    modifier = Modifier.size(13.dp)
+                )
                 Text(
                     text = when {
                         forceDeepThinking -> stringResource(R.string.chat_thinking_chip_forced)
@@ -127,19 +150,17 @@ internal fun ThinkingControlMenu(
                             stringResource(R.string.chat_thinking_chip_effort, reasoningEffortLabelShort(reasoningEffort))
                         else -> stringResource(R.string.chat_thinking_chip_default)
                     },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1
                 )
-            },
-            leadingIcon = {
                 Icon(
-                    Icons.Default.Psychology,
-                    contentDescription = thinkingMenuCd,
-                    modifier = Modifier.size(16.dp),
-                    tint = if (forceDeepThinking) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.primary
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp)
                 )
             }
-        )
+        }
 
         DropdownMenu(
             expanded = expanded,

@@ -61,12 +61,29 @@ class RootfsConfigurator(
         val warnings = mutableListOf<String>()
 
         // ── 1. /etc/resolv.conf —— DNS 是 apt/网络的第一阻断点 ──
+        // ★ 符号链接加固（用户反馈「APT 引导未完成」的可能根因）：Ubuntu Base
+        // 24.04 的 /etc/resolv.conf 是指向 /run/systemd/resolve/stub-resolv.conf
+        // 的符号链接 —— PRoot 内无 systemd，目标不存在 → dangling symlink：
+        //   - hasContent() 对 dangling 链接返回 false（isFile=false）
+        //   - writeText 跟随链接 → 目标目录缺失 → FileNotFoundException →
+        //     configure 崩溃或静默失败 → guest DNS 全灭 → apt update 必败。
+        // 处理：非普通文件（链接/损坏）时先删除再重写为普通文件。
         val resolv = File(root, "etc/resolv.conf")
         val dns = resolveDnsServers(warnings)
-        if (!hasContent(resolv)) {
+        val resolvIsPlainFile = resolv.isFile && !java.nio.file.Files.isSymbolicLink(resolv.toPath())
+        if (!resolvIsPlainFile || !hasContent(resolv)) {
             resolv.parentFile?.mkdirs()
-            resolv.writeText(dns.joinToString("\n") { "nameserver $it" } + "\n")
-            actions.add("resolv.conf: wrote nameservers ${dns.joinToString(",")}")
+            if (resolv.exists() || java.nio.file.Files.exists(resolv.toPath())) {
+                // dangling symlink：exists() 对其返回 false，须用 Files.exists 跟随链接判定
+                runCatching { resolv.delete() }
+                    .onFailure { warnings.add("resolv.conf: cannot remove stale entry — ${it.message}") }
+            }
+            runCatching {
+                resolv.writeText(dns.joinToString("\n") { "nameserver $it" } + "\n")
+                actions.add("resolv.conf: wrote nameservers ${dns.joinToString(",")}")
+            }.onFailure {
+                warnings.add("resolv.conf: write failed — ${it.message}")
+            }
         } else {
             actions.add("resolv.conf: kept existing (${resolv.length()} bytes)")
         }
@@ -77,9 +94,9 @@ class RootfsConfigurator(
             hosts.parentFile?.mkdirs()
             hosts.writeText(
                 """
-                127.0.0.1	localhost
-                ::1		localhost ip6-localhost ip6-loopback
-                127.0.1.1	$hostname
+                127.0.0.1       localhost
+                ::1             localhost ip6-localhost ip6-loopback
+                127.0.1.1       $hostname
                 """.trimIndent() + "\n"
             )
             actions.add("hosts: wrote localhost + $hostname")

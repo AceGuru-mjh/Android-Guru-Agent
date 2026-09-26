@@ -262,16 +262,20 @@ fun AgentChatScreen(
     Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ═══ 顶部模式栏（v3：模式选择器 + 思考深度 + 新会话，窄屏不裁切）═══
+        // ═══ 顶部模式栏（v4 紧凑化：用户反馈「上面那一部分太高」）═══
+        // 高度收敛三处：Row 垂直 padding 8→4、图标按钮 40→34dp、预设 chip 32→28dp；
+        // 内部胶囊统一 28dp（AgentModeSelector / AgentRoleSelector / ThinkingLevelSelector
+        // 已同步紧凑化）→ 整行 ~36dp（原 ~52dp），叠 TopAppBar+ContextMeter 后顶部
+        // 从 ~164dp 收敛到 ~114dp。
         Surface(
             tonalElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // ═══ Agent 角色选择器（人设胶囊 + 下拉菜单）═══
                 // 选中即持久化 → VM collector patchConfig（下一轮请求生效，
@@ -317,7 +321,7 @@ fun AgentChatScreen(
                             )
                         },
                         modifier = Modifier
-                            .heightIn(min = 32.dp)
+                            .heightIn(min = 28.dp)
                             .semantics { contentDescription = presetChipCd }
                     )
                 }
@@ -336,24 +340,24 @@ fun AgentChatScreen(
                 // 历史对话入口：消息流自动归档，点击恢复接续上下文
                 IconButton(
                     onClick = { showHistory = true },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         Icons.Outlined.History,
                         contentDescription = stringResource(R.string.chat_cd_chat_history),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
                 // 新会话按钮
                 IconButton(
                     onClick = { viewModel.newChat() },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         Icons.Default.Add,
                         contentDescription = stringResource(R.string.chat_cd_new_chat),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }

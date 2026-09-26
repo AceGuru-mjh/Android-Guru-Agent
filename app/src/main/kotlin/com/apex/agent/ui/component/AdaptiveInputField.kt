@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -125,15 +126,29 @@ fun AdaptiveInputField(
     // 触发条件严格限定 false→true（避免隐藏键盘后又被动弹出）；失败静默
     //（controller 未挂载等时序异常不应炸 UI）。与 TerminalRenderer.showKeyboard 同款。
     val keyboardController = LocalSoftwareKeyboardController.current
+    // ── IME insets 重分发防御（用户反馈「键盘弹出时输入框有时不上抬」）──
+    // 根因：BottomSheet/Dialog/Popup 等弹层关闭后，Activity 窗口的 WindowInsets
+    // 分发链可能停留在旧值（弹层接管/归还焦点时吞掉了 IME insets 回调），
+    // Scaffold 的 contentWindowInsets=systemBars.union(ime) 拿不到最新键盘高度
+    // → 输入栏不被顶起。requestApplyInsets() 强制 View 树重新请求一次 insets
+    // 分发（Android 官方应对 stale insets 的标准手段）。
+    // 触发时机：① 焦点从无到有（点击输入框）②按下事件（早于焦点建立）。
+    val view = LocalView.current
     LaunchedEffect(isFocused) {
-        if (isFocused) keyboardController?.show()
+        if (isFocused) {
+            keyboardController?.show()
+            view.requestApplyInsets()
+        }
     }
     // ── Press 提前 show（不消费事件，安全）：按下瞬间即请求 IME，早于焦点建立 ──
     // 覆盖「点击后焦点到位但 IME 迟迟不弹」的设备；与上方 isFocused 兑底双保险。
     // 注意：不加 clickable / pointerInput（历史教训 c649934：父级手势会吃掉 TextField 点击）。
     LaunchedEffect(Unit) {
         interactionSource.interactions.collect { interaction ->
-            if (interaction is PressInteraction.Press) keyboardController?.show()
+            if (interaction is PressInteraction.Press) {
+                keyboardController?.show()
+                view.requestApplyInsets()
+            }
         }
     }
     val fieldBackground by animateColorAsState(
@@ -151,15 +166,27 @@ fun AdaptiveInputField(
             onValueChange = onValueChange,
             interactionSource = interactionSource,
             // 不再叠加 clickable —— 交回文本框原生点击处理（聚焦 / 弹输入法 / 定位光标）
+            // 液态玻璃修复（用户反馈「圆角UI里有长方形」）：OutlinedTextField 默认
+            // 描边是近乎直角的 4dp 圆角框，嵌在圆角玻璃输入栏里形成生硬的「矩形贴片」。
+            // 改为：无边框（transparent）+ 12dp 圆角背景 —— 视觉融入玻璃材质层，
+            // 聚焦时仅以柔和背景色 + 光标提示（不再画硬边框）。
             modifier = Modifier
                 .fillMaxWidth()
-                .background(fieldBackground, RoundedCornerShape(8.dp))
+                .background(
+                    fieldBackground,
+                    RoundedCornerShape(12.dp)
+                )
                 .focusRequester(focusRequester),
             placeholder = placeholder,
             maxLines = effectiveMaxLines,
             minLines = 1,
+            shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                disabledBorderColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                unfocusedContainerColor = Color.Transparent,
                 focusedLabelColor = MaterialTheme.colorScheme.primary,
                 cursorColor = MaterialTheme.colorScheme.primary
             ),

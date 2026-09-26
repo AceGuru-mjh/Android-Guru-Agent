@@ -164,7 +164,12 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             specular = Color.White.copy(alpha = style.specularAlpha)
         )
     } else {
-        // 浅色玻璃重调：乳白磨砂 + 上缘受光 + 主题色倾向 —— 修复「白天模式一片死白」
+        // 浅色玻璃 v2（用户反馈「白天液态玻璃做的啥也不是」）：
+        // 三层递进 —— ①霜底更通透（scrimAlpha+0.16，原 +0.22 过实像塑料片，
+        // 白底上直接是一块灰板）；②顶部受光带加亮加宽（specular*1.6+0.20，
+        // 配合 GlassSurface 的斜向扫掠形成可辨识的光带）；③下缘定界收窄
+        //（edgeAlpha*0.10，原 0.14 在白天显灰脏边）。层次拉开后玻璃才有
+        // 「材质感」而非「纯色填充」。
         GlassPalette(
             dark = dark,
             hazeBackground = scheme.background,
@@ -177,18 +182,19 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             hazeFallback = scheme.surfaceVariant.copy(
                 alpha = (style.scrimAlpha + 0.24f).coerceAtMost(1f)
             ),
-            // Frosted 霜底：乳白偏灰 —— 在白底上能看出「一层玻璃」而非白上白
+            // Frosted 霜底：乳白偏灰但更透 —— 靠顶光带 + 中带分隔高光补层次，
+            // 而不是把底色做实（做实就是「白上贴灰块」，正是被吐槽的观感）
             frostBase = scheme.surfaceVariant.copy(
-                alpha = (style.scrimAlpha + 0.22f).coerceAtMost(1f)
+                alpha = (style.scrimAlpha + 0.16f).coerceAtMost(1f)
             ),
-            // 顶部受光提亮：白色 lift —— 霜面上亮下实，正是磨砂玻璃的受光方向
-            frostLift = Color.White.copy(alpha = style.specularAlpha * 1.6f + 0.18f),
+            // 顶部受光提亮：白色 lift 加宽加亮 —— 霜面上亮下实，正是磨砂玻璃的受光方向
+            frostLift = Color.White.copy(alpha = style.specularAlpha * 1.6f + 0.20f),
             // 上缘 rim light：白玻璃受光边（绘制层会再乘激活 boost，按压更亮）
-            edgeTop = Color.White.copy(alpha = style.edgeAlpha * 1.3f + 0.06f),
+            edgeTop = Color.White.copy(alpha = style.edgeAlpha * 1.3f + 0.07f),
             // 下缘落影：极淡深色定界 —— 给轮廓收边，但不像旧版那样成灰框脏描边
-            edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.14f),
+            edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.10f),
             // 顶部镜面扫掠：更强的白色高光，在乳白底上仍可辨
-            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.04f)
+            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.05f)
         )
     }
     // 状态强调色：工具卡运行态 / 错误态等着色 —— 不用大面积高饱和，保持克制

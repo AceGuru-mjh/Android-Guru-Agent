@@ -180,8 +180,20 @@ internal fun UpdatePanel() {
         val manifest = (result as? UpdateCheckResult.Available)?.latest ?: return
         val patch = checker.preferredPatch(manifest, BuildConfig.VERSION_NAME)
         val full = checker.preferredAsset(manifest)
-        val asset = (if (usePatch) patch else null) ?: full ?: return
-        val fileName = asset.url.substringAfterLast('/')
+        // patch/full are distinct types (UpdatePatchAsset vs UpdateAsset) —
+        // unify the fields we need instead of an elvis that would widen to Any.
+        val assetUrl: String
+        val assetSha256: String?
+        if (usePatch && patch != null) {
+            assetUrl = patch.url
+            assetSha256 = patch.sha256
+        } else if (full != null) {
+            assetUrl = full.url
+            assetSha256 = full.sha256
+        } else {
+            return
+        }
+        val fileName = assetUrl.substringAfterLast('/')
         val title = if (usePatch) {
             "Apex Agent ${manifest.versionName} patch"
         } else {
@@ -190,14 +202,14 @@ internal fun UpdatePanel() {
         scope.launch {
             // AUTO 档：无测速数据先现场探测一轮，再取最快节点
             val resolved = if (selectedMirror == DownloadMirror.AUTO && speeds.isEmpty()) {
-                speeds = probe.probeAll(asset.url)
+                speeds = probe.probeAll(assetUrl)
                 resolveAuto(speeds)
             } else if (selectedMirror == DownloadMirror.AUTO) {
                 resolveAuto(speeds)
             } else selectedMirror
-            val finalUrl = resolved.rewrite(asset.url)
+            val finalUrl = resolved.rewrite(assetUrl)
             val enqueued = withContext(Dispatchers.IO) {
-                downloader.enqueue(finalUrl, fileName, title, usePatch, asset.sha256)
+                downloader.enqueue(finalUrl, fileName, title, usePatch, assetSha256)
             }
             if (enqueued != null) {
                 downloadPercent = 0

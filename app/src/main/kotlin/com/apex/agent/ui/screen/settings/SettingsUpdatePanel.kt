@@ -572,10 +572,14 @@ private fun MirrorSelectionDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_about_update_source_title)) },
-        text = Column(
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.verticalScroll(rememberScrollState())
-        ) {
+        // AlertDialog.text expects a @Composable () -> Unit lambda — the
+        // original code invoked Column directly (Unit vs ComposableFunction0
+        // mismatch + cascading composable-context errors on title/confirm).
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
             Text(
                 stringResource(R.string.settings_about_update_mirror_desc),
                 style = MaterialTheme.typography.bodySmall,
@@ -633,6 +637,7 @@ private fun MirrorSelectionDialog(
                         )
                     }
                 }
+            }
             }
         },
         confirmButton = {

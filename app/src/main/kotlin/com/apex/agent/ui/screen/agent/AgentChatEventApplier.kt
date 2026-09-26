@@ -169,13 +169,23 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             if (event.callId != activeToolCallId) return
 
             toolOutputBuffer.append(stripAnsi(event.chunk))
+            // ── P1（内存/卡顿）：尾部窗口截断 ──
+            // 旧实现缓冲无上限增长，且每次 flush 对全量缓冲 toString()（O(n) 拷贝）
+            // → 数 MB 级持续输出（长 shell / 日志尾部）在主线程形成 O(n²) 字符串
+            // 分配，GC 洪峰/ANR。展示层本就只取尾 4000 字符（takeLast 同款口径），
+            // 缓冲同步裁到尾窗即可 —— append 路径 O(chunk)，flush 路径 O(4000)。
+            if (toolOutputBuffer.length > AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS) {
+                toolOutputBuffer.delete(
+                    0,
+                    toolOutputBuffer.length - AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS
+                )
+            }
 
             // 16ms 内的多个 chunk 合并为一次 UI 更新（≈1 帧节流）。
             if (toolFlushJob == null) {
                 toolFlushJob = viewModelScope.launch {
                     delay(AgentChatViewModel.FLUSH_INTERVAL_MS)
                     val snapshot = toolOutputBuffer.toString()
-                        .takeLast(AgentToolCallUi.MAX_LIVE_TOOL_OUTPUT_CHARS)
                     // 原地替换唯一的"活输出"步骤（不追加），避免重叠文本重复叠加。
                     upsertLiveOutputStep(snapshot)
                     _uiState.update { state ->

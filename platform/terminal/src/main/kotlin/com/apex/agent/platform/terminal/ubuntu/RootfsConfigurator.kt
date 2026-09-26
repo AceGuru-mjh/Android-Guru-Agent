@@ -252,6 +252,42 @@ class RootfsConfigurator(
 
     private fun hasContent(f: File): Boolean = f.isFile && f.length() > 0
 
+    /**
+     * P1（DNS 快照刷新）：resolv.conf 是**安装时刻**的 DNS 快照 —— configure()
+     * 只在 doInstall 内执行一次，「非空即保留」策略让切网（Wi-Fi→蜂窝/VPN）
+     * 后 guest 内 apt/pip/curl 的 DNS 全灭且无任何修复通道（repair 不重写、
+     * ensureReady 短路）。本方法对比宿主当前 DNS 与文件内容，变化时重写。
+     *
+     * - 幂等且廉价（一次 DNS provider 调用 + 一次小文件读）；
+     * - DNS 兑底链拿不到有效服务器（无网络等）时不动作（返回 false）——
+     *   绝不把「不知道」写成「8.8.8.8」假装可用；
+     * - 符号链接/损坏条目处理同 configure() 的加固逻辑。
+     *
+     * @return true = 已重写（网络已切换）；false = 无变化 / 无 DNS / rootfs 不可用。
+     */
+    fun refreshDnsIfChanged(root: File): Boolean {
+        if (!root.isDirectory) return false
+        val warnings = mutableListOf<String>()
+        val dns = resolveDnsServers(warnings)
+        if (dns.isEmpty()) return false
+        val desired = dns.distinct().joinToString("\n") { "nameserver $it" } + "\n"
+        val resolv = File(root, "etc/resolv.conf")
+        val current = runCatching {
+            resolv.takeIf { it.isFile && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+                ?.readText()
+        }.getOrNull()
+        if (current != null && current.trim() == desired.trim()) return false
+        val wrote = runCatching {
+            if (resolv.exists() || java.nio.file.Files.exists(resolv.toPath())) {
+                resolv.delete() // dangling symlink / 旧普通文件统一先删
+            }
+            resolv.parentFile?.mkdirs()
+            resolv.writeText(desired)
+            true
+        }.getOrDefault(false)
+        return wrote
+    }
+
     companion object {
         const val DEFAULT_HOSTNAME = "android-guru"
     }

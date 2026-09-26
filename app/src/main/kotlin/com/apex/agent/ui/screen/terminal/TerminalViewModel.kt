@@ -227,6 +227,10 @@ class TerminalViewModel @Inject constructor(
     fun selectSession(id: Long) {
         if (_activeSessionId.value == id) return
         _activeSessionId.value = id
+        // P2（跨会话残留）：交互行缓冲随会话切换清空 —— A 会话敲到一半的命令
+        // 残留在 pendingLine 里，切到 B 后按空回车会拿旧命令做黑白名单检查，
+        // 命中则空回车被拦截并弹指向旧命令的「已拦截」提示。
+        pendingLine.setLength(0)
         observeActiveSession()
     }
 
@@ -305,6 +309,10 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.close(id, force = true)
             sessionBackends.remove(id)
             sessionTitles.remove(id)
+            // 关闭的是当前会话时同步清交互行缓冲（语义同 selectSession 的清理）
+            if (_activeSessionId.value == id) {
+                pendingLine.setLength(0)
+            }
             refreshSessionsInternal()
             if (_activeSessionId.value == id) {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
@@ -425,9 +433,14 @@ class TerminalViewModel @Inject constructor(
             val bytes = KeySequenceEncoder.encodePaste(
                 text, _renderState.value?.bracketedPaste ?: false
             )
+            // P1（CJK 乱码）：bytes 直通 —— 旧实现把 UTF-8 字节经 ISO-8859-1 转
+            // String 再按 UTF-8 重编码（Runtime 侧 InputManager 按 UTF-8 写 PTY），
+            // 剪贴板里的中文/emoji/重音字符全部变成 "ä½ " 类乱码。
+            // Runtime 的 RAW 路径已支持 bytes 直通（T85，注释明言「消除双重编码」），
+            // UI 调用方此前没有同步切换 —— 现在对齐。
             terminalRuntime.write(
                 sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
-                text = String(bytes, Charsets.ISO_8859_1)
+                bytes = bytes
             )
         }
     }

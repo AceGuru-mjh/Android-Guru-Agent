@@ -100,7 +100,9 @@ internal fun AgentMessageItem(
         )
         is AgentUiMessage.ToolCall -> ToolCallCard(
             toolCall = message,
-            onRetry = retryLastUser(vm)
+            onRetry = retryLastUser(vm),
+            // UX-1 同款门禁：流式生成中重试会取消在途轮次（旧工具卡悬挂 + 部分回复丢失）
+            retryEnabled = actionsEnabled
         )
         is AgentUiMessage.System -> SystemMessage(message.text)
         is AgentUiMessage.PipelineBanner -> PipelineBannerCard(message)
@@ -110,7 +112,10 @@ internal fun AgentMessageItem(
         is AgentUiMessage.Error -> ErrorBlock(
             message = message.message,
             canRetry = message.canRetry,
-            onRetry = retryLastUser(vm)
+            onRetry = retryLastUser(vm),
+            // UX-1 同款门禁：菜单项有门禁而重试 Chip 没有 —— 流式中可点，
+            // 取消在途轮次后旧错误卡仍残留、引擎上下文重复收到同一用户文本
+            retryEnabled = actionsEnabled
         )
         is AgentUiMessage.ThinkingMessage -> ThinkingBubble(message.thought, finished = true)
         is AgentUiMessage.PlanMessage -> PlanCard(message.plan, currentStepIndex = currentStepIndex)
@@ -565,12 +570,16 @@ internal fun ThinkingBubble(text: String, finished: Boolean = false) {
 
 /**
  * 错误提示块：区别于灰色 System 行，使用红色高亮卡片 + 图标 + 可选重试。
+ *
+ * @param retryEnabled 重试门禁（流式生成中置 false —— 点重试会取消在途轮次；
+ *   与消息菜单同款门禁口径，旧实现菜单有门禁而 Chip 没有）。
  */
 @Composable
 internal fun ErrorBlock(
     message: String,
     canRetry: Boolean = false,
-    onRetry: () -> Unit = {}
+    onRetry: () -> Unit = {},
+    retryEnabled: Boolean = true
 ) {
     val errorColor = MaterialTheme.colorScheme.error
     val context = LocalContext.current
@@ -624,7 +633,7 @@ internal fun ErrorBlock(
                     )
                 }
                 if (canRetry) {
-                    RetryChip(onRetry = onRetry)
+                    RetryChip(onRetry = onRetry, enabled = retryEnabled)
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))

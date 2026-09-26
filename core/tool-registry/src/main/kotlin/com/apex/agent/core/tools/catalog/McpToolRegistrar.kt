@@ -4,6 +4,8 @@ import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.core.tools.mcp.McpManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -18,7 +20,20 @@ import java.util.concurrent.ConcurrentHashMap
  * its tool list between connections never leaves ghost tools behind.
  *
  * Registration runs on the supplied [scope] (IO) because discovery is a
- * network call; unregistration is pure in-memory and synchronous.
+ * network call; unregistration is pure in-memory.
+ *
+ * ## 竞态治理（P1：注册/注销竞态）
+ *
+ * 旧实现「异步注册 vs 同步注销」存在两类竞态：
+ *  1. **幽灵工具**：`onServerConnected` 的异步 `listTools` 最长等 180s —— 期间
+ *     服务器被断开（同步注销先行完成），在途注册协程仍把陈旧工具集写回
+ *     ToolRegistry，留下执行必报 "not connected" 的幽灵工具；
+ *  2. **并发互删**：两次并发 `registerServer` 的 stale 清算交错，互删对方
+ *     刚注册的工具。
+ *
+ * 修复：**每服务器一把 [Mutex]** 串行化注册/注销全部临界区；注册在拿到锁、
+ * 完成 discovery 后**校验服务器仍在连接表**（不在 → 在途注册作废），注销同样
+ * 经 scope 持锁执行 —— 两条路径严格串行，任一顺序都收敛到一致状态。
  */
 class McpToolRegistrar(
     private val manager: McpManager,
@@ -29,6 +44,12 @@ class McpToolRegistrar(
     /** server → registered tool ids (for precise unregistration). */
     private val registered = ConcurrentHashMap<String, MutableSet<String>>()
 
+    /** server → 串行锁（注册/注销互斥；见类 KDoc「竞态治理」）。 */
+    private val serverLocks = ConcurrentHashMap<String, Mutex>()
+
+    private fun lockFor(serverName: String): Mutex =
+        serverLocks.getOrPut(serverName) { Mutex() }
+
     init {
         manager.addSessionListener(this)
     }
@@ -38,28 +59,45 @@ class McpToolRegistrar(
      * or after `mcp_connect`). Safe to call repeatedly — REPLACE semantics.
      */
     suspend fun registerServer(serverName: String) {
-        val tools = manager.listServerTools(serverName)
-        val ids = synchronized(this) {
-            registered.getOrPut(serverName) { ConcurrentHashMap.newKeySet() }
+        lockFor(serverName).withLock {
+            val tools = manager.listServerTools(serverName)
+            // 竞态防御：discovery 期间（最长 180s）服务器可能已被断开/移除 ——
+            // 注销路径（onServerDisconnected）已清理完毕，此处写回即幽灵工具
+            //（执行必报 not connected）。校验连接表，不在 → 在途注册作废。
+            if (serverName !in manager.getConnectedServers()) {
+                registered.remove(serverName)
+                return
+            }
+            val ids = registered.getOrPut(serverName) { ConcurrentHashMap.newKeySet() }
+            val fresh = mutableSetOf<String>()
+            for (tool in tools) {
+                val mcpTool = McpAgentTool(manager, serverName, tool)
+                registry.register(mcpTool)
+                fresh += mcpTool.id
+            }
+            // Drop tools the server no longer exposes (REPLACE removed them from
+            // the registry already; this keeps our tracking set exact).
+            val stale = ids.filter { it !in fresh }
+            stale.forEach { registry.unregister(it) }
+            ids.removeAll(stale.toSet())
+            ids.addAll(fresh)
         }
-        val fresh = mutableSetOf<String>()
-        for (tool in tools) {
-            val mcpTool = McpAgentTool(manager, serverName, tool)
-            registry.register(mcpTool)
-            fresh += mcpTool.id
-        }
-        // Drop tools the server no longer exposes (REPLACE removed them from
-        // the registry already; this keeps our tracking set exact).
-        val stale = ids.filter { it !in fresh }
-        stale.forEach { registry.unregister(it) }
-        ids.removeAll(stale.toSet())
-        ids.addAll(fresh)
     }
 
-    /** Unregister every tool from a server (disconnect/remove/disable). */
+    /**
+     * Unregister every tool from a server (disconnect/remove/disable).
+     *
+     * 经 [scope] 异步化以持同一把服务器锁 —— 与在途注册严格串行（见类 KDoc
+     * 「竞态治理」）：注销先到 → 注册的连接校验作废在途结果；注册先到 →
+     * 注销精确清理刚写入的工具。任一顺序都收敛一致。
+     */
     fun unregisterServer(serverName: String) {
-        val ids = registered.remove(serverName) ?: return
-        ids.forEach { registry.unregister(it) }
+        scope.launch {
+            lockFor(serverName).withLock {
+                val ids = registered.remove(serverName) ?: return@withLock
+                ids.forEach { registry.unregister(it) }
+            }
+        }
     }
 
     /** Every currently registered MCP tool id (server → ids snapshot). */

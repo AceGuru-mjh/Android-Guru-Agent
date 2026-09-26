@@ -246,6 +246,11 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             val snapshot = withContext(Dispatchers.IO) { snapshotState() } ?: return@launch
             _uiState.update { state -> snapshot.copy(
+                // 视图与瞬时态保留：scope 不保留 →「已安装管理」里任何开关/卸载/连接
+                // （全部以 refresh() 收尾）都会把顶栏弹回「市场」视图；mcpConnecting
+                // 不保留 → 长连接期间重进屏幕丢失防双击并发保护。
+                scope = state.scope,
+                mcpConnecting = state.mcpConnecting,
                 selectedTab = state.selectedTab,
                 modelScopeQuery = state.modelScopeQuery,
                 modelScopeSkills = state.modelScopeSkills,
@@ -466,8 +471,16 @@ class MarketViewModel @Inject constructor(
             val name = config.name.trim()
             mcpManager.addServer(config.copy(name = name)).fold(
                 onSuccess = {
-                    message(languageManager.getString(R.string.market_mcp_added).format(name))
-                    mcpManager.connect(name)   // 添加后立即尝试连接
+                    // P2：连接结果不再被吞 —— 添加后立即连接失败（URL 错/命令不存在）时
+                    // 用户只看到「已添加」成功提示，错误静默丢失。fold 进同一条 snackbar。
+                    val connectMsg = mcpManager.connect(name).fold(
+                        onSuccess = { languageManager.getString(R.string.market_mcp_added).format(name) },
+                        onFailure = {
+                            languageManager.getString(R.string.market_add_failed)
+                                .format("${it.message ?: ""}")
+                        }
+                    )
+                    message(connectMsg)
                     refresh()
                 },
                 onFailure = {
@@ -611,8 +624,21 @@ class MarketViewModel @Inject constructor(
             mcpManager.disconnect(name)
             mcpManager.addServer(config.copy(name = name)).fold(
                 onSuccess = {
-                    message(languageManager.getString(R.string.market_mcp_edit_saved).format(name))
-                    if (config.enabled) mcpManager.connect(name)
+                    // 连接结果折叠（同 addMcpServer）：编辑保存后重连失败不再静默。
+                    if (config.enabled) {
+                        val connectMsg = mcpManager.connect(name).fold(
+                            onSuccess = {
+                                languageManager.getString(R.string.market_mcp_edit_saved).format(name)
+                            },
+                            onFailure = {
+                                languageManager.getString(R.string.market_add_failed)
+                                    .format("${it.message ?: ""}")
+                            }
+                        )
+                        message(connectMsg)
+                    } else {
+                        message(languageManager.getString(R.string.market_mcp_edit_saved).format(name))
+                    }
                     refresh()
                 },
                 onFailure = {

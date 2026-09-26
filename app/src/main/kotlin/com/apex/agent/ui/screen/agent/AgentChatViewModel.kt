@@ -453,12 +453,22 @@ class AgentChatViewModel @Inject constructor(
     /**
      * 运行期"活输出"步骤的唯一写入口：每次 flush 用最新尾部快照【原地替换】同一条
      * OUTPUT 步骤（而非追加新步骤），消除旧实现里逐次叠加重复文本的缺陷。
+     *
+     * 替换时**保留原步骤 id**：时间线以 s.id 作 LazyColumn key —— 每次换新 UUID
+     * 会让活输出行每 16ms 被 dispose/recreate（横滚位置重置、重组放大），
+     * 与「原地替换」的注释意图相悖。seq 仍然递增（时间线滚动感知更新靠它）。
      * （internal —— 事件归约已迁出至 AgentChatEventApplier.kt 扩展）
      */
     internal fun upsertLiveOutputStep(snapshot: String) {
-        val live = ToolStep(phase = StepPhase.OUTPUT, text = snapshot, seq = nextStepSeq())
-        val steps = currentToolCallSteps ?: emptyList()
         val existingId = liveOutputStepId
+        // 替换形态：沿用原 id（LazyColumn key 稳定）；新建形态：全新 id。
+        val live = ToolStep(
+            id = existingId ?: java.util.UUID.randomUUID().toString(),
+            phase = StepPhase.OUTPUT,
+            text = snapshot,
+            seq = nextStepSeq()
+        )
+        val steps = currentToolCallSteps ?: emptyList()
         if (existingId != null) {
             val idx = steps.indexOfFirst { it.id == existingId }
             if (idx >= 0) {
@@ -569,7 +579,8 @@ class AgentChatViewModel @Inject constructor(
         currentJob?.cancel()
         // 同 sendMessage：被取消的上一轮流水线横幅收尾，避免残留"运行中"脉冲。
         finishActiveBanner()
-        updateInputText("")
+        // P2：不清草稿 —— retry 的文本来自历史消息而非输入框；用户正在打的新草稿
+        // 不该被无声清掉（regenerateResponse 已特意保留草稿，此路径漏修对齐）。
         currentJob = viewModelScope.launch {
             runEngine(trimmed, attachments)
         }
@@ -640,15 +651,32 @@ class AgentChatViewModel @Inject constructor(
     private suspend fun runEngine(text: String, persistedAttachments: List<MessageAttachment>) {
         // 新一轮流式开始：清空上一轮可能残留的流式缓冲（防跨轮串字）；retry 路径同样受益。
         streamBuffers.reset()
+        // P1（旧工具卡悬挂）：runEngine/retry 覆盖新一轮时必须清掉上一轮的工具运行态
+        //（对比 abort() 的完整清理面）—— 否则被取消轮次的工具卡永久「运行中」脉冲
+        // + 计时器常跑；toolOutputBuffer/flush Job/activeToolCallId 同属该清理面。
+        toolFlushJob?.cancel()
+        toolFlushJob = null
+        activeToolCallId = null
+        toolOutputBuffer.setLength(0)
+        liveOutputStepId = null
+        currentToolCallSteps = null
+        // 在途部分回复保留为 isPartial（abort() 同款语义 —— 新发送取消旧任务时，
+        // 已流出的内容不该无声消失）。
+        val inFlightResponse = _uiState.value.currentResponse
         _uiState.update { state ->
             state.copy(
-                messages = state.messages + AgentUiMessage.User(
-                    text = text,
-                    attachments = persistedAttachments
-                ),
+                messages = state.messages +
+                    (if (inFlightResponse.isNotBlank())
+                        listOf(AgentUiMessage.Agent(text = inFlightResponse, isPartial = true))
+                    else emptyList()) +
+                    AgentUiMessage.User(
+                        text = text,
+                        attachments = persistedAttachments
+                    ),
                 isLoading = true,
                 currentThinking = "",
-                currentResponse = ""
+                currentResponse = "",
+                currentToolCall = null
             )
         }
 

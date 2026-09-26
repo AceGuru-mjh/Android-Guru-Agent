@@ -80,3 +80,46 @@ fun List<CodeTodoTool.Todo>.toStorable(): List<StorableTodo> =
 /** 落盘待办 → UI 待办清单（CodeTodoTool 是全量覆盖式更新，直接整体回填）。 */
 fun List<StorableTodo>.toCodeTodos(): List<CodeTodoTool.Todo> =
     map { CodeTodoTool.Todo(content = it.content, status = it.status, priority = it.priority) }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 旧档兼容：messages → 胶囊时间轴条目（stream 检查点缺失时的回退映射）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 旧版快照（只有 messages）→ 时间轴条目的降级映射。
+ *
+ * - USER/ASSISTANT/SYSTEM → 对应条目（终态）；
+ * - TOOL → 最小胶囊（等宽 logTail 回放，无 diff/hunk/终端缓冲——详情弹层
+ *   走通用输出体，已是可接受降级）；
+ * - 截断标记（「…(截断)」后缀）原样保留。
+ */
+fun List<StorableCodeMessage>.toStreamEntries(): List<com.apex.agent.core.code.stream.StreamEntry> {
+    var seq = 0L
+    return mapNotNull { msg ->
+        val id = "legacy-${msg.role.lowercase()}-${seq++}"
+        when (msg.role.uppercase()) {
+            "USER" -> com.apex.agent.core.code.stream.StreamEntry.UserEntry(id, msg.text)
+            "ASSISTANT" -> com.apex.agent.core.code.stream.StreamEntry.AssistantEntry(id, msg.text, false)
+            "SYSTEM" -> com.apex.agent.core.code.stream.StreamEntry.SystemEntry(id, msg.text)
+            "TOOL" -> {
+                val kind = com.apex.agent.core.code.stream.ToolKind.fromToolName(msg.toolName ?: "tool")
+                com.apex.agent.core.code.stream.StreamEntry.ToolCapsuleEntry(
+                    id = id,
+                    call = com.apex.agent.core.code.stream.StreamToolCall(
+                        id = id,
+                        kind = kind,
+                        displayName = msg.toolName ?: "工具",
+                        target = msg.text.lineSequence().firstOrNull()?.take(48) ?: "…",
+                        status = if (msg.toolSuccess)
+                            com.apex.agent.core.code.stream.ToolCallStatus.SUCCESS
+                        else com.apex.agent.core.code.stream.ToolCallStatus.FAILED,
+                        durationMs = msg.durationMs,
+                        logTail = msg.text,
+                        summary = msg.text.lineSequence().firstOrNull()?.take(24)
+                    )
+                )
+            }
+            else -> null
+        }
+    }
+}

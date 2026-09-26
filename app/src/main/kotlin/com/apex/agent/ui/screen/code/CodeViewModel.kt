@@ -10,6 +10,10 @@ import com.apex.agent.core.code.longtask.LongTaskStore
 import com.apex.agent.core.code.longtask.LongTaskTemplates
 import com.apex.agent.core.code.longtask.LongTaskTracker
 import com.apex.agent.core.code.longtask.TaskCopyEngine
+import com.apex.agent.core.code.stream.CodeStreamCheckpoint
+import com.apex.agent.core.code.stream.CodeStreamSession
+import com.apex.agent.core.code.stream.CodeStreamSnapshot
+import com.apex.agent.core.code.stream.StreamToolCall
 import com.apex.agent.core.code.thinking.CodeAdaptiveThinkingSelector
 import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
 import com.apex.agent.core.code.thinking.CodeThinkingLevel
@@ -30,6 +34,7 @@ import com.apex.agent.ui.screen.code.editor.AtRefParser
 import com.apex.agent.ui.screen.code.editor.EditorFileLoader
 import com.apex.agent.ui.screen.code.session.CodeSessionSnapshot
 import com.apex.agent.ui.screen.code.session.CodeSessionStore
+import com.apex.agent.ui.screen.code.session.toStreamEntries
 import com.apex.agent.ui.screen.code.session.toCodeTodos
 import com.apex.agent.ui.screen.code.session.toStorable
 import com.apex.agent.ui.screen.code.session.withFreshIds
@@ -46,6 +51,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -119,6 +125,17 @@ class CodeViewModel @Inject constructor(
     private var editorJob: Job? = null
     private var sessionPersistJob: Job? = null
     private var sessionLoadJob: Job? = null
+
+    // ═══ 胶囊时间轴（渲染通道数据源）═══
+    // 渲染半边：事件归约进 session，25ms ticker 拉快照进 uiState.stream；
+    // 副作用半边（长任务追踪/深水区观察器/落盘）仍走既有 reduce——双通道
+    // 彻底分流，引擎与既有功能零改动。
+
+    /** 胶囊时间轴会话（VM 自持，跨 run 累积；恢复/清空见 bind/clear）。 */
+    private val streamSession = CodeStreamSession()
+
+    /** 渲染 ticker：运行期每 25ms 拉一次快照（≤40Hz 攒批）。 */
+    private var renderJob: Job? = null
 
     /** 当前绑定的会话归属工作区（null = 尚未绑定，不落盘）。 */
     private var boundWorkspaceId: String? = null
@@ -210,6 +227,10 @@ class CodeViewModel @Inject constructor(
         runToolCalls = 0
         recentToolOutcomes.clear()
 
+        // 胶囊时间轴：用户气泡入轴 + 渲染 ticker 启动（25ms ≤40Hz 攒批）。
+        streamSession.beginRun(trimmed)
+        startRenderTicker()
+
         runJob = viewModelScope.launch {
             _uiState.update { it.copy(isRunning = true, error = null) }
             var aborted = false
@@ -217,6 +238,7 @@ class CodeViewModel @Inject constructor(
                 codeEngine.execute(UserInput(text = engineInput)).collect { event ->
                     longTaskTracker.onEvent(event)
                     maybeEscalateOnDeepWater(event)
+                    streamSession.onEvent(event)
                     reduce(event)
                 }
             } catch (e: CancellationException) {
@@ -237,6 +259,8 @@ class CodeViewModel @Inject constructor(
                 // 上一轮错误史归档（下轮 AUTO 预检的输入信号）。
                 lastRunToolCalls = runToolCalls
                 lastRunErrors = recentToolOutcomes.count { !it }
+                // 渲染收尾：停 ticker 前冲最后一次快照（尾巴事件不丢）。
+                stopRenderTicker()
                 // v1.2 长任务收尾：状态裁决（中止/失败/完成）+ 长任务判定入库
                 // （短任务返回 null 静默丢弃）；入库后刷新面板数据。
                 val finalError = _uiState.value.error
@@ -259,6 +283,7 @@ class CodeViewModel @Inject constructor(
     fun abort() {
         runJob?.cancel()
         viewModelScope.launch { codeEngine.abort() }
+        stopRenderTicker()
         _uiState.update { it.copy(isRunning = false) }
     }
 
@@ -299,10 +324,12 @@ class CodeViewModel @Inject constructor(
                 withContext(Dispatchers.IO) { runCatching { codeSessionStore.clear(wsId) } }
             }
         }
+        streamSession.clear()
         _uiState.update {
             it.copy(
                 messages = emptyList(), todos = emptyList(), contextUsedTokens = 0,
-                inputDraft = "", editorFilePath = null, editorFile = null, editorError = null
+                inputDraft = "", editorFilePath = null, editorFile = null, editorError = null,
+                stream = CodeStreamSnapshot()
             )
         }
     }
@@ -562,8 +589,9 @@ class CodeViewModel @Inject constructor(
         sendMessage(record.goal)
     }
 
-    /** 追加一条系统消息（不落库引擎历史，仅 UI 展示）。 */
+    /** 追加一条系统消息（时间轴主通道 + 旧消息通道双写，仅 UI 展示）。 */
     private fun appendSystemMessage(text: String) {
+        streamSession.injectSystem(text)
         _uiState.update {
             it.copy(messages = it.messages + CodeChatMessage(idGen.incrementAndGet(), CodeChatMessage.Role.SYSTEM, text))
         }
@@ -722,11 +750,23 @@ class CodeViewModel @Inject constructor(
         val snapshot = withContext(Dispatchers.IO) {
             runCatching { codeSessionStore.load(ws.workspaceId) }.getOrNull()
         }
-        if (snapshot != null && snapshot.messages.isNotEmpty()) {
+        if (snapshot != null && (snapshot.messages.isNotEmpty() || snapshot.stream != null)) {
             val restored = snapshot.messages.withFreshIds(1L)
             idGen.set(restored.lastOrNull()?.id ?: 0L)
             codeTodoTool.restore(snapshot.todos.toCodeTodos())
-            _uiState.update { it.copy(messages = restored, todos = snapshot.todos.toCodeTodos()) }
+            // 时间轴恢复：stream 检查点优先（含 diff 原文/轮次红绿态）；
+            // 旧档（null）走 messages → 条目的兼容映射（降级：无 diff 细节）
+            val timeline = snapshot.stream
+                ?.let { cp -> CodeStreamCheckpoint.toEntries(cp) }
+                ?: snapshot.messages.toStreamEntries()
+            streamSession.replaceAll(timeline)
+            _uiState.update {
+                it.copy(
+                    messages = restored,
+                    todos = snapshot.todos.toCodeTodos(),
+                    stream = streamSession.snapshot()
+                )
+            }
             snapshot.lastActiveFile?.let { lastFile -> openEditorFile(lastFile) }
         } else {
             // 全新会话：清 UI 态（引擎侧 setActiveWorkspace 已重置上下文）+ 欢迎提示
@@ -745,7 +785,7 @@ class CodeViewModel @Inject constructor(
         }
     }
 
-    /** 从当前 UI 态构造会话快照（消息 + todos + 当前文件）。 */
+    /** 从当前 UI 态构造会话快照（消息 + todos + 当前文件 + 时间轴检查点）。 */
     private fun buildSessionSnapshot(workspaceId: String): CodeSessionSnapshot {
         val state = _uiState.value
         return CodeSessionSnapshot(
@@ -753,6 +793,11 @@ class CodeViewModel @Inject constructor(
             messages = state.messages.toStorable(),
             todos = codeTodoTool.snapshot().toStorable(),
             lastActiveFile = state.editorFilePath,
+            stream = CodeStreamCheckpoint.toCheckpoint(
+                session = streamSession,
+                workspaceId = workspaceId,
+                committedFiles = state.stream.affectedFiles
+            ),
             updatedAt = System.currentTimeMillis()
         )
     }
@@ -913,6 +958,7 @@ class CodeViewModel @Inject constructor(
 
     override fun onCleared() {
         runJob?.cancel()
+        renderJob?.cancel()
         // #152：viewModelScope 在 onCleared 前已被取消——防抖尾巴经独立 scope 冲刷
         val wsId = boundWorkspaceId
         if (wsId != null) {
@@ -925,8 +971,41 @@ class CodeViewModel @Inject constructor(
         super.onCleared()
     }
 
+    // ═══ 胶囊时间轴：渲染 ticker 与详情数据 ═══
+
+    /** 启动渲染 ticker（25ms ≤40Hz；脏才推快照，无变更零重组）。 */
+    private fun startRenderTicker() {
+        renderJob?.cancel()
+        renderJob = viewModelScope.launch {
+            while (isActive) {
+                delay(RENDER_TICK_MS)
+                streamSession.tick()?.let { snap ->
+                    _uiState.update { it.copy(stream = snap) }
+                }
+            }
+        }
+    }
+
+    /** 停止 ticker 并冲最后一次快照（run 收尾调用）。 */
+    private fun stopRenderTicker() {
+        renderJob?.cancel()
+        renderJob = null
+        streamSession.snapshot().let { snap ->
+            _uiState.value = _uiState.value.copy(stream = snap)
+        }
+    }
+
+    /** 详情弹层的终端尾窗（历史 BASH 调用的输出回看）。 */
+    fun terminalLogOf(callId: String): String? = streamSession.terminalContentOf(callId)
+
+    /** 详情弹层入参便捷转换（UI 持有 StreamToolCall 时调用）。 */
+    fun toolCallById(call: StreamToolCall): StreamToolCall = call
+
     private companion object {
         /** 深水区升级观察器的工具成败滑窗长度（与选档器口径一致：最近 3 次）。 */
         const val RECENT_OUTCOME_WINDOW = 3
+
+        /** 渲染攒批窗口：25ms = 上限 40Hz（规格书：脉冲式输出）。 */
+        const val RENDER_TICK_MS = 25L
     }
 }

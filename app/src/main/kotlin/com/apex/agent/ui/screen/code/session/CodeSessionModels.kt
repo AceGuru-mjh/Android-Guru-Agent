@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.code.session
 
+import com.apex.agent.core.code.stream.CodeStreamCheckpoint
 import kotlinx.serialization.Serializable
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,6 +73,13 @@ data class CodeSessionSnapshot(
     val todos: List<StorableTodo> = emptyList(),
     /** 最近一次编辑/激活的文件相对路径（无则 null）。 */
     val lastActiveFile: String? = null,
+    /**
+     * 胶囊时间轴检查点（v 胶囊流式：渲染主通道的持久化形态）。
+     *
+     * null = 旧版快照（恢复时走 messages → 时间轴的兼容映射）；
+     * 新快照 messages 仍保留（降级兼容 + 旧版本 APP 可读）。
+     */
+    val stream: CodeStreamCheckpoint.StorableCheckpoint? = null,
     /** 快照落盘时间戳（epoch 毫秒，调用方负责盖戳）。 */
     val updatedAt: Long = 0
 )

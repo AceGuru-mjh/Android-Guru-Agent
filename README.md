@@ -1026,6 +1026,7 @@ Android-Guru-Agent/
 | [docs/search-providers.md](docs/search-providers.md) | **P94 搜索供应商框架**：Tavily/Brave/Exa/SearXNG/DDG/Bing 六供应商/三阶段回退/缓存限流（对标 rikka 19 家搜索抽象） |
 | [docs/persona-cards.md](docs/persona-cards.md) | **P95 角色卡**：SillyTavern V1/V2/PNG tEXt 导入/Lorebook 触发（对标 operit 角色卡 + rikka AssistantImporter） |
 | [docs/provider-share.md](docs/provider-share.md) | **P96 供应商分享**：四层洋葱 URI/Key 脱敏/GZIP/QR 版本估算（对标 rikka QR 分享） |
+| [docs/capsule-stream.md](docs/capsule-stream.md) | **胶囊流式输出系统**：Coding 工作流时间轴 / 双通道架构 / 幂等与检查点 / 验收矩阵 |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 

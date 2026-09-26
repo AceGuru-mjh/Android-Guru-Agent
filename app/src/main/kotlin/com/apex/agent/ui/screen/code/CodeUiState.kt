@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.code
 
 import com.apex.agent.core.code.longtask.LongTaskRecord
+import com.apex.agent.core.code.stream.CodeStreamSnapshot
 import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
 import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.codetools.tools.CodeTodoTool
@@ -51,6 +52,10 @@ data class CodeUiState(
 
     /** 档位效能统计（当前工作区；null = 未加载/无工作区）。 */
     val thinkingStats: CodeThinkingEvolutionTracker.WorkspaceThinkingStats? = null,
+
+    // ── 胶囊时间轴（渲染主通道快照）──
+    // 25ms ≤40Hz 攒批推送；entries/终端尾窗/派生统计一体的不可变值。
+    val stream: CodeStreamSnapshot = CodeStreamSnapshot(),
 
     // ── 编辑器面板（v1.0 #154）──
     // editorFilePath 非空即挂载面板；editorFile 为加载结果（null = 加载中/失败态）。

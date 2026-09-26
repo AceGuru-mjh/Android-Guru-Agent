@@ -208,7 +208,7 @@ Root → Shizuku → 沙箱 Shell 自动降级<br/>无 Root 也能执行特权�
 | 🛰️ | **BYO-LLM** | OpenAI 兼容协议 + DeepSeek / OpenRouter / Ollama / 自定义端点预设；多模型运行时按角色路由（含图片自动走 VISION）；原生支持 `reasoning_content` 思维链（R1 / Qwen3-thinking / o 系列） |
 | ⚡ | **三级权限链** | Root → Shizuku → 普通沙箱 shell 自动降级选择，无 Root 设备也能执行特权命令 |
 | 🧩 | **全插件化** | AIDL 跨进程插件 SDK + 技能市场（工具/技能/MCP/插件/连接器五个货架）+ 40+ 可安装技能模板 |
-| 💭 | **七档思考系统（v1.2）** | NONE→ULTRACODE→APEXCODE 七深度档 + AUTO 逐轮自适应；档位驱动提示词 / 模型参数 / 迭代倍率 / 压缩阈值 / 输出预算**全执行画像**，Agent 与 Coding 双模式可用，档位效能用历史数据说话 |
+| 💭 | **七档思考系统（Coding 页专属）** | NONE→ULTRACODE→APEXCODE 七深度档 + AUTO 预检自适应（发送前选档 + 深水区升级）；档位驱动提示词 / 模型参数 / 迭代倍率 / 压缩阈值 / 输出预算**全执行画像**，档位效能用历史数据说话（Agent 聊天页为独立六档体系） |
 | 🕓 | **长任务中心（v1.2）** | 超阈值运行自动留档；检查点时间线回看（轮次 / 相对时间 / todo 完成度）+ 续跑不从头、复制带上下文重跑、同目标运行对比、8 模板一键启动 |
 
 > [!IMPORTANT]
@@ -467,10 +467,10 @@ stateDiagram-v2
 
 | 层 | 控制点 | 档位 | 效果 |
 |----|--------|------|------|
-| **提示词思考** | `ThinkingLevel` | NONE / LIGHT / STANDARD / DEEP / MAXIMUM / ULTRACODE / APEXCODE + AUTO 元档 | 系统提示注入推理指令强度；v1.2 起档位同时驱动**执行画像**（迭代倍率 / 工具自检 / 终检清单 / 压缩阈值 / 工具输出预算，`ThinkingProfile` 静态表单源） |
+| **提示词思考** | Agent 六档 `ThinkingLevel` / Coding 七档 `CodeThinkingLevel` | 两套独立阶梯：聊天页 NONE/LIGHT/STANDARD/DEEP/MAXIMUM+AUTO；Coding 页另有 ULTRACODE/APEXCODE 深水两档 | 系统提示注入推理指令强度；档位同时驱动**执行画像**（迭代倍率 / 压缩阈值 / 输出预算，Coding 深水两档经旋钮补偿反补） |
 | **原生思考** | `ReasoningEffort` | NONE / LOW / MEDIUM / HIGH / MAX | 直接写 `reasoning_effort` 请求参数（o 系列 / R1 / Qwen3-thinking），MAX 档同时抬高 `max_completion_tokens` 给思维链留空间 |
 
-**v1.2 七档思考阶梯**（Agent 聊天页与 Code 屏选择器**双模式可用**；Code 屏另有「思考档位指南」弹层摊开全部画像 + 档位效能统计）：
+**七档思考阶梯**（**Coding 页专属**；Agent 聊天页为独立六档体系，两页面互不干扰。Code 屏另有「思考档位指南」弹层摊开全部画像 + 档位效能统计）：
 
 | 档位 | 定位 | budget | 迭代倍率 | 输出预算 |
 |------|------|--------|----------|----------|
@@ -481,7 +481,7 @@ stateDiagram-v2
 | MAXIMUM | ToT 7 步 + 终检三问清单 | 16384 | ×1.5 | 10000 |
 | ULTRACODE | 编码闭环 7 步（不变量→候选改法→风险排序→最小修改→即时验证） | 32768 | ×2.0 | 12000 |
 | APEXCODE | 架构级穷举 + 对抗性自审 + 全量验证矩阵 + 证据链汇报 | 65536 | ×3.0 | 16000 |
-| AUTO | 元档：按任务复杂度逐轮自适应（可升至 ULTRACODE，**永不自动选 APEXCODE**） | — | — | — |
+| AUTO | 元档：发送前预检选档 + 深水区升级（可升至 ULTRACODE，**永不自动选 APEXCODE**） | — | — | — |
 
 Coding 模式在通用画像之上还有一层**编码特化指令**（`CodeThinkingPrompts`：
 一读一改 / 标准编码循环 / 改动集思维 / 不变量守护 / 依赖地图→回归扫描 /
@@ -989,7 +989,7 @@ Android-Guru-Agent/
 - [x] 终端运行时 2.0（Ubuntu rootfs + PRoot + 原生 PTY + VT100）
 - [x] 多模型运行时（角色路由 + VISION）
 - [x] 浏览器智能体（DOM 级 + 稳定 ref）
-- [x] v1.2 七档思考系统（NONE→ULTRACODE→APEXCODE + AUTO 自适应，双模式可用 + 档位效能统计）
+- [x] v1.2 七档思考系统（NONE→ULTRACODE→APEXCODE + AUTO 预检自适应，Coding 页专属 + 档位效能统计；Agent 聊天页保持六档独立体系）
 - [x] v1.2 长任务中心（自动留档 / 检查点时间线与续跑 / 复制对比 / 8 模板）
 - [ ] 宏技能语义检索（嵌入索引，跨 App 近邻复用 —— Voyager 启发）
 - [ ] 记忆软删除与双时间线（Zep/Graphiti 启发）

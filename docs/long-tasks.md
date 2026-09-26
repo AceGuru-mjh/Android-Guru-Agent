@@ -16,7 +16,7 @@ LongTaskTracker（纯内存聚合）
       │  └─ 长任务 → LongTaskRecord
       │        │ fire-and-forget            │ ingest
       │        ▼                            ▼
-      │  LongTaskStore                ThinkingEvolutionTracker
+      │  LongTaskStore                CodeThinkingEvolutionTracker
       │  （filesDir/longtask/，        （工作区×档位效能统计）
       │   原子写+内存缓存+保留策略）
       ▼
@@ -125,7 +125,7 @@ CodeViewModel.sendMessage（组装好的提示词直接进引擎）
 上限 64。UI 的「对比上次」按钮用 `LongTaskDiff.compare` 渲染两次
 运行的文件交集/差集、迭代/工具/时长差，以系统消息进对话。
 
-## 五、档位效能统计（ThinkingEvolutionTracker）
+## 五、档位效能统计（CodeThinkingEvolutionTracker，coding 专属）
 
 把长任务留档按「工作区 × 档位」聚合：runs / 状态三分计数 / 平均
 迭代/工具/时长/文件数 / 成功率派生。
@@ -183,15 +183,15 @@ Coding 屏工作区条「长任务」按钮唤起 ModalBottomSheet，三页签�
 
 | 文件 | 职责 |
 |------|------|
-| `core/agent-engine/.../engine/longtask/LongTaskModels.kt` | Record/Checkpoint/CopyOptions 数据模型 |
-| `core/agent-engine/.../engine/longtask/LongTaskDetector.kt` | 规模判定纯函数 |
-| `core/agent-engine/.../engine/longtask/LongTaskStore.kt` | JSON 存储（原子写/缓存/prune） |
-| `core/agent-engine/.../engine/longtask/LongTaskTracker.kt` | 事件流聚合 + 检查点 |
-| `core/agent-engine/.../engine/longtask/TaskCopyEngine.kt` | 复制/重跑/续跑/摘要/复制链 |
-| `core/agent-engine/.../engine/longtask/LongTaskTemplates.kt` | 8 内置模板 |
-| `core/agent-engine/.../engine/longtask/LongTaskDiff.kt` | 运行对比 |
-| `core/agent-engine/.../engine/thinking/ThinkingEvolutionTracker.kt` | 档位效能统计 |
-| `app/.../di/LongTaskModule.kt` | DI 装配（含启动 prune） |
+| `core/code-engine/.../code/longtask/LongTaskModels.kt` | Record/Checkpoint/CopyOptions 数据模型 |
+| `core/code-engine/.../code/longtask/LongTaskDetector.kt` | 规模判定纯函数 |
+| `core/code-engine/.../code/longtask/LongTaskStore.kt` | JSON 存储（原子写/缓存/prune） |
+| `core/code-engine/.../code/longtask/LongTaskTracker.kt` | 事件流聚合 + 检查点 |
+| `core/code-engine/.../code/longtask/TaskCopyEngine.kt` | 复制/重跑/续跑/摘要/复制链 |
+| `core/code-engine/.../code/longtask/LongTaskTemplates.kt` | 8 内置模板 |
+| `core/code-engine/.../code/longtask/LongTaskDiff.kt` | 运行对比 |
+| `core/code-engine/.../code/thinking/CodeCodeThinkingEvolutionTracker.kt` | 档位效能统计 |
+| `app/.../di/CodeLongTaskModule.kt` | DI 装配（含启动 prune） |
 | `app/.../ui/screen/code/longtask/CodeLongTaskSheet.kt` | 三页签面板 |
 | `app/.../ui/screen/code/CodeViewModel.kt` | 追踪接线 + 复制/重跑/续跑/对比 API |
 
@@ -223,7 +223,7 @@ Coding 屏工作区条「长任务」按钮唤起 ModalBottomSheet，三页签�
 | Tracker 聚合态（计数/环缓冲/检查点） | LongTaskTracker 实例字段 | VM 主线程串行（collect 链），单写者无竞争 |
 | Store 内存缓存 + Mutex | LongTaskStore | suspend API 串行化；snapshotBlocking 主线程快速读 |
 | 记录落盘 | persistScope（SupervisorJob+IO） | fire-and-forget，捕获不可变快照 |
-| 效能统计 | ThinkingEvolutionTracker | 同上（共用 LongTaskPersistScope） |
+| 效能统计 | CodeThinkingEvolutionTracker | 同上（共用 LongTaskPersistScope） |
 | UI 状态 | CodeUiState（StateFlow） | VM 独占更新，Compose 收集 |
 
 关键不变量：**VM 主线程绝不等磁盘**（所有 IO 都在 withContext(IO)

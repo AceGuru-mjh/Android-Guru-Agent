@@ -74,6 +74,20 @@ class TerminalCore(
     // T85：光标形状（DECSCUSR）。宿主经 [cursorStyle] 读取并绘制对应形状。
     private var cursorStyle = CursorStyle.BAR
 
+    // ── Termux 对齐（鼠标/焦点/超链接子系统）──
+    /** 鼠标报告模式（DECSET 1000/1002/1003/1005/1006/1015/1016/1007/10060 状态机）。 */
+    private var mouseReporting = MouseReportingState()
+
+    /** 焦点报告（DECSET 1004）—— UI 据此在窗口焦点变化时发送 ESC[I/ESC[O。 */
+    private var focusReporting = FocusReporting()
+
+    /** OSC 8 超链接注册表（RenderCell.link 编号 → URI）。 */
+    private val hyperlinks = HyperlinkRegistry()
+
+    /** 屏内文本搜索命中（[search] 后由 [searchHits] 读出；空 = 无命中/未搜）。 */
+    private var searchHits: List<TerminalSearchMatch> = emptyList()
+    private var activeSearchHitIndex: Int = -1
+
     /**
      * T85：宿主应答通道。DA1/DA2/DSR（CPR）需要向 PTY 回写响应序列 ——
      * 纯 JVM 的 TerminalCore 无法直接写 PTY，由宿主注入回调。
@@ -461,7 +475,7 @@ class TerminalCore(
                 }
                 i += subs.size - 1
             } else when (p) {
-                0 -> currentStyle = TerminalStyle.DEFAULT
+                0 -> currentStyle = TerminalStyle.DEFAULT.copy(linkIndex = currentStyle.linkIndex)
                 1 -> currentStyle = currentStyle.copy(bold = true)
                 2 -> currentStyle = currentStyle.copy(dim = true)
                 3 -> currentStyle = currentStyle.copy(italic = true)
@@ -559,6 +573,7 @@ class TerminalCore(
         savedStyle = TerminalStyle.DEFAULT
         scrollRegion.set(0, rows - 1, rows)
         cursorStyle = CursorStyle.BAR
+        // DECSTR：鼠标/焦点报告不重置（DEC STD 070 —— 非样式/光标类模式）。
         mutations += ScreenMutation.FULL
     }
 
@@ -566,7 +581,25 @@ class TerminalCore(
     private fun handleOsc(seq: VtParser.OSCSequence) {
         when (seq.code) {
             0, 1, 2 -> title = seq.data    // set title
-            8 -> { /* hyperlink — stored as flag on cell in future */ }
+            // ── Termux 对齐：OSC 8 超链接 ──
+            // data = "params;uri"（params 可为空，含 id=foo 显式键）或仅 "uri"。
+            // 空 URI（data 为 ";" 或空）= 闭链。链接编号进 TerminalStyle.linkIndex，
+            // 随落屏 cell 流入 RenderCell.link —— UI 查 [hyperlinks] 表得到 URI。
+            8 -> {
+                val semi = seq.data.indexOf(';')
+                val params: String
+                val uri: String
+                if (semi >= 0) {
+                    params = seq.data.substring(0, semi)
+                    uri = seq.data.substring(semi + 1)
+                } else {
+                    params = ""
+                    uri = seq.data
+                }
+                val newLink = hyperlinks.open(params, uri)
+                currentStyle = if (newLink == 0) currentStyle.copy(linkIndex = 0)
+                else currentStyle.copy(linkIndex = newLink)
+            }
             // T82: OSC 52 — clipboard write request (base64 payload). Format:
             //   OSC 52 ; [selection: c|p|s] ; [base64-data]  (selection part optional)
             // Empty payload = clipboard QUERY — we do not answer (host never
@@ -625,6 +658,8 @@ class TerminalCore(
                 cursor.column = 0
             }
             'H' -> tabStops.set(cursor.column)   // HTS — set horizontal tab stop at cursor column
+            '=' -> modes.applicationKeypad = true   // DECKPAM — application keypad
+            '>' -> modes.applicationKeypad = false  // DECKPNM — numeric keypad
             else -> { /* unknown ESC ignored */ }
         }
     }
@@ -649,6 +684,10 @@ class TerminalCore(
             2004 -> modes.bracketedPaste = enable
             47, 1047 -> switchAlternateScreen(enable, saveCursor = false)
             1049 -> switchAlternateScreen(enable, saveCursor = true)
+            // ── Termux 对齐：鼠标/焦点报告模式（vim/tmux/htop 触摸交互的前提）──
+            1004 -> focusReporting = FocusReporting.apply(focusReporting, enable)
+            1000, 1002, 1003, 1005, 1006, 1007, 1015, 1016, 10060 ->
+                mouseReporting = MouseReportingState.apply(mouseReporting, p, enable)
         }
     }
 
@@ -714,6 +753,10 @@ class TerminalCore(
         pendingClipboardRequests.clear()
         utf8.reset(); parser.reset()
         title = null
+        // Termux 对齐：RIS 全重置 —— 鼠标/焦点报告归零、超链接表清空
+        mouseReporting = MouseReportingState()
+        focusReporting = FocusReporting()
+        hyperlinks.reset()
         mutations += ScreenMutation.FULL
     }
 
@@ -737,6 +780,15 @@ class TerminalCore(
 
     /** Bracketed paste mode (CSI ?2004 h/l) — paste wrapper hint for the input layer. */
     val bracketedPaste: Boolean get() = modes.bracketedPaste
+
+    /** 当前鼠标报告模式（DECSET 1000/1002/… 状态）— UI 据此把触摸事件编码进 PTY。 */
+    val mouseMode: MouseReportingState get() = mouseReporting
+
+    /** 当前焦点报告模式（DECSET 1004）— UI 在窗口焦点变化时发送 ESC[I/ESC[O。 */
+    val focusMode: FocusReporting get() = focusReporting
+
+    /** 超链接编号 → URI（悬空编号返回 null；0 一律 null）。 */
+    fun hyperlinkUriOf(linkId: Int): String? = hyperlinks.uriOf(linkId)
 
     /** Total lines currently held in the main screen's scrollback. */
     val scrollbackCount: Int get() = mainBuffer.scrollbackLineCount
@@ -768,6 +820,7 @@ class TerminalCore(
             cursorStyle = cursorStyle,
             alternateScreen = modes.alternateScreen,
             applicationCursor = modes.applicationCursor,
+            applicationKeypad = modes.applicationKeypad,
             bracketedPaste = modes.bracketedPaste,
             reverseVideo = modes.reverseVideo,
             title = title,
@@ -775,8 +828,26 @@ class TerminalCore(
             scrollback = sb,
             scrollbackTotal = mainBuffer.scrollbackLineCount,
             scrollbackBase = mainBuffer.scrollbackLinesEver,
-            bellSeq = drainBell()
+            bellSeq = drainBell(),
+            mouseMode = mouseReporting,
+            focusMode = focusReporting,
+            // T86：屏内实际出现的 OSC 8 链接 id → URI（小表，UI 点击直查）
+            linkTable = buildLinkTable(visible, sb)
         )
+    }
+
+    /** 收集屏内/scrollback 渲染行里出现的链接 id → URI 映射（悬空 id 跳过）。 */
+    private fun buildLinkTable(
+        visible: List<List<RenderCell>>,
+        scrollback: List<List<RenderCell>>
+    ): Map<Int, String> {
+        val ids = HashSet<Int>()
+        for (row in visible) for (cell in row) if (cell.link != 0) ids.add(cell.link)
+        for (row in scrollback) for (cell in row) if (cell.link != 0) ids.add(cell.link)
+        if (ids.isEmpty()) return emptyMap()
+        val out = HashMap<Int, String>(ids.size)
+        for (id in ids) hyperlinks.uriOf(id)?.let { out[id] = it }
+        return out
     }
 
     /** Render one row of cells, trimming trailing default-blank cells (they are pure background). */
@@ -819,11 +890,13 @@ class TerminalCore(
         // by the UI (keeps default-vs-explicit color semantics in one place).
         if (c.style.inverse || modes.reverseVideo) flags = flags or RenderCell.FLAG_INVERSE
         if (c.width == 2) flags = flags or RenderCell.FLAG_WIDE
+        if (c.style.linkIndex != 0) flags = flags or RenderCell.FLAG_LINK
         return RenderCell(
             text = sb.toString(),
             fg = colorArgb(c.style.foreground),
             bg = colorArgb(c.style.background),
-            flags = flags
+            flags = flags,
+            link = c.style.linkIndex
         )
     }
 
@@ -846,6 +919,143 @@ class TerminalCore(
 
     /** The last [maxLines] scrollback lines, oldest first (main screen only). */
     override fun scrollbackText(maxLines: Int): List<String> = mainBuffer.scrollbackRenderedLines(maxLines)
+
+    // ═══ v0.2 capability overrides（Termux 对齐 —— native .so 加载失败回退
+    // 纯 Kotlin 引擎时，鼠标/焦点/按键/粘贴/链接能力不降级）═══
+
+    override fun mouseTrackingMode(): MouseTrackingMode = mouseReporting.tracking
+
+    override fun mouseWireEncoding(): MouseWireEncoding = mouseReporting.encoding
+
+    override fun focusReportEnabled(): Boolean = focusReporting.enabled
+
+    override fun altScrollEnabled(): Boolean = mouseReporting.altScroll
+
+    override fun applicationKeypadMode(): Boolean = modes.applicationKeypad
+
+    override fun encodeMouseEvent(
+        type: TerminalMouseEventType,
+        button: Int,
+        mods: Int,
+        col: Int,
+        row: Int
+    ): ByteArray? = MouseEncoder.encode(type, button, mods, col, row, mouseReporting)
+
+    override fun encodeFocus(focused: Boolean): ByteArray? =
+        encodeFocusEvent(focused, focusReporting)
+
+    /**
+     * 滚轮路由：鼠标跟踪开启 → 鼠标滚轮事件；否则备用屏 + 1007 → 方向键；
+     * 都不满足 → null（UI 滚动视口）。主屏滚轮恒为视口滚动（Termux 同语义）。
+     */
+    override fun encodeWheel(up: Boolean): ByteArray? {
+        if (mouseReporting.enabled) {
+            val t = if (up) TerminalMouseEventType.WHEEL_UP else TerminalMouseEventType.WHEEL_DOWN
+            return MouseEncoder.encode(t, 0, 0, cursor.column + 1, cursor.row + 1, mouseReporting)
+        }
+        if (mouseReporting.altScroll && modes.alternateScreen) {
+            return MouseEncoder.altScrollArrow(up)
+        }
+        return null
+    }
+
+    override fun encodeKey(key: TerminalKey, mods: Int): ByteArray? =
+        KeySequenceTables.encode(key, mods, modes.applicationCursor, modes.applicationKeypad)
+
+    override fun encodePaste(text: String): ByteArray? =
+        KeySequenceTables.encodePaste(text, modes.bracketedPaste)
+
+    /** 当前活跃链接表（id 升序快照；UI 主用 [linkAt] 单点查询）。 */
+    override fun links(): List<String> = hyperlinks.allUris()
+
+    /** 屏内坐标 → OSC 8 URI（备用屏同查；越界/无链接 → null）。 */
+    override fun linkAt(screenRow: Int, col: Int): String? {
+        if (screenRow !in 0 until rows || col !in 0 until cols) return null
+        val cell = currentBuffer.get(screenRow, col)
+        return hyperlinks.uriOf(cell.style.linkIndex)
+    }
+
+    // ═══ v0.2 屏内搜索（scrollback + 可见屏；全局行坐标）═══
+
+    /**
+     * 全局行文本（0 = 最老保留行）。备用屏无 scrollback —— 契约全局行
+     * 针对主屏；备用屏搜索仅覆盖可见区（行号以 scrollbackLineCount 偏移）。
+     */
+    private fun globalLineText(globalRow: Long): String? {
+        val sb = currentBuffer.let { if (modes.alternateScreen) 0 else mainBuffer.scrollbackLineCount }
+        return when {
+            globalRow < sb -> {
+                // scrollback 行（index 相对 scrollback 头）
+                val cells = mainBuffer.scrollbackLine(globalRow.toInt()) ?: return null
+                cellsToText(cells)
+            }
+            globalRow < sb + rows -> {
+                val cells = currentBuffer.row((globalRow - sb).toInt())
+                cellsToText(cells)
+            }
+            else -> null
+        }
+    }
+
+    private fun cellsToText(cells: Array<TerminalCell>): String {
+        val sb = StringBuilder(cells.size)
+        for (c in cells) {
+            if (c.isWideTrail) continue
+            sb.appendCodePoint(if (c.codePoint == 0) ' '.code else c.codePoint)
+            for (m in c.combining) sb.appendCodePoint(m)
+        }
+        return sb.toString()
+    }
+
+    /** [TerminalEngine.search]：朴素子串搜索（大小写/全词可控），全局行坐标命中。 */
+    override fun search(pattern: String, caseInsensitive: Boolean, wholeWord: Boolean): Int {
+        if (pattern.isEmpty()) { searchHits = emptyList(); activeSearchHitIndex = -1; return 0 }
+        val sbLines = if (modes.alternateScreen) 0 else mainBuffer.scrollbackLineCount
+        val totalLines = (sbLines + rows).toLong()
+        val needle = if (caseInsensitive) pattern.lowercase() else pattern
+        val found = ArrayList<TerminalSearchMatch>()
+        for (line in 0L until totalLines) {
+            val raw = globalLineText(line) ?: continue
+            val hay = if (caseInsensitive) raw.lowercase() else raw
+            var from = 0
+            while (true) {
+                val at = hay.indexOf(needle, from)
+                if (at < 0) break
+                val end = at + needle.length
+                if (wholeWord && !isWordBoundary(hay, at, end)) { from = at + 1; continue }
+                found.add(TerminalSearchMatch(line, at, line, end))
+                from = end
+            }
+        }
+        searchHits = found
+        activeSearchHitIndex = if (found.isEmpty()) -1 else 0
+        return found.size
+    }
+
+    private fun isWordBoundary(hay: String, start: Int, end: Int): Boolean {
+        fun wordChar(i: Int): Boolean {
+            val c = hay[i]
+            return c.isLetterOrDigit() || c == '_'
+        }
+        val before = start > 0 && wordChar(start - 1)
+        val after = end < hay.length && wordChar(end)
+        return !before && !after
+    }
+
+    override fun searchHitCount(): Int = searchHits.size
+
+    override fun searchHits(): List<TerminalSearchMatch> = searchHits
+
+    override fun clearSearch() {
+        searchHits = emptyList()
+        activeSearchHitIndex = -1
+    }
+
+    override fun setActiveSearchHit(index: Int) {
+        if (index in searchHits.indices) activeSearchHitIndex = index
+    }
+
+    override fun activeSearchHit(): Int = activeSearchHitIndex
 
     /**
      * 消费式读出"刚响过铃"（BEL）。
@@ -943,6 +1153,8 @@ data class RenderCell(
         const val FLAG_INVERSE = 1 shl 7
         /** East-Asian wide char — occupies two columns; monospace CJK glyph advance ≈ 2 cells. */
         const val FLAG_WIDE = 1 shl 8
+        /** OSC 8 hyperlink carrier — [link] is a live id into the session URI table. */
+        const val FLAG_LINK = 1 shl 9
     }
 }
 
@@ -991,5 +1203,13 @@ data class TerminalRenderSnapshot(
      * 用序号而不是布尔值，是因为 `yes`-类输出可能短时间连续发 BEL，
      * 布尔去重会让第二声石沉大海；同时纯 JVM，不含任何 Android 依赖。
      */
-    val bellSeq: Long = 0L
+    val bellSeq: Long = 0L,
+    /** 鼠标报告模式（Termux 对齐）：UI 据此把触摸/滚轮编码为 PTY 字节。 */
+    val mouseMode: MouseReportingState = MouseReportingState(),
+    /** 焦点报告（DECSET 1004）：窗口焦点变化时 UI 发送 ESC[I / ESC[O。 */
+    val focusMode: FocusReporting = FocusReporting(),
+    /** DECKPAM（ESC = / ESC >）：小键盘应用模式（数字键 SS3 p..y）。 */
+    val applicationKeypad: Boolean = false,
+    /** 屏内实际出现的 OSC 8 链接 id → URI（UI 点击直查；悬空 id 不在表中）。 */
+    val linkTable: Map<Int, String> = emptyMap()
 )

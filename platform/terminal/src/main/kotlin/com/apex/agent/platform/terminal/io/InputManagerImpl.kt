@@ -196,8 +196,12 @@ class InputManagerImpl(
         if (op.kind == InputKind.LINE && op.text != null) {
             val basis = op.policyBasis ?: op.text
             val req = InputRequest(sessionId, command = basis, bytes = null, owner = op.owner)
-            when (policy.check(req)) {
-                is Decision.Deny -> return Result.failure(RuntimeException("TerminalError:PermissionDenied"))
+            when (val d = policy.check(req)) {
+                is Decision.Deny -> return Result.failure(RuntimeException(
+                    // P0 修复：带上策略原因 —— 模型可理解"命令被策略拦截"并换法，
+                    // 而不是把 PermissionDenied 误当会话故障反复重试。
+                    "TerminalError:PermissionDenied — ${d.reason}"
+                ))
                 Decision.Allow -> {}
             }
         }

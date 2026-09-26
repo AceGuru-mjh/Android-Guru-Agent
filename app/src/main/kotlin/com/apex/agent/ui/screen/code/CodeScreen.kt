@@ -64,15 +64,20 @@ import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.screen.agent.QuestionCard
+import com.apex.agent.core.code.stream.StreamToolCall
 import com.apex.agent.ui.screen.code.editor.CodeEditorPanel
 import com.apex.agent.ui.screen.code.longtask.CodeLongTaskSheet
+import com.apex.agent.ui.screen.code.stream.CodeStreamTimeline
+import com.apex.agent.ui.screen.code.stream.CodeTerminalPanel
+import com.apex.agent.ui.screen.code.stream.CodeToolDetailSheet
 
 /**
  * # Code Screen — Coding 模式主屏（与 Agent 聊天屏同级别）
  *
- * 布局：工作区条（切换/新建）→ Todo 面板（可折叠）→ 消息流（用户/助手/
- * 工具卡）→ 输入栏。工具卡对 code_edit / code_write 输出做 diff 感知着色
- * （+绿/-红），其余工具以等宽文本呈现。
+ * 布局：工作区条（切换/新建）→ Todo 面板（可折叠）→ 编辑器面板 →
+ * **胶囊时间轴**（工具胶囊/思考链/验证轮次/结论气泡，25ms 攒批）→
+ * 终端面板（活跃 BASH 脉冲尾窗，独立锚定）→ 思考档位选择器 → 输入栏。
+ * 胶囊点击进详情弹层（分族路由：终端全文/文件 Diff/搜索命中）。
  */
 @Composable
 fun CodeScreen(
@@ -82,6 +87,10 @@ fun CodeScreen(
     val pendingAgentQuestion by viewModel.pendingAgentQuestion.collectAsState()
     var showNewWorkspace by remember { mutableStateOf(false) }
     var showThinkingGuide by remember { mutableStateOf(false) }
+    // 胶囊详情弹层选中项（null = 关闭）
+    var selectedToolCall by remember { mutableStateOf<StreamToolCall?>(null) }
+    // 终端面板折叠态（默认展开——BASH 是 Coding 工作流主舞台）
+    var terminalCollapsed by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -115,10 +124,21 @@ fun CodeScreen(
         }
 
         Box(modifier = Modifier.weight(1f)) {
-            CodeMessageList(
-                messages = state.messages,
-                isRunning = state.isRunning,
-                modifier = Modifier.fillMaxSize()
+            // 胶囊时间轴（渲染主通道）：Diff + 终端日志 + 结构化错误三件套
+            CodeStreamTimeline(
+                snapshot = state.stream,
+                isStreaming = state.isRunning,
+                onToolClick = { call -> selectedToolCall = call }
+            )
+        }
+
+        // 终端面板（活跃 BASH 的脉冲尾窗；独立锚定与时间轴互不抢占）
+        if (state.stream.activeTerminalCallId != null || state.stream.terminalContent.isNotBlank()) {
+            CodeTerminalPanel(
+                content = state.stream.terminalContent,
+                activeCommand = state.stream.activeTerminalCallId,
+                collapsed = terminalCollapsed,
+                onToggleCollapse = { terminalCollapsed = !terminalCollapsed }
             )
         }
 
@@ -187,6 +207,15 @@ fun CodeScreen(
             currentLevel = state.thinkingLevel,
             onDismiss = { showThinkingGuide = false },
             onSelect = viewModel::setThinkingLevel
+        )
+    }
+
+    // 胶囊详情弹层（分族路由：BASH→终端全文 / EDIT→Diff / GREP→命中列表）
+    selectedToolCall?.let { call ->
+        CodeToolDetailSheet(
+            call = call,
+            terminalFallback = viewModel.terminalLogOf(call.id),
+            onDismiss = { selectedToolCall = null }
         )
     }
 
@@ -406,214 +435,9 @@ private fun TodoPanel(todos: List<CodeTodoTool.Todo>) {
 }
 
 // ═══ 消息流 ═══
-
-@Composable
-private fun CodeMessageList(
-    messages: List<CodeChatMessage>,
-    isRunning: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
-    LazyColumn(
-        state = listState,
-        modifier = modifier,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(messages, key = { it.id }) { message ->
-            CodeMessageItem(message)
-        }
-        if (isRunning) {
-            item(key = "running-indicator") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(4.dp)
-                ) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.code_working),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CodeMessageItem(message: CodeChatMessage) {
-    when (message.role) {
-        CodeChatMessage.Role.USER -> UserBubble(message.text)
-        CodeChatMessage.Role.ASSISTANT -> AssistantMessage(message)
-        CodeChatMessage.Role.TOOL -> ToolCard(message)
-        CodeChatMessage.Role.SYSTEM -> SystemNote(message.text)
-    }
-}
-
-@Composable
-private fun UserBubble(text: String) {
-    Row(
-        horizontalArrangement = Arrangement.End,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp),
-            modifier = Modifier.widthIn(max = 320.dp)
-        ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(12.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun AssistantMessage(message: CodeChatMessage) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        if (message.isStreaming && message.text.isEmpty()) {
-            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-        } else {
-            MarkdownText(markdown = message.text)
-        }
-    }
-}
-
-@Composable
-private fun SystemNote(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-    )
-}
-
-/**
- * 工具卡片：code_edit / code_write 的输出含统一 diff（+/- 行），逐行着色；
- * 其余工具等宽文本（可折叠）。
- */
-@Composable
-private fun ToolCard(message: CodeChatMessage) {
-    var expanded by remember { mutableStateOf(false) }
-    // v1.0 #153：code_git_diff 输出统一 diff 原文，与 code_edit/write 共用 diff 着色
-    val isDiffTool = message.toolName == "code_edit" || message.toolName == "code_write" ||
-        message.toolName == "code_git_diff"
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        shape = RoundedCornerShape(10.dp)
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-            ) {
-                val (icon, tint) = if (message.isStreaming) {
-                    null to MaterialTheme.colorScheme.tertiary
-                } else if (message.toolSuccess) {
-                    Icons.Default.Check to MaterialTheme.colorScheme.primary
-                } else {
-                    Icons.Default.ErrorOutline to MaterialTheme.colorScheme.error
-                }
-                if (message.isStreaming) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                } else {
-                    icon?.let {
-                        Icon(it, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = message.toolName ?: "tool",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold
-                )
-                if (!message.isStreaming && message.durationMs > 0) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "${message.durationMs}ms",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = if (expanded) "−" else "+",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (expanded || isDiffTool || message.text.length < 400) {
-                Spacer(Modifier.height(6.dp))
-                val display = if (expanded) message.text else message.text.take(600) + if (message.text.length > 600) "\n…" else ""
-                if (isDiffTool) {
-                    DiffOutput(display)
-                } else {
-                    Text(
-                        text = display,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** diff 感知着色：+ 行绿 / - 行红 / 其余淡。 */
-@Composable
-private fun DiffOutput(text: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-    ) {
-        text.split('\n').take(120).forEach { line ->
-            val (bg, color) = when {
-                line.startsWith("+") -> androidx.compose.ui.graphics.Color(0x1400A884) to androidx.compose.ui.graphics.Color(0xFF1B8A5A)
-                line.startsWith("-") -> androidx.compose.ui.graphics.Color(0x14D84040) to androidx.compose.ui.graphics.Color(0xFFB03A3A)
-                else -> androidx.compose.ui.graphics.Color.Transparent to MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            }
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = color,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(bg)
-                    .padding(horizontal = 6.dp, vertical = 0.dp)
-            )
-        }
-    }
-}
+// v 胶囊流式：旧 CodeMessageList/CodeMessageItem/ToolCard/DiffOutput 渲染族
+// 已由 stream 包（CodeStreamTimeline + 卡片族）整体取代——Diff 着色/
+// 等宽回放/流式态全部升级为胶囊 + 详情弹层分族路由形态。
 
 // ═══ 输入栏 ═══
 

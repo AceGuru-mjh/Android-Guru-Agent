@@ -232,6 +232,40 @@ class CodeStreamSession {
     /** 时间轴条目数（测试与落盘裁剪依据）。 */
     fun entryCount(): Int = entries.size
 
+    /**
+     * 整轴替换（检查点/旧档恢复用）：清空内部状态后灌入既有条目。
+     *
+     * 恢复的条目全部视为终态（isStreaming 强制 false 由调用方保证——
+     * mapper 产出即终态）；工具表与终端缓冲不重建（历史 BASH 尾窗在
+     * DetailSheet 不可回放是已声明的降级）。
+     */
+    fun replaceAll(restored: List<StreamEntry>) {
+        entries.clear()
+        entries.addAll(restored)
+        toolCalls.clear()
+        terminalBuffers.clear()
+        affectedFiles.clear()
+        streamingThinking = null
+        streamingAssistant = null
+        activeTerminalCallId = null
+        lastError = null
+        toolCallCount = restored.count { it is StreamEntry.ToolCapsuleEntry }
+        failedToolCallCount = restored.count {
+            (it as? StreamEntry.ToolCapsuleEntry)?.call?.status == ToolCallStatus.FAILED
+        }
+        restored.forEach { entry ->
+            if (entry is StreamEntry.ToolCapsuleEntry) {
+                toolCalls[entry.call.id] = entry.call
+            }
+        }
+        dirty = true
+    }
+
+    /** 清空时间轴（新会话）。 */
+    fun clear() {
+        replaceAll(emptyList())
+    }
+
     /** 只读条目访问（检查点序列化用）。 */
     fun entriesSnapshot(): List<StreamEntry> = entries.toList()
 

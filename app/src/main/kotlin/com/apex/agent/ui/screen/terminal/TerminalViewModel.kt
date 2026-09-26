@@ -7,12 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
 import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
+import com.apex.agent.platform.terminal.io.KeyEventMapping
 import com.apex.agent.platform.terminal.io.KeySequenceEncoder
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
+import com.apex.agent.terminalemulator.MouseEncoder
+import com.apex.agent.terminalemulator.TerminalMouseEventType
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
+import com.apex.agent.terminalemulator.encodeFocusEvent
 import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -447,6 +451,115 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.resize(sid, rows, cols)
         }
     }
+
+    // ═══════════════════ T86：Termux 对齐输入扩展（硬件键/鼠标/焦点/字号）═══════════════════
+
+    /**
+     * 硬件键盘完整映射（KeyEventMapping —— xterm 修饰键协议）。
+     *
+     * 覆盖旧 [sendKey] 路径之外的键位：Shift/Alt/Ctrl+方向键（`ESC[1;5A` 类）、
+     * F1-F12、小键盘（DECKPAM 感知）、Shift+Tab、Alt+字符（meta 化）。
+     * 无映射（返回 null）时 UI 放行给 IME/系统。
+     *
+     * 行缓冲语义与 [sendKey] 一致：ENTER=提交检查、BACKSPACE=退格、其余清空。
+     */
+    fun sendHardwareKey(keyCode: Int, mods: Int, unicodeChar: Int = 0) {
+        val sid = _activeSessionId.value ?: return
+        val render = _renderState.value
+        val modes = KeyEventMapping.KeyModes(
+            applicationCursor = render?.applicationCursor ?: false,
+            applicationKeypad = render?.applicationKeypad ?: false,
+            numLock = true
+        )
+        val bytes = KeyEventMapping.encode(keyCode, mods, modes, unicodeChar) ?: return
+        when (keyCode) {
+            KeyEventMapping.KEYCODE_ENTER -> {
+                val candidate = pendingLine.toString().trim()
+                if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
+                    _notice.value = lang.getString(R.string.term_notice_blocked, candidate.take(40))
+                    return
+                }
+                pendingLine.setLength(0)
+            }
+            KeyEventMapping.KEYCODE_DEL -> if (pendingLine.isNotEmpty()) pendingLine.setLength(pendingLine.length - 1)
+            else -> pendingLine.setLength(0)
+        }
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /**
+     * 鼠标事件（触摸/手写笔 → MouseEncoder → PTY）。
+     *
+     * guest 开启 DECSET 1000/1002/1003 后，vim/tmux/htop 把触摸点击当鼠标用。
+     * 坐标 1-based（xterm 习惯）；未开启跟踪时编码器返回 null → 静默忽略。
+     */
+    fun sendMouseEvent(type: TerminalMouseEventType, button: Int, mods: Int, col: Int, row: Int) {
+        val sid = _activeSessionId.value ?: return
+        val mode = _renderState.value?.mouseMode ?: return
+        val bytes = MouseEncoder.encode(type, button, mods, col, row, mode) ?: return
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /**
+     * 滚轮路由：跟踪开启 → 滚轮当鼠标事件进 PTY（vim 里滚 = 移动光标）；
+     * 备用屏 + 1007 → 方向键；否则返回 false 让 UI 滚动视口（正常行为）。
+     *
+     * @return true = 已编码进 PTY（UI 不要再滚视口）
+     */
+    fun sendWheel(up: Boolean): Boolean {
+        val sid = _activeSessionId.value ?: return false
+        val render = _renderState.value ?: return false
+        val bytes = when {
+            render.mouseMode.enabled -> MouseEncoder.encode(
+                if (up) TerminalMouseEventType.WHEEL_UP else TerminalMouseEventType.WHEEL_DOWN,
+                0, 0, render.cursorCol + 1, render.cursorRow + 1, render.mouseMode
+            )
+            render.mouseMode.altScroll && render.alternateScreen -> MouseEncoder.altScrollArrow(up)
+            else -> null
+        } ?: return false
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+        return true
+    }
+
+    /**
+     * 窗口焦点变化 → ESC[I / ESC[O（DECSET 1004）。
+     * vim FocusGained/FocusLost、tmux focus-events 依赖此序列。
+     */
+    fun notifyTerminalFocus(gained: Boolean) {
+        val sid = _activeSessionId.value ?: return
+        val mode = _renderState.value?.focusMode ?: return
+        val bytes = encodeFocusEvent(gained, mode) ?: return
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /** 双指捏合调字号（Termux 手势）：步进 1，钳制 6..32。 */
+    fun adjustFontSize(delta: Int) {
+        if (delta == 0) return
+        updateSettings { copy(fontSize = (fontSize + delta).coerceIn(6, 32)) }
+    }
+
+    /** OSC 8 链接 URI 查询（屏内 link id → URI；悬空/未知 → null）。 */
+    fun linkUriOf(linkId: Int): String? = _renderState.value?.linkTable?.get(linkId)
 
     // ═══════════════════════ Ubuntu 生命周期入口 ═══════════════════════
 

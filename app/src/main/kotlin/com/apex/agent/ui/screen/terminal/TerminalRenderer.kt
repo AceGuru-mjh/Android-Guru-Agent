@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.R
+import com.apex.agent.platform.terminal.io.KeyEventMapping
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.terminalemulator.RenderCell
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
@@ -113,6 +115,22 @@ fun TerminalRenderer(
     val render by viewModel.renderState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // T86：窗口焦点变化 → ESC[I / ESC[O（DECSET 1004；vim FocusGained/Lost、
+    // tmux focus-events）。用生命周期近似（ON_RESUME=聚焦，ON_PAUSE=失焦）。
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> viewModel.notifyTerminalFocus(true)
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> viewModel.notifyTerminalFocus(false)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     TerminalGrid(
         render = render,
         fontSize = settings.fontSize,
@@ -126,6 +144,33 @@ fun TerminalRenderer(
         // 响铃（BEL）反馈：对齐 Termux/ConnectBot —— 补全失败、命令报错时给一下振动
         onBell = {
             if (settings.vibrateOnBell) runCatching { vibrateOnce(context) }
+        },
+        // T86：硬件键完整映射（KeyEventMapping：修饰键/F1-12/小键盘）
+        onHardwareKey = { keyCode, mods, unicode ->
+            viewModel.sendHardwareKey(keyCode, mods, unicode)
+            true  // 有映射才会走到这里（VM 内 encode null 时静默返回仍算消费，防双发）
+        },
+        // T86：双指捏合调字号
+        onFontSizeStep = viewModel::adjustFontSize,
+        // T86：OSC 8 链接 → 系统浏览器
+        onLinkOpen = { uri ->
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+                )
+            }
+        },
+        // T86：滚轮/鼠标报告路由
+        onWheel = viewModel::sendWheel,
+        onMouse = { type, col, row ->
+            when (type) {
+                0 -> viewModel.sendMouseEvent(
+                    com.apex.agent.terminalemulator.TerminalMouseEventType.PRESS, 0, 0, col, row
+                )
+                1 -> viewModel.sendMouseEvent(
+                    com.apex.agent.terminalemulator.TerminalMouseEventType.RELEASE, 0, 0, col, row
+                )
+            }
         },
         modifier = modifier
     )
@@ -171,6 +216,17 @@ fun TerminalGrid(
     onResize: (rows: Int, cols: Int) -> Unit,
     /** 响铃（BEL 0x07）回调 —— 序号变化即触发，宿主决定振动/提示/忽略。 */
     onBell: () -> Unit = {},
+    /** T86：硬件键盘完整映射（KeyEventMapping —— 修饰键/F1-12/小键盘）。
+     * 返回 true = 已编码写入（消费事件）；false = 无映射（走旧 onKey 表/IME）。 */
+    onHardwareKey: (keyCode: Int, mods: Int, unicodeChar: Int) -> Boolean = { _, _, _ -> false },
+    /** T86：双指捏合调字号（Termux 手势）：delta = ±1 步进。 */
+    onFontSizeStep: (Int) -> Unit = {},
+    /** T86：OSC 8 链接点击（uri 已由 render.linkTable 解析）。 */
+    onLinkOpen: (String) -> Unit = {},
+    /** T86：滚轮路由 —— 返回 true = 已编码进 PTY（vim 滚动），UI 不滚视口。 */
+    onWheel: (up: Boolean) -> Boolean = { false },
+    /** T86：鼠标事件（触摸点击 → guest 鼠标报告；模式关闭时 VM 层静默忽略）。 */
+    onMouse: (type: Int, col: Int, row: Int) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -215,8 +271,60 @@ fun TerminalGrid(
     var selectionHead by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val selectionActive = selectionAnchor != null && selectionHead != null
 
-    // ── CTRL 锁存（下一次字母输入转控制码）──
+    // ── CTRL/SHIFT/ALT 锁存（下一次特殊键/字母按修饰组合发）──
     var ctrlLatched by remember { mutableStateOf(false) }
+    var shiftLatched by remember { mutableStateOf(false) }
+    var altLatched by remember { mutableStateOf(false) }
+
+    /** T86：锁存修饰位 → xterm 组合（SHIFT/ALT+方向键 = 选择/词跳，Termux 同款）。 */
+    fun latchedMods(): Int {
+        var m = 0
+        if (ctrlLatched) m = m or KeyEventMapping.MOD_CTRL
+        if (shiftLatched) m = m or KeyEventMapping.MOD_SHIFT
+        if (altLatched) m = m or KeyEventMapping.MOD_ALT
+        return m
+    }
+
+    /** 特殊键按当前锁存修饰发送（无锁存走旧 onKey 路径，保持兼容）。 */
+    fun sendKeyWithLatches(key: TerminalKey) {
+        val mods = latchedMods()
+        if (mods == 0) {
+            onKey(key)
+            return
+        }
+        val keyCode = when (key) {
+            TerminalKey.ARROW_UP -> KeyEventMapping.KEYCODE_DPAD_UP
+            TerminalKey.ARROW_DOWN -> KeyEventMapping.KEYCODE_DPAD_DOWN
+            TerminalKey.ARROW_LEFT -> KeyEventMapping.KEYCODE_DPAD_LEFT
+            TerminalKey.ARROW_RIGHT -> KeyEventMapping.KEYCODE_DPAD_RIGHT
+            TerminalKey.HOME -> KeyEventMapping.KEYCODE_MOVE_HOME
+            TerminalKey.END -> KeyEventMapping.KEYCODE_MOVE_END
+            TerminalKey.PAGE_UP -> KeyEventMapping.KEYCODE_PAGE_UP
+            TerminalKey.PAGE_DOWN -> KeyEventMapping.KEYCODE_PAGE_DOWN
+            TerminalKey.ENTER -> KeyEventMapping.KEYCODE_ENTER
+            TerminalKey.TAB -> KeyEventMapping.KEYCODE_TAB
+            TerminalKey.BACKSPACE -> KeyEventMapping.KEYCODE_DEL
+            TerminalKey.F1 -> KeyEventMapping.KEYCODE_F1
+            TerminalKey.F2 -> KeyEventMapping.KEYCODE_F1 + 1
+            TerminalKey.F3 -> KeyEventMapping.KEYCODE_F1 + 2
+            TerminalKey.F4 -> KeyEventMapping.KEYCODE_F1 + 3
+            TerminalKey.F5 -> KeyEventMapping.KEYCODE_F1 + 4
+            TerminalKey.F6 -> KeyEventMapping.KEYCODE_F1 + 5
+            TerminalKey.F7 -> KeyEventMapping.KEYCODE_F1 + 6
+            TerminalKey.F8 -> KeyEventMapping.KEYCODE_F1 + 7
+            TerminalKey.F9 -> KeyEventMapping.KEYCODE_F1 + 8
+            TerminalKey.F10 -> KeyEventMapping.KEYCODE_F1 + 9
+            TerminalKey.F11 -> KeyEventMapping.KEYCODE_F1 + 10
+            TerminalKey.F12 -> KeyEventMapping.KEYCODE_F1 + 11
+            else -> 0
+        }
+        if (keyCode != 0) {
+            onHardwareKey(keyCode, mods, 0)
+            shiftLatched = false; altLatched = false  // 一次性锁存（发出即释放）
+        } else {
+            onKey(key)
+        }
+    }
 
     // ── IME 隐藏桥 + 焦点 ──
     val focusRequester = remember { FocusRequester() }
@@ -313,14 +421,30 @@ fun TerminalGrid(
         return builder.toString()
     }
 
-    // ── 硬件键盘（preview 优先消费；支持长按重复）──
+    // ── 硬件键盘（preview 优先消费；T86 升级：KeyEventMapping 完整修饰键协议）──
     fun handleHardwareKey(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
-        val kc = event.nativeKeyEvent.keyCode
-        if (event.isCtrlPressed && kc in android.view.KeyEvent.KEYCODE_A..android.view.KeyEvent.KEYCODE_Z) {
-            onControl('a' + (kc - android.view.KeyEvent.KEYCODE_A))
-            return true
+        val nk = event.nativeKeyEvent
+        // 修饰位（xterm 协议输入侧）
+        var mods = 0
+        if (event.isCtrlPressed) mods = mods or KeyEventMapping.MOD_CTRL
+        if (event.isShiftPressed) mods = mods or KeyEventMapping.MOD_SHIFT
+        if (event.isAltPressed) mods = mods or KeyEventMapping.MOD_ALT
+        // 修饰组合路径（含 F1-12/小键盘/修饰方向键）交给完整映射；
+        // 无修饰的普通字符仍走 IME/onText（unicodeChar 只在修饰时需要）。
+        if (mods != 0) {
+            if (onHardwareKey(nk.keyCode, mods, nk.unicodeChar)) return true
         }
+        // 无修饰：F1-F12 / 小键盘 / 方向键等非字符键仍需终端拦截
+        when (nk.keyCode) {
+            in KeyEventMapping.KEYCODE_F1..KeyEventMapping.KEYCODE_F12,
+            in KeyEventMapping.KEYCODE_NUMPAD_0..KeyEventMapping.KEYCODE_NUMPAD_9,
+            KeyEventMapping.KEYCODE_NUMPAD_ENTER, KeyEventMapping.KEYCODE_NUMPAD_ADD,
+            KeyEventMapping.KEYCODE_NUMPAD_SUBTRACT, KeyEventMapping.KEYCODE_NUMPAD_MULTIPLY,
+            KeyEventMapping.KEYCODE_NUMPAD_DIVIDE, KeyEventMapping.KEYCODE_NUMPAD_DOT,
+            KeyEventMapping.KEYCODE_INSERT -> if (onHardwareKey(nk.keyCode, 0, nk.unicodeChar)) return true
+        }
+        // 旧路径：基础键（方向/Home/End/PgUp/PgDn/Del/Enter/Tab/Backspace/Esc）
         return when (event.key) {
             Key.Enter -> { onKey(TerminalKey.ENTER); true }
             Key.Backspace -> { onKey(TerminalKey.BACKSPACE); true }
@@ -363,11 +487,50 @@ fun TerminalGrid(
                 .fillMaxWidth()
                 .onSizeChanged { viewSize = it }
                 .onPreviewKeyEvent { handleHardwareKey(it) }
+                // T86：双指捏合调字号（Termux 手势）—— 与 tap 手势独立挂载；
+                // 阈值触发制（一次捏合跨阈值只步进一档，重置基准防连跳）。
+                .pointerInput(Unit) {
+                    var pinchBase = 1f
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom == 1f) return@detectTransformGestures
+                        val accumulated = pinchBase * zoom
+                        when {
+                            accumulated >= 1.25f -> { onFontSizeStep(+1); pinchBase = 1f }
+                            accumulated <= 0.8f -> { onFontSizeStep(-1); pinchBase = 1f }
+                            else -> pinchBase = accumulated
+                        }
+                    }
+                }
                 // 点击整个终端区域（含"终端未启动"占位）都拉起输入法 —— 旧实现只挂在
                 // LazyColumn 上，会话未启动 / 无输出时点哪都没反应。
                 .pointerInput(Unit) {
                     detectTapGestures(
-                        onTap = {
+                        onTap = { offset ->
+                            // T86：OSC 8 链接点击优先（点击即打开，不拉键盘）
+                            val at = cellAt(offset)
+                            if (at != null) {
+                                val snap = render
+                                if (snap != null) {
+                                    val rowCells = allRows.getOrNull(at.first)
+                                    val cell = rowCells?.getOrNull(at.second)
+                                    if (cell != null && cell.link != 0) {
+                                        snap.linkTable[cell.link]?.let { uri ->
+                                            onLinkOpen(uri)
+                                            return@detectTapGestures
+                                        }
+                                    }
+                                    // T86：鼠标报告开启（vim/tmux 触摸模式）→ 点击即鼠标事件
+                                    if (snap.mouseMode.enabled) {
+                                        // 屏内坐标（不含 scrollback 偏移）：visible 行号 = 全局行号 - scrollback.size
+                                        val visibleRow = at.first - snap.scrollback.size + 1
+                                        if (visibleRow >= 1) {
+                                            onMouse(0, at.second + 1, visibleRow)  // 0 = PRESS
+                                            onMouse(1, at.second + 1, visibleRow)  // 1 = RELEASE
+                                            return@detectTapGestures
+                                        }
+                                    }
+                                }
+                            }
                             if (selectionActive) {
                                 selectionAnchor = null; selectionHead = null
                             }
@@ -489,16 +652,22 @@ fun TerminalGrid(
             BasicTextField(
                 value = imeBuffer,
                 onValueChange = { new ->
-                    /** 下发一段文本到 PTY（CTRL 锁存时单字母转控制码）。 */
+                    /** 下发一段文本到 PTY（CTRL 锁存单字母转控制码；ALT 锁存 meta 化）。 */
                     fun deliver(chunk: String) {
                         // 换行归一：终端的"提交"是 \r（Enter 键语义），不是 \n
                         val text = chunk.replace('\n', '\r')
                         if (text.isEmpty()) return
-                        if (ctrlLatched && text.length == 1 && text[0].isLetter()) {
-                            onControl(text[0])
-                            ctrlLatched = false
-                        } else {
-                            onText(text)
+                        when {
+                            ctrlLatched && text.length == 1 && text[0].isLetter() -> {
+                                onControl(text[0])
+                                ctrlLatched = false
+                            }
+                            // T86：ALT 锁存 → meta 化（ESC + 字符；bash Alt+B/F 词跳、Alt+. 上参）
+                            altLatched && text.length == 1 -> {
+                                onText("\u001B$text")
+                                altLatched = false
+                            }
+                            else -> onText(text)
                         }
                     }
 
@@ -543,8 +712,12 @@ fun TerminalGrid(
             KeyToolbar(
                 ctrlActive = ctrlLatched,
                 onCtrlToggle = { ctrlLatched = !ctrlLatched },
+                shiftActive = shiftLatched,
+                onShiftToggle = { shiftLatched = !shiftLatched },
+                altActive = altLatched,
+                onAltToggle = { altLatched = !altLatched },
                 onText = onText,
-                onKey = onKey,
+                onKey = ::sendKeyWithLatches,
                 onControl = onControl,
                 onShowKeyboard = ::showKeyboard,
                 onPaste = {
@@ -721,19 +894,24 @@ private fun columnX(cells: List<RenderCell>, col: Int, charWidthPx: Float): Floa
 // ═══════════════════════ 特殊键工具栏（T85 重做：Termux 风格）═══════════════════════
 
 /**
- * 触屏辅助键行（T85 重做）。
+ * 触屏辅助键行（T85 重做 / T86 增强）。
  *
  * 设计对齐 Termux extra-keys：
- *  - **主簇**（滚动区前端，一眼可达）：拉起键盘 / 退格 / ESC / TAB / CTRL 锁存 /
- *    方向键 —— 高频键排在最前；
- *  - **扩展簇**（继续横向滚动）：常用 shell 符号（| ~ - / \ $ & 等 —— 免切输入法
- *    的符号面板）+ 控制码（^C ^D ^Z ^L ^U）+ HOME/END/PgUp/PgDn + 粘贴；
- *  - 触控目标 36dp 高（Material 无障碍阈值）；CTRL 锁存高亮为 mint 实底深字。
+ *  - **主簇**（滚动区前端，一眼可达）：拉起键盘 / 退格 / ESC / TAB / CTRL·SHIFT·ALT
+ *    锁存 / 方向键 —— 高频键排在最前；
+ *  - **扩展簇**（继续横向滚动）：常用 shell 符号（| ~ - / \ $ & 等）+ 控制码
+ *    （^C ^D ^Z ^L ^U）+ HOME/END/PgUp/PgDn + F1-F12 + 粘贴；
+ *  - 触控目标 36dp 高（Material 无障碍阈值）；锁存键高亮为 mint 实底深字，
+ *    SHIFT/ALT 一次性（随下一个特殊键发出即释放）。
  */
 @Composable
 private fun KeyToolbar(
     ctrlActive: Boolean,
     onCtrlToggle: () -> Unit,
+    shiftActive: Boolean,
+    onShiftToggle: () -> Unit,
+    altActive: Boolean,
+    onAltToggle: () -> Unit,
     onText: (String) -> Unit,
     onKey: (TerminalKey) -> Unit,
     onControl: (Char) -> Unit,
@@ -762,6 +940,18 @@ private fun KeyToolbar(
             highlighted = ctrlActive,
             onClick = onCtrlToggle
         )
+        // T86：SHIFT/ALT 锁存（一次性 —— 与下一个方向/导航/F 键组合后自动释放）。
+        // SHIFT+方向 = vim 可视选择 / readline 选区；ALT+B/F = 词跳（发送时 meta 化）。
+        ToolbarKey(
+            label = "SHIFT",
+            highlighted = shiftActive,
+            onClick = onShiftToggle
+        )
+        ToolbarKey(
+            label = "ALT",
+            highlighted = altActive,
+            onClick = onAltToggle
+        )
         ToolbarKey("↑") { onKey(TerminalKey.ARROW_UP) }
         ToolbarKey("↓") { onKey(TerminalKey.ARROW_DOWN) }
         ToolbarKey("←") { onKey(TerminalKey.ARROW_LEFT) }
@@ -781,7 +971,7 @@ private fun KeyToolbar(
         ToolbarKey("*") { onText("*") }
         ToolbarKey("=") { onText("=") }
 
-        // ── 扩展簇：控制码 / 导航 ──
+        // ── 扩展簇：控制码 / 导航 / F 键（htop 帮助、vim 命令模式、mc 菜单）──
         ToolbarKey("^C") { onControl('c') }
         ToolbarKey("^D") { onControl('d') }
         ToolbarKey("^Z") { onControl('z') }
@@ -791,6 +981,18 @@ private fun KeyToolbar(
         ToolbarKey("END") { onKey(TerminalKey.END) }
         ToolbarKey("PGUP") { onKey(TerminalKey.PAGE_UP) }
         ToolbarKey("PGDN") { onKey(TerminalKey.PAGE_DOWN) }
+        ToolbarKey("F1") { onKey(TerminalKey.F1) }
+        ToolbarKey("F2") { onKey(TerminalKey.F2) }
+        ToolbarKey("F3") { onKey(TerminalKey.F3) }
+        ToolbarKey("F4") { onKey(TerminalKey.F4) }
+        ToolbarKey("F5") { onKey(TerminalKey.F5) }
+        ToolbarKey("F6") { onKey(TerminalKey.F6) }
+        ToolbarKey("F7") { onKey(TerminalKey.F7) }
+        ToolbarKey("F8") { onKey(TerminalKey.F8) }
+        ToolbarKey("F9") { onKey(TerminalKey.F9) }
+        ToolbarKey("F10") { onKey(TerminalKey.F10) }
+        ToolbarKey("F11") { onKey(TerminalKey.F11) }
+        ToolbarKey("F12") { onKey(TerminalKey.F12) }
         ToolbarKey(stringResource(R.string.term_paste)) { onPaste() }
     }
 }

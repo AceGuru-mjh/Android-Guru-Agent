@@ -99,7 +99,8 @@ internal fun CustomInstructionDialog(
 // ═══ 思考深度选择器 ═══
 
 /**
- * 思考深度选择器（#168 六档：NONE/LIGHT/STANDARD/DEEP/MAXIMUM/AUTO）。
+ * 思考深度选择器（#168 六档 → v1.2 扩为 7 深度档 + AUTO 元档：
+ * NONE/LIGHT/STANDARD/DEEP/MAXIMUM/ULTRACODE/APEXCODE/AUTO）。
  *
  * 紧凑化（用户反馈「思考程度那一部分太高」）：原 AssistChip 默认 32dp 高 +
  * 内部额外 padding，且 emoji 文案在部分字体下撑高。换成与 AgentModeSelector
@@ -184,8 +185,13 @@ internal fun ThinkingLevelSelector(
 }
 
 /**
- * 思考深度描述（UI 层本地化映射；#168 六档文案 = ThinkingProfile.uiDescription
- * 的 i18n 版，含执行策略差异说明；core 枚举 description 保持引擎侧不动）。
+ * 思考深度描述（UI 层本地化映射；#168 六档 + v1.2 新两档文案 =
+ * ThinkingProfile.uiDescription 的 i18n 版，含执行策略差异说明；
+ * core 枚举 description 保持引擎侧不动。
+ *
+ * 注：既有档位用 thinking_level_* 键（#168 批次）；ULTRACODE/APEXCODE 用
+ * chat_thinking_* 键（v1.2 批次，主控指定的键名）——两批键名并存但各自
+ * 两 locale 对称，不影响编译与回退。
  */
 @Composable
 private fun thinkingLevelDescription(level: ThinkingLevel): String = when (level) {
@@ -194,6 +200,8 @@ private fun thinkingLevelDescription(level: ThinkingLevel): String = when (level
     ThinkingLevel.STANDARD -> stringResource(R.string.thinking_level_standard_desc)
     ThinkingLevel.DEEP -> stringResource(R.string.thinking_level_deep_desc)
     ThinkingLevel.MAXIMUM -> stringResource(R.string.thinking_level_maximum_desc)
+    ThinkingLevel.ULTRACODE -> stringResource(R.string.chat_thinking_ultracode_desc)
+    ThinkingLevel.APEXCODE -> stringResource(R.string.chat_thinking_apexcode_desc)
     ThinkingLevel.AUTO -> stringResource(R.string.thinking_level_auto_desc)
 }
 

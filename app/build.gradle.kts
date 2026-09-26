@@ -30,8 +30,11 @@ android {
         // 参考：developer.android.com/about/versions/10/privacy/changes
         //       （"Execute permission for app home directory" 一节）
         targetSdk = 28
-        versionCode = 6
-        versionName = "1.3.1"
+        // v1.4.2：双仓库发布架构升级 —— PR 合并即自动发版（release.yml push main 触发）。
+        // CI 通过 -PapexVersionName / -PapexVersionCode 注入最终版本（版本号冲突时
+        // 自动追加构建序号，如 1.4.2.1，并自动递增 versionCode）；本地构建走源码值。
+        versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 9
+        versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.2"
 
         ndk {
             // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so

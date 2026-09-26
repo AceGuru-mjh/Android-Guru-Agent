@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,9 +31,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.apex.agent.BuildConfig
 import com.apex.agent.R
 
-/** 项目仓库地址 —— About 区唯一对外跳转目标。 */
+/** 项目仓库地址 —— About 区对外跳转目标（源代码 / Issue / PR）。 */
 private const val REPO_URL = "https://github.com/AceGuru-mjh/Android-Guru-Agent"
 
 /** Star 引导行图标色：琥珀色，与 M3 主色拉开距离，白/深底上都醒目。 */
@@ -42,12 +45,13 @@ private val StarAmber = Color(0xFFF59E0B)
  *
  * 从 SettingsScreen.kt 拆出（文件行数预算 1200）。
  * 全部真实数据：BuildConfig 版本号 + 实际依赖清单 —— 无写死版本串。
+ * v1.4.1 起内置更新检查（发布仓库 version.json）；v1.4.2 起更新面板升级为
+ * 独立组件 [UpdatePanel]：补丁增量更新 + 高速节点/镜像选择（见该文件头注释）。
  */
 @Composable
 internal fun AboutSection() {
     val context = LocalContext.current
-    // Toast 在非 Compose lambda 中触发：字符串上提到组合层取词
-    val noBrowserHint = stringResource(R.string.settings_about_no_browser)
+
     SectionCard(
         title = stringResource(R.string.settings_about_title),
         icon = Icons.Default.Info,
@@ -55,9 +59,12 @@ internal fun AboutSection() {
         initiallyExpanded = false
     ) {
         // 版本（BuildConfig 真实值）
-        SettingInfoRow(stringResource(R.string.settings_about_version), "${com.apex.agent.BuildConfig.VERSION_NAME} (${com.apex.agent.BuildConfig.VERSION_CODE})")
-        SettingInfoRow(stringResource(R.string.settings_about_package), com.apex.agent.BuildConfig.APPLICATION_ID)
-        SettingInfoRow(stringResource(R.string.settings_about_build_type), com.apex.agent.BuildConfig.BUILD_TYPE)
+        SettingInfoRow(stringResource(R.string.settings_about_version), "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        SettingInfoRow(stringResource(R.string.settings_about_package), BuildConfig.APPLICATION_ID)
+        SettingInfoRow(stringResource(R.string.settings_about_build_type), BuildConfig.BUILD_TYPE)
+
+        // ── 更新面板（检查更新 / 增量补丁 / 高速节点镜像）────────────────────
+        UpdatePanel()
 
         // 开源组件（本项目直接引入的运行时依赖 —— 真实清单，非装饰）
         Text(
@@ -73,13 +80,9 @@ internal fun AboutSection() {
 
         // 仓库跳转：ACTION_VIEW 直接打开 GitHub 仓库页（不再走剪贴板复制）。
         // runCatching 兜底：极端环境无浏览器 Activity 时不崩溃，Toast 告知。
-        val openRepo: () -> Unit = {
-            runCatching {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(REPO_URL)))
-            }.onFailure {
-                Toast.makeText(context, noBrowserHint, Toast.LENGTH_SHORT).show()
-            }
-        }
+        // Toast 文案上提到组合层取词（stringResource 不可在非 Compose lambda 中调用）
+        val noBrowserHint = stringResource(R.string.settings_about_no_browser)
+        val openRepo: () -> Unit = { openUrl(context, REPO_URL, noBrowserHint) }
         Button(
             onClick = openRepo,
             modifier = Modifier.fillMaxWidth()
@@ -117,6 +120,18 @@ internal fun AboutSection() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline
         )
+    }
+}
+
+/**
+ * ACTION_VIEW 打开外链的统一出口：runCatching 兜底极端环境无浏览器 Activity
+ * 时不崩溃，Toast 告知（仓库页与更新下载共用 —— 本区与 [UpdatePanel] 同包）。
+ */
+internal fun openUrl(context: android.content.Context, url: String, noBrowserHint: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }.onFailure {
+        Toast.makeText(context, noBrowserHint, Toast.LENGTH_SHORT).show()
     }
 }
 

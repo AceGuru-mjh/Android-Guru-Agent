@@ -145,6 +145,9 @@
     <string name="chat_thinking_standard_desc">Analyze → pick approach → execute</string>
     <string name="chat_thinking_deep_desc">Compare options → assess risks → pick best</string>
     <string name="chat_thinking_maximum_desc">Full reasoning chain + self-review + multi-round validation</string>
+    <!-- v1.2 七级思考：新深度档描述（= ThinkingProfile.uiDescriptionEn 要点版，含执行策略差异） -->
+    <string name="chat_thinking_ultracode_desc">Coding-grade deep reasoning: invariants, candidate edits, risk-ranking, minimal change, immediate verification (iterations x2.0)</string>
+    <string name="chat_thinking_apexcode_desc">Architecture-level exhaustive reasoning + adversarial self-review + full verification matrix (iterations x3.0, retains more context)</string>
     <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionEn，含执行策略差异） -->
     <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
     <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>

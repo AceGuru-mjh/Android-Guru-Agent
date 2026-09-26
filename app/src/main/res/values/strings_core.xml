@@ -233,6 +233,40 @@
     <string name="settings_about_view_repo">View the GitHub repository</string>
     <string name="settings_about_star">Give this project a star — thank you!</string>
     <string name="settings_about_credits">This project\'s architecture draws heavily on the open-source community (Termux, proot, Operit, etc.) — saluting all contributors.</string>
+    <!-- Update check (reads version.json from the release repository) -->
+    <string name="settings_about_update_check">Check for updates</string>
+    <string name="settings_about_update_checking">Checking for updates…</string>
+    <string name="settings_about_update_latest">Up to date (latest: v%1$s)</string>
+    <string name="settings_about_update_available">New version v%1$s available</string>
+    <string name="settings_about_update_download">Download update</string>
+    <string name="settings_about_update_failed">Update check failed: %1$s</string>
+    <!-- Patch (delta) update + high-speed mirror selection -->
+    <string name="settings_about_update_patch">Delta update (%1$s)</string>
+    <string name="settings_about_update_patch_hint">v%1$s → v%2$s · %3$d%% smaller than full package</string>
+    <string name="settings_about_update_patch_inapplicable">Delta patch only upgrades from v%1$s (you are on v%2$s) — use the full package</string>
+    <string name="settings_about_update_full">Full package (%1$s)</string>
+    <string name="settings_about_update_source">Download source</string>
+    <string name="settings_about_update_source_title">Select download source</string>
+    <string name="settings_about_update_source_auto">Auto (fastest)</string>
+    <string name="settings_about_update_source_direct">GitHub direct</string>
+    <string name="settings_about_update_mirror_desc">Mirrors accelerate GitHub downloads — recommended on restricted networks</string>
+    <string name="settings_about_update_mirror_auto_hint">Probes all nodes and picks the fastest</string>
+    <string name="settings_about_update_speedtesting">Testing…</string>
+    <string name="settings_about_update_ms">%1$d ms</string>
+    <string name="settings_about_update_fastest">Fastest</string>
+    <string name="settings_about_update_unreachable">Unreachable</string>
+    <string name="settings_about_update_downloading">Downloading… %1$d%%</string>
+    <string name="settings_about_update_download_started">Download started: %1$s</string>
+    <string name="settings_about_update_enqueue_failed">Could not start download (DownloadManager unavailable)</string>
+    <string name="settings_about_update_verify_failed_title">Checksum failed</string>
+    <string name="settings_about_update_verify_failed_body">SHA-256 mismatch on %1$s — the file is corrupted. Please retry with another mirror</string>
+    <string name="settings_about_update_patch_done_title">Patch ready</string>
+    <string name="settings_about_update_patch_done_saved">Saved to: %1$s</string>
+    <string name="settings_about_update_patch_done_body">Apply it in any Linux shell (the built-in Ubuntu terminal also works after installing xdelta3): the command below patches your currently installed APK into the new one, then open it to install</string>
+    <string name="settings_about_update_copy_cmd">Copy command</string>
+    <string name="settings_about_update_apk_done_title">APK ready</string>
+    <string name="settings_about_update_close">Close</string>
+    <string name="settings_about_update_copied">Copied</string>
 
     <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
     <string name="settings_error_provider_not_found">Provider not found: %1$s</string>

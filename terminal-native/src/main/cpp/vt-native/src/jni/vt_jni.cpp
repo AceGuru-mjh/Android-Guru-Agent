@@ -106,8 +106,9 @@ jobjectArray toStringArray(JNIEnv* env, const std::vector<std::string>& v) {
   return arr;
 }
 
-// Flat layout: [rowCount, perRow: cellCount, cells...: cp, fg, bg, flags, nComb, comb...]
-void encodeFlatRows(JNIEnv* env, const std::vector<apex::vt::FlatRow>& rows,
+// Flat layout: [rowCount, perRow: cellCount, cells...: cp, fg, bg, flags,
+// link, nComb, comb...] — `link` is the 1-based OSC 8 hyperlink id (0 = none).
+void encodeFlatRows(JNIEnv*, const std::vector<apex::vt::FlatRow>& rows,
                     const std::vector<uint32_t>& combPool, std::vector<jint>& out) {
   out.clear();
   out.push_back(jint(rows.size()));
@@ -118,12 +119,60 @@ void encodeFlatRows(JNIEnv* env, const std::vector<apex::vt::FlatRow>& rows,
       out.push_back(jint(c.fg));
       out.push_back(jint(c.bg));
       out.push_back(jint(c.flags));
+      out.push_back(jint(c.link));
       out.push_back(jint(c.combCount));
       for (uint32_t k = 0; k < c.combCount && c.combOff + k < combPool.size(); ++k) {
         out.push_back(jint(combPool[c.combOff + k]));
       }
     }
   }
+}
+
+// UTF-16 (jstring) → UTF-8 — used by paste (Kotlin strings are UTF-16).
+std::string utf16ToUtf8String(JNIEnv* env, jstring s) {
+  std::string out;
+  if (!s) return out;
+  const jsize n = env->GetStringLength(s);
+  if (n <= 0) return out;
+  const jchar* u = env->GetStringChars(s, nullptr);
+  if (!u) return out;
+  out.reserve(size_t(n));
+  for (jsize i = 0; i < n; ++i) {
+    uint32_t cp = u[i];
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n && u[i + 1] >= 0xDC00 && u[i + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (uint32_t(u[i + 1]) - 0xDC00);
+      ++i;
+    } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+      cp = 0xFFFD;
+    }
+    if (cp < 0x80) {
+      out.push_back(char(cp));
+    } else if (cp < 0x800) {
+      out.push_back(char(0xC0 | (cp >> 6)));
+      out.push_back(char(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+      out.push_back(char(0xE0 | (cp >> 12)));
+      out.push_back(char(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(char(0x80 | (cp & 0x3F)));
+    } else {
+      out.push_back(char(0xF0 | (cp >> 18)));
+      out.push_back(char(0x80 | ((cp >> 12) & 0x3F)));
+      out.push_back(char(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(char(0x80 | (cp & 0x3F)));
+    }
+  }
+  env->ReleaseStringChars(s, u);
+  return out;
+}
+
+jbyteArray toJByteArray(JNIEnv* env, const std::vector<uint8_t>& v) {
+  if (v.empty()) return nullptr;
+  jbyteArray arr = env->NewByteArray(jsize(v.size()));
+  if (arr) {
+    std::vector<jbyte> tmp(v.begin(), v.end());
+    env->SetByteArrayRegion(arr, 0, jsize(tmp.size()), tmp.data());
+  }
+  return arr;
 }
 
 }  // namespace
@@ -246,11 +295,17 @@ Java_com_apex_agent_vtnative_NativeVtCore_nativeVisibleCells(JNIEnv* env, jclass
 }
 
 // Full snapshot in one call: visible + scrollback + header in flat ints.
-// Layout: [16 header ints, visible rows, scrollback rows] where rows are
-// [rowCount, perRow: cellCount, cells...: cp, fg, bg, flags, nComb, comb...].
-// Header: rows, cols, cursorRow, cursorCol, cursorVisible, cursorShape,
-// altScreen, applicationCursor, bracketedPaste, reverseVideo,
-// scrollbackTotal, reserved, scrollbackBase(hi/lo), bellSeq(hi/lo).
+// Layout: [32 header ints, visible rows, scrollback rows] where rows are
+// [rowCount, perRow: cellCount, cells...: cp, fg, bg, flags, link, nComb, comb...].
+// Header (v0.2 — Kotlin NativeVtCore decodes the same layout):
+//   [0] rows            [1] cols            [2] cursorRow      [3] cursorCol
+//   [4] cursorVisible   [5] cursorShape     [6] altScreen      [7] applicationCursor
+//   [8] bracketedPaste  [9] reverseVideo    [10] sbTotal       [11] linkCount
+//   [12] sbBaseHi       [13] sbBaseLo       [14] bellHi        [15] bellLo
+//   [16] selStartHi     [17] selStartLo     [18] selStartCol   [19] selEndHi
+//   [20] selEndLo       [21] selEndCol      [22] hitCount      [23] activeHit
+//   [24] mouseMode      [25] mouseEncoding  [26] focusReport   [27] altScroll
+//   [28] appKeypad      [29] modifyLevel    [30] activeLinks   [31] reserved
 // The Kotlin wrapper decodes; renderSnapshot drains the bell (Kotlin parity).
 JNIEXPORT jintArray JNICALL
 Java_com_apex_agent_vtnative_NativeVtCore_nativeSnapshotCells(JNIEnv* env, jclass, jlong handle,
@@ -264,7 +319,7 @@ Java_com_apex_agent_vtnative_NativeVtCore_nativeSnapshotCells(JNIEnv* env, jclas
   encodeFlatRows(env, snap.scrollback, snap.combPool, scrollback);
 
   std::vector<jint> flat;
-  flat.reserve(12 + visible.size() + scrollback.size());
+  flat.reserve(32 + visible.size() + scrollback.size());
   flat.push_back(jint(snap.rows));
   flat.push_back(jint(snap.cols));
   flat.push_back(jint(snap.cursorRow));
@@ -276,11 +331,27 @@ Java_com_apex_agent_vtnative_NativeVtCore_nativeSnapshotCells(JNIEnv* env, jclas
   flat.push_back(jint(snap.bracketedPaste ? 1 : 0));
   flat.push_back(jint(snap.reverseVideo ? 1 : 0));
   flat.push_back(jint(snap.scrollbackTotal));
-  flat.push_back(jint(0));  // reserved (alignment / future use)
+  flat.push_back(jint(snap.links.size()));
   flat.push_back(jint(snap.scrollbackBase >> 32));
   flat.push_back(jint(uint32_t(snap.scrollbackBase)));
   flat.push_back(jint(snap.bellSeq >> 32));
   flat.push_back(jint(uint32_t(snap.bellSeq)));
+  flat.push_back(jint(snap.selStartRow >> 32));
+  flat.push_back(jint(uint32_t(snap.selStartRow)));
+  flat.push_back(jint(snap.selStartRow < 0 ? -1 : snap.selStartCol));
+  flat.push_back(jint(snap.selEndRow >> 32));
+  flat.push_back(jint(uint32_t(snap.selEndRow)));
+  flat.push_back(jint(snap.selEndRow < 0 ? -1 : snap.selEndCol));
+  flat.push_back(jint(snap.searchHitCount));
+  flat.push_back(jint(snap.activeSearchHit));
+  flat.push_back(jint(snap.mouseMode));
+  flat.push_back(jint(snap.mouseEncoding));
+  flat.push_back(jint(snap.focusReport ? 1 : 0));
+  flat.push_back(jint(snap.altScroll ? 1 : 0));
+  flat.push_back(jint(snap.applicationKeypad ? 1 : 0));
+  flat.push_back(jint(snap.modifyLevel));
+  flat.push_back(jint(e->activeLinkCount()));
+  flat.push_back(jint(0));  // reserved (alignment / future use)
   flat.insert(flat.end(), visible.begin(), visible.end());
   flat.insert(flat.end(), scrollback.begin(), scrollback.end());
   return toJIntArray(env, flat);
@@ -319,14 +390,189 @@ JNIEXPORT jbyteArray JNICALL
 Java_com_apex_agent_vtnative_NativeVtCore_nativePollResponses(JNIEnv* env, jclass, jlong handle) {
   Engine* e = asEngine(handle);
   if (!e) return nullptr;
-  std::vector<uint8_t> r = e->pollResponses();
-  if (r.empty()) return nullptr;
-  jbyteArray arr = env->NewByteArray(jsize(r.size()));
-  if (arr) {
-    std::vector<jbyte> tmp(r.begin(), r.end());
-    env->SetByteArrayRegion(arr, 0, jsize(tmp.size()), tmp.data());
+  return toJByteArray(env, e->pollResponses());
+}
+
+// ═══ v0.2 foundation natives ═══
+
+// Hyperlink URI table (index i ↔ FlatCell.link == i + 1).
+JNIEXPORT jobjectArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeLinks(JNIEnv* env, jclass, jlong handle) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toStringArray(env, e->renderSnapshot(0).links);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeLinkAt(JNIEnv* env, jclass, jlong handle,
+                                                       jint screenRow, jint col) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  const char* uri = e->linkAt(int(screenRow), int(col));
+  return uri ? newStringUtf8(env, std::string(uri)) : nullptr;
+}
+
+// Search — returns the hit count; hits follow via nativeSearchHits.
+JNIEXPORT jint JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSearch(JNIEnv* env, jclass, jlong handle,
+                                                        jstring pattern, jboolean caseInsensitive,
+                                                        jboolean wholeWord) {
+  Engine* e = asEngine(handle);
+  if (!e || !pattern) return 0;
+  const char* utf = env->GetStringUTFChars(pattern, nullptr);
+  if (!utf) return 0;
+  int n = e->search(utf, caseInsensitive == JNI_TRUE, wholeWord == JNI_TRUE);
+  env->ReleaseStringUTFChars(pattern, utf);
+  return jint(n);
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeClearSearch(JNIEnv*, jclass, jlong handle) {
+  if (Engine* e = asEngine(handle)) e->clearSearch();
+}
+
+// Flat longs: per hit [startRow, startCol, endRow, endCol] (global rows).
+JNIEXPORT jlongArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSearchHits(JNIEnv* env, jclass, jlong handle) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  int n = e->searchHitCount();
+  std::vector<jlong> flat;
+  flat.reserve(size_t(n) * 4);
+  for (int i = 0; i < n; ++i) {
+    apex::vt::SearchMatchInfo h = e->searchHit(i);
+    flat.push_back(jlong(h.startRow));
+    flat.push_back(jlong(h.startCol));
+    flat.push_back(jlong(h.endRow));
+    flat.push_back(jlong(h.endCol));
   }
+  jlongArray arr = env->NewLongArray(jsize(flat.size()));
+  if (arr && !flat.empty()) env->SetLongArrayRegion(arr, 0, jsize(flat.size()), flat.data());
   return arr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSetActiveSearchHit(JNIEnv*, jclass, jlong handle,
+                                                                    jint index) {
+  if (Engine* e = asEngine(handle)) e->setActiveSearchHit(int(index));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeActiveSearchHit(JNIEnv*, jclass, jlong handle) {
+  Engine* e = asEngine(handle);
+  return e ? jint(e->activeSearchHit()) : jint(-1);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSearchHitCount(JNIEnv*, jclass, jlong handle) {
+  Engine* e = asEngine(handle);
+  return e ? jint(e->searchHitCount()) : jint(0);
+}
+
+// Selection (global rows — same numbering as search hits).
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeBeginSelection(JNIEnv*, jclass, jlong handle,
+                                                               jlong globalRow, jint col) {
+  if (Engine* e = asEngine(handle)) e->beginSelection(globalRow, int(col));
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeExtendSelection(JNIEnv*, jclass, jlong handle,
+                                                                 jlong globalRow, jint col) {
+  if (Engine* e = asEngine(handle)) e->extendSelection(globalRow, int(col));
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeClearSelection(JNIEnv*, jclass, jlong handle) {
+  if (Engine* e = asEngine(handle)) e->clearSelection();
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeExpandSelectionWord(JNIEnv*, jclass, jlong handle,
+                                                                     jlong globalRow, jint col) {
+  if (Engine* e = asEngine(handle)) e->expandSelectionWord(globalRow, int(col));
+}
+
+JNIEXPORT void JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeExpandSelectionLine(JNIEnv*, jclass, jlong handle,
+                                                                     jlong globalRow, jint col) {
+  if (Engine* e = asEngine(handle)) e->expandSelectionLine(globalRow, int(col));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSelectionText(JNIEnv* env, jclass, jlong handle) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return newStringUtf8(env, e->selectionText());
+}
+
+// Session persistence.
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeSaveSession(JNIEnv* env, jclass, jlong handle,
+                                                            jint maxScrollbackRows) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toJByteArray(env, e->saveSession(int(maxScrollbackRows)));
+}
+
+// Returns a NEW engine handle, or 0 when the blob fails validation.
+JNIEXPORT jlong JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeRestoreSession(JNIEnv* env, jclass, jbyteArray data,
+                                                               jint off, jint len,
+                                                               jint maxScrollback) {
+  if (!data || len <= 0 || maxScrollback < 0) return 0;
+  jsize arrayLen = env->GetArrayLength(data);
+  if (off < 0 || len > arrayLen - off) return 0;
+  jbyte* elems = env->GetByteArrayElements(data, nullptr);
+  if (!elems) return 0;
+  std::unique_ptr<Engine> restored =
+      Engine::restoreSession(reinterpret_cast<const uint8_t*>(elems) + off, size_t(len),
+                             int(maxScrollback));
+  env->ReleaseByteArrayElements(data, elems, JNI_ABORT);
+  return reinterpret_cast<jlong>(restored.release());
+}
+
+// Input encoding — mode-aware (DECCKM / DECKPAM / modifyOtherKeys / Kitty).
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeEncodeKey(JNIEnv* env, jclass, jlong handle,
+                                                          jint key, jint mods) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toJByteArray(env, e->encodeKey(int(key), int(mods)));
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeEncodePaste(JNIEnv* env, jclass, jlong handle,
+                                                            jstring text) {
+  Engine* e = asEngine(handle);
+  if (!e || !text) return nullptr;
+  std::string utf8 = utf16ToUtf8String(env, text);
+  return toJByteArray(env, e->encodePasteUtf8(utf8.data(), utf8.size()));
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeEncodeMouseEvent(JNIEnv* env, jclass, jlong handle,
+                                                                 jint type, jint button, jint mods,
+                                                                 jint col, jint row) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toJByteArray(env, e->encodeMouseEvent(int(type), int(button), int(mods), int(col), int(row)));
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeEncodeFocus(JNIEnv* env, jclass, jlong handle,
+                                                            jboolean focused) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toJByteArray(env, e->encodeFocusEvent(focused == JNI_TRUE));
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_apex_agent_vtnative_NativeVtCore_nativeEncodeWheel(JNIEnv* env, jclass, jlong handle,
+                                                            jint dir) {
+  Engine* e = asEngine(handle);
+  if (!e) return nullptr;
+  return toJByteArray(env, e->encodeWheel(int(dir)));
 }
 
 }  // extern "C"

@@ -2,7 +2,10 @@ name: APK Build
 
 # 独立 APK 构建流水线 —— 与 CI 解耦，按需出包：
 #   - workflow_dispatch: 手动触发，可选 debug / release（release 以 debug 密钥签名，产物可直接安装）
-#   - push tag v*: 自动构建 release 并创建 GitHub Release 附带 APK
+#
+# ⚠️ v1.4.1 起 tag 发布已移交 release.yml（双仓库发布架构）：
+#   push tag v*.*.* → 构建产物经跨仓库 PAT 发布到 Android-Guru-Agent-Release。
+#   本工作流仅保留手动触发，用于临时验证构建 —— 不再在开发仓库创建 Release。
 on:
   workflow_dispatch:
     inputs:
@@ -14,9 +17,6 @@ on:
         options:
           - debug
           - release
-  push:
-    tags:
-      - 'v*'
 
 concurrency:
   group: apk-${{ github.ref }}
@@ -24,13 +24,13 @@ concurrency:
 
 jobs:
   build:
-    name: Build APK (${{ inputs.build_type || (startsWith(github.ref, 'refs/tags/') && 'release') || 'debug' }})
+    name: Build APK (${{ inputs.build_type || 'debug' }})
     runs-on: ubuntu-latest
     # T84：完整 rootfs（~300MB+/ABI）暂存 + universal（含 3 份）打包 —— 45 分钟
     # 余量不足（fetch ~1.3GB + 两次 assemble + 1.3GB APK 产出）。
     timeout-minutes: 60
     permissions:
-      contents: write   # tag 构建时创建 Release 并上传产物
+      contents: read    # 手动验证构建只读；对外发布走 release.yml 的跨仓库 PAT
     defaults:
       run:
         # bashisms 依赖：Build 步骤的 ${VARIANT^} 首字母大写、Resolve variant 的 [[ ]]。
@@ -93,13 +93,8 @@ jobs:
       - name: Resolve build variant
         id: variant
         run: |
-          if [ "${{ inputs.build_type }}" != "" ]; then
-            echo "type=${{ inputs.build_type }}" >> "$GITHUB_OUTPUT"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            echo "type=release" >> "$GITHUB_OUTPUT"
-          else
-            echo "type=debug" >> "$GITHUB_OUTPUT"
-          fi
+          # 仅剩 workflow_dispatch 触发：变体直接取输入（默认 debug）
+          echo "type=${{ inputs.build_type || 'debug' }}" >> "$GITHUB_OUTPUT"
 
       - name: Build APK
         run: |
@@ -140,7 +135,7 @@ jobs:
           VARIANT=${{ steps.variant.outputs.type }}
           APK_DIR="app/build/outputs/apk/$VARIANT"
           SHA8=$(echo "${{ github.sha }}" | cut -c1-8)
-          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          VERSION=$(grep -oP 'versionName\s*=.*"\K[^"]+' app/build.gradle.kts)
           echo "### 📦 APK 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ "$VARIANT" = "release" ]; then
@@ -197,26 +192,5 @@ jobs:
           path: ${{ steps.artifact.outputs.path_universal }}
           if-no-files-found: error
           retention-days: 30
-
-      - name: Create GitHub Release (tag builds only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.artifact.outputs.path }}
-            ${{ steps.artifact.outputs.path_universal }}
-          generate_release_notes: true
-          body: |
-            ## Apex Agent ${{ github.ref_name }}
-
-            自动构建产物 —— 见附件 APK（两个变体，选适合你设备的）：
-
-            - **arm64-v8a**（首选，现代手机）：内置 Ubuntu rootfs 仅含 arm64
-            - **universal**（全 ABI）：含 arm64 / armeabi-v7a / x86_64 三份 rootfs，旧设备与模拟器适用（体积大，谨慎流量）
-
-            > T84：Ubuntu 24.04 完整 CLI 环境随 APK 内置 —— 首次使用离线解包约
-            > 2~5 分钟（解压后 ~1GB 存储；gcc / python3 / git / vim / man 开箱即用），
-            > 零网络。apt 装新包才需联网。
-
-            - 变体: release（debug 密钥签名，可直接安装）
-            - 提交: ${{ github.sha }}
+      # 对外发布（Release + APK + version.json + 增量补丁）已移交 release.yml：
+      # 双仓库发布架构 —— 产物统一落在 Android-Guru-Agent-Release。

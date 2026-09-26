@@ -233,6 +233,40 @@
     <string name="settings_about_view_repo">查看 GitHub 仓库</string>
     <string name="settings_about_star">请给我项目来一个 Star，谢谢！</string>
     <string name="settings_about_credits">本项目大量架构受益于开源社区（Termux、proot、Operit 等），致敬所有贡献者。</string>
+    <!-- 更新检查（读取发布仓库 version.json） -->
+    <string name="settings_about_update_check">检查更新</string>
+    <string name="settings_about_update_checking">正在检查更新…</string>
+    <string name="settings_about_update_latest">已是最新版本（v%1$s）</string>
+    <string name="settings_about_update_available">发现新版本 v%1$s</string>
+    <string name="settings_about_update_download">下载更新</string>
+    <string name="settings_about_update_failed">检查更新失败：%1$s</string>
+    <!-- 补丁增量更新 + 高速节点/镜像选择 -->
+    <string name="settings_about_update_patch">增量更新（%1$s）</string>
+    <string name="settings_about_update_patch_hint">v%1$s → v%2$s · 比完整包小 %3$d%%</string>
+    <string name="settings_about_update_patch_inapplicable">增量补丁仅支持从 v%1$s 升级（当前 v%2$s），请下载完整包</string>
+    <string name="settings_about_update_full">完整安装包（%1$s）</string>
+    <string name="settings_about_update_source">下载源</string>
+    <string name="settings_about_update_source_title">选择下载源（高速节点）</string>
+    <string name="settings_about_update_source_auto">自动（测速选优）</string>
+    <string name="settings_about_update_source_direct">GitHub 直连</string>
+    <string name="settings_about_update_mirror_desc">镜像可加速 GitHub 下载 —— 国内网络环境推荐开启</string>
+    <string name="settings_about_update_mirror_auto_hint">自动探测各节点延迟并选最快</string>
+    <string name="settings_about_update_speedtesting">测速中…</string>
+    <string name="settings_about_update_ms">%1$d 毫秒</string>
+    <string name="settings_about_update_fastest">最快</string>
+    <string name="settings_about_update_unreachable">不通</string>
+    <string name="settings_about_update_downloading">下载中… %1$d%%</string>
+    <string name="settings_about_update_download_started">已开始下载：%1$s</string>
+    <string name="settings_about_update_enqueue_failed">无法发起下载（系统下载服务不可用）</string>
+    <string name="settings_about_update_verify_failed_title">校验失败</string>
+    <string name="settings_about_update_verify_failed_body">%1$s 的 SHA-256 指纹不匹配，文件已损坏；请换一个下载源重试</string>
+    <string name="settings_about_update_patch_done_title">补丁已就绪</string>
+    <string name="settings_about_update_patch_done_saved">保存位置：%1$s</string>
+    <string name="settings_about_update_patch_done_body">在任意 Linux 环境应用（内置 Ubuntu 终端安装 xdelta3 后亦可）：下方命令会把当前安装的 APK 打补丁为新版本，完成后打开新 APK 即可安装</string>
+    <string name="settings_about_update_copy_cmd">复制命令</string>
+    <string name="settings_about_update_apk_done_title">安装包已就绪</string>
+    <string name="settings_about_update_close">关闭</string>
+    <string name="settings_about_update_copied">已复制</string>
 
     <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
     <string name="settings_error_provider_not_found">未找到服务商：%1$s</string>

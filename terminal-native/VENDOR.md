@@ -3,7 +3,7 @@
 ## Upstream
 
 - Repository: https://github.com/AceGuru-mjh/apex-vt-native
-- Vendored commit: `16dc7f707a67f625bbb89f228e3bece5bf257ae4` (v0.1.0)
+- Vendored commit: `19e8fb592875e0f3b4a165bdc107db7095e50a4d` (v0.2 foundation — upstream PR #1, CI green: host tests + 3×NDK)
 - License: MIT (upstream LICENSE applies to the vendored sources)
 
 ## What is vendored
@@ -15,7 +15,7 @@
 | `src/main/cpp/vt-native/CMakeLists.txt` | `CMakeLists.txt` (library build script) |
 | `src/main/kotlin/.../NativeVtCore.kt` | `kotlin/.../NativeVtCore.kt` (adapted: real imports, no `@file:JvmName`, no finalize) |
 
-**Not** vendored: `tests/` (129 host parity tests + fuzz + benchmark) and
+**Not** vendored: `tests/` (370 host tests: 129 v0.1 parity + 241 v0.2 foundation; fuzz + benchmark) and
 `.github/workflows/` — they run in the upstream repo's CI on every push.
 
 ## Rules

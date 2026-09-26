@@ -6,11 +6,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #168 AUTO 档自适应选档器场景测试（≥10 个场景）。
+ * #168 AUTO 档自适应选档器场景测试（≥10 个场景）+ v1.2 新阶梯用例。
  *
  * 覆盖：短平快 / 多步指示 / 代码任务 / 长文本 / 风险词保底 / 错误恢复升档 /
  * 规划期首轮保底 / 长任务深水区 / 组合 MAXIMUM / 理由字符串可解释性 /
- * 纯函数确定性。
+ * 纯函数确定性；v1.2 新增：超高分(>11)→ULTRACODE、深水区连环失败→
+ * ULTRACODE 保底、APEXCODE 永不被 select 返回（穷举各类输入）、错误恢复
+ * 升档阶梯到 ULTRACODE 封顶、档位序数比较。
  */
 class AdaptiveThinkingSelectorTest {
 
@@ -177,5 +179,134 @@ class AdaptiveThinkingSelectorTest {
     fun `selector is deterministic for identical input`() {
         val input = AdaptiveInput("先分析然后执行 git 操作", 3, 1, 2, false)
         assertEquals(selector.select(input), selector.select(input))
+    }
+
+    // ── 9. v1.2 超高分：> 11 → ULTRACODE ──────────────────────
+
+    @Test
+    fun `score above eleven picks ULTRACODE directly`() {
+        // 超长(+3) + 多步(+2) + 代码(+2) + 风险(+3) + 错误恢复(+2) = 12 > 11
+        val d = select(
+            "先备份再操作：需要卸载旧版本，然后 rm -rf 清理残留目录，" +
+                "接着重装并配置权限，用 git 管理改动，每一步都要验证。" +
+                "以下是详细需求与边界情况说明。".repeat(110),
+            recentErrors = 1
+        )
+        assertEquals(ThinkingLevel.ULTRACODE, d.level)
+        assertTrue("理由应含评分 12：${d.reason}", d.reason.contains("评分 12"))
+    }
+
+    @Test
+    fun `score ten without errors still caps at MAXIMUM not ULTRACODE`() {
+        // 同文本零错误：10 分 → MAXIMUM（9..11 区间），v1.2 阈值不冲击既有行为
+        val d = select(
+            "先备份再操作：需要卸载旧版本，然后 rm -rf 清理残留目录，" +
+                "接着重装并配置权限，用 git 管理改动，每一步都要验证。" +
+                "以下是详细需求与边界情况说明。".repeat(110)
+        )
+        assertEquals(ThinkingLevel.MAXIMUM, d.level)
+        assertTrue(d.reason.contains("评分 10"))
+    }
+
+    // ── 10. v1.2 深水区升级：>30 调用 & ≥2 错误 → 至少 ULTRACODE ──
+
+    @Test
+    fun `deep water with repeated failures floors at ULTRACODE`() {
+        // 零信号短文本 + 31 次调用 + 2 错误：评分 2 → LIGHT → 升档 STANDARD →
+        // 深水区连环失败保底 ULTRACODE
+        val d = select("继续", toolCalls = 31, recentErrors = 2)
+        assertEquals(ThinkingLevel.ULTRACODE, d.level)
+        assertTrue("理由应含保底说明：${d.reason}", d.reason.contains("保底ULTRACODE"))
+        assertTrue(d.reason.contains("错误恢复升一档"))
+    }
+
+    @Test
+    fun `deep water escalation requires strictly more than thirty calls`() {
+        // 30 次调用 = 不触发（>30 严格门槛）：仍停在 STANDARD（深水区旧保底）
+        val boundary = select("继续", toolCalls = 30, recentErrors = 2)
+        assertEquals(ThinkingLevel.STANDARD, boundary.level)
+    }
+
+    @Test
+    fun `deep water escalation requires at least two errors`() {
+        // 31 次调用但只有 1 个错误：连环失败不成立 → 仍 STANDARD
+        val single = select("继续", toolCalls = 31, recentErrors = 1)
+        assertEquals(ThinkingLevel.STANDARD, single.level)
+    }
+
+    // ── 11. v1.2 成本防线：APEXCODE 永不被自动选择 ────────────
+
+    @Test
+    fun `apexcode is never selected across exhaustive input combinations`() {
+        // 穷举代表性输入空间：文本信号 × 错误数 × 调用数 × 迭代期 × 模式，
+        // 任何路径（阈值/保底/升档）都不允许返回 APEXCODE（成本失控防线）
+        val texts = listOf(
+            "现在几点了",
+            "先分析然后执行 git 操作",
+            "rm -rf /data 并按步骤详细规划每个风险",
+            "这是很长的需求描述。".repeat(120)
+        )
+        val toolCallCounts = listOf(0, 5, 16, 31, 40)
+        val errorCounts = listOf(0, 1, 2, 3)
+        var combinations = 0
+        for (text in texts) {
+            for (calls in toolCallCounts) {
+                for (errors in errorCounts) {
+                    for (iteration in 0..1) {
+                        for (planMode in listOf(false, true)) {
+                            val d = select(
+                                text,
+                                toolCalls = calls,
+                                recentErrors = errors,
+                                iteration = iteration,
+                                planMode = planMode
+                            )
+                            assertTrue(
+                                "APEXCODE 不可被自动选择（text=${text.take(8)}、calls=$calls、errors=$errors）",
+                                d.level != ThinkingLevel.APEXCODE
+                            )
+                            combinations++
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue("穷举组合数异常：$combinations", combinations >= 300)
+    }
+
+    // ── 12. v1.2 错误恢复升档阶梯：…→MAXIMUM→ULTRACODE 封顶 ──
+
+    @Test
+    fun `error recovery escalates maximum base to ultracode`() {
+        // 长文本(+2) + 多步(+2) + 代码(+2) + 风险(+3) + 错误(+2) = 11 →
+        // 基础 MAXIMUM（9..11）→ 错误恢复升一档 → ULTRACODE
+        val d = select(
+            "先备份，然后 rm -rf 清理，再用 git 提交。" + "背景说明。".repeat(100),
+            recentErrors = 1
+        )
+        assertEquals(ThinkingLevel.ULTRACODE, d.level)
+        assertTrue(d.reason.contains("评分 11"))
+        assertTrue(d.reason.contains("错误恢复升一档"))
+    }
+
+    @Test
+    fun `error recovery caps at ultracode even from ultracode base`() {
+        // 基础档已是 ULTRACODE（评分 12）再出错：封顶不再升，绝不进 APEXCODE
+        val d = select(
+            "先备份再操作：需要卸载旧版本，然后 rm -rf 清理残留目录，" +
+                "接着重装并配置权限，用 git 管理改动，每一步都要验证。" +
+                "以下是详细需求与边界情况说明。".repeat(110),
+            recentErrors = 3
+        )
+        assertEquals(ThinkingLevel.ULTRACODE, d.level)
+    }
+
+    // ── 13. v1.2 档位序数：阶梯顶端可比 ──────────────────────
+
+    @Test
+    fun `ordinal ladder puts new tiers above maximum and auto last`() {
+        assertTrue(ThinkingLevel.ULTRACODE > ThinkingLevel.MAXIMUM)
+        assertTrue(ThinkingLevel.APEXCODE > ThinkingLevel.ULTRACODE)
+        assertTrue(ThinkingLevel.AUTO > ThinkingLevel.APEXCODE)
     }
 }

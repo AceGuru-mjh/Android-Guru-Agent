@@ -1,4 +1,4 @@
-package com.apex.agent.core.engine.longtask
+package com.apex.agent.core.code.longtask
 
 /**
  * # 长任务判定器（纯函数，零状态零依赖）

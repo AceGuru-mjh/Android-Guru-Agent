@@ -1,22 +1,22 @@
-package com.apex.agent.core.code
-
-import com.apex.agent.core.engine.ThinkingLevel
+package com.apex.agent.core.code.thinking
 
 /**
- * # Code Thinking Prompts — Coding 模式专属思考档位指令（v1.2 七档思考系统）
+ * # Code Thinking Prompts — Coding 模式专属思考档位指令（七档思考系统）
  *
  * ## 与既有思考系统的关系（三层分工，不重复注入）
  *
- * 1. **通用思考画像**（[com.apex.agent.core.engine.thinking.ThinkingProfile]）：
+ * 1. **通用思考画像**（agent-engine 的 ThinkingProfile）：
  *    引擎每轮经 ThinkingModeController 注入 "## Thinking Instructions" 段
- *    （推理框架 + 迭代/压缩/输出预算等执行策略）—— 任何模式共用；
+ *    （推理框架 + 迭代/压缩/输出预算等执行策略）—— 任何模式共用。
+ *    coding 侧档位经 [CodeThinkingLevel.toAgentLevel] 映射打底，深水两档
+ *    的增量由 [CodeThinkingProfile] 旋钮补偿反补；
  * 2. **本类（coding 特化指令）**：按当前档位注入编码纪律的**补充**指令 ——
  *    通用画像讲「怎么想」，本类讲「编码时具体怎么想」：读码纪律、验证
  *    回路、子代理委派、架构分解、对抗性自审等编码特有方法论；
  * 3. **模型原生 reasoning 参数**（reasoning_effort / thinking_budget）：
- *    由 app 层 ThinkingLevel→ReasoningEffort 映射通道下发，与本类无关。
+ *    由 app 层 CodeThinkingLevel→ReasoningEffort 映射通道下发，与本类无关。
  *
- * 注入通道：[CodeAgentEngine.refreshContext] 把 [thinkingDirective] 的产物
+ * 注入通道：CodeAgentEngine.refreshContext 把 [thinkingDirective] 的产物
  * 拼进 additionalSystemContext（与 Rules/Workspace 段并列）—— 引擎零改动，
  * agent 模式零影响。
  *
@@ -30,38 +30,37 @@ import com.apex.agent.core.engine.ThinkingLevel
  * | DEEP | 改动集思维：先建改动清单再动手，每处改动关联验证方式 |
  * | MAXIMUM | 不变量守护：识别代码不变量与连锁影响，改后全链路核对 |
  * | ULTRACODE | 编码深推理闭环：依赖地图→候选改法→风险排序→最小修改→即时验证→回归扫描 |
- * | APEXCODE | 架构级穷举：影响半径测绘→多方案对比矩阵→对抗性自审自己的 diff→全量验证矩阵（构建/lint/测试/回读）→证据链汇报 |
+ * | APEXCODE | 架构级穷举：影响半径测绘→多方案对比矩阵→对抗性自审自己的 diff→全量验证矩阵→证据链汇报（内嵌 [CodeThinkingProfile.APEX_SELF_CHECK_CHECKLIST] 五问清单） |
  *
- * AUTO 档：本类注入一行「档位自适应中」提示（逐轮实际档位由引擎侧
- * AdaptiveThinkingSelector 决定，通用画像随轮次变化；编码纪律取
- * [AUTO_FALLBACK_DIRECTIVE_LEVEL]（DEEP）的指令作为兜底 —— 自适应档
- * 的实际档位 ≥STANDARD 时该纪律全部适用且无冲突）。
+ * AUTO 档：VM 发送前经 [CodeAdaptiveThinkingSelector] 预检解析出具体
+ * 深度档（引擎接收的是解析后的档位），本类注入一行「预检自适应」说明 +
+ * [AUTO_FALLBACK_DIRECTIVE_LEVEL]（DEEP）的编码纪律兜底。
  *
  * 纯静态、无副作用；同档位多次调用返回等值字符串（幂等，JIT 刷新安全）。
  */
 object CodeThinkingPrompts {
 
     /** AUTO 档的编码纪律兜底档（见类 KDoc：自适应实际档位 ≥STANDARD 全适用）。 */
-    val AUTO_FALLBACK_DIRECTIVE_LEVEL: ThinkingLevel = ThinkingLevel.DEEP
+    val AUTO_FALLBACK_DIRECTIVE_LEVEL: CodeThinkingLevel = CodeThinkingLevel.DEEP
 
     /**
      * 按档位返回编码特化思考指令（拼进 additionalSystemContext）。
      *
      * NONE → 空串（不注入段落，与通用画像的「不思考」语义对齐）。
      */
-    fun thinkingDirective(level: ThinkingLevel): String = when (level) {
-        ThinkingLevel.NONE -> ""
-        ThinkingLevel.LIGHT -> LIGHT_DIRECTIVE
-        ThinkingLevel.STANDARD -> STANDARD_DIRECTIVE
-        ThinkingLevel.DEEP -> DEEP_DIRECTIVE
-        ThinkingLevel.MAXIMUM -> MAXIMUM_DIRECTIVE
-        ThinkingLevel.ULTRACODE -> ULTRACODE_DIRECTIVE
-        ThinkingLevel.APEXCODE -> APEXCODE_DIRECTIVE
-        ThinkingLevel.AUTO -> autoDirective()
+    fun thinkingDirective(level: CodeThinkingLevel): String = when (level) {
+        CodeThinkingLevel.NONE -> ""
+        CodeThinkingLevel.LIGHT -> LIGHT_DIRECTIVE
+        CodeThinkingLevel.STANDARD -> STANDARD_DIRECTIVE
+        CodeThinkingLevel.DEEP -> DEEP_DIRECTIVE
+        CodeThinkingLevel.MAXIMUM -> MAXIMUM_DIRECTIVE
+        CodeThinkingLevel.ULTRACODE -> ULTRACODE_DIRECTIVE
+        CodeThinkingLevel.APEXCODE -> APEXCODE_DIRECTIVE
+        CodeThinkingLevel.AUTO -> autoDirective()
     }
 
     /**
-     * AUTO 档指令：说明自适应机制 + DEEP 级编码纪律兜底。
+     * AUTO 档指令：说明发送前预检机制 + DEEP 级编码纪律兜底。
      * （独立方法而非常量，便于测试断言组合语义。）
      *
      * 注意拼接顺序：先对字面量 trimIndent 再拼接兜底体——若把兜底体直接
@@ -72,7 +71,7 @@ object CodeThinkingPrompts {
     private fun autoDirective(): String =
         """
         ### 编码思考模式：自适应（AUTO）
-        思考深度由引擎按任务复杂度逐轮自适应（复杂任务自动加深）。编码纪律基线：
+        思考深度已在发送前按任务复杂度预检选档（长任务深水区运行中可自动加深）。编码纪律基线：
         """.trimIndent() + "\n" + DEEP_DIRECTIVE_BODY_INDENTED
 
     // ═══════════════════ 各档指令正文 ═══════════════════
@@ -119,6 +118,12 @@ object CodeThinkingPrompts {
 - 中途换方向时，先记录「为什么放弃当前路线」再切换，避免来回摇摆。
 """.trimIndent()
 
+    /**
+     * APEXCODE 指令：巅峰档正文 + 内嵌五问终检清单
+     * （[CodeThinkingProfile.APEX_SELF_CHECK_CHECKLIST]——模型在产出
+     * 最终回复之前看到，真实影响本轮输出；additionalSystemContext 时机
+     * 与引擎侧终检通道等价）。
+     */
     private val APEXCODE_DIRECTIVE = """
 ### 编码思考（APEXCODE · 架构级穷举推理）
 这是最高思考档位，按工程评审的强度对待每一次改动：
@@ -129,7 +134,7 @@ object CodeThinkingPrompts {
 5. **全量验证矩阵**：改完后按可用性执行——构建（terminal.exec）/ lint / 测试 / 关键文件回读 / 诊断全绿——每项留下证据（输出摘要），不凭感觉宣称通过。
 6. **证据链汇报**：结论里给出「改了什么 / 为什么这样改 / 验证证据 / 遗留风险」四段式汇报，引用一律 path:line。
 - 全程维持检查点纪律：每完成一个阶段用 code_todo 勾掉并简注结果，任务中断后可从检查点恢复。
-""".trimIndent()
+""".trimIndent() + "\n\n" + CodeThinkingProfile.APEX_SELF_CHECK_CHECKLIST
 
     /** DEEP 指令的缩进体（AUTO 兜底拼接用：整体右移两格保持嵌套可读）。 */
     private val DEEP_DIRECTIVE_BODY_INDENTED: String = DEEP_DIRECTIVE

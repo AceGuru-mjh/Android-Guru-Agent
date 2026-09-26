@@ -23,27 +23,30 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
-import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 
 /**
- * # Code Thinking Selector — Coding 模式思考档位选择器（v1.2 七档思考系统）
+ * # Code Thinking Selector — Coding 模式思考档位选择器（七档思考系统）
  *
  * 输入栏上方的紧凑入口（AssistChip 显示当前档位名），点开下拉列出
  * 7 深度档 + AUTO 元档，下拉底部提供「查看档位指南」入口（打开
- * [CodeThinkingGuideSheet] 的全量对比表与逐档卡片）。与 Agent 聊天页的
- * ThinkingLevelSelector 平行实现（两屏交互语境不同：Code 屏以档位徽标 +
- * 一句话画像为主，不展示自适应决策理由——coding 模式的决策理由随引擎
- * 事件流进对话，不进选择器）。
+ * [CodeThinkingGuideSheet] 的全量对比表与逐档卡片）。
  *
- * 档位描述文案：ULTRACODE / APEXCODE 两档复用聊天页的
- * chat_thinking_ultracode_desc / chat_thinking_apexcode_desc（同义共享，
- * 避免两 locale 四处重复）；其余档位用 coding 语境专属文案
- * （code_thinking_*_desc，编码视角的档位说明）。
+ * 档位枚举为 coding 专属的 [CodeThinkingLevel]（与 Agent 聊天页的六档
+ * ThinkingLevel 完全分立——两页面各自解释自己的思考阶梯）。
+ *
+ * AUTO 档旁回显最近一次预检决策（[adaptiveDecision]，发送前由
+ * CodeViewModel.resolveRuntimeThinkingLevel 产生）。
+ *
+ * 档位描述文案：全部使用 coding 语境专属文案（code_thinking_*_desc，
+ * 含 ULTRACODE / APEXCODE 两档——coding 自有键，不跨模块复用聊天页
+ * 字符串）。
  */
 @Composable
 internal fun CodeThinkingSelector(
-    current: ThinkingLevel,
-    onSelect: (ThinkingLevel) -> Unit,
+    current: CodeThinkingLevel,
+    adaptiveDecision: String?,
+    onSelect: (CodeThinkingLevel) -> Unit,
     onOpenGuide: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -68,7 +71,16 @@ internal fun CodeThinkingSelector(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
             )
-            ThinkingLevel.entries.forEach { level ->
+            // AUTO 预检决策回显（仅 AUTO 档且有决策时）
+            if (current == CodeThinkingLevel.AUTO && !adaptiveDecision.isNullOrBlank()) {
+                Text(
+                    text = adaptiveDecision,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                )
+            }
+            CodeThinkingLevel.entries.forEach { level ->
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -88,30 +100,32 @@ internal fun CodeThinkingSelector(
                         onSelect(level)
                     }
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.code_thinking_guide_open)) },
-                    leadingIcon = {
-                        Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    onClick = {
-                        expanded = false
-                        onOpenGuide()
-                    }
-                )
             }
+            // 指南入口：循环体之外单份渲染（v1.2 误放 entries.forEach 内
+            // 重复渲染 8 次——修正归属时顺手修复）。
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.code_thinking_guide_open)) },
+                leadingIcon = {
+                    Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                onClick = {
+                    expanded = false
+                    onOpenGuide()
+                }
+            )
         }
     }
 }
 
-/** 档位 → 画像级一句话说明（coding 语境；ULTRACODE/APEXCODE 与聊天页共享键）。 */
+/** 档位 → 画像级一句话说明（coding 语境，全部使用 strings_code 自有键）。 */
 @Composable
-private fun codeThinkingLevelDetail(level: ThinkingLevel): String = when (level) {
-    ThinkingLevel.NONE -> stringResource(R.string.code_thinking_none_desc)
-    ThinkingLevel.LIGHT -> stringResource(R.string.code_thinking_light_desc)
-    ThinkingLevel.STANDARD -> stringResource(R.string.code_thinking_standard_desc)
-    ThinkingLevel.DEEP -> stringResource(R.string.code_thinking_deep_desc)
-    ThinkingLevel.MAXIMUM -> stringResource(R.string.code_thinking_maximum_desc)
-    ThinkingLevel.ULTRACODE -> stringResource(R.string.chat_thinking_ultracode_desc)
-    ThinkingLevel.APEXCODE -> stringResource(R.string.chat_thinking_apexcode_desc)
-    ThinkingLevel.AUTO -> stringResource(R.string.code_thinking_auto_desc)
+private fun codeThinkingLevelDetail(level: CodeThinkingLevel): String = when (level) {
+    CodeThinkingLevel.NONE -> stringResource(R.string.code_thinking_none_desc)
+    CodeThinkingLevel.LIGHT -> stringResource(R.string.code_thinking_light_desc)
+    CodeThinkingLevel.STANDARD -> stringResource(R.string.code_thinking_standard_desc)
+    CodeThinkingLevel.DEEP -> stringResource(R.string.code_thinking_deep_desc)
+    CodeThinkingLevel.MAXIMUM -> stringResource(R.string.code_thinking_maximum_desc)
+    CodeThinkingLevel.ULTRACODE -> stringResource(R.string.code_thinking_ultracode_desc)
+    CodeThinkingLevel.APEXCODE -> stringResource(R.string.code_thinking_apexcode_desc)
+    CodeThinkingLevel.AUTO -> stringResource(R.string.code_thinking_auto_desc)
 }

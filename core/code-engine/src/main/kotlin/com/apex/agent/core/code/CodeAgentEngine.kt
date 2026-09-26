@@ -1,9 +1,11 @@
 package com.apex.agent.core.code
 
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
+import com.apex.agent.core.code.thinking.CodeThinkingProfile
+import com.apex.agent.core.code.thinking.CodeThinkingPrompts
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.ApexAgentEngine
-import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
@@ -51,11 +53,33 @@ class CodeAgentEngine(
     private var globalRules: String = ""
 
     /**
-     * 当前思考档位（v1.2 七档思考系统：引擎侧缓存，refreshContext 时取
-     * 对应编码特化指令；引擎配置层的通用画像由 delegate.patchConfig
-     * 的 thinkingLevel 字段独立承载，两通道同步由 [updateThinkingLevel] 统一）。
+     * 当前思考档位（coding 专属七档枚举）：引擎侧缓存，refreshContext 时取
+     * 对应编码特化指令。引擎配置层的通用画像由 delegate.patchConfig 的
+     * thinkingLevel 字段承载（[updateThinkingLevel] 三通道统一同步）。
      */
-    private var currentThinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD
+    private var currentCodeThinkingLevel: CodeThinkingLevel = CodeThinkingLevel.STANDARD
+
+    /**
+     * 引擎旋钮基数快照（构造时拍下 CodeModule 配置的原始值）。
+     *
+     * 深水两档（ULTRACODE/APEXCODE）映射 MAXIMUM 打底后，超出 MAXIMUM 的
+     * 增量靠「改基数再让引擎自乘」反补：迭代基数 ×(2.0/1.5 或 3.0/1.5)、
+     * 输出预算抬到档位预算、APEX 压缩阈值 /0.9。若不快照基数而是叠加当前
+     * 配置反复换档，多次切换后基数会被指数污染——快照保证任意次换档都从
+     * 同一起点计算（幂等）。
+     */
+    private val engineKnobBase: KnobBase = KnobBase(
+        maxIterations = delegate.currentConfig().maxIterations,
+        maxToolOutputLength = delegate.currentConfig().maxToolOutputLength,
+        compressionThreshold = delegate.currentConfig().compressionThreshold
+    )
+
+    /** 旋钮基数（见 [engineKnobBase] KDoc）。 */
+    private data class KnobBase(
+        val maxIterations: Int,
+        val maxToolOutputLength: Int,
+        val compressionThreshold: Float
+    )
 
     // ═══ AgentEngine 委托 ═══
 
@@ -120,26 +144,44 @@ class CodeAgentEngine(
     }
 
     /**
-     * 更新思考档位（v1.2 七档思考系统）：双通道同步——
-     * 1. 引擎配置层：delegate.patchConfig(thinkingLevel) → 通用思考画像
-     *    （Thinking Instructions 段 + 迭代/压缩/输出预算倍率）随轮次生效；
-     * 2. 编码特化层：存字段，refreshContext 时把
+     * 更新思考档位（coding 七档）：三通道同步——
+     * 1. 档位映射：delegate.patchConfig(thinkingLevel = level.toAgentLevel())
+     *    → 通用思考画像（Thinking Instructions 段 + 迭代/压缩/输出预算
+     *    倍率）随轮次生效；深水两档映射 MAXIMUM 打底；
+     * 2. 旋钮补偿：以 [engineKnobBase] 为基数反补深水两档的增量
+     *    （[CodeThinkingProfile] compensated\* 纯函数——ULTRACODE 迭代
+     *    ×2.0、APEX ×3.0 / 输出预算抬到档位预算 / APEX 压缩更晚）；
+     *    其余档位基数复位，由引擎自己的倍率体系接管；
+     * 3. 编码特化层：存字段，refreshContext 时把
      *    [CodeThinkingPrompts.thinkingDirective] 拼进 additionalSystemContext。
      *
      * 与 updateGlobalRules 同款 JIT 语义：不立即刷上下文，下轮生效。
      */
-    fun updateThinkingLevel(level: ThinkingLevel) {
-        currentThinkingLevel = level
-        delegate.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+    fun updateThinkingLevel(level: CodeThinkingLevel) {
+        currentCodeThinkingLevel = level
+        delegate.patchConfig { cfg ->
+            cfg.copy(
+                thinkingLevel = level.toAgentLevel(),
+                maxIterations = CodeThinkingProfile.compensatedMaxIterations(
+                    engineKnobBase.maxIterations, level
+                ),
+                maxToolOutputLength = CodeThinkingProfile.compensatedToolOutputBudget(
+                    engineKnobBase.maxToolOutputLength, level
+                ),
+                compressionThreshold = CodeThinkingProfile.compensatedCompressionThreshold(
+                    engineKnobBase.compressionThreshold, level
+                )
+            )
+        }
     }
 
-    /** 当前思考档位（UI 回显用）。 */
-    fun thinkingLevel(): ThinkingLevel = currentThinkingLevel
+    /** 当前思考档位（UI 回显用，coding 七档枚举）。 */
+    fun thinkingLevel(): CodeThinkingLevel = currentCodeThinkingLevel
 
     /**
-     * AUTO 档最近一次自适应选档决策（"LEVEL: 因子→评分→档位"）；
-     * 非 AUTO 档或尚无决策 → null。VM 在 IterationStart 后拉取展示
-     * （镜像 Agent 模式 EventApplier 的可解释性通道）。
+     * 当前档位最近一次自适应决策说明（发送前预检/运行中升级由 VM 侧
+     * CodeAdaptiveThinkingSelector 产生并自行展示——引擎侧仅透传通用
+     * 引擎的 AUTO 可解释性通道，coding 正常路径不产生非空值）。
      */
     fun currentThinkingDecision(): String? = delegate.currentThinkingDecision()
 
@@ -168,10 +210,10 @@ class CodeAgentEngine(
         val name = currentWorkspaceName ?: return
         val segments = mutableListOf(CodePrompts.codingIdentity())
 
-        // ═══ v1.2 七档思考系统：编码特化思考指令（NONE 档返回空串自动跳过）═══
+        // ═══ coding 七档思考系统：编码特化思考指令（NONE 档返回空串自动跳过）═══
         // 通用思考画像（推理框架 + 预算倍率）由引擎配置层的 thinkingLevel
-        // 承载（updateThinkingLevel 双通道同步），此处只补编码方法论。
-        CodeThinkingPrompts.thinkingDirective(currentThinkingLevel)
+        // 承载（updateThinkingLevel 三通道同步），此处只补编码方法论。
+        CodeThinkingPrompts.thinkingDirective(currentCodeThinkingLevel)
             .takeIf { it.isNotEmpty() }
             ?.let { segments += it }
 

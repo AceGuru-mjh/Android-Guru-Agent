@@ -1,13 +1,13 @@
-package com.apex.agent.core.code
+package com.apex.agent.core.code.thinking
 
-import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [CodeThinkingPrompts] 编码特化思考指令测试（v1.2 七档思考系统）。
+ * [CodeThinkingPrompts] 编码特化思考指令测试（coding 专属七档）。
  *
  * 断言三件事：
  * 1. NONE 档不注入（空串——与通用画像的「不思考」语义对齐）；
@@ -18,13 +18,13 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `none level produces empty directive`() {
-        assertEquals("", CodeThinkingPrompts.thinkingDirective(ThinkingLevel.NONE))
+        assertEquals("", CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.NONE))
     }
 
     @Test
     fun `every non-none level produces non-empty directive with own marker`() {
-        ThinkingLevel.entries
-            .filter { it != ThinkingLevel.NONE }
+        CodeThinkingLevel.entries
+            .filter { it != CodeThinkingLevel.NONE }
             .forEach { level ->
                 val directive = CodeThinkingPrompts.thinkingDirective(level)
                 assertTrue("档位 $level 指令不应为空", directive.isNotBlank())
@@ -37,8 +37,8 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `each level marker is distinct`() {
-        val markers = ThinkingLevel.entries
-            .filter { it != ThinkingLevel.NONE }
+        val markers = CodeThinkingLevel.entries
+            .filter { it != CodeThinkingLevel.NONE }
             .associateWith { level ->
                 CodeThinkingPrompts.thinkingDirective(level).lineSequence().first()
             }
@@ -48,7 +48,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `ultracode carries coding closed-loop methodology`() {
-        val directive = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.ULTRACODE)
+        val directive = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.ULTRACODE)
         assertTrue(directive.contains("依赖地图"))
         assertTrue(directive.contains("候选改法"))
         assertTrue(directive.contains("风险排序"))
@@ -59,7 +59,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `apexcode carries architecture-grade methodology`() {
-        val directive = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.APEXCODE)
+        val directive = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.APEXCODE)
         assertTrue(directive.contains("架构定位"))
         assertTrue(directive.contains("影响半径"))
         assertTrue(directive.contains("对比矩阵"))
@@ -70,7 +70,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `auto directive explains adaptivity and carries deep baseline`() {
-        val directive = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.AUTO)
+        val directive = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.AUTO)
         assertTrue(directive.contains("自适应"))
         // AUTO 兜底 = DEEP 纪律（去标题后的缩进体）
         assertTrue(directive.contains("改动集清单"))
@@ -79,7 +79,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `directives are idempotent per level`() {
-        ThinkingLevel.entries.forEach { level ->
+        CodeThinkingLevel.entries.forEach { level ->
             assertEquals(
                 "档位 $level 指令应幂等",
                 CodeThinkingPrompts.thinkingDirective(level),
@@ -90,14 +90,14 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `auto fallback level is deep`() {
-        assertEquals(ThinkingLevel.DEEP, CodeThinkingPrompts.AUTO_FALLBACK_DIRECTIVE_LEVEL)
+        assertEquals(CodeThinkingLevel.DEEP, CodeThinkingPrompts.AUTO_FALLBACK_DIRECTIVE_LEVEL)
     }
 
     @Test
     fun `no nested comment hazard sequences in directives`() {
         // KDoc/字符串里出现斜杠+星号序列会在 Kotlin 块注释里开启嵌套层级
         // （历史地雷）；指令文本本身也该避免（可能被拼进注释性上下文）。
-        ThinkingLevel.entries.forEach { level ->
+        CodeThinkingLevel.entries.forEach { level ->
             val directive = CodeThinkingPrompts.thinkingDirective(level)
             assertFalse(
                 "档位 $level 指令不应含斜杠+星号序列",
@@ -110,7 +110,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `light directive covers glance-edit discipline`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.LIGHT)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.LIGHT)
         assertTrue(d.contains("code_read"))
         assertTrue(d.contains("diff"))
         assertTrue(d.contains("STANDARD")) // 退路指引
@@ -118,7 +118,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `standard directive covers full edit loop`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.STANDARD)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.STANDARD)
         assertTrue(d.contains("code_read"))
         assertTrue(d.contains("code_edit"))
         assertTrue(d.contains("诊断"))
@@ -127,7 +127,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `deep directive covers changeset mindset and subagent delegation`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.DEEP)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.DEEP)
         assertTrue(d.contains("改动集清单"))
         assertTrue(d.contains("验证"))
         assertTrue(d.contains("code_task"))
@@ -136,7 +136,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `maximum directive covers invariants and ripple effects`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.MAXIMUM)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.MAXIMUM)
         assertTrue(d.contains("不变量"))
         assertTrue(d.contains("调用方"))
         assertTrue(d.contains("全链路"))
@@ -145,7 +145,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `ultracode directive carries six-step closed loop`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.ULTRACODE)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.ULTRACODE)
         // 六步闭环逐一在场
         assertTrue(d.contains("1. **依赖地图**"))
         assertTrue(d.contains("2. **候选改法**"))
@@ -160,7 +160,7 @@ class CodeThinkingPromptsTest {
 
     @Test
     fun `apexcode directive carries six-phase review protocol`() {
-        val d = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.APEXCODE)
+        val d = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.APEXCODE)
         assertTrue(d.contains("1. **架构定位**"))
         assertTrue(d.contains("2. **影响半径测绘**"))
         assertTrue(d.contains("3. **多方案对比矩阵**"))
@@ -175,12 +175,12 @@ class CodeThinkingPromptsTest {
     @Test
     fun `directives grow more prescriptive with depth`() {
         // 深度档指令应比浅档更长（方法论更具体）：阶梯单调性粗粒度锁定
-        val lightLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.LIGHT).length
-        val standardLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.STANDARD).length
-        val deepLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.DEEP).length
-        val maximumLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.MAXIMUM).length
-        val ultracodeLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.ULTRACODE).length
-        val apexLen = CodeThinkingPrompts.thinkingDirective(ThinkingLevel.APEXCODE).length
+        val lightLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.LIGHT).length
+        val standardLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.STANDARD).length
+        val deepLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.DEEP).length
+        val maximumLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.MAXIMUM).length
+        val ultracodeLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.ULTRACODE).length
+        val apexLen = CodeThinkingPrompts.thinkingDirective(CodeThinkingLevel.APEXCODE).length
         assertTrue(lightLen < standardLen)
         assertTrue(standardLen < deepLen)
         assertTrue(deepLen < maximumLen)

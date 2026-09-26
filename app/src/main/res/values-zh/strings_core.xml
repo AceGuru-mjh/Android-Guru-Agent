@@ -232,6 +232,13 @@
     <string name="settings_about_view_repo">查看 GitHub 仓库</string>
     <string name="settings_about_star">请给我项目来一个 Star，谢谢！</string>
     <string name="settings_about_credits">本项目大量架构受益于开源社区（Termux、proot、Operit 等），致敬所有贡献者。</string>
+    <!-- 更新检查（读取发布仓库 version.json） -->
+    <string name="settings_about_update_check">检查更新</string>
+    <string name="settings_about_update_checking">正在检查更新…</string>
+    <string name="settings_about_update_latest">已是最新版本（v%1$s）</string>
+    <string name="settings_about_update_available">发现新版本 v%1$s</string>
+    <string name="settings_about_update_download">下载更新</string>
+    <string name="settings_about_update_failed">检查更新失败：%1$s</string>
 
     <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
     <string name="settings_error_provider_not_found">未找到服务商：%1$s</string>

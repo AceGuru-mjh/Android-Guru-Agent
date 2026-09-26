@@ -445,6 +445,15 @@ data class AgentSettings(
      * false = 引擎回退 STANDARD 三步 CoT（默认）。
      */
     val forceDeepThinking: Boolean = false,
+    /**
+     * v1.2 Coding 模式思考档位（持久化，与聊天页 thinkingLevelOverride 互不
+     * 干扰——两模式各自记忆）："" = 未设置（回退 STANDARD）；"auto" = AUTO
+     * 自适应；其余 = ThinkingLevel 枚举名小写
+     * （none/light/standard/deep/maximum/ultracode/apexcode）。
+     * Coding 页选择器写入，CodeViewModel init 恢复（updateThinkingLevel
+     * 双通道运行时生效，无需重启）。
+     */
+    val codeThinkingLevel: String = "",
     val maxIterations: Int = 20,
     val keepAlive: Boolean = true,
 

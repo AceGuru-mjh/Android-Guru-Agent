@@ -232,6 +232,13 @@
     <string name="settings_about_view_repo">View the GitHub repository</string>
     <string name="settings_about_star">Give this project a star — thank you!</string>
     <string name="settings_about_credits">This project\'s architecture draws heavily on the open-source community (Termux, proot, Operit, etc.) — saluting all contributors.</string>
+    <!-- Update check (reads version.json from the release repository) -->
+    <string name="settings_about_update_check">Check for updates</string>
+    <string name="settings_about_update_checking">Checking for updates…</string>
+    <string name="settings_about_update_latest">Up to date (latest: v%1$s)</string>
+    <string name="settings_about_update_available">New version v%1$s available</string>
+    <string name="settings_about_update_download">Download update</string>
+    <string name="settings_about_update_failed">Update check failed: %1$s</string>
 
     <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
     <string name="settings_error_provider_not_found">Provider not found: %1$s</string>

@@ -49,9 +49,9 @@ private const val TAG = "ProotExec"
  * | SpawnRequest.cwd | guest cwd | 说明 |
  * |---|---|---|
  * | null | /workspace | 与 PTY 会话默认一致（文件工具写入的目录） |
- * | /storage/emulated/0/** | /sdcard/** | 共享存储 bind（Termux 语义） |
- * | <filesDir>/linux/home/** | /root/** | 持久化 home bind（与终端会话互通） |
- * | <filesDir>/linux/workspaces/** | /workspace | 该工作区 bind 到 /workspace（与 git runner 一致） |
+ * | /storage/emulated/0/… | /sdcard/… | 共享存储 bind（Termux 语义） |
+ * | <filesDir>/linux/home/… | /root/… | 持久化 home bind（与终端会话互通） |
+ * | <filesDir>/linux/workspaces/… | /workspace | 该工作区 bind 到 /workspace（与 git runner 一致） |
  * | 其它**真实存在**的 host 目录 | 原路径 | 追加 `同路径:同路径` bind —— 绝对路径引用不失效 |
  * | 不存在的目录 | — | 抛 FileNotFoundException（与 ProcessBuilder.directory 语义一致，引擎转 spawn failure） |
  *

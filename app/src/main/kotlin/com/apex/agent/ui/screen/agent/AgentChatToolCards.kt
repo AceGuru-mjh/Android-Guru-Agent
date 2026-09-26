@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,11 +39,13 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -203,18 +207,49 @@ private fun githubSummary(name: String, args: String): String? {
     }
 }
 
+/**
+ * ═══ 工具调用卡 v2：小胶囊折叠态（用户反馈「工具调用缩小成小胶囊，点击才放大」）═══
+ *
+ * 折叠态：单行小胶囊（高 ~26dp）—— 来源图标 + 工具名 + 状态圆点 + 智能摘要 +
+ * 时长；不渲染参数/输出/时间线，流水里的几十次调用不再刷屏。
+ * 展开态：完整 GlassToolCard（参数 + 执行时间线 + 智能输出 + 重试），
+ * 内容与 v1 完全一致，只是按需渲染。
+ * 顺序性：卡片仍由 AgentChatEventApplier 按完成顺序追加到消息流，本卡不重排。
+ */
 @Composable
 internal fun ToolCallCard(
     toolCall: AgentUiMessage.ToolCall,
-    onRetry: (() -> Unit)? = null
+    onRetry: (() -> Unit)? = null,
+    // HTML 产物预览：Agent 写出的 .html 文件（工作区根已解析）非空时显示预览钮。
+    htmlPreviewPath: String? = null,
+    onPreviewHtml: (String) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
     val isError = toolCall.success == false
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = if (isError) MaterialTheme.colorScheme.error else kindStyle.color
+    val summary = remember(toolCall.id) {
+        smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
+    }
 
-    // ═══ Liquid Glass 迁移：ElevatedCard → GlassToolCard Frosted 档 ═══
-    // 卡片位于消息源LazyColumn 内部 —— Haze 1.4 不支持源内嵌套采样，
+    if (!expanded) {
+        // ═══ 折叠态：小胶囊（默认状态）═══
+        ToolCallCapsule(
+            toolName = toolCall.toolName,
+            kindStyle = kindStyle,
+            accent = accent,
+            summary = summary,
+            durationMs = toolCall.durationMs,
+            isError = isError,
+            isRunning = false,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { expanded = true }
+        )
+        return
+    }
+
+    // ═══ 展开态：完整 GlassToolCard（Liquid Glass Frosted 档）═══
+    // 卡片位于消息源 LazyColumn 内部 —— Haze 1.4 不支持源内嵌套采样，
     // 诚实降级为 Frosted：主题薄霜 + 状态着色 + 边缘光 + 高光，不冒充 backdrop。
     GlassToolCard(
         status = if (isError) GlassToolStatus.FAILED else GlassToolStatus.COMPLETED,
@@ -222,7 +257,7 @@ internal fun ToolCallCard(
         accent = accent,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
+            .clickable { expanded = false }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -293,9 +328,6 @@ internal fun ToolCallCard(
                     ToolKindBadge(toolCall.kind, toolCall.server, toolCall.skill)
 
                     // 智能摘要：折叠时也能一眼看懂这次调用在做什么（文件路径 / 命令 / URL）
-                    val summary = remember(toolCall.id) {
-                        smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
-                    }
                     if (!summary.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -318,6 +350,23 @@ internal fun ToolCallCard(
                     )
                 }
 
+                // HTML 产物即时预览（应用内 WebView，无需跳出 App/外部浏览器冷启动）：
+                // 仅成功完成的调用展示；路径已由 AgentMessageItem 解析验证。
+                if (htmlPreviewPath != null && toolCall.success == true) {
+                    val previewCd = stringResource(R.string.chat_cd_preview_html)
+                    IconButton(
+                        onClick = { onPreviewHtml(htmlPreviewPath) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Preview,
+                            contentDescription = previewCd,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
                 Icon(
                     imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = if (expanded) stringResource(R.string.chat_cd_collapse_tool)
@@ -327,7 +376,7 @@ internal fun ToolCallCard(
                 )
             }
 
-            if (expanded && toolCall.args.isNotBlank()) {
+            if (toolCall.args.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = stringResource(R.string.chat_params),
@@ -335,8 +384,8 @@ internal fun ToolCallCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
@@ -351,7 +400,7 @@ internal fun ToolCallCard(
             }
 
             // ═══ 执行过程时间线（展开可见，全量保留步骤与原始输出）═══
-            if (expanded && toolCall.steps.isNotEmpty()) {
+            if (toolCall.steps.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = stringResource(R.string.chat_execution_steps),
@@ -366,7 +415,7 @@ internal fun ToolCallCard(
                 )
             }
 
-            val outputText = if (expanded) toolCall.fullOutput ?: toolCall.output else toolCall.output
+            val outputText = toolCall.fullOutput ?: toolCall.output
 
             if (outputText != null) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -379,14 +428,12 @@ internal fun ToolCallCard(
                     WebSearchResultsCard(results, query = extractSearchQuery(outputText))
                 } else {
                     // 智能输出渲染：按工具类型自动选择 代码高亮 / 文件卡 / JSON树 / Shell / 文本 卡片。
-                    // output 直接传 outputText（本分支已保证非空）：展开时它等于 fullOutput ?: output，
-                    // 折叠时等于 output——与卡片将要展示的内容完全一致。
                     SmartToolOutput(
                         toolName = toolCall.toolName,
                         args = toolCall.args,
                         output = outputText,
                         fullOutput = toolCall.fullOutput,
-                        expanded = expanded,
+                        expanded = true,
                         isError = isError
                     )
                 }
@@ -402,6 +449,115 @@ internal fun ToolCallCard(
                     RetryChip(onRetry = onRetry)
                 }
             }
+        }
+    }
+}
+
+/**
+ * ═══ 工具调用小胶囊（折叠态专用，ToolCallCard / RunningToolCallCard 共用）═══
+ *
+ * 用户需求：「调用工具和一些调用什么的都缩小，最好缩小成非常小的那种，
+ * 点击才会放大，缩小成小胶囊」。设计：全宽但高度仅 ~26dp 的细胶囊 ——
+ * 来源图标(12dp) + 工具名(等宽字号) + 状态圆点(6dp) + 智能摘要(灰色单行) +
+ * 时长 + 展开箭头(12dp)。点击整个胶囊展开完整卡片。
+ *
+ * 状态圆点：运行中 = 主色脉冲；完成 = 绿色实心；失败 = 红色实心。
+ */
+@Composable
+internal fun ToolCallCapsule(
+    toolName: String,
+    kindStyle: ToolKindStyle,
+    accent: Color,
+    summary: String?,
+    durationMs: Long,
+    isError: Boolean,
+    isRunning: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    // 运行态脉冲：圆点透明度 0.35↔1 循环（完成/失败态静态）
+    val transition = rememberInfiniteTransition(label = "capsuleDot")
+    val pulseAlpha by transition.animateFloat(
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "capsuleDotAlpha"
+    )
+    val dotColor = when {
+        isError -> MaterialTheme.colorScheme.error
+        isRunning -> accent
+        else -> Color(0xFF22C55E)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.30f)),
+        modifier = modifier
+            .heightIn(min = 26.dp)
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = kindStyle.icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                text = toolName,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 132.dp)
+            )
+            // 状态圆点（运行中脉冲）
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        color = dotColor.copy(alpha = if (isRunning) pulseAlpha else 1f),
+                        shape = CircleShape
+                    )
+            )
+            // 智能摘要（灰色单行，占满剩余宽度；无摘要留白）
+            if (!summary.isNullOrBlank()) {
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+            // 时长
+            if (durationMs > 0) {
+                Text(
+                    text = formatDuration(durationMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(12.dp)
+            )
         }
     }
 }
@@ -673,6 +829,11 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
 
+    // ═══ v2 小胶囊折叠态：运行中的工具默认也只占一行 ~26dp（用户反馈
+    // 「调用工具缩小成小胶囊，点击才放大」），点击展开完整运行卡（时间线/
+    // 进度/输出）。展开态内容与 v1 完全一致。═══
+    var expanded by remember(toolCall.id) { mutableStateOf(false) }
+
     // 实时耗时计时：立即显示真实已用时长（而非从 0 起跳），此后每秒刷新；
     // ≥60s 后切换为 2m05s 形式，长任务可读性更好。
     var elapsedSec by remember(toolCall.id) {
@@ -691,12 +852,29 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
         smartToolSummary(toolCall.toolName, toolCall.args, toolCall.kind, toolCall.server)
     }
 
+    if (!expanded) {
+        ToolCallCapsule(
+            toolName = toolCall.toolName,
+            kindStyle = kindStyle,
+            accent = accent,
+            summary = summary,
+            durationMs = elapsedSec * 1000,
+            isError = false,
+            isRunning = true,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { expanded = true }
+        )
+        return
+    }
+
     // ═══ Liquid Glass 迁移：ElevatedCard → GlassToolCard Frosted 档 ═══
     // 运行态：工具类型色 accent 驱动着色 + 边缘光，保留既有脉冲反馈环
     GlassToolCard(
         status = GlassToolStatus.RUNNING,
         accent = accent,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = false }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(

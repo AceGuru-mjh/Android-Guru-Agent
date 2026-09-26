@@ -266,7 +266,16 @@ class UbuntuLifecycleCoordinator(
      */
     suspend fun ensureReady(force: Boolean = false, timeoutMs: Long = defaultTimeoutMs): EnsureResult = mutex.withLock {
         // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
-        if (!force && _state.value.phase == Phase.READY) {
+        // ★ 修复「每次都会显示 APT 引导未完成」（用户反馈）：T83 降级语义下
+        // phase=READY 但 bootstrapNote != null（引导失败降级）时，原实现同样
+        // 秒回 AlreadyReady —— bootstrap 永不重试，降级注记永远不消失。
+        // 现在：引导降级态不走短路，继续走完整编排 —— bootstrap 幂等续跑
+        // （evidence 只含已完成阶段 + APT_UPDATE 镜像 fallback），网络恢复后
+        // 下一次 ensureReady 即自愈为完整 READY；引导本来就完整的设备不受影响。
+        if (!force &&
+            _state.value.phase == Phase.READY &&
+            _state.value.bootstrapNote == null
+        ) {
             return EnsureResult.AlreadyReady(_state.value.capabilities ?: emptyList())
         }
         val startedAt = clock()

@@ -294,8 +294,8 @@ internal object ConsoleTheme {
     val chipActive = Color(0xFF1F3429)
     /** 分隔线。 */
     val stroke = Color(0xFF233029)
-    /** 主文本。 */
-    val text = Color(0xFFDDEBE3)
+    /** 主文本（提亮至近白 —— 与 TerminalRenderer 前景纯白统一，终端「白色字体」反馈）。 */
+    val text = Color(0xFFF2F7F4)
     /** 次级文本。 */
     val dim = Color(0xFF7E948A)
     /** 强调（neon mint —— App dark primary）。 */

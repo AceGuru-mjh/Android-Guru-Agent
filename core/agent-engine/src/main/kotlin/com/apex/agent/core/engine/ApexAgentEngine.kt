@@ -650,6 +650,8 @@ class ApexAgentEngine(
 
     private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
+        // P0 修复（承诺未执行催促）：每任务至多催促一次（防无限循环）
+        var promiseNudged = false
 
         while (isRunning && iteration < thinkingController.effectiveMaxIterations(config.maxIterations)) {
             iteration++
@@ -697,8 +699,13 @@ class ApexAgentEngine(
             // 计划决定请求 tools 数组（provider 安全名 + 预算钳制）与 system
             // prompt 工具清单（同一份 plan.visibleRegistryIds）——两侧永远
             // 一致；tool_open 激活的工具从下一轮自动进入计划。
+            // P0 修复（连接即可见）：已连接服务（GitHub 等）的工具 id 并入计划 ——
+            // 否则 "## Connected Services" 宣称 github_* 可用而 tools 数组里
+            // 根本没有这些函数，provider 拒绝未声明调用（用户反馈"密钥连接
+            // 没有一点作用"的机制根因）。
             val plan = EngineToolPlanner.buildToolPlan(
-                config, toolRegistry, toolActivation, toolDegradationLevel
+                config, toolRegistry, toolActivation, toolDegradationLevel,
+                serviceToolIds = connectedServicesProvider?.connectedToolIds() ?: emptySet()
             )
             currentToolPlan = plan
 
@@ -789,6 +796,20 @@ class ApexAgentEngine(
                     continue
                 }
                 throw e
+            }
+
+            // ═══ P1 修复（降级自动恢复）：本轮 LLM 交互成功完成 → 降级等级归零 ═══
+            // 旧状态机只在下一次 execute()（新任务）复位 —— 任务内一次误判
+            //（400/413 与工具无关的报错也曾触发）就永久降级：第一次纯 CORE，
+            // 第二次直接无工具 —— 模型"突然只用嘴回答"，余下轮次全部废掉。
+            // 现在每轮成功即恢复：孤立的失败不再有跨轮记忆；真正的工具拒绝
+            // 会在下一轮再次触发降级重试（每轮独立计数，语义不变）。
+            if (toolDegradationLevel > 0) {
+                AppLogger.instance.debug(
+                    LogCategory.ENGINE, "ApexAgentEngine",
+                    "Iteration succeeded — resetting tool degradation level to 0"
+                )
+                toolDegradationLevel = 0
             }
 
             // 若本轮收到了原生思考内容，发射 ThinkingComplete 让 UI 收尾。
@@ -882,6 +903,27 @@ class ApexAgentEngine(
 
                         emit(AgentEvent.ResponseComplete(draft))
                         return iteration
+                    }
+
+                    // ═══ P0 修复（承诺未执行催促，BUILD 模式）：用户反馈"Agent 不会主动调用命令"═══
+                    // 纯文本轮是 BUILD 循环的终止条件 —— 弱模型常第一轮叙述计划（"我现在去
+                    // 执行 XX…"）而不带 tool_calls，任务即告结束，观感"只说不做"。这里对
+                    // 响应文本做后置检测（assist/PromiseDetector.kt，刻意保守）：
+                    // - 检出强承诺语迹 且 本任务尚未催促过 且 未到迭代上限 → 注入
+                    //   System 催促并 continue（模型获得一次"真做"的机会；每任务至多
+                    //   一次 —— 催促后仍不行动 = 合法收尾，不无限循环）；
+                    // - 未检出 / 已催促 → 照常 ResponseComplete（绝不丢已生成的回复）。
+                    if (config.mode == AgentMode.BUILD && !promiseNudged &&
+                        iteration < thinkingController.effectiveMaxIterations(config.maxIterations) - 1 &&
+                        com.apex.agent.core.engine.assist.PromiseDetector
+                            .isPromiseWithoutAction(contentBuilder.toString())
+                    ) {
+                        promiseNudged = true
+                        addMessage(LlmMessage.Assistant(contentBuilder.toString()))
+                        addMessage(
+                            LlmMessage.System(com.apex.agent.core.engine.assist.PromiseDetector.NUDGE_MESSAGE)
+                        )
+                        continue
                     }
 
                     addMessage(LlmMessage.Assistant(contentBuilder.toString()))

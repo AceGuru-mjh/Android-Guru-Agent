@@ -263,20 +263,31 @@ class UbuntuLifecycleCoordinator(
      * - 超时 → [EnsureResult.InProgress]：进度不丢（解包 .part 续拷 + bootstrap
      *   evidence 续跑），再次调用续跑；
      * - [force]=true：绕过 READY 短路（版本迁移/修复用）。
+     *
+     * P1 修复（锁等待纳入超时）：旧实现 `withTimeoutOrNull` 在 `mutex.withLock`
+     * **内部** —— 第二个 caller 的 timeoutMs 不覆盖锁排队时间。首个 caller 解包
+     * 最长 30 分钟，期间 Agent 的 terminal.ubuntu.ensure（工具层 1,830s 策略）或
+     * UI 的任何 ensureReady 调用会挂在锁上直到外层 ToolRunPolicy 击杀（或无限
+     * 等待）。现在 timeout 包住「锁等待 + 编排步骤」全程：等待超锁预算一半即
+     * 诚实返回 InProgress（调用方可重试续跑），绝不无限阻塞。
      */
-    suspend fun ensureReady(force: Boolean = false, timeoutMs: Long = defaultTimeoutMs): EnsureResult = mutex.withLock {
-        // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
-        if (!force && _state.value.phase == Phase.READY) {
-            return EnsureResult.AlreadyReady(_state.value.capabilities ?: emptyList())
-        }
-        val startedAt = clock()
-        val fromPhase = _state.value.phase
-        val result = withTimeoutOrNull(timeoutMs) { runEnsureSteps(force, startedAt, fromPhase) }
-        result ?: EnsureResult.InProgress(
+    suspend fun ensureReady(force: Boolean = false, timeoutMs: Long = defaultTimeoutMs): EnsureResult =
+        withTimeoutOrNull(timeoutMs) {
+            mutex.withLock {
+                // 快速路径：已 READY 且非 force —— 不触碰底层（秒回）。
+                if (!force && _state.value.phase == Phase.READY) {
+                    return@withLock EnsureResult.AlreadyReady(
+                        _state.value.capabilities ?: emptyList()
+                    )
+                }
+                val startedAt = clock()
+                val fromPhase = _state.value.phase
+                runEnsureSteps(force, startedAt, fromPhase)
+            }
+        } ?: EnsureResult.InProgress(
             phase = _state.value.phase,
             message = "仍在 ${_state.value.phase.name} 阶段 — 再次调用继续等待，进度不会丢失"
         )
-    }
 
     private suspend fun runEnsureSteps(force: Boolean, startedAt: Long, fromPhase: Phase): EnsureResult {
         // ── Stage 1: rootfs（幂等判断由 provisioner 承担 —— 编排层不复制 rootfs 状态语义）──

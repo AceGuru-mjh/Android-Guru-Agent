@@ -290,7 +290,14 @@ class TerminalViewModel @Inject constructor(
                 return
             }
         }
-        val created = terminalRuntime.create(backendId = backendId)
+        // P1 修复（主线程 fork/exec）：terminalRuntime.create 链路含
+        // LinuxPRootBackend.availability()/prepare() —— 真实 ProcessBuilder fork
+        //（proot --version 探针，create 内各做一次共 2 次）、符号链接创建、home
+        // skel 拷贝、workspace mkdirs、forkpty 本身。旧实现直接跑在
+        // viewModelScope(Main.immediate)，慢设备上卡顿/StrictMode 违例/ANR 风险。
+        val created = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            terminalRuntime.create(backendId = backendId)
+        }
         val result = created.getOrElse { e ->
             _notice.value = lang.getString(R.string.term_notice_create_failed, e.message?.take(120) ?: "")
             return
@@ -506,8 +513,12 @@ class TerminalViewModel @Inject constructor(
             ubuntuLifecycle.progressFlow().collect { p ->
                 _ubuntuProgress.value = p
                 // 安装完成后刷新占用（下载/解压会显著改变磁盘占用）
+                // P1 修复（布尔优先级）：&& 先于 || 结合 —— 旧写法
+                // `a && b || c` 等价于 `(a && b) || c`，任何以 REMOVED 结尾的
+                // stage（含未来 bootstrap 可能新增的移除态）都会触发刷新；
+                // 显式括号表达意图：install 域内的 READY / REMOVED 才刷新。
                 if (p.stage.startsWith("install:") &&
-                    p.stage.endsWith("READY") || p.stage.endsWith("REMOVED")
+                    (p.stage.endsWith("READY") || p.stage.endsWith("REMOVED"))
                 ) {
                     refreshRootfsSize()
                 }

@@ -128,9 +128,19 @@ class ThinkingModeController(
      *
      * 清单经 system prompt 的 Thinking 段下发（模型在产出最终回复**之前**
      * 看到，真实影响本轮输出）；本方法供测试断言与 UI/后续扩展直接取用。
+     *
+     * v1.2：APEXCODE 档优先返回巅峰专属五问清单
+     * [ThinkingProfile.APEX_SELF_CHECK_CHECKLIST]（不变量 / 回归两问对应其
+     * 提示词闭环）；MAXIMUM / ULTRACODE 仍用三问清单。
      */
     fun finalSelfCheckPrompt(): String? =
-        currentProfile?.takeIf { it.finalSelfCheck }?.let { ThinkingProfile.SELF_CHECK_CHECKLIST }
+        currentProfile?.let {
+            when {
+                it.level == ThinkingLevel.APEXCODE -> ThinkingProfile.APEX_SELF_CHECK_CHECKLIST
+                it.finalSelfCheck -> ThinkingProfile.SELF_CHECK_CHECKLIST
+                else -> null
+            }
+        }
 
     /** 最近一次 AUTO 决策理由（无决策 / 非 AUTO 档返回 null）。 */
     fun lastDecisionReason(): String? = lastDecision?.reason

@@ -322,5 +322,10 @@ tasks.register("warnBundledRootfs") {
 }
 
 // release：严格门禁（缺失/指纹不符 = 构建失败）；debug：存在性警告（不阻断迭代）
-tasks.named("preReleaseBuild") { dependsOn("checkBundledRootfs") }
-tasks.named("preBuild") { dependsOn("warnBundledRootfs") }
+// ⚠️ 时机：AGP 的 preBuild/preReleaseBuild 在 afterEvaluate 之前尚未注册 ——
+// 直接 tasks.named(...) 在脚本执行期即抛 "Task not found"（CI 实测）。
+// 挪入 afterEvaluate：任务注册完成后解析，严格性不降级（不存在照样报错）。
+project.afterEvaluate {
+    tasks.named("preReleaseBuild") { dependsOn("checkBundledRootfs") }
+    tasks.named("preBuild") { dependsOn("warnBundledRootfs") }
+}

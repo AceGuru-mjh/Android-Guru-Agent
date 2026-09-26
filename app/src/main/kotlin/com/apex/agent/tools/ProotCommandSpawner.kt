@@ -126,7 +126,7 @@ class ProotCommandSpawner(
     // ══════════════════════════════════════════════════════════════════
 
     /** Ubuntu 路由计划（null = 本次 spawn 回落 Android 通道）。 */
-    private class UbuntuRoute(
+    internal class UbuntuRoute(
         /** 真实 rootfs 根目录（versions/ 子目录解析结果）。 */
         val rootfs: File
     )
@@ -258,7 +258,7 @@ class ProotCommandSpawner(
     }
 
     /** guest cwd 计划：guest cwd + 需要追加的 bind 集 + 作为 /workspace bind 的工作区。 */
-    private class GuestCwdPlan(
+    internal class GuestCwdPlan(
         val guestCwd: String,
         val extraBinds: List<PRootBind>,
         /** 组装 PRootLaunchRequest.workingDirectory 用的值。 */

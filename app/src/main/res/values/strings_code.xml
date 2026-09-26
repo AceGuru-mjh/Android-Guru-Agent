@@ -158,4 +158,33 @@
     <string name="code_longtask_cp_counts_fmt">%1$d tools · %2$d files</string>
     <string name="code_longtask_cp_todos_fmt">☑%1$d ☐%2$d</string>
     <string name="code_thinking_guide_open">View tier guide</string>
+    <!-- ═══ 胶囊流式输出（Coding 工作流时间轴）═══ -->
+    <string name="code_stream_group_more_fmt">%1$d tool capsules collapsed</string>
+    <string name="code_stream_group_expand">Expand</string>
+    <string name="code_stream_diff_unnamed">(file)</string>
+    <string name="code_stream_diff_stat_fmt">+%1$d −%2$d</string>
+    <string name="code_stream_diff_truncated">Diff truncated — open the file for the full change</string>
+    <string name="code_stream_terminal_idle">terminal</string>
+    <string name="code_stream_terminal_toggle">Toggle terminal panel</string>
+    <string name="code_stream_terminal_empty">(no output yet)</string>
+    <string name="code_stream_thinking_running">Thinking…</string>
+    <string name="code_stream_thinking_done">Thought chain · tap to expand</string>
+    <string name="code_stream_verify_round_fmt">Verify round %1$d</string>
+    <string name="code_stream_verify_passed">passed</string>
+    <string name="code_stream_verify_failed">failed</string>
+    <string name="code_stream_verify_unknown">in progress</string>
+    <string name="code_stream_verify_counts_fmt">%1$d edit · %2$d verify</string>
+    <string name="code_stream_verify_details_gone">Details not replayable after restore</string>
+    <string name="code_stream_error_recoverable">Recoverable error</string>
+    <string name="code_stream_error_fatal">Fatal error</string>
+    <string name="code_stream_files_touched">%1$d files touched</string>
+    <string name="code_stream_fab_bottom">Latest</string>
+    <string name="code_stream_detail_diff_title">File diff</string>
+    <string name="code_stream_detail_diff_missing">No diff payload captured for this call</string>
+    <string name="code_stream_detail_grep_title">Search hits</string>
+    <string name="code_stream_detail_grep_empty">No hits captured</string>
+    <string name="code_stream_detail_terminal_title">Terminal output</string>
+    <string name="code_stream_detail_output_title">Tool output</string>
+    <string name="code_stream_run_streaming">Running · capsule timeline</string>
+    <string name="code_stream_run_idle">Describe a coding task to start the capsule timeline</string>
 </resources>

@@ -158,4 +158,33 @@
     <string name="code_longtask_cp_counts_fmt">%1$d 工具 · %2$d 文件</string>
     <string name="code_longtask_cp_todos_fmt">☑%1$d ☐%2$d</string>
     <string name="code_thinking_guide_open">查看档位指南</string>
+    <!-- ═══ 胶囊流式输出（Coding 工作流时间轴）═══ -->
+    <string name="code_stream_group_more_fmt">已收起 %1$d 颗工具胶囊</string>
+    <string name="code_stream_group_expand">展开</string>
+    <string name="code_stream_diff_unnamed">（文件）</string>
+    <string name="code_stream_diff_stat_fmt">+%1$d −%2$d</string>
+    <string name="code_stream_diff_truncated">Diff 已截断——打开文件查看完整改动</string>
+    <string name="code_stream_terminal_idle">终端</string>
+    <string name="code_stream_terminal_toggle">展开/收起终端面板</string>
+    <string name="code_stream_terminal_empty">（暂无输出）</string>
+    <string name="code_stream_thinking_running">思考中…</string>
+    <string name="code_stream_thinking_done">思考链 · 点击展开</string>
+    <string name="code_stream_verify_round_fmt">验证轮次 %1$d</string>
+    <string name="code_stream_verify_passed">通过</string>
+    <string name="code_stream_verify_failed">未通过</string>
+    <string name="code_stream_verify_unknown">进行中</string>
+    <string name="code_stream_verify_counts_fmt">%1$d 次编辑 · %2$d 次验证</string>
+    <string name="code_stream_verify_details_gone">恢复后明细不可回放</string>
+    <string name="code_stream_error_recoverable">可恢复错误</string>
+    <string name="code_stream_error_fatal">致命错误</string>
+    <string name="code_stream_files_touched">触碰 %1$d 个文件</string>
+    <string name="code_stream_fab_bottom">回到底部</string>
+    <string name="code_stream_detail_diff_title">文件 Diff</string>
+    <string name="code_stream_detail_diff_missing">该调用未捕获到 diff 内容</string>
+    <string name="code_stream_detail_grep_title">搜索命中</string>
+    <string name="code_stream_detail_grep_empty">未捕获到命中结果</string>
+    <string name="code_stream_detail_terminal_title">终端输出</string>
+    <string name="code_stream_detail_output_title">工具输出</string>
+    <string name="code_stream_run_streaming">运行中 · 胶囊时间轴</string>
+    <string name="code_stream_run_idle">描述一个编码任务，开启胶囊时间轴</string>
 </resources>

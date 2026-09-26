@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -206,7 +207,10 @@ private fun githubSummary(name: String, args: String): String? {
 @Composable
 internal fun ToolCallCard(
     toolCall: AgentUiMessage.ToolCall,
-    onRetry: (() -> Unit)? = null
+    onRetry: (() -> Unit)? = null,
+    // HTML 产物预览：Agent 写出的 .html 文件（工作区根已解析）非空时显示预览钮。
+    htmlPreviewPath: String? = null,
+    onPreviewHtml: (String) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
     val isError = toolCall.success == false
@@ -316,6 +320,23 @@ internal fun ToolCallCard(
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                // HTML 产物即时预览（应用内 WebView，无需跳出 App/外部浏览器冷启动）：
+                // 仅成功完成的调用展示；路径已由 AgentMessageItem 解析验证。
+                if (htmlPreviewPath != null && toolCall.success == true) {
+                    val previewCd = stringResource(R.string.chat_cd_preview_html)
+                    IconButton(
+                        onClick = { onPreviewHtml(htmlPreviewPath) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Preview,
+                            contentDescription = previewCd,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
 
                 Icon(

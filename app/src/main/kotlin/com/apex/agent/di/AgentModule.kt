@@ -80,13 +80,17 @@ object AgentModule {
             "maximum" -> ThinkingLevel.MAXIMUM
             else -> ThinkingLevel.STANDARD
         }
+        // 双级思考控制第二级（强制深度思考）：开启时启动快照即钉 MAXIMUM ——
+        // 不必等聊天页 ViewModel 的 patchConfig（后台服务/其它入口也生效）。
+        val effectiveThinkingLevel =
+            if (agent.forceDeepThinking) ThinkingLevel.MAXIMUM else thinkingLevel
         // ═══ Agent 角色（人设层）：激活角色拍平进引擎配置 ═══
         // 启动快照（本方法 @Singleton 一次性）；运行时切换由 AgentChatViewModel
         // 监听 agentSettings 热更新（patchConfig），两条路径字段一一对应。
         val activeRole = agent.activeRole()
         return AgentConfig(
             mode = mode,
-            thinkingLevel = thinkingLevel,
+            thinkingLevel = effectiveThinkingLevel,
             maxIterations = agent.maxIterations,
             // 上下文压缩（对应 AgentSettings 同名字段，重启应用/新会话后生效）
             maxContextTokens = agent.maxContextTokens,

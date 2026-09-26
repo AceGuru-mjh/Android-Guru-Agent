@@ -203,6 +203,10 @@ class CodeStreamSession {
 
             is AgentEvent.PlanConfirmed, is AgentEvent.SpecConfirmed,
             is AgentEvent.SpecAwaitingConfirmation -> Unit
+
+            // 真实用量更新（服务端 token 统计）—— 归 VM/仪表盘通道消费，
+            // 胶囊时间轴不展示用量条目（低频元数据，非工作流事件）。
+            is AgentEvent.UsageUpdated -> Unit
         }
     }
 

@@ -29,12 +29,7 @@ data class AdaptiveInput(
 data class AdaptiveDecision(val level: ThinkingLevel, val reason: String)
 
 /**
- * AUTO 档自适应选档器：输入复杂度分类 → 按轮次动态选 [ThinkingLevel]（#168；
- * v1.2 阶梯顶端扩到 ULTRACODE）。
- *
- * **APEXCODE 仅用户显式指定，自动化永不选择**——巅峰档的预算/迭代/上下文
- * 成本不可控，交给选档器会失控；本选档器的任何路径（阈值/保底/升档）都
- * 不可能返回 APEXCODE。
+ * AUTO 档自适应选档器：输入复杂度分类 → 按轮次动态选 [ThinkingLevel]（#168）。
  *
  * ## 评分模型（每项加权分，全部因子都会写进 [AdaptiveDecision.reason]）
  *
@@ -45,7 +40,7 @@ data class AdaptiveDecision(val level: ThinkingLevel, val reason: String)
  * | 多步指示词 | 先/然后/接着/步骤/first/then/step/plan/多任务 并列出现 | +2 | 显式多步任务 |
  * | 代码/命令含量 | ``` 代码块 / `$ ` 提示符 / git·npm·apt·gradle·pip 等命令词 | +2 | 技术任务需要结构化推理 |
  * | 风险词 | 删除/uninstall/rm -rf/格式化/刷机/权限 等 | +3 | **硬保底 DEEP**（无论总分） |
- * | 错误恢复 | recentErrors > 0 | +2 且**显式升一档** | 近期出错 → 当前思路有问题，加深反思避免重蹈（ULTRACODE 封顶） |
+ * | 错误恢复 | recentErrors > 0 | +2 且**显式升一档** | 近期出错 → 当前思路有问题，加深反思避免重蹈（MAXIMUM 封顶） |
  *
  * ## 总分 → 档位阈值
  *
@@ -54,8 +49,7 @@ data class AdaptiveDecision(val level: ThinkingLevel, val reason: String)
  * | < 3 | LIGHT |
  * | 3..5 | STANDARD |
  * | 6..8 | DEEP |
- * | 9..11 | MAXIMUM |
- * | > 11 | ULTRACODE |
+ * | > 8 | MAXIMUM |
  *
  * ## 档位下限（在阈值结果之上取 max，可解释地写进理由）
  *
@@ -63,10 +57,7 @@ data class AdaptiveDecision(val level: ThinkingLevel, val reason: String)
  * - 探索期（iterationIndex == 0 且 planMode）→ 至少 **STANDARD**
  *   （规划期首轮需要完整 CoT 而非简思）；
  * - 长任务深水区（historyToolCalls > 15）→ 至少 **STANDARD**
- *   （大量工具调用后上下文复杂度上升，需要一致性与反思防跑偏）；
- * - 长任务深水区 + 连环失败（historyToolCalls > 30 且 recentErrors >= 2）
- *   → 至少 **ULTRACODE**（v1.2：长任务跑到 30+ 次工具调用还在连环失败 =
- *   当前思路已经系统性跑偏，需要编码特化深推理闭环重新锚定不变量）。
+ *   （大量工具调用后上下文复杂度上升，需要一致性与反思防跑偏）。
  *
  * ## 短平快
  *
@@ -118,7 +109,6 @@ class AdaptiveThinkingSelector {
 
         // ── 总分 → 基础档位 ──
         var level = when {
-            score > ULTRACODE_SCORE_CEILING -> ThinkingLevel.ULTRACODE
             score > DEEP_SCORE_CEILING -> ThinkingLevel.MAXIMUM
             score >= DEEP_SCORE_FLOOR -> ThinkingLevel.DEEP
             score >= STANDARD_SCORE_FLOOR -> ThinkingLevel.STANDARD
@@ -135,15 +125,12 @@ class AdaptiveThinkingSelector {
 
         // 错误恢复升一档：评分 +2 之外显式保证「升一档」语义 —— 仅靠 +2 跨不过
         // 档位边界时会卡在原档（如零信号任务 0+2=2 仍是 LIGHT），故直接提升
-        // 一档；v1.2 阶梯扩为 LIGHT→…→DEEP→MAXIMUM→ULTRACODE，ULTRACODE 封顶
-        // 不再升（APEXCODE 不可自动选，见类 KDoc 的成本防线说明）。
+        // 一档；MAXIMUM 已封顶不再升。
         if (input.recentErrors > 0) {
             level = when (level) {
                 ThinkingLevel.LIGHT -> ThinkingLevel.STANDARD
                 ThinkingLevel.STANDARD -> ThinkingLevel.DEEP
-                ThinkingLevel.DEEP -> ThinkingLevel.MAXIMUM
-                ThinkingLevel.MAXIMUM -> ThinkingLevel.ULTRACODE
-                ThinkingLevel.ULTRACODE, ThinkingLevel.APEXCODE -> ThinkingLevel.ULTRACODE // ULTRACODE 封顶；APEXCODE 不可达（基础档位不含），穷举保护
+                ThinkingLevel.DEEP, ThinkingLevel.MAXIMUM -> ThinkingLevel.MAXIMUM
                 ThinkingLevel.NONE, ThinkingLevel.AUTO -> level // 不可达（基础档位不含），穷举保护
             }
             adjustments.add("错误恢复升一档")
@@ -160,16 +147,6 @@ class AdaptiveThinkingSelector {
         if (input.historyToolCalls > DEEP_WATER_TOOL_CALLS && level < ThinkingLevel.STANDARD) {
             level = ThinkingLevel.STANDARD
             adjustments.add("长任务深水区(>${DEEP_WATER_TOOL_CALLS}次调用)保底STANDARD")
-        }
-        // v1.2 深水区升级规则：长任务（>30 次调用）叠加连环失败（≥2 错误）=
-        // 系统性跑偏，STANDARD 保底不够用 → 至少 ULTRACODE（编码特化深推理
-        // 闭环重新锚定不变量）。APEXCODE 仍不可自动选（成本防线）。
-        if (input.historyToolCalls > DEEP_WATER_ULTRACODE_CALLS &&
-            input.recentErrors >= ULTRACODE_ERROR_FLOOR &&
-            level < ThinkingLevel.ULTRACODE
-        ) {
-            level = ThinkingLevel.ULTRACODE
-            adjustments.add("深水区连环失败(${input.historyToolCalls}次调用&${input.recentErrors}错误)保底ULTRACODE")
         }
 
         val reason = buildString {
@@ -220,14 +197,5 @@ class AdaptiveThinkingSelector {
         const val DEEP_SCORE_FLOOR = 6
         const val DEEP_SCORE_CEILING = 8
         const val DEEP_WATER_TOOL_CALLS = 15
-
-        /** 总分 > 11 → ULTRACODE（v1.2：满分 12 = 超长+多步+代码+风险+错误全叠加）。 */
-        const val ULTRACODE_SCORE_CEILING = 11
-
-        /** 深水区升级规则的调用数门槛：> 30 次工具调用。 */
-        const val DEEP_WATER_ULTRACODE_CALLS = 30
-
-        /** 深水区升级规则的错误数门槛：最近 >= 2 次失败。 */
-        const val ULTRACODE_ERROR_FLOOR = 2
     }
 }

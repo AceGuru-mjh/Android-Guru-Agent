@@ -42,18 +42,13 @@ enum class AgentMode(val displayName: String, val description: String) {
 }
 
 /**
- * 思考深度等级（#168 六档 → v1.2 扩为 **7 深度档 + AUTO 元档**）。
+ * 思考深度等级（#168 起六档）
  * 控制Agent在每次决策前的推理深度。
- *
- * 7 深度档阶梯（level 0-6）：NONE → LIGHT → STANDARD → DEEP → MAXIMUM →
- * ULTRACODE（编码特化深推理闭环）→ APEXCODE（架构级穷举推理）；
- * AUTO 是元档（level 7，恒最后）——不算深度层，只负责委托动态选档。
  *
  * 各档的完整执行画像（提示词 + 参数 + 迭代/验证/压缩/输出策略）见
  * [com.apex.agent.core.engine.thinking.ThinkingProfile]；AUTO 档的逐轮
  * 动态选档由 [com.apex.agent.core.engine.thinking.ThinkingModeController]
- * 驱动。序数即深度序：枚举天然 Comparable，`ULTRACODE > MAXIMUM` 成立，
- * 选档器与 UI 均可直接比较。
+ * 驱动。
  */
 enum class ThinkingLevel(val level: Int, val description: String) {
     /** 不思考，直接行动 */
@@ -72,25 +67,11 @@ enum class ThinkingLevel(val level: Int, val description: String) {
     MAXIMUM(4, "完整推理链+自我反思+多轮验证"),
 
     /**
-     * 编码特化深推理（v1.2）：面向改代码任务的深水档——先把不变量钉死，
-     * 再枚举候选改法、按风险排序，永远选最小修改并即时验证。
-     */
-    ULTRACODE(5, "编码特化深推理：不变量→候选改法→风险排序→最小修改→即时验证"),
-
-    /**
-     * 巅峰档（v1.2）：架构级穷举推理 + 对抗性自审 + 全量验证矩阵。
-     * **仅用户显式指定**——自动化（AUTO 选档/错误恢复升档）永不选择，
-     * 防止失控成本；预算与迭代倍率都是全梯度天花板。
-     */
-    APEXCODE(6, "架构级穷举推理 + 对抗性自审 + 全量验证矩阵"),
-
-    /**
-     * 自动档（#168，元档）：按任务复杂度（文本长度/多步指示词/代码含量/风险词/
+     * 自动档（#168）：按任务复杂度（文本长度/多步指示词/代码含量/风险词/
      * 错误史/迭代深水区）逐轮动态选档，委托
      * [com.apex.agent.core.engine.thinking.AdaptiveThinkingSelector]。
-     * level 数值 7 = 恒在全部深度档之后（元档不算深度层）。
      */
-    AUTO(7, "自动：按任务复杂度动态选档");
+    AUTO(5, "自动：按任务复杂度动态选档");
     
     /**
      * 转换为 system prompt 中的思考指令。
@@ -129,26 +110,6 @@ enum class ThinkingLevel(val level: Int, val description: String) {
             6. Synthesize the optimal execution plan from the best path.
             7. Only then, execute the first step, observe, and re-evaluate if the outcome diverges.
         """.trimIndent()
-        ULTRACODE -> """
-            Use coding-grade deep reasoning before any edit:
-            1. Read-map-plan: re-read the relevant files and endpoints first; map the current state before changing it.
-            2. State the invariants: what must remain true after the change (behavior, APIs, data, tests).
-            3. Generate 2-3 candidate edits and rank them by risk of breaking the invariants.
-            4. Choose the smallest change that satisfies the goal; prefer surgical edits over rewrites.
-            5. Apply the edit, then immediately verify: re-read the changed region; run build/lint/test when available.
-            6. Scan for regressions: callers, similar patterns, and side effects your edit may have introduced.
-            7. If verification fails, diagnose the actual cause before retrying — never blind-retry the same edit.
-        """.trimIndent()
-        APEXCODE -> """
-            Operate at architecture level with exhaustive rigor:
-            1. Architecture-first decomposition: map components, layers, and data flow before touching any file.
-            2. Blast-radius mapping: list every module, API, and test that the intended change can affect.
-            3. Build 2-3 full plans (Tree-of-Thoughts style) and score them against a verification matrix (build / lint / test / re-read).
-            4. Adversarial self-review: attack your own plan and diff as a hostile reviewer would; hunt the weakest assumption.
-            5. Execute with checkpoints: after each stage, verify against the matrix before proceeding.
-            6. Post-verification is exhaustive: run or re-run build, lint, and tests; re-read every file you changed end-to-end.
-            7. Deliver an evidence-based summary: every claim backed by a verification result, not an impression.
-        """.trimIndent()
     }
     
     /**
@@ -161,8 +122,6 @@ enum class ThinkingLevel(val level: Int, val description: String) {
         STANDARD -> 1024
         DEEP -> 4096
         MAXIMUM -> 16384
-        ULTRACODE -> 32768 // 编码深水档：双倍于 MAXIMUM，支撑不变量→验证闭环的多轮推理
-        APEXCODE -> 65536 // 巅峰档：四倍于 MAXIMUM，支撑架构级穷举 + 对抗性自审
     }
 
     /**
@@ -178,10 +137,6 @@ enum class ThinkingLevel(val level: Int, val description: String) {
      * 为什么返回 String 而不是枚举：agent-engine 与 ReasoningEffort 所在的
      * llm-adapter 已有依赖，但保持 ThinkingLevel 纯枚举层不直接硬引用，
      * 映射关系集中在本处，便于单测与后续调档。
-     *
-     * ULTRACODE / APEXCODE 同样映射 "MAX"——Provider 侧 MAX 已是天花板，
-     * 两档与 MAXIMUM 的真实差异由提示词（toPromptInstruction）+ 执行策略
-     * （ThinkingProfile：budget/迭代倍率/验证矩阵）拉开，而非 effort 名。
      */
     fun toReasoningEffortName(): String? = when (this) {
         NONE -> null
@@ -190,8 +145,6 @@ enum class ThinkingLevel(val level: Int, val description: String) {
         STANDARD -> "MEDIUM"
         DEEP -> "HIGH"
         MAXIMUM -> "MAX"
-        ULTRACODE -> "MAX" // Provider 天花板；档间差异靠提示词+执行策略
-        APEXCODE -> "MAX" // 同上
     }
 }
 

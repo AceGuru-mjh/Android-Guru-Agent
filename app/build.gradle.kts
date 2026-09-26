@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -270,7 +272,7 @@ tasks.register("checkBundledRootfs") {
                 problems += "$abi: 档案缺失（${f.absolutePath}）"
                 continue
             }
-            val actual = java.security.MessageDigest.getInstance("SHA-256").let { md ->
+            val actual = MessageDigest.getInstance("SHA-256").let { md ->
                 f.inputStream().use { input ->
                     val buf = ByteArray(1 shl 16)
                     while (true) {

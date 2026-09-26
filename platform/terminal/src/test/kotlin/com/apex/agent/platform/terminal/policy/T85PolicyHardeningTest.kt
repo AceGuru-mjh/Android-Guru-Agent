@@ -137,10 +137,30 @@ class T85PolicyHardeningTest {
     )
 
     @Test
-    fun `agent line execution stays conservative`() {
-        // Agent LINE：复杂即拒（Spec §6 语义保持，不因分段检查放宽）
-        val d = impl.check(InputRequest(1, "ls | grep foo", null, InputOwner.AGENT))
-        assertTrue("Agent 执行路径保持保守", d is Decision.Deny)
+    fun `agent line execution uses segments routing with denylist enforcement`() {
+        // P0 修复后：Agent LINE 走分段检查 —— 复合命令不再整体误杀
+        //（旧行为 `ls | grep foo` complex→DENY，Agent 的直觉命令全被拒），
+        // 黑名单段仍拦截。
+        assertTrue(
+            "Agent 复合命令不得整体误杀",
+            impl.check(InputRequest(1, "ls | grep foo", null, InputOwner.AGENT)) is Decision.Allow
+        )
+        assertTrue(
+            "Agent 链式安装命令不得误杀",
+            impl.check(InputRequest(1, "cd /workspace && ls -la", null, InputOwner.AGENT)) is Decision.Allow
+        )
+        assertTrue(
+            "Agent 黑名单段必须拦截",
+            impl.check(InputRequest(1, "echo hi && rm -rf /", null, InputOwner.AGENT)) is Decision.Deny
+        )
+        assertTrue(
+            "Agent 包装器载荷必须拦截",
+            impl.check(InputRequest(1, "bash -c \"shutdown\"", null, InputOwner.AGENT)) is Decision.Deny
+        )
+        assertTrue(
+            "Agent 引号去壳后必须拦截",
+            impl.check(InputRequest(1, "\"rm\" -rf /", null, InputOwner.AGENT)) is Decision.Deny
+        )
     }
 
     @Test

@@ -26,17 +26,25 @@ class TerminalPolicyImpl(
     override fun check(request: InputRequest): Decision {
         val cmd = request.command ?: return Decision.Allow
         val effective = dynamicPolicy?.invoke() ?: commandPolicy
-        // T85：按 owner + 交互上下文分级 ——
-        //  - AGENT 的 LINE 命令执行：保守路径（复杂/不可解析即拒，Spec §6）；
-        //  - 交互输入（interactive=true，含 AGENT 的 RAW/按键回车累积行）：分段检查
-        //    （黑名单逐段拦截，`apt-get update && apt-get install` 这类链式命令与
-        //    REPL 里的 `print("a|b")` 不再被误杀 —— 环境中心依赖安装曾全量被误拒）；
-        //  - USER/SYSTEM：分段检查（用户自有名单 + 内置默认危险命令；交互哲学同 Termux）。
-        val decision = if (request.interactive || request.owner != InputOwner.AGENT) {
-            effective.checkSegments(cmd)
-        } else {
-            effective.check(CommandParser.parse(cmd))
-        }
+        // T85 → P0 修复（用户反馈"Agent 不会主动调用命令、终端用不了"）：
+        // 全部 owner 统一走**分段检查**（逐段黑名单 + 包装器 deep-scan + 引号透明）。
+        //
+        // 旧行为：AGENT 的 LINE 命令执行走保守 parse 路径 —— 含 `&&`/`|`/`;`/`$(`/
+        // 引号首 token 的命令一律 complex → DENY。Agent 的直觉命令（`cd /workspace
+        // && ls`、`pip install x && python y.py`、`echo "a" | grep b`）每次被拒，
+        // 且 JobManager 把 PermissionDenied 误报为 WriteFailed —— 模型无法分辨
+        // 「会话坏了」还是「命令被拦」，反复撞墙后放弃终端 → 用户观感"终端用不了"。
+        //
+        // 安全性不降级：checkSegments 对每一段做与保守路径等强的检查 ——
+        //  - 黑名单逐段拦截（`echo hi && rm -rf /` → 段 rm 命中 → DENY）；
+        //  - 引号/反斜杠去壳后精确匹配（`"rm"` / `r\m` → rm → DENY）；
+        //  - shell 包装器段 deep-scan 全 token（`bash -c "shutdown"` → DENY）；
+        //  - 前导环境变量赋值剥离（`FOO=1 rm …` → DENY）；
+        //  - 家族变体匹配（`mkfs.ext4` → mkfs → DENY）。
+        // 已知极限（变量间接 / 运行时拼接）由防御纵深兜底：PRoot 沙箱、
+        // CommandPermissionGate 确认门、RiskAwareToolGate —— 与 USER/SYSTEM
+        // 路径此前已承担的残余风险一致（T85 KDoc 存档）。
+        val decision = effective.checkSegments(cmd)
         return mapDecision(decision, CommandParser.parse(cmd))
     }
 

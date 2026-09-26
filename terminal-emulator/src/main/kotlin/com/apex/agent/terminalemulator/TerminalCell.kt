@@ -60,40 +60,15 @@ data class TerminalCell(
 /**
  * Unicode display width (Spec §9 PR #53).
  *
- * Simplified East Asian Width: CJK ranges = 2, combining = 0, control = 0, rest = 1.
- * NOT a full Unicode database — covers the common cases (CJK, emoji, combining).
- * Emoji width is complex (ZWJ sequences); v1 treats most emoji as 2 (wide).
+ * T86 升级：判定逻辑委托 [UnicodeWidthTables]（Termux WcWidth.java 对齐的完整
+ * 区间表 + 二分查找）。本门面保留 —— TerminalCell/ScreenBuffer 调用点零改动，
+ * 宽度精度直接升级（谚文扩展/CJK 扩展 G/零宽格式字符/精确 emoji 区间）。
  */
 object UnicodeWidth {
 
-    fun of(codePoint: Int): Int = when {
-        codePoint < 0x20 || codePoint in 0x7F..0x9F -> 0       // C0/C1 control
-        codePoint < 0x300 -> 1                                   // ASCII + Latin-1
-        codePoint == 0x200D -> 0                                 // ZWJ (joins grapheme clusters)
-        codePoint in 0x300..0x36F -> 0                           // combining diacritical
-        codePoint in 0x1AB0..0x1AFF -> 0                         // combining diacritical extended
-        codePoint in 0xFE00..0xFE0F -> 0                         // variation selectors VS1..VS16 (incl. VS16)
-        codePoint in 0xE0100..0xE01EF -> 0                       // supplementary variation selectors
-        codePoint in 0x1F3FB..0x1F3FF -> 0                       // emoji skin-tone modifiers
-        codePoint in 0x1DC0..0x1DFF -> 0                         // combining diacritical supplemental
-        codePoint in 0x20D0..0x20FF -> 0                         // combining symbols
-        codePoint in 0xFE20..0xFE2F -> 0                         // combining half marks
-        codePoint in 0x1100..0x115F -> 2                         // Hangul Jamo
-        codePoint in 0x2E80..0x303E -> 2                         // CJK radicals
-        codePoint in 0x3041..0x33FF -> 2                         // Hiragana/Katakana/CJK symbols
-        codePoint in 0x3400..0x4DBF -> 2                         // CJK Ext A
-        codePoint in 0x4E00..0x9FFF -> 2                         // CJK Unified
-        codePoint in 0xA000..0xA4CF -> 2                         // Yi
-        codePoint in 0xAC00..0xD7A3 -> 2                         // Hangul Syllables
-        codePoint in 0xF900..0xFAFF -> 2                         // CJK Compatibility
-        codePoint in 0xFE30..0xFE4F -> 2                         // CJK Compatibility Forms
-        codePoint in 0xFF00..0xFF60 -> 2                         // Fullwidth Forms
-        codePoint in 0xFFE0..0xFFE6 -> 2                         // Fullwidth Signs
-        codePoint in 0x1F300..0x1FAFF -> 2                       // Emoji + symbols (wide)
-        codePoint in 0x20000..0x3FFFD -> 2                       // CJK Ext B-F
-        else -> 1
-    }
+    fun of(codePoint: Int): Int = UnicodeWidthTables.widthOf(codePoint)
 
     /** Is this a combining character (width 0, modifies preceding base)? */
-    fun isCombining(codePoint: Int): Boolean = of(codePoint) == 0 && codePoint >= 0x300
+    fun isCombining(codePoint: Int): Boolean =
+        codePoint >= 0x300 && UnicodeWidthTables.isZeroWidth(codePoint)
 }

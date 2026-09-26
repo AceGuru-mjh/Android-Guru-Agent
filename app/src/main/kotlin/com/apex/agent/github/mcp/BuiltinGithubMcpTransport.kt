@@ -269,8 +269,23 @@ class BuiltinGithubMcpTransport(
 
     private suspend fun callSearchCode(args: JsonObject): String {
         val query = args.stringArg("query") ?: return "Error: 需要 query"
+        // P1 修复（同步原生 GithubSearchCodeTool 的限定符前置校验）：
+        // GitHub legacy /search/code 硬约束 —— query 必须含 repo:/user:/org:
+        // 限定符，纯关键词必 422 "Validation Failed"。旧实现直接
+        // api.searchCode(query, null, null, null)，MCP 路径纯关键词搜索必返
+        // 422 错误（原生工具已修复但 MCP 路径未同步）。缺限定符时返回可自修复
+        // 的 Error（省一次 HTTP 往返；模型下一轮带上 repo/org/user 重试即可）。
+        val repo = args.stringArg("repo")
+        val org = args.stringArg("org")
+        val user = args.stringArg("user")
+        val hasQualifierInQuery = query.contains(Regex("""\b(repo|user|org):"""))
+        if (repo == null && org == null && user == null && !hasQualifierInQuery) {
+            return "Error: GitHub code search requires a repo, org, or user scope. " +
+                "Re-run with repo (\"owner/name\"), org, or user parameter. " +
+                "Keyword-only global code search is not supported by the GitHub API."
+        }
         val limit = args.intArg("limit")?.coerceIn(1, 100) ?: DEFAULT_SEARCH_LIMIT
-        val result = api.searchCode(query, perPage = limit)
+        val result = api.searchCode(query, repo, org, user, perPage = limit)
         if (result.items.isEmpty()) return "未找到匹配代码"
         return buildString {
             appendLine("搜索 \"$query\" — ${result.total_count} 个结果:")
@@ -377,9 +392,12 @@ class BuiltinGithubMcpTransport(
             })
             add(buildJsonObject {
                 put("name", "search_code")
-                put("description", "在 GitHub 中搜索代码")
+                put("description", "在 GitHub 中搜索代码（需要 repo/org/user 范围限定，纯关键词搜索会被 GitHub API 拒绝）")
                 put("inputSchema", schema(buildJsonObject {
                     put("query", prop("string", "搜索关键词（GitHub 代码搜索语法）"))
+                    put("repo", prop("string", "仓库限定符 'owner/name'（推荐的作用范围）"))
+                    put("org", prop("string", "组织限定符 —— 搜索该组织全部仓库"))
+                    put("user", prop("string", "用户限定符 —— 搜索该用户全部仓库"))
                     put("limit", prop("integer", "返回数量上限（1-100，默认 $DEFAULT_SEARCH_LIMIT）"))
                 }, listOf("query")))
             })

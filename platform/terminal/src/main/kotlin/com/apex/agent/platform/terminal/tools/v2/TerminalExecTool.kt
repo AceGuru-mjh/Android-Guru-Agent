@@ -74,8 +74,16 @@ class TerminalExecTool(
         (stdout_bytes_total/stderr_bytes_total tell the real size; truncated=true means
         use head/tail/grep to narrow). timeout_ms kills the process honestly
         (timed_out=true). cwd defaults to the remembered working directory (cd persists
-        across calls, same as shell_execute). Prefer this over terminal_exec for
-        non-interactive commands; use terminal.run+observe for interactive/long jobs.
+        across calls, same as shell_execute).
+        Channel routing (see "channel" in the result): when the Ubuntu sandbox is
+        installed and ready, non-Android commands (python3, gcc, apt, git, npm, pip,
+        make, node, bash scripts, ...) run inside the PRoot Ubuntu sandbox
+        (channel="proot-ubuntu"; /sdcard maps to shared storage, /workspace to the
+        active workspace) — toolchain commands work out of the box. Android-specific
+        commands (am, pm, dumpsys, settings, input, ...) and any command while Ubuntu
+        is not installed fall back to the Android host shell (root-su / shizuku /
+        local-sh). Prefer this over terminal_exec for non-interactive commands; use
+        terminal.run+observe for interactive/long jobs.
     """.trimIndent()
 
     override val parametersSchema: String = """

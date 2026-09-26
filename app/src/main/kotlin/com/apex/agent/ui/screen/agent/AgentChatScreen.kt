@@ -101,7 +101,13 @@ fun AgentChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
-    val inputText by viewModel.inputText.collectAsStateWithLifecycle()
+    // P1 修复（每键全屏重组 → 打字卡顿）：旧写法 `val inputText by …collect…`
+    // 在根作用域读取 State —— 每次按键（updateInputText → StateFlow 发射）都会
+    // 重组整个 888 行 Screen 体（LazyColumn 脚架 + ~20 个状态收集 + 玻璃采样
+    // 输入栏 + 横滚工具栏全部 lambda 重建），中低端机打字明显卡顿。
+    // 现在只持有稳定的 State 对象；读取下沉到输入行 lambda（composable 作用域）
+    // 与点击回调（即时读 .value），按键只重组输入行本身。
+    val inputTextState = viewModel.inputText.collectAsStateWithLifecycle()
     val pendingQuestion by viewModel.pendingQuestion.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -633,10 +639,10 @@ fun AgentChatScreen(
                             // after it so the original intent is preserved. The command
                             // itself carries a trailing space so the user can keep typing
                             // arguments right away.
-                            val merged = if (inputText.isBlank()) {
+                            val merged = if (inputTextState.value.isBlank()) {
                                 command
                             } else {
-                                inputText.trimEnd() + " " + command
+                                inputTextState.value.trimEnd() + " " + command
                             }
                             viewModel.updateInputText(merged)
                         }
@@ -682,6 +688,10 @@ fun AgentChatScreen(
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    // P1 修复（每键全屏重组）：inputText 在此 lambda 内读取 ——
+                    // State 读取订阅的是最近的 composable 作用域（本 Row content），
+                    // 按键只重组本行，不再牵动整个 Screen。
+                    val inputText = inputTextState.value
                     // ═══ 输入框（自适应高度 + 手势扩展 + 双击全屏 + IME 发送）═══
                     //（斜杠实时联想收纳进输入框 Box：菜单锚定在文本框下方而非整行左缘）
                     Box(modifier = Modifier.weight(1f)) {

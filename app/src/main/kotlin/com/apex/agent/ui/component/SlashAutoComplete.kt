@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
@@ -60,7 +61,12 @@ fun SlashAutoCompleteHost(
     DropdownMenu(
         expanded = true,
         onDismissRequest = { dismissedFor = inputText },
-        modifier = modifier.heightIn(max = 280.dp)
+        modifier = modifier.heightIn(max = 280.dp),
+        // P0 修复（键盘被联想菜单收起）：M3 DropdownMenu 默认 focusable=true ——
+        // 弹窗夺取窗口焦点，IME 随即收起，用户输入 "/" 后无法继续盲打命令名
+        //（Compose 已知坑）。联想菜单不需要键盘导航（选中靠点击），显式
+        // focusable=false 让输入框保持焦点、键盘常驻。
+        properties = PopupProperties(focusable = false)
     ) {
         suggestions.forEach { item ->
             DropdownMenuItem(

@@ -530,6 +530,13 @@ class AgentChatViewModel @Inject constructor(
         }
 
         currentJob = viewModelScope.launch {
+            // P0 修复（互斥锁冲突丢消息）：旧实现只 cancel UI 收集器（currentJob），
+            // TaskRuntime 镜像收集器与执行锁不随 UI 生命周期走 —— 在途任务继续持锁。
+            // 下一轮 executeNormalMessage → taskController.execute 撞互斥锁 →
+            // "TaskRuntime rejects concurrent execution" 错误气泡，用户消息打水漂
+            //（abort 后快速重发的窗口期必现）。先 await cancel 完成再执行新消息
+            //（串行化，无竞态；无在途任务时 cancel 立即返回 false）。
+            taskController.cancel()
             executeNormalMessage(trimmedText, currentAttachments)
         }
     }
@@ -1052,7 +1059,29 @@ class AgentChatViewModel @Inject constructor(
         activeBannerId = execute.banner.id
 
         currentJob = viewModelScope.launch {
-            collectEngineFlowSafely(taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt)))
+            // P0 修复（闪退）：taskController.execute 的互斥拒绝
+            // （IllegalStateException：上一轮执行仍在途）发生在作为参数求值时 ——
+            // 位于 collectEngineFlowSafely 的 try/catch **之前**，异常冒泡到
+            // viewModelScope（无 handler）直接闪退。这里先安全求值，拒绝时转
+            // 可读错误气泡（与 executeNormalMessage 的兑底一致）。
+            val flow = try {
+                taskController.cancel() // 先串行化释放（同 sendMessage）
+                taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { s ->
+                    s.copy(
+                        messages = s.messages + AgentUiMessage.Error(
+                            message = "执行失败：${e.message ?: e::class.simpleName}",
+                            canRetry = true
+                        ),
+                        isLoading = false
+                    )
+                }
+                return@launch
+            }
+            collectEngineFlowSafely(flow)
         }.apply {
             invokeOnCompletion {
                 routeContextKind = null

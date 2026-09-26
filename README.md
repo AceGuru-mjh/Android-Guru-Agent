@@ -846,7 +846,9 @@ chmod +x gradlew
 
 > [!TIP]
 > 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest)
-> （arm64 / universal 两个变体，由 tag 触发 CI 自动发布）。
+> （arm64 / universal 两个变体；**PR 合并进 main 即自动构建发布**，无需打 tag）。
+> 已装用户可在 App「设置 → 关于 → 检查更新」直接升级 —— 支持增量补丁
+> （~14MB vs 全量 300MB+）与高速节点/镜像加速下载。
 > 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
 > `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
 
@@ -1016,6 +1018,14 @@ Android-Guru-Agent/
 | [docs/pipeline-output-optimization.md](docs/pipeline-output-optimization.md) | 流水线输出优化记录 |
 | [docs/PERF.md](docs/PERF.md) | 性能笔记 |
 | [docs/MIGRATION_REPORT.md](docs/MIGRATION_REPORT.md) | 迁移报告 |
+| [docs/operit-rikkahub-comparison.md](docs/operit-rikkahub-comparison.md) | **P9x 系列调研**：operit vs rikkahub 全面对比（架构/执行循环/Key 管理/记忆/角色/分支/提示词/搜索/终端/生态/质量 11 域），产出 P90-P96 七项落地 |
+| [docs/key-pool.md](docs/key-pool.md) | **P90 API Key 池**：三态门控/四轮换模式/指数退避/请求层换 Key 重试环（对标 operit MultiApiKeyProvider + rikka LruKeyRoulette） |
+| [docs/prompt-variables.md](docs/prompt-variables.md) | **P91 提示词变量**：19 内置变量/转义与默认值语法/递归环安全（对标 rikka PlaceholderTransformer） |
+| [docs/prompt-template-library.md](docs/prompt-template-library.md) | **P92 提示词模板库**：10 内置模板/四级变量合并/原子持久化/导入导出（对标 operit 提示词库） |
+| [docs/message-branching.md](docs/message-branching.md) | **P93 消息分支**：MessageBranchNode 候选数组模型/九操作/树存储与迁移（对标 rikka MessageNode） |
+| [docs/search-providers.md](docs/search-providers.md) | **P94 搜索供应商框架**：Tavily/Brave/Exa/SearXNG/DDG/Bing 六供应商/三阶段回退/缓存限流（对标 rikka 19 家搜索抽象） |
+| [docs/persona-cards.md](docs/persona-cards.md) | **P95 角色卡**：SillyTavern V1/V2/PNG tEXt 导入/Lorebook 触发（对标 operit 角色卡 + rikka AssistantImporter） |
+| [docs/provider-share.md](docs/provider-share.md) | **P96 供应商分享**：四层洋葱 URI/Key 脱敏/GZIP/QR 版本估算（对标 rikka QR 分享） |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 

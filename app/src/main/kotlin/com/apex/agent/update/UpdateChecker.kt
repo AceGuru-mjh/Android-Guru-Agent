@@ -75,12 +75,38 @@ class UpdateChecker(
      */
     fun preferredDownloadUrl(manifest: UpdateManifest): String? {
         val download = manifest.download ?: return manifest.releasePage
+        return preferredAsset(manifest)?.url ?: manifest.releasePage
+    }
+
+    /**
+     * 按设备 ABI 选资产对象（体积/SHA 供 UI 展示与下载后校验）。
+     */
+    fun preferredAsset(manifest: UpdateManifest): UpdateAsset? {
+        val download = manifest.download ?: return null
         val arm64Device = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
         return when {
-            arm64Device && download.arm64 != null -> download.arm64.url
-            !arm64Device && download.universal != null -> download.universal.url
-            else -> download.arm64?.url ?: download.universal?.url ?: manifest.releasePage
+            arm64Device -> download.arm64 ?: download.universal
+            else -> download.universal ?: download.arm64
         }
+    }
+
+    /**
+     * 按设备 ABI 选增量补丁，并验证适用性：清单的 `fromTag` 必须等于本地
+     * `v{versionName}`（补丁只能从「上一版」打到「本版」；跳版安装只能全量）。
+     *
+     * 返回 null = 无可用补丁（首次发布 / rootfs 大改被 CI 丢弃 / 跨多版）。
+     */
+    fun preferredPatch(
+        manifest: UpdateManifest,
+        currentVersionName: String
+    ): UpdatePatchAsset? {
+        val patch = manifest.patch ?: return null
+        val arm64Device = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
+        val asset = when {
+            arm64Device -> patch.arm64 ?: patch.universal
+            else -> patch.universal ?: patch.arm64
+        } ?: return null
+        return asset.takeIf { it.fromTag == "v$currentVersionName" }
     }
 }
 
@@ -100,19 +126,42 @@ sealed interface UpdateCheckResult {
     data class Failed(val reason: String) : UpdateCheckResult
 }
 
+/** 下载目标统一视图：全量 APK（UpdateAsset）与增量补丁（UpdatePatchAsset）共有的
+ *  定位字段 —— 让 UI 层的下载入口能以单一类型接待两种资产。 */
+interface UpdateTarget {
+    val url: String
+    val sha256: String?
+}
+
 /** 单个发布资产：直链 + 体积 + SHA-256（供下载后校验）。 */
 @Serializable
 data class UpdateAsset(
-    val url: String,
+    override val url: String,
     val sizeBytes: Long = 0L,
-    val sha256: String? = null
-)
+    override val sha256: String? = null
+) : UpdateTarget
 
 /** 下载矩阵：arm64 纯净包 / universal 全 ABI 包。 */
 @Serializable
 data class UpdateDownload(
     val arm64: UpdateAsset? = null,
     val universal: UpdateAsset? = null
+)
+
+/** 增量补丁资产：`fromTag` 声明适用基础版本（xdelta3 VCDIFF）。 */
+@Serializable
+data class UpdatePatchAsset(
+    val fromTag: String,
+    override val url: String,
+    val sizeBytes: Long = 0L,
+    override val sha256: String? = null
+) : UpdateTarget
+
+/** 补丁矩阵：与 [UpdateDownload] 同构的 arm64 / universal 双变体。 */
+@Serializable
+data class UpdatePatchMatrix(
+    val arm64: UpdatePatchAsset? = null,
+    val universal: UpdatePatchAsset? = null
 )
 
 /**
@@ -126,5 +175,6 @@ data class UpdateManifest(
     val tag: String? = null,
     val publishedAt: String? = null,
     val releasePage: String? = null,
-    val download: UpdateDownload? = null
+    val download: UpdateDownload? = null,
+    val patch: UpdatePatchMatrix? = null
 )

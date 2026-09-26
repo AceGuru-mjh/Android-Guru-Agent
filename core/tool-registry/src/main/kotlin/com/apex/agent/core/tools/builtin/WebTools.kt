@@ -1,6 +1,8 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.search.SearchProviderRegistry
+import com.apex.agent.core.tools.search.SearchQuery
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.*
@@ -243,7 +245,8 @@ class WebFetchTool(
  * 误判为成功，导致模型反复重试烧限流额度）。
  */
 class WebSearchTool(
-    private val httpClient: OkHttpClient = WebFetchTool.defaultClient()
+    private val httpClient: OkHttpClient = WebFetchTool.defaultClient(),
+    private val searchRegistry: SearchProviderRegistry? = null
 ) : AgentTool {
 
     override val id = "web_search"
@@ -311,6 +314,28 @@ class WebSearchTool(
         } catch (e: Exception) {
             failures.add("$name: ${e.message ?: e::class.simpleName}")
             null
+        }
+
+        // 4-d 多供应商注册表优先：API 型（Tavily/Brave/Exa/SearXNG）+
+        // 免 key 爬虫兜底（DDG/Bing）全链由注册表编排。为 null 或返回
+        // 0 结果/错误时回落到下方原有三级爬虫链——默认路径（registry ==
+        // null）行为与旧版逐字节一致，既有测试零迁移。
+        searchRegistry?.let { registry ->
+            try {
+                val response = registry.search(
+                    SearchQuery(query = query, maxResults = maxResults)
+                )
+                if (response.items.isNotEmpty()) {
+                    return formatResults(
+                        query,
+                        response.items.map { SearchResult(it.title, it.url, it.snippet) }
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures.add("registry: ${e.message ?: e::class.simpleName}")
+            }
         }
 
         val results = attempt("duckduckgo-html") { searchDuckDuckGoHtml(query, maxResults) }

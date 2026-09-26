@@ -213,8 +213,9 @@ jobs:
             exit 0
           fi
           echo "🔗 上一版本：${PREV_TAG}（来源 ${PREV_SRC}）"
-          mkdir -p prev
-          : > dist/patch_meta.tsv
+          # meta/ 存内部工作文件（不进 Release 资产）；dist/ 只放对外产物
+          mkdir -p prev meta
+          : > meta/patch_meta.tsv
           for VARIANT in arm64 universal; do
             NEW_APK=$(ls dist/*-${VARIANT}-*.apk | head -1)
             # 下载旧包 → 出补丁 → 立即删旧包（universal ~900MB，磁盘峰值控制）
@@ -239,20 +240,20 @@ jobs:
               rm -f "dist/${PATCH_NAME}"
               continue
             fi
-            echo -n "${VARIANT}|${PREV_TAG}|${PATCH_NAME}" >> dist/patch_meta.tsv
-            echo "" >> dist/patch_meta.tsv
+            echo -n "${VARIANT}|${PREV_TAG}|${PATCH_NAME}" >> meta/patch_meta.tsv
+            echo "" >> meta/patch_meta.tsv
             echo "✅ ${PATCH_NAME} — $((PATCH_SIZE / 1024 / 1024)) MB（$((PATCH_SIZE * 100 / NEW_SIZE))% of ${VARIANT}）"
             rm -f prev/*.apk
           done
           rm -rf prev
           # 补丁说明进 Job Summary
-          if [ -s dist/patch_meta.tsv ]; then
+          if [ -s meta/patch_meta.tsv ]; then
             {
               echo ""
               echo "### 🔧 增量补丁（${PREV_TAG} → ${TAG}）"
               while IFS='|' read -r VARIANT FROM NAME; do
                 echo "- \`${NAME}\` — $(( $(stat -c%s "dist/${NAME}") / 1024 / 1024 )) MB"
-              done < dist/patch_meta.tsv
+              done < meta/patch_meta.tsv
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -286,9 +287,9 @@ jobs:
           universal = asset(f"ApexAgent-v{version}-release-universal-{sha8}.apk")
 
           patch = None
-          if os.path.exists("dist/patch_meta.tsv") and os.path.getsize("dist/patch_meta.tsv") > 0:
+          if os.path.exists("meta/patch_meta.tsv") and os.path.getsize("meta/patch_meta.tsv") > 0:
               patch = {}
-              with open("dist/patch_meta.tsv") as f:
+              with open("meta/patch_meta.tsv") as f:
                   for line in f:
                       line = line.strip()
                       if not line:

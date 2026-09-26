@@ -76,30 +76,32 @@ fun ContextMeterBar(
         pulse
     } else 0.5f
 
+    // ═══ 高度收紧（用户反馈「上面那一部分太高」）：整条从 48dp 点击槽位压到 20dp。═══
+    // 顶栏纵向叠了 TopAppBar(64) + 本条 + 模式栏(~52)，此前本条以「48dp 最小触摸目标」
+    // 占位把顶部推到 ~164dp。全宽长条的触摸面积远超 48x48dp（宽度补偿高度，
+    // Material 无障碍对超宽元素允许 <48dp 高度），仪表盘是辅助诊断入口而非高频操作。
     Column(modifier = modifier.fillMaxWidth()) {
         // ═══ 顶部长条（点击弹仪表盘）═══
-        // P3-f（6-c）：可视长条仍为 10dp，但点击区域扩到 48dp 最小触摸目标
-        //（原 10dp 点击热区远低于 Material 无障碍标准）。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp)
+                .height(20.dp)
                 .clickable { menuExpanded = true },
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(10.dp)
-                    .padding(horizontal = 12.dp, vertical = 1.dp)
+                    .height(4.dp)
+                    .padding(horizontal = 12.dp)
             ) {
-                // 未使用段（暗灰半透明，占满）
+                // 未使用段（暗灰半透明，占满）—— 4dp 细条配 2dp 圆角
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(5.dp)
+                            shape = RoundedCornerShape(2.dp)
                         )
                 )
                 // 已用段（霓虹辉光 + 渐变实体 + 末端亮点，按真实比例）
@@ -128,7 +130,7 @@ fun ContextMeterBar(
                                             accent.copy(alpha = 0.9f)
                                         )
                                     ),
-                                    shape = RoundedCornerShape(5.dp)
+                                    shape = RoundedCornerShape(2.dp)
                                 )
                         )
                         // 末端高光点（能量流头部）

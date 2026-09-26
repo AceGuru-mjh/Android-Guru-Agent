@@ -12,13 +12,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.InputType
@@ -99,6 +101,11 @@ internal fun CustomInstructionDialog(
 /**
  * 思考深度选择器（#168 六档：NONE/LIGHT/STANDARD/DEEP/MAXIMUM/AUTO）。
  *
+ * 紧凑化（用户反馈「思考程度那一部分太高」）：原 AssistChip 默认 32dp 高 +
+ * 内部额外 padding，且 emoji 文案在部分字体下撑高。换成与 AgentModeSelector
+ * 同款的 28dp 紧凑胶囊（图标 13dp + labelMedium），顶栏高度由整行最高胶囊
+ * 决定 → 全行统一在 ~36dp 内。
+ *
  * @param adaptiveDecision AUTO 档最近一次引擎侧自适应选档理由
  *   （"LEVEL: 因子→评分→档位"；仅 AUTO 选中且有决策时展示）。
  */
@@ -111,13 +118,36 @@ internal fun ThinkingLevelSelector(
     var expanded by remember { mutableStateOf(false) }
 
     Box {
-        AssistChip(
+        Surface(
             onClick = { expanded = true },
-            label = { Text("💭 ${current.name}") },
-            leadingIcon = {
-                Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.heightIn(min = 28.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Psychology,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = current.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp)
+                )
             }
-        )
+        }
 
         DropdownMenu(
             expanded = expanded,

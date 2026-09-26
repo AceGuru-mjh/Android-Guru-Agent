@@ -347,7 +347,25 @@ class UbuntuLifecycleCoordinatorTest {
             "apt lock held（failedStage=APT_UPDATE）",
             env.coordinator.stateFlow.value.bootstrapNote
         )
-        // 降级 READY 后快速路径仍成立：同进程再次 ensure 不重试 bootstrap
+        // ★ 语义变更（修复用户反馈「每次都会显示 APT 引导未完成」）：降级 READY
+        //（bootstrapNote != null）后再次 ensure 会重试 bootstrap（幂等续跑，
+        // 网络恢复后自愈），不再 AlreadyReady 短路 —— 引导失败仍诚实降级。
+        // 引导完整（note == null）的 READY 仍走秒回快速路径（见测试 10d）。
+        val again = env.coordinator.ensureReady()
+        assertTrue(again is UbuntuLifecycleCoordinator.EnsureResult.Ready)
+        assertTrue((again as UbuntuLifecycleCoordinator.EnsureResult.Ready).bootstrapDegraded)
+    }
+
+    @Test
+    fun `10d full READY (no degraded note) still short-circuits to AlreadyReady`() = runBlocking {
+        val env = Env()
+        env.bootstrap.behavior = {
+            UbuntuLifecycleCoordinator.BootstrapStageResult(
+                UbuntuLifecycleCoordinator.BootstrapOutcome.READY, "READY"
+            )
+        }
+        env.coordinator.ensureReady()
+        // 完整 READY：快速路径秒回，不重复 bootstrap
         val again = env.coordinator.ensureReady()
         assertTrue(again is UbuntuLifecycleCoordinator.EnsureResult.AlreadyReady)
     }

@@ -53,7 +53,7 @@ internal fun AgentRoleSelector(
     val selectorDescription = stringResource(R.string.chat_role_selector_cd, current.name)
 
     Box {
-        // ── 触发器：当前角色胶囊（emoji + 名字 + 下拉箭头）──
+        // ── 触发器：当前角色胶囊（紧凑 28dp，与 AgentModeSelector 同款）──
         Surface(
             onClick = { expanded = true },
             shape = RoundedCornerShape(50),
@@ -61,18 +61,18 @@ internal fun AgentRoleSelector(
             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
             modifier = Modifier
-                .heightIn(min = 36.dp)
+                .heightIn(min = 28.dp)
                 .semantics { contentDescription = selectorDescription }
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Text(text = current.emoji, style = MaterialTheme.typography.labelLarge)
+                Text(text = current.emoji, style = MaterialTheme.typography.labelMedium)
                 Text(
                     text = current.name,
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -81,7 +81,7 @@ internal fun AgentRoleSelector(
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(13.dp)
                 )
             }
         }

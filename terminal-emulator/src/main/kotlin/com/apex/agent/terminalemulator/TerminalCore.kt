@@ -199,12 +199,16 @@ class TerminalCore(
     /** Shift cells right by [width] within the current row, starting at the cursor column (IRM). */
     private fun insertCharsAtCursor(width: Int) {
         val r = cursor.row
-        for (c in (cols - 1) downTo (cursor.column + width)) {
+        // P2：光标落在宽字符 trail 上时，操作起点左扩到 lead —— 整对一起右移，
+        // 防拆对（lead 留原地 trail 移走 = 双孤儿）。收尾 repairRow 兜底。
+        val start = wideAwareStart(r, cursor.column)
+        for (c in (cols - 1) downTo (start + width)) {
             currentBuffer.setCell(r, c, currentBuffer.get(r, c - width))
         }
-        for (c in cursor.column until (cursor.column + width).coerceAtMost(cols)) {
+        for (c in start until (start + width).coerceAtMost(cols)) {
             currentBuffer.setCell(r, c, TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
     }
 
     // ─── C0 controls (§4) ───
@@ -344,25 +348,57 @@ class TerminalCore(
     private fun insertChars(n: Int) {
         val count = n.coerceAtLeast(1)
         val r = cursor.row
-        for (c in (cols - 1) downTo (cursor.column + count)) {
+        // P2：同 IRM —— 起点宽字符配对感知（整对一起移，防拆对孤儿）。
+        val start = wideAwareStart(r, cursor.column)
+        for (c in (cols - 1) downTo (start + count)) {
             currentBuffer.setCell(r, c, currentBuffer.get(r, c - count))
         }
-        for (c in cursor.column until (cursor.column + count).coerceAtMost(cols)) {
+        for (c in start until (start + count).coerceAtMost(cols)) {
             currentBuffer.setCell(r, c, TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
         mutations += ScreenMutation.rows(r, r)
     }
 
-    /** DCH (§5): delete [n] cells at the cursor, shifting the rest of the row left. */
+    /**
+     * DCH (§5): delete [n] cells at the cursor, shifting the rest of the row left.
+     *
+     * P2：宽字符整对删除（xterm 语义：宽字符是占 2 列的 1 个字符）——
+     * 起点在 trail → 起点左扩到 lead；起点在 lead → count+1 吸收 trail。
+     * 只删半体会留孤儿（渲染跳 trail → 整行错列）。repairRow 兜底。
+     */
     private fun deleteChars(n: Int) {
         val count = n.coerceAtLeast(1)
         val r = cursor.row
-        for (c in cursor.column until cols) {
-            val src = c + count
+        var start = cursor.column
+        var effective = count
+        when {
+            cursor.column > 0 && currentBuffer.get(r, cursor.column).isWideTrail &&
+                currentBuffer.get(r, cursor.column - 1).isWideLead -> {
+                start = cursor.column - 1
+                effective = count + 1
+            }
+            currentBuffer.get(r, cursor.column).isWideLead &&
+                cursor.column + 1 < cols && currentBuffer.get(r, cursor.column + 1).isWideTrail -> {
+                effective = count + 1
+            }
+        }
+        for (c in start until cols) {
+            val src = c + effective
             currentBuffer.setCell(r, c, if (src < cols) currentBuffer.get(r, src) else TerminalCell.BLANK)
         }
+        currentBuffer.repairRow(r)
         mutations += ScreenMutation.rows(r, r)
     }
+
+    /**
+     * P2：插入类操作的宽字符感知起点 —— [col] 是某宽字符的 trail
+     *（lead 在 col-1）时返回 col-1，使插入位不拆散既有宽字符对。
+     */
+    private fun wideAwareStart(row: Int, col: Int): Int =
+        if (col > 0 && currentBuffer.get(row, col).isWideTrail &&
+            currentBuffer.get(row, col - 1).isWideLead
+        ) col - 1 else col
 
     private fun eraseDisplay(mode: Int) {
         when (mode) {

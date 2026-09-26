@@ -514,7 +514,10 @@ struct Engine::Impl {
 
   // IRM: shift cells right by [width] within the current row (at cursor).
   void insertCharsAtCursor(int width) {
-    cur->insertChars(cursor.row, cursor.col, width);
+    // P2 (Kotlin parity): widen the start to the lead when the cursor sits on a
+    // wide trail — the pair moves together; repairRow sweeps leftover orphans.
+    cur->insertChars(cursor.row, wideAwareStart(cursor.row, cursor.col), width);
+    cur->repairRow(cursor.row);
   }
 
   // ═══ C0 controls (§4) ═══
@@ -731,15 +734,42 @@ struct Engine::Impl {
   // ICH (§5): insert [n] blank cells at the cursor, rest shifts right.
   void insertChars(int n) {
     int count = n < 1 ? 1 : n;
-    cur->insertChars(cursor.row, cursor.col, count);
+    cur->insertChars(cursor.row, wideAwareStart(cursor.row, cursor.col), count);
+    cur->repairRow(cursor.row);
     mutationRows(cursor.row);
   }
 
   // DCH (§5): delete [n] cells at the cursor, rest shifts left.
+  // P2 (Kotlin parity): a wide char is ONE character occupying 2 cells — when
+  // the deletion starts on either half, consume the whole pair (start extends
+  // to the lead on a trail; count+1 absorbs the trail on a lead). Deleting only
+  // one half leaves an orphan and misaligns the row.
   void deleteChars(int n) {
     int count = n < 1 ? 1 : n;
-    cur->deleteChars(cursor.row, cursor.col, count);
+    int start = cursor.col;
+    int effective = count;
+    if (cursor.col > 0 && (cur->cell(cursor.row, cursor.col).flags & kCellWideTrail) &&
+        (cur->cell(cursor.row, cursor.col - 1).flags & kCellWideLead)) {
+      start = cursor.col - 1;
+      effective = count + 1;
+    } else if ((cur->cell(cursor.row, cursor.col).flags & kCellWideLead) &&
+               cursor.col + 1 < cols &&
+               (cur->cell(cursor.row, cursor.col + 1).flags & kCellWideTrail)) {
+      effective = count + 1;
+    }
+    cur->deleteChars(cursor.row, start, effective);
+    cur->repairRow(cursor.row);
     mutationRows(cursor.row);
+  }
+
+  // P2 (Kotlin parity): insert-type start that keeps wide pairs intact —
+  // returns col-1 when [col] is the trail of a wide lead at col-1.
+  int wideAwareStart(int row, int col) const {
+    if (col > 0 && (cur->cell(row, col).flags & kCellWideTrail) &&
+        (cur->cell(row, col - 1).flags & kCellWideLead)) {
+      return col - 1;
+    }
+    return col;
   }
 
   void eraseDisplay(int mode) {

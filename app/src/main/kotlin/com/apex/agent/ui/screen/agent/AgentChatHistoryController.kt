@@ -172,24 +172,49 @@ internal fun AgentChatViewModel.newChat() {
     }
 }
 
-/** 删除单个历史会话（正在聊的那条也允许删：删除后当前会话脱离历史索引）。 */
+/**
+ * 删除单个历史会话（正在聊的那条也允许删：删除后当前会话脱离历史索引）。
+ *
+ * P2 修复：① 先取消在途防抖归档 + ChatHistoryManager 墓碑拦截，防删除后
+ * 迟到快照把会话复活；② 删除前先收集该会话持久化的附件路径，删除索引后
+ * 同步清理附件文件（旧实现只删 SharedPreferences，附件永久残留）。
+ */
 internal fun AgentChatViewModel.deleteChatSession(sessionId: String) {
+    historyPersistJob?.cancel()
+    historyPersistJob = null
     if (currentHistorySessionId == sessionId) {
         currentHistorySessionId = null
         currentHistorySessionCreatedAt = null
     }
     viewModelScope.launch(Dispatchers.IO) {
+        // 先读后删：deleteSession 后 msg_ 键即消失，附件路径取不到了
+        val attachmentPaths = chatHistory.loadMessages(sessionId)
+            .flatMap { it.attachmentPaths }
         chatHistory.deleteSession(sessionId)
+        if (attachmentPaths.isNotEmpty()) {
+            attachmentCleanup.cleanupFiles(attachmentPaths)
+        }
         _chatSessions.value = chatHistory.loadSessions()
     }
 }
 
-/** 清空全部历史会话（当前会话同时脱离历史索引）。 */
+/**
+ * 清空全部历史会话（当前会话同时脱离历史索引）。
+ * 同样先取消在途归档 + 逐会话收集附件路径统一清理。
+ */
 internal fun AgentChatViewModel.clearAllChatSessions() {
+    historyPersistJob?.cancel()
+    historyPersistJob = null
     currentHistorySessionId = null
     currentHistorySessionCreatedAt = null
     viewModelScope.launch(Dispatchers.IO) {
+        val attachmentPaths = chatHistory.loadSessions().flatMap { s ->
+            chatHistory.loadMessages(s.id).flatMap { it.attachmentPaths }
+        }
         chatHistory.clearAll()
+        if (attachmentPaths.isNotEmpty()) {
+            attachmentCleanup.cleanupFiles(attachmentPaths)
+        }
         _chatSessions.value = chatHistory.loadSessions()
     }
 }

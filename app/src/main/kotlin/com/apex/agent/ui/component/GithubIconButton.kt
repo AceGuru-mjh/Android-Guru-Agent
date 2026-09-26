@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
@@ -96,11 +97,12 @@ fun GithubIconButton(
                     text = {
                         Column {
                             Text(
-                                "已连接: ${connectionState.username ?: "GitHub"}",
+                                // P2 i18n：菜单文案随语言取词（旧实现硬编码中文）
+                                stringResource(R.string.github_menu_connected, connectionState.username ?: "GitHub"),
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
-                                "点击断开",
+                                stringResource(R.string.github_menu_disconnect),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -113,7 +115,7 @@ fun GithubIconButton(
                 )
             } else {
                 DropdownMenuItem(
-                    text = { Text("连接 GitHub") },
+                    text = { Text(stringResource(R.string.github_menu_connect)) },
                     leadingIcon = {
                         Icon(
                             painterResource(R.drawable.ic_github_mark), null,
@@ -130,7 +132,7 @@ fun GithubIconButton(
                     }
                 )
                 DropdownMenuItem(
-                    text = { Text("GitHub Token (ghp_*) 密钥访问") },
+                    text = { Text(stringResource(R.string.github_menu_token)) },
                     leadingIcon = {
                         Icon(
                             painterResource(R.drawable.ic_github_mark), null,

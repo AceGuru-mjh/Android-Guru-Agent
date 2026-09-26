@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.attachment.AttachmentCleanupManager
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
@@ -62,7 +63,9 @@ class AgentChatViewModel @Inject constructor(
     // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
     private val languageManager: LanguageManager,
     // v2：斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）
-    private val mcpManager: com.apex.agent.core.tools.mcp.McpManager
+    private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
+    // P2：删除/清空历史会话时同步清理附件文件（AgentChatHistoryController 扩展使用）
+    internal val attachmentCleanup: AttachmentCleanupManager
 ) : ViewModel() {
 
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
@@ -607,7 +610,10 @@ class AgentChatViewModel @Inject constructor(
                 currentAttachments.map { att ->
                     // 尝试从预拷贝缓存获取（零等待）
                     val preprocessedPath = preprocessor.getSandboxPath(att.uri)
-                    val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
+                    // 命中预拷贝：晋升到正式 attachments 目录（生命周期归一，
+                    // 否则已发送附件留在 attachments_pre，进程重启后即成永久孤儿）
+                    val localPath = preprocessedPath?.let { attachmentCleanup.promoteToAttachments(it) }
+                        ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
 
                     MessageAttachment(
                         name = att.name,

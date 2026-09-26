@@ -71,6 +71,9 @@ class Screen {
 
   void eraseRow(int row, int fromCol, int toCol, uint16_t styleId);
   void eraseRows(int fromRow, int toRow, uint16_t styleId);
+  // P2 (Kotlin parity): fix orphan wide trails / edge-of-grid wide leads left
+  // by raw shift ops (ICH/DCH/IRM). Idempotent; see vt_screen.cpp for details.
+  void repairRow(int row);
   void scrollUp(int n, int top, int bottom);
   void scrollDown(int n, int top, int bottom);
   void insertLines(int row, int n, int top, int bottom);

@@ -389,7 +389,8 @@ private fun FullscreenEditorDialog(
                     onClick = { onConfirm(text) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("完成")
+                    // P2 i18n：全屏确认按钮文案随语言取词
+                    Text(stringResource(R.string.common_done))
                 }
             }
         }

@@ -660,8 +660,6 @@ fun AgentChatScreen(
                                 viewModel.updateInputText(merged)
                             }
                         }
-                            }
-                        }
                     )
 
                     // ═══ GitHub 连接状态按钮 ═══

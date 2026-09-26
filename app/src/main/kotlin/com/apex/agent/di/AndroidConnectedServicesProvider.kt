@@ -1,6 +1,7 @@
 package com.apex.agent.di
 
 import com.apex.agent.core.engine.ConnectedServicesProvider
+import com.apex.agent.core.tools.catalog.McpToolRegistrar
 import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.github.GithubTokenManager
 import javax.inject.Inject
@@ -24,7 +25,9 @@ import javax.inject.Singleton
 @Singleton
 class AndroidConnectedServicesProvider @Inject constructor(
     private val githubTokenManager: GithubTokenManager,
-    private val connectorRegistry: ConnectorRegistry
+    private val connectorRegistry: ConnectorRegistry,
+    // P0 修复（连接即可见）：MCP 一等工具注册表快照源
+    private val mcpToolRegistrar: McpToolRegistrar
 ) : ConnectedServicesProvider {
 
     override fun connectedServicesSummary(): String? {
@@ -60,5 +63,41 @@ class AndroidConnectedServicesProvider @Inject constructor(
 
         if (sections.isEmpty()) return null
         return sections.joinToString("\n\n")
+    }
+
+    override fun connectedToolIds(): Set<String> {
+        val ids = mutableSetOf<String>()
+        // ═══ GitHub：Token 已配置 → 9 个 github_* 原生工具全部进请求 ═══
+        //（提示词宣称 "github_* tools are ready" —— tools 数组必须真的有它们）
+        if (githubTokenManager.isConnected()) {
+            ids += GITHUB_TOOL_IDS
+        }
+        // ═══ 已连接 MCP 服务器的一等工具（mcp__{server}__{tool}）═══
+        // 注册表快照即「当前真实可用」；连接中的沙箱/远程服务器同样适用。
+        // 上限保护：MCP 工具总量钳制（大服务器几十个工具时不挤占 CORE 集的
+        // 请求预算 —— ToolRequestBudget.MAX_TOOLS=64，超出部分按名称序丢弃）。
+        var mcpBudget = MAX_MCP_TOOLS
+        for ((_, toolIds) in mcpToolRegistrar.registeredSnapshot()) {
+            for (toolId in toolIds) {
+                if (mcpBudget <= 0) return ids
+                if (ids.add(toolId)) mcpBudget--
+            }
+        }
+        return ids
+    }
+
+    companion object {
+        /** GithubTools.kt 注册的 9 个原生工具 id（连接即全部可见）。 */
+        private val GITHUB_TOOL_IDS: Set<String> = setOf(
+            "github_get_user", "github_list_repos", "github_read_file",
+            "github_write_file", "github_create_issue", "github_list_issues",
+            "github_search_code", "github_list_branches", "github_search_repos"
+        )
+
+        /**
+         * MCP 一等工具并入请求的数量上限 —— 给 CORE 集（~45 个）保留
+         * MAX_TOOLS 预算的余量，超大 MCP 服务器按服务器注册顺序截断。
+         */
+        private const val MAX_MCP_TOOLS = 12
     }
 }

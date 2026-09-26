@@ -31,6 +31,23 @@ class McpToolRegistrar(
 
     init {
         manager.addSessionListener(this)
+        // P0 修复（注册竞态）：初始 sweep。
+        //
+        // 旧行为只挂 listener —— 若 MCP 服务器在 registrar 构造**之前**就已
+        // 连接（McpModule 的 @Provides 副作用在自持 IO scope 里 ensureAndConnect，
+        // 与 provideMcpToolRegistrar 的构造顺序无任何保证），fireConnected 发生在
+        // addSessionListener 之前 → 无人接收 → mcp__github__* / mcp__search__*
+        // 等一等工具不注册。此前靠 ApexCoreService.onCreate 的全量重连弥补，
+        // 但 service 未跑的窗口期（首启竞态）一等 MCP 工具缺失。
+        //
+        // 这里对已连接服务器做一次幂等补注册（registerServer 是 REPLACE 语义，
+        // 与 listener 路径重复执行无副作用）；发现走 scope(IO) 不阻塞构造。
+        scope.launch {
+            manager.getConnectedServers().forEach { serverName ->
+                runCatching { registerServer(serverName) }
+                    .onFailure { /* discovery failed: proxy tools still available */ }
+            }
+        }
     }
 
     /**

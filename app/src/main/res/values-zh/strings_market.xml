@@ -173,6 +173,13 @@
     <string name="market_mcp_apikey_label">API Key（可选，作 Bearer 发送）</string>
     <string name="market_mcp_add_connect">添加并连接</string>
 
+    <!-- ═══ 对话框 · 编辑 MCP（已安装管理 · 配置编辑）═══ -->
+    <string name="market_mcp_edit_title">编辑工具源</string>
+    <string name="market_mcp_edit_name_locked">名称创建后固定（如需重命名请删除后重新添加）</string>
+    <string name="market_mcp_edit_save">保存并重连</string>
+    <string name="market_mcp_edit_saved">已更新：%1$s（正在重连…）</string>
+    <string name="market_mcp_edit_action">编辑</string>
+
     <!-- ═══ 对话框 · 添加 MCP · PRoot 沙箱（Issue #163） ═══ -->
     <string name="market_mcp_sandbox_label">在 PRoot 沙箱中运行</string>
     <string name="market_mcp_sandbox_desc">命令将在内嵌 Ubuntu 环境中执行（本地命令建议开启——Android 宿主没有 npx/node）</string>

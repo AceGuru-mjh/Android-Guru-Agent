@@ -60,7 +60,9 @@ class AgentChatViewModel @Inject constructor(
     // 历史对话仓库（归档/恢复/删除；逻辑主体在 AgentChatHistoryController.kt）
     internal val chatHistory: ChatHistoryManager,
     // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
-    private val languageManager: LanguageManager
+    private val languageManager: LanguageManager,
+    // v2：斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）
+    private val mcpManager: com.apex.agent.core.tools.mcp.McpManager
 ) : ViewModel() {
 
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
@@ -288,6 +290,34 @@ class AgentChatViewModel @Inject constructor(
         savedStateHandle[KEY_DRAFT_INPUT] = text
     }
 
+    // ═══ 流水线指令胶囊（斜杠菜单选中 → 结构化挂起，不再裸文本入框）═══
+
+    private val _pendingCommand = MutableStateFlow<PendingPipelineCommand?>(null)
+
+    /** 当前挂在输入栏的流水线指令胶囊（null = 无）。发送时拼回 `/type:id` 走斜杠管线。 */
+    val pendingCommand: StateFlow<PendingPipelineCommand?> = _pendingCommand.asStateFlow()
+
+    /**
+     * 挂起一条流水线指令胶囊（Skill / MCP / 连接器 / 插件）。
+     *
+     * - 已有胶囊时**替换**（单条语义：一次发送触发一条流水线，避免多指令
+     *   组合出 `/skill:a /mcp:b` 这种解析器不认识的复合命令）；
+     * - 输入框里若已有同源斜杠残文（如手动输入了 `/skill:` 前缀），顺手清掉，
+     *   避免胶囊 + 残文双份指令。
+     */
+    fun setPendingCommand(command: PendingPipelineCommand) {
+        _pendingCommand.value = command
+        val draft = inputText.value
+        if (draft.isNotBlank() && draft.trimStart().startsWith("/")) {
+            updateInputText("")
+        }
+    }
+
+    /** 移除胶囊（胶囊行 × 按钮）。 */
+    fun clearPendingCommand() {
+        _pendingCommand.value = null
+    }
+
     /**
      * 自定义模式指令（持久化到 SharedPreferences）。
      *
@@ -480,7 +510,9 @@ class AgentChatViewModel @Inject constructor(
         // 二轮审计 A-1：不计入 ERROR 占位附件——「空文本 + 全部附件读取失败」时
         // 不应发出空消息（P2-9 的 enabled 判定与 drainAttachments 的过滤口径对齐）。
         val hasUsableAttachment = attachmentManager.attachments.value.any { it.status != UploadStatus.ERROR }
-        if (trimmedText.isEmpty() && !hasUsableAttachment) return
+        // 胶囊挂起时输入框文本视为"附加要求"（可为空）——胶囊本身即指令主体。
+        val pendingCmd = _pendingCommand.value
+        if (trimmedText.isEmpty() && !hasUsableAttachment && pendingCmd == null) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
@@ -491,11 +523,21 @@ class AgentChatViewModel @Inject constructor(
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
         val currentAttachments = attachmentManager.drainAttachments()
 
-        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）
+        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）+ 摘下胶囊
         updateInputText("")
+        _pendingCommand.value = null
+
+        // 胶囊 → 拼回斜杠命令：`/type:id` +（输入框有文本时）附加要求。
+        // 附件与斜杠指令互斥（下方分支提示后丢弃），胶囊路径同样遵循。
+        val effectiveText = if (pendingCmd != null) {
+            if (trimmedText.isEmpty()) pendingCmd.toCommandToken()
+            else pendingCmd.toCommandToken() + " " + trimmedText
+        } else {
+            trimmedText
+        }
 
         // 斜杠指令分支：附件已被收集，但不随指令发送（给出 System 提示）
-        if (trimmedText.startsWith("/")) {
+        if (effectiveText.startsWith("/")) {
             if (currentAttachments.isNotEmpty()) {
                 _uiState.update { s ->
                     s.copy(
@@ -505,7 +547,7 @@ class AgentChatViewModel @Inject constructor(
                     )
                 }
             }
-            handleSlashCommand(trimmedText)
+            handleSlashCommand(effectiveText)
             return
         }
 
@@ -962,7 +1004,13 @@ class AgentChatViewModel @Inject constructor(
      * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
-        val result = SlashCommands.handle(command, githubTokenManager)
+        // mcpConnected 快照：路由器据此对已连接的 /mcp:<id> 注入「用 mcp_call 调
+        // server=<id>」引导提示词（旧实现恒空集，模型面对 MCP 指令只能瞎猜）。
+        val result = SlashCommands.handle(
+            command,
+            githubTokenManager,
+            mcpConnected = runCatching { mcpManager.getConnectedServers().toSet() }.getOrDefault(emptySet())
+        )
 
         // 指令会取消上一个流式任务：先清空流式缓冲，防残留文本串入新一轮。
         streamBuffers.reset()

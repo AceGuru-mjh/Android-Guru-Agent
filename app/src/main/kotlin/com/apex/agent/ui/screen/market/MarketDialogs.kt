@@ -68,20 +68,82 @@ fun AddMcpDialog(
     onAdd: (McpServerConfig) -> Unit,
     sandboxAvailable: Boolean = false
 ) {
-    var name by remember { mutableStateOf("") }
-    var transport by remember { mutableStateOf(McpTransport.STDIO) }
+    McpConfigFormDialog(
+        title = stringResource(R.string.market_mcp_add_title),
+        initial = null,
+        sandboxAvailable = sandboxAvailable,
+        confirmLabel = stringResource(R.string.market_mcp_add_connect),
+        onDismiss = onDismiss,
+        onConfirm = onAdd
+    )
+}
+
+/**
+ * 编辑已配置的 MCP 工具源（市场 → 已安装管理 → MCP 行「编辑」）。
+ *
+ * 表单预填现有配置（URL / 命令 / 参数 / 环境变量 / 沙箱开关），名称锁定只读
+ * （改名涉及删旧建新，容易把已连接会话与斜杠菜单状态拆散；需要改名走删除重加）。
+ * 保存后由 VM 断开旧连接 → 覆盖写配置 → 自动重连（配置变了旧连接必然失效）。
+ *
+ * @param initial 当前配置快照（预填表单）。
+ * @param sandboxAvailable PRoot 沙箱就绪态（与 [AddMcpDialog] 同源）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditMcpDialog(
+    initial: McpServerConfig,
+    sandboxAvailable: Boolean = false,
+    onSave: (McpServerConfig) -> Unit,
+    onDismiss: () -> Unit
+) {
+    McpConfigFormDialog(
+        title = stringResource(R.string.market_mcp_edit_title),
+        initial = initial,
+        sandboxAvailable = sandboxAvailable,
+        confirmLabel = stringResource(R.string.market_mcp_edit_save),
+        onDismiss = onDismiss,
+        onConfirm = onSave
+    )
+}
+
+/**
+ * MCP 配置表单的公共主体（添加 / 编辑共用）。
+ *
+ * - initial == null → 添加模式：名称可编辑，transport 默认 STDIO，沙箱开关默认
+ *   跟随可用性；
+ * - initial != null → 编辑模式：名称锁定（锁定原因见 [EditMcpDialog]），全部字段
+ *   预填，保留原 enabled 偏好。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun McpConfigFormDialog(
+    title: String,
+    initial: McpServerConfig?,
+    sandboxAvailable: Boolean,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (McpServerConfig) -> Unit
+) {
+    val isEdit = initial != null
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var transport by remember { mutableStateOf(initial?.transport ?: McpTransport.STDIO) }
 
     // STDIO 字段
-    var command by remember { mutableStateOf("") }
-    var args by remember { mutableStateOf("") }
-    var env by remember { mutableStateOf("") }
+    var command by remember { mutableStateOf(initial?.command ?: "") }
+    var args by remember { mutableStateOf(initial?.args?.joinToString(" ") ?: "") }
+    var env by remember {
+        mutableStateOf(initial?.env?.entries?.joinToString("\n") { "${it.key}=${it.value}" } ?: "")
+    }
 
     // 远端字段
-    var url by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf(initial?.url ?: "") }
+    var apiKey by remember { mutableStateOf(initial?.apiKey ?: "") }
 
     // 沙箱开关（Issue #163）：就绪即默认开 —— Android 宿主没有 npx
-    var runInSandbox by remember { mutableStateOf(sandboxAvailable) }
+    //（编辑模式预填原值：用户已显式选过沙箱形态的不再被重置）
+    var runInSandbox by remember {
+        mutableStateOf(if (isEdit) (initial?.runInSandbox ?: false) else sandboxAvailable)
+    }
 
     val nameValid = name.trim().isNotBlank() && !name.trim().contains(Regex("[\"\\\\\\n]"))
     val isStdio = transport == McpTransport.STDIO
@@ -91,7 +153,7 @@ fun AddMcpDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.market_mcp_add_title)) },
+        title = { Text(title) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -99,12 +161,20 @@ fun AddMcpDialog(
             ) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
+                    onValueChange = { if (!isEdit) name = it },
+                    readOnly = isEdit,
                     label = { Text(stringResource(R.string.market_mcp_name_label)) },
-                    isError = name.isNotBlank() && !nameValid,
-                    supportingText = if (name.isNotBlank() && !nameValid) {
-                        { Text(stringResource(R.string.market_mcp_name_invalid)) }
-                    } else null,
+                    isError = !isEdit && name.isNotBlank() && !nameValid,
+                    supportingText = when {
+                        isEdit -> {
+                            // 编辑模式：名称锁定只读（改名走删除重加）
+                            { Text(stringResource(R.string.market_mcp_edit_name_locked)) }
+                        }
+                        name.isNotBlank() && !nameValid -> {
+                            { Text(stringResource(R.string.market_mcp_name_invalid)) }
+                        }
+                        else -> null
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -214,25 +284,27 @@ fun AddMcpDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onAdd(
+                    onConfirm(
                         McpServerConfig(
                             name = name.trim(),
                             url = if (isStdio) "" else url.trim(),
                             transport = transport,
                             apiKey = apiKey.trim().takeIf { !isStdio && it.isNotBlank() },
-                            enabled = true,
+                            // 编辑模式保留原 enabled 偏好（用户禁用的不会因编辑被重新打开）
+                            enabled = if (isEdit) initial?.enabled ?: true else true,
                             command = command.trim().takeIf { isStdio && it.isNotBlank() },
                             args = if (isStdio) args.trim().split(ARGS_SPLIT).filter { it.isNotBlank() } else emptyList(),
                             env = if (isStdio) parseKeyValueLines(env) else emptyMap(),
                             // Issue #163：沙箱开关透传（远端形态强制 false；
                             // 未就绪时双重保险归 false，防止意外态写出沙箱配置）
                             runInSandbox = isStdio && runInSandbox && sandboxAvailable,
-                            headers = emptyMap()
+                            // 编辑模式保留导入路径写入的自定义请求头
+                            headers = initial?.headers ?: emptyMap()
                         )
                     )
                 },
                 enabled = valid
-            ) { Text(stringResource(R.string.market_mcp_add_connect)) }
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.market_action_cancel)) }

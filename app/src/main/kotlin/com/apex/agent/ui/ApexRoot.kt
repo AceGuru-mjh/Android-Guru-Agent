@@ -235,6 +235,7 @@ fun ApexRoot() {
                 ContextMeterBar(
                     usedTokens = agentState.contextUsedTokens,
                     maxTokens = agentState.contextMaxTokens,
+                    sessionTotalTokens = agentState.sessionTotalTokens,
                     onCompress = { agentVm.compressNow() }
                 )
 

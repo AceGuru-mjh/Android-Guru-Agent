@@ -55,6 +55,18 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
             _lastAdaptiveDecision.value = (agentEngine as? ApexAgentEngine)?.currentThinkingDecision()
         }
 
+        // ═══ 真实用量：每轮 LLM 响应的 usage 统计帧直达仪表盘 ═══
+        // （此前仪表盘只在 Complete 时拿估算值刷新 —— 用户质疑「用完还是 0」。
+        //  现在流尾统计帧一到就更新，数字是服务端返回的真实值。）
+        is AgentEvent.UsageUpdated -> {
+            _uiState.update {
+                it.copy(
+                    contextUsedTokens = event.totalTokens,
+                    sessionTotalTokens = it.sessionTotalTokens + event.totalTokens
+                )
+            }
+        }
+
         // ═══ Plan模式 ═══
         is AgentEvent.PlanGenerated -> {
             _uiState.update { it.copy(plan = event.plan) }

@@ -25,6 +25,7 @@
     <string name="context_used_tokens">已用 Token</string>
     <string name="context_max_tokens">上下文上限</string>
     <string name="context_usage_ratio">占用比例</string>
+    <string name="context_session_total_tokens">会话累计消耗</string>
     <string name="context_status">状态</string>
     <string name="context_status_danger">危险</string>
     <string name="context_status_warning">警告</string>

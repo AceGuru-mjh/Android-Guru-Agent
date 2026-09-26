@@ -260,8 +260,44 @@ class ApexAgentEngine(
     /** 当前持久化的消息条数（UI 显示历史深度）。 */
     fun historyCount(): Int = memory?.count() ?: conversationHistory.size
 
-    /** 当前上下文估算 token 数（UI 仪表盘；与自动压缩阈值计算同源）。 */
-    fun currentTokenCount(): Int = TokenEstimator.estimateHistory(conversationHistory)
+    // ═══ 真实用量统计（用户反馈「已用 token 像假的、用完还是 0」）═══
+    //
+    // 根因：流式路径此前完全不解析 usage —— OpenAI 协议流式默认不带统计，
+    // 仪表盘只能拿 TokenEstimator 的启发式估算充数，且仅在 Complete 时刷新。
+    // 现在：请求体带 stream_options.include_usage（客户端层），流尾统计帧
+    // 解析进 LlmStreamChunk.usage，引擎记录最近一次真实值并在每轮结束发射
+    // [AgentEvent.UsageUpdated]，仪表盘显示服务端返回的真实 token 数。
+    /** 最近一次 LLM 响应携带的真实 usage（null = 端点未返回统计）。 */
+    @Volatile private var lastRealUsage: Usage? = null
+
+    /** 记录流帧携带的 usage（仅接受 totalTokens>0 的有效统计）。 */
+    private fun trackUsage(u: Usage?) {
+        if (u != null && u.totalTokens > 0) lastRealUsage = u
+    }
+
+    /**
+     * 当前上下文 token 数（UI 仪表盘）：
+     * 优先返回最近一次响应的**真实**统计（prompt+completion ≈ 压缩后全上下文），
+     * 端点不返回 usage 时回退 TokenEstimator 启发式估算（与压缩阈值同源）。
+     */
+    fun currentTokenCount(): Int {
+        val real = lastRealUsage
+        if (real != null && real.totalTokens > 0) return real.totalTokens
+        return TokenEstimator.estimateHistory(conversationHistory)
+    }
+
+    /** 会话累计消耗的真实 token（多轮累加；0 = 尚无统计）。 */
+    fun sessionTotalTokens(): Long = sessionTotalTokensReal.get()
+
+    private val sessionTotalTokensReal = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** 累加一轮真实 usage（emit 供 UI 呈现）。 */
+    private suspend fun recordAndEmitUsage(u: Usage?, emit: suspend (AgentEvent) -> Unit) {
+        if (u == null || u.totalTokens <= 0) return
+        trackUsage(u)
+        sessionTotalTokensReal.addAndGet(u.totalTokens.toLong())
+        emit(AgentEvent.UsageUpdated(u.promptTokens, u.completionTokens, u.totalTokens))
+    }
 
     /** 上下文 token 上限（占用百分比的分母）。 */
     fun maxContextTokens(): Int = config.maxContextTokens
@@ -496,6 +532,8 @@ class ApexAgentEngine(
                 planResponseBuilder.append(it)
                 emit(AgentEvent.ThinkingChunk(it))
             }
+            // 真实用量：规划期请求同样计入会话统计与仪表盘
+            recordAndEmitUsage(chunk.usage, emit)
         }
 
         val planResponse = planResponseBuilder.toString()
@@ -546,6 +584,7 @@ class ApexAgentEngine(
                 reflectionBuilder.append(it)
                 emit(AgentEvent.ResponseChunk(it))
             }
+            recordAndEmitUsage(chunk.usage, emit)
         }
         emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
 
@@ -584,6 +623,8 @@ class ApexAgentEngine(
                 specResponseBuilder.append(it)
                 emit(AgentEvent.ThinkingChunk(it))
             }
+            // 真实用量：规格期请求同样计入会话统计与仪表盘
+            recordAndEmitUsage(chunk.usage, emit)
         }
 
         val specResponse = specResponseBuilder.toString()
@@ -628,6 +669,7 @@ class ApexAgentEngine(
                 reflectionBuilder.append(it)
                 emit(AgentEvent.ResponseChunk(it))
             }
+            recordAndEmitUsage(chunk.usage, emit)
         }
         emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
 
@@ -738,6 +780,9 @@ class ApexAgentEngine(
                     contentBuilder.append(it)
                     emit(AgentEvent.ResponseChunk(it))
                 }
+                // 真实用量统计帧（include_usage 流尾帧 / DeepSeek 末帧）：
+                // 记录 + 发射 UsageUpdated —— 仪表盘显示服务端真实 token。
+                recordAndEmitUsage(chunk.usage, emit)
                 // 多模态输出：图片/视频模型生成的媒体（OpenRouter image part /
                 // CogView chat 生图 / video_url）转 markdown 注入回复流，
                 // 复用 ResponseChunk 管线直达 UI（MarkdownText 渲染 + Lightbox）。

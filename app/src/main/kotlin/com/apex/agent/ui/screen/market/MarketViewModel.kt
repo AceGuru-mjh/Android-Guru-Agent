@@ -584,6 +584,45 @@ class MarketViewModel @Inject constructor(
         }
     }
 
+    // ═══ MCP · 配置编辑（已安装管理「编辑」入口）═══
+
+    /** 正在编辑的 MCP 配置快照（null = 编辑器关闭）。UI 据此渲染 [EditMcpDialog]。 */
+    private val _editingMcp = MutableStateFlow<McpServerConfig?>(null)
+    val editingMcp: StateFlow<McpServerConfig?> = _editingMcp.asStateFlow()
+
+    /** 打开编辑器：按名取配置快照（不存在则忽略 —— 列表与配置极小概率失同步）。 */
+    fun openMcpEditor(name: String) {
+        val config = mcpManager.getConfigs().firstOrNull { it.name == name } ?: return
+        _editingMcp.value = config
+    }
+
+    fun closeMcpEditor() {
+        _editingMcp.value = null
+    }
+
+    /**
+     * 保存编辑后的配置：断开旧连接（配置已变，旧连接必然失效）→ 覆盖写 →
+     * enabled 时自动重连（对齐「添加并连接」的行为闭环）。
+     */
+    fun updateMcpServer(config: McpServerConfig) {
+        viewModelScope.launch {
+            val name = config.name.trim()
+            // 先断开：addServer 只覆盖配置不触碰活跃连接，旧 client 挂着旧参数
+            mcpManager.disconnect(name)
+            mcpManager.addServer(config.copy(name = name)).fold(
+                onSuccess = {
+                    message(languageManager.getString(R.string.market_mcp_edit_saved).format(name))
+                    if (config.enabled) mcpManager.connect(name)
+                    refresh()
+                },
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
+            )
+            _editingMcp.value = null
+        }
+    }
+
     // ═══ 连接器 ═══
 
     fun addConnector(id: String, name: String, type: String, endpoint: String) {

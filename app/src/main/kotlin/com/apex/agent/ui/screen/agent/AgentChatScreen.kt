@@ -101,6 +101,8 @@ fun AgentChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // ★ 缺陷 3 修复：inputText 提升到 ViewModel + SavedStateHandle，跨配置变更存活
     val inputText by viewModel.inputText.collectAsStateWithLifecycle()
+    // 流水线指令胶囊：斜杠菜单选中项（[</> skill: 名字] 形态挂在输入栏上方）
+    val pendingCommand by viewModel.pendingCommand.collectAsStateWithLifecycle()
     val pendingQuestion by viewModel.pendingQuestion.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -560,6 +562,14 @@ fun AgentChatScreen(
                     onRemove = { index -> viewModel.removeAttachment(index) }
                 )
 
+                // ═══ 流水线指令胶囊行（[</> skill: 名字 ×] —— 无挂起指令时不占位）═══
+                // 斜杠菜单选中的 Skill / MCP / 连接器 / 插件以迷你胶囊挂在输入栏，
+                // 输入框不再出现 `/skill:xxx` 裸文本；发送时 VM 拼回斜杠管线。
+                PipelineCapsuleRow(
+                    pending = pendingCommand,
+                    onRemove = { viewModel.clearPendingCommand() }
+                )
+
                 // ═══ "小圆环"工具菜单状态标签行（可单独关闭）═══
                 ToolkitChipsRow(
                     webSearchEnabled = webSearchEnabled,
@@ -610,21 +620,23 @@ fun AgentChatScreen(
                     )
 
                     // ═══ / 斜杠指令按钮 ═══
+                    // 选中项挂成输入栏迷你胶囊（[</> skill: 名字]），不再裸文本入框；
+                    // 解析失败的非管线命令（理论上不存在）回退旧文本插入路径。
                     SlashCommandButton(
                         slashMenuProvider = slashMenuProvider,
-                        onCommandSelected = { command ->
-                            // Insert the command rather than overwriting existing input.
-                            // If the user has already typed something (e.g.
-                            // "请帮我用 ... 查询"), the selected command is space-joined
-                            // after it so the original intent is preserved. The command
-                            // itself carries a trailing space so the user can keep typing
-                            // arguments right away.
-                            val merged = if (inputText.isBlank()) {
-                                command
+                        onItemSelected = { item ->
+                            val capsule = PendingPipelineCommand.fromCommand(item.command, item.label)
+                            if (capsule != null) {
+                                viewModel.setPendingCommand(capsule)
                             } else {
-                                inputText.trimEnd() + " " + command
+                                val command = item.command
+                                val merged = if (inputText.isBlank()) {
+                                    command
+                                } else {
+                                    inputText.trimEnd() + " " + command
+                                }
+                                viewModel.updateInputText(merged)
                             }
-                            viewModel.updateInputText(merged)
                         }
                     )
 
@@ -681,8 +693,9 @@ fun AgentChatScreen(
                             sendKeyBehavior = uiSettings.sendKeyBehavior,
                             onSend = {
                                 // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
+                                // 胶囊-only（输入框空文本）同样可发：VM 拼回 /type:id 走斜杠管线
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
-                                if ((inputText.isNotBlank() || hasUsableAttachment) && !uiState.isLoading) {
+                                if ((inputText.isNotBlank() || hasUsableAttachment || pendingCommand != null) && !uiState.isLoading) {
                                     viewModel.sendMessage(inputText.trim())
                                 }
                             },
@@ -700,11 +713,19 @@ fun AgentChatScreen(
                                 )
                             }
                         )
-                        // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击回填）═══
+                        // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击挂胶囊）═══
                         SlashAutoCompleteHost(
                             inputText = inputText,
                             slashMenuProvider = slashMenuProvider,
-                            onCommandSelected = { viewModel.updateInputText(it) }
+                            onItemSelected = { item ->
+                                val capsule = PendingPipelineCommand.fromCommand(item.command, item.label)
+                                if (capsule != null) {
+                                    // 选中即挂胶囊（VM 清掉框内 / 残文），附加要求直接继续打字
+                                    viewModel.setPendingCommand(capsule)
+                                } else {
+                                    viewModel.updateInputText(item.command)
+                                }
+                            }
                         )
                     }
 
@@ -730,12 +751,12 @@ fun AgentChatScreen(
                         FilledIconButton(
                             onClick = {
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
-                                if (inputText.isNotBlank() || hasUsableAttachment) {
+                                if (inputText.isNotBlank() || hasUsableAttachment || pendingCommand != null) {
                                     viewModel.sendMessage(inputText.trim())
-                                    // ★ viewModel.sendMessage 内部已调用 updateInputText("")
+                                    // ★ viewModel.sendMessage 内部已调用 updateInputText("") + 摘胶囊
                                 }
                             },
-                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR },
+                            enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR } || pendingCommand != null,
                             interactionSource = sendInteraction,
                             modifier = Modifier
                                 .size(40.dp)

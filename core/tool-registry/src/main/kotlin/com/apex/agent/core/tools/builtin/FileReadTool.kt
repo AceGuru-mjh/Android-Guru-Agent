@@ -76,6 +76,55 @@ class FileReadTool(
             if (!file.exists()) return "Error: File not found: $path"
             if (!file.canRead()) return "Error: Permission denied: $path"
             if (file.isDirectory) return "Error: '$path' is a directory. Use list_files."
+
+            // ── PDF / DOCX 文档：先文本提取再走视口模式 ──
+            // 旧实现把 PDF 当二进制拒读（"Binary file"），用户以为「AI 能读 PDF」
+            // 实际一行都读不到。现在 DocumentTextExtractor 提取正文（PDF 解析
+            // content stream 文本操作符 / DOCX 解包 w:t），提取结果按 cacheKey
+            // 缓存，滚动翻页不重复解析。
+            val document = documentLines(file)
+            if (document != null) {
+                val (lines, note) = document
+                val total = lines.size
+                if (total == 0) {
+                    return buildString {
+                        appendLine("📄 ${file.name} (${formatSize(file.length())}) — 文档文本提取为空")
+                        note?.let { appendLine(it) }
+                    }
+                }
+                val startLine = when {
+                    tail != null -> maxOf(0, total - tail)
+                    around != null -> maxOf(0, around - limit / 2)
+                    scroll == "down" -> (viewportCache[path] ?: 0) + limit
+                    scroll == "up" -> maxOf(0, (viewportCache[path] ?: limit) - limit)
+                    offset != null -> offset.coerceIn(0, total - 1)
+                    else -> 0
+                }
+                if (startLine >= total) {
+                    return "📄 ${file.name}（提取文本 $total 行）— offset $startLine 超出末尾。"
+                }
+                val endLine = minOf(startLine + limit, total)
+                viewportCache[path] = startLine
+                return buildString {
+                    appendLine("📄 ${file.name}（${formatSize(file.length())}，提取文本 $total 行）")
+                    note?.let { appendLine("⚠ $it") }
+                    val pct = (endLine * 100) / total
+                    appendLine("Viewing lines ${startLine + 1}–$endLine of $total ($pct%)")
+                    appendLine("─".repeat(50))
+                    lines.subList(startLine, endLine).forEachIndexed { i, line ->
+                        appendLine("${(startLine + i + 1).toString().padStart(5)} │ $line")
+                    }
+                    appendLine("─".repeat(50))
+                    if (endLine < total) {
+                        appendLine("⬇️ ${total - endLine} more lines below. offset:$endLine or scroll:\"down\" to continue.")
+                    } else if (startLine > 0) {
+                        appendLine("⬆️ ${startLine} lines above. scroll:\"up\" to go back.")
+                    } else {
+                        appendLine("✅ Showing entire extracted text.")
+                    }
+                }
+            }
+
             if (isBinary(file)) return "Binary file (${formatSize(file.length())}). Use shell_execute for inspection."
 
             // Size cap: a multi-GB logcat dump would otherwise OOM the agent on readLines().
@@ -152,6 +201,29 @@ class FileReadTool(
         if (file.length() == 0L) return false
         val bytes = file.inputStream().use { it.readNBytes(256) }
         return bytes.count { it == 0.toByte() } > bytes.size / 10
+    }
+
+    /**
+     * 文档提取缓存（PDF/DOCX 解析贵，滚动翻页不重解）：cacheKey → (行, 提示)。
+     * 容量上限 8 条 LRU（超出直接重提取 —— 文档场景同屏最多几个文件，够用）。
+     */
+    private val documentCache = LinkedHashMap<String, Pair<List<String>, String?>>(8, 0.75f, true)
+
+    /** 文档文件 → 提取行（非文档 null；结果含空提取提示时也返回供调用方呈现）。 */
+    private fun documentLines(file: File): Pair<List<String>, String?>? {
+        val key = DocumentTextExtractor.cacheKey(file)
+        synchronized(documentCache) {
+            documentCache[key]?.let { return it }
+        }
+        val extraction = DocumentTextExtractor.extractIfDocument(file) ?: return null
+        val result = extraction.lines to extraction.note
+        synchronized(documentCache) {
+            if (documentCache.size >= 8) {
+                documentCache.remove(documentCache.keys.first())
+            }
+            documentCache[key] = result
+        }
+        return result
     }
 
     private fun resolveFile(path: String): File =

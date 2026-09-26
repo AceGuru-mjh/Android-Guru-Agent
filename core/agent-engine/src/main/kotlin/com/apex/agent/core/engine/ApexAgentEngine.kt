@@ -121,7 +121,7 @@ class ApexAgentEngine(
      * 实际执行 LLM 调用的运行时。null [modelRuntime] 时回退到单 client，
      * 保留旧行为；非空时使用多模型路由。
      */
-    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
+    internal val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     /**
      * T76 — 当前执行的诊断标签（taskId/stepId → LlmRequestContext 四元 ID）。
@@ -177,7 +177,7 @@ class ApexAgentEngine(
     // tagsSetter 钩子从其他线程裸写，当前只能靠调用方自律；后续应改为注入
     // 显式消息队列（Channel）或统一在引擎调度器内串行化所有历史变更。
     @Volatile
-    private var isRunning = false
+    internal var isRunning = false
 
     /**
      * 任务内是否有任何工具动作失败（跨 [executeToolCallStreaming] 调用累计）。
@@ -200,7 +200,7 @@ class ApexAgentEngine(
      * Channel for the UI to deliver spec-confirmation decisions back to the engine
      * while [executeSpecMode] is suspended on [awaitSpecConfirmation].
      */
-    private var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
+    internal var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
 
     /**
      * Channel for the UI to deliver user-input answers back to the engine
@@ -262,45 +262,26 @@ class ApexAgentEngine(
 
     // ═══ 真实用量统计（用户反馈「已用 token 像假的、用完还是 0」）═══
     //
-    // 根因：流式路径此前完全不解析 usage —— OpenAI 协议流式默认不带统计，
-    // 仪表盘只能拿 TokenEstimator 的启发式估算充数，且仅在 Complete 时刷新。
-    // 现在：请求体带 stream_options.include_usage（客户端层），流尾统计帧
-    // 解析进 LlmStreamChunk.usage，引擎记录最近一次真实值并在每轮结束发射
-    // [AgentEvent.UsageUpdated]，仪表盘显示服务端返回的真实 token 数。
-    /** 最近一次 LLM 响应携带的真实 usage（null = 端点未返回统计）。 */
-    @Volatile private var lastRealUsage: Usage? = null
+    // 根因修复的完整背景与状态逻辑内聚于 [EngineUsageTracker]
+    // （EngineUsageTracking.kt，God-file 预算拆分）：请求体带
+    // stream_options.include_usage（客户端层），流尾统计帧解析进
+    // LlmStreamChunk.usage，每轮结束发射 [AgentEvent.UsageUpdated]，
+    // 仪表盘显示服务端返回的真实 token 数。
+    private val usageTracker = EngineUsageTracker { conversationHistory }
 
-    /** 记录流帧携带的 usage（仅接受 totalTokens>0 的有效统计）。 */
-    private fun trackUsage(u: Usage?) {
-        if (u != null && u.totalTokens > 0) lastRealUsage = u
-    }
-
-    /**
-     * 当前上下文 token 数（UI 仪表盘）：
-     * 优先返回最近一次响应的**真实**统计（prompt+completion ≈ 压缩后全上下文），
-     * 端点不返回 usage 时回退 TokenEstimator 启发式估算（与压缩阈值同源）。
-     */
-    fun currentTokenCount(): Int {
-        val real = lastRealUsage
-        if (real != null && real.totalTokens > 0) return real.totalTokens
-        return TokenEstimator.estimateHistory(conversationHistory)
-    }
+    /** 当前上下文 token 数（UI 仪表盘）：优先真实 usage，回退启发式估算。 */
+    fun currentTokenCount(): Int = usageTracker.currentContextTokens()
 
     /** 会话累计消耗的真实 token（多轮累加；0 = 尚无统计）。 */
-    fun sessionTotalTokens(): Long = sessionTotalTokensReal.get()
-
-    private val sessionTotalTokensReal = java.util.concurrent.atomic.AtomicLong(0)
-
-    /** 累加一轮真实 usage（emit 供 UI 呈现）。 */
-    private suspend fun recordAndEmitUsage(u: Usage?, emit: suspend (AgentEvent) -> Unit) {
-        if (u == null || u.totalTokens <= 0) return
-        trackUsage(u)
-        sessionTotalTokensReal.addAndGet(u.totalTokens.toLong())
-        emit(AgentEvent.UsageUpdated(u.promptTokens, u.completionTokens, u.totalTokens))
-    }
+    fun sessionTotalTokens(): Long = usageTracker.sessionTotalTokens()
 
     /** 上下文 token 上限（占用百分比的分母）。 */
     fun maxContextTokens(): Int = config.maxContextTokens
+
+    /** 累加一轮真实 usage 并发射仪表盘事件（无统计时零开销；spec 流复用）。 */
+    internal suspend fun recordAndEmitUsage(u: Usage?, emit: suspend (AgentEvent) -> Unit) {
+        usageTracker.accumulate(u)?.let { emit(it) }
+    }
 
     /**
      * 主动压缩上下文（UI 仪表盘按钮触发）：与自动压缩共用 [ContextCompressor]，
@@ -593,104 +574,15 @@ class ApexAgentEngine(
 
     // awaitPlanConfirmation 已迁至 plan/PlanExecutionSupport.kt（#169：Boolean → PlanDecision）。
     // ═══════════════════════════════════════════════════════
-    // SPEC mode
+    // SPEC mode —— executeSpecMode / awaitSpecConfirmation 已迁至
+    // EngineSpecFlow.kt（同包扩展 + internal 成员直调，调用点零改动）。
     // ═══════════════════════════════════════════════════════
-
-    /**
-     * 规格模式：Think → 生成需求规格（流式）→ 解析 → 用户确认 →
-     * 按交付物逐项执行（复用 Build 循环）→ 总结。
-     *
-     * 与 [executePlanMode] 的区别：产物是 [ExecutionSpec]（目标 / 需求 /
-     * 约束 / 验收标准 / 交付物），执行阶段的每一步都携带完整规格上下文，
-     * 让模型明确"要交付什么、做成什么样才算完成"。
-     */
-    private suspend fun executeSpecMode(
-        input: String,
-        emit: suspend (AgentEvent) -> Unit
-    ): Int {
-        // Phase 1: think + generate spec (streamed as ThinkingChunk)
-        emit(AgentEvent.ThinkingStart(0, config.thinkingLevel))
-
-        val specPrompt = buildSpecPrompt(input)
-        val specResponseBuilder = StringBuilder()
-
-        // B1：不传 temperature 哨兵 → Profile 值生效（同 plan 生成）。
-        runtime.chatStream(
-            context = tagged(LlmRequestContext.reasoning("spec_generation")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt)
-        ).collect { chunk ->
-            chunk.content?.let {
-                specResponseBuilder.append(it)
-                emit(AgentEvent.ThinkingChunk(it))
-            }
-            // 真实用量：规格期请求同样计入会话统计与仪表盘
-            recordAndEmitUsage(chunk.usage, emit)
-        }
-
-        val specResponse = specResponseBuilder.toString()
-        emit(AgentEvent.ThinkingComplete(specResponse))
-
-        // Phase 2: parse spec
-        val spec = EngineResponseParsers.parseExecutionSpec(specResponse, input)
-        emit(AgentEvent.SpecGenerated(spec))
-
-        // Phase 3: await user confirmation
-        emit(AgentEvent.SpecAwaitingConfirmation(spec))
-        val confirmed = awaitSpecConfirmation()
-        if (!confirmed) {
-            emit(AgentEvent.Aborted)
-            return 0
-        }
-        emit(AgentEvent.SpecConfirmed(spec))
-
-        // Phase 4: execute each deliverable sequentially (Build loop per deliverable).
-        // 无交付物时回退到需求清单；两者皆空则直接执行目标。
-        val steps = spec.deliverables.ifEmpty { spec.requirements }.ifEmpty { listOf(spec.goal) }
-        var iterations = 0
-        for ((index, stepText) in steps.withIndex()) {
-            if (!isRunning) break
-            emit(AgentEvent.StepStart(index, stepText))
-
-            val stepPrompt = buildSpecStepPrompt(spec, stepText, index)
-            addMessage(LlmMessage.User(stepPrompt))
-
-            val stepIters = executeBuildLoop { event -> emit(event) }
-            iterations += stepIters
-        }
-
-        // Phase 5: reflection
-        val reflectPrompt = buildSpecReflectionPrompt(spec)
-        val reflectionBuilder = StringBuilder()
-        runtime.chatStream(
-            context = tagged(LlmRequestContext.primary("spec_reflection")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt)
-        ).collect { chunk ->
-            chunk.content?.let {
-                reflectionBuilder.append(it)
-                emit(AgentEvent.ResponseChunk(it))
-            }
-            recordAndEmitUsage(chunk.usage, emit)
-        }
-        emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
-
-        return iterations
-    }
-
-    private suspend fun awaitSpecConfirmation(): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        specConfirmationDeferred = deferred
-        return try {
-            withTimeout(PLAN_CONFIRMATION_TIMEOUT_MS) { deferred.await() }
-        } finally {
-            specConfirmationDeferred = null
-        }
-    }
 
     // ═══════════════════════════════════════════════════════
     // BUILD mode (ReAct loop)
     // ═══════════════════════════════════════════════════════
 
-    private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
+    internal suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
 
         while (isRunning && iteration < thinkingController.effectiveMaxIterations(config.maxIterations)) {
@@ -1131,12 +1023,12 @@ class ApexAgentEngine(
 
 
     /** T76 — executionTags（taskId/stepId）填入 LlmRequestContext；未接线时原样返回。 */
-    private fun tagged(ctx: LlmRequestContext): LlmRequestContext {
+    internal fun tagged(ctx: LlmRequestContext): LlmRequestContext {
         val tags = executionTags ?: return ctx
         return ctx.copy(taskId = tags.first, stepId = tags.second)
     }
 
-    private fun buildSystemPrompt(planningPhase: Boolean = false): String = EnginePrompts.buildSystemPrompt(
+    internal fun buildSystemPrompt(planningPhase: Boolean = false): String = EnginePrompts.buildSystemPrompt(
         config = config,
         currentProfile = thinkingController.profileFor(config),
         planningPhase = planningPhase,

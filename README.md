@@ -846,7 +846,9 @@ chmod +x gradlew
 
 > [!TIP]
 > 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest)
-> （arm64 / universal 两个变体，由 tag 触发 CI 自动发布）。
+> （arm64 / universal 两个变体；**PR 合并进 main 即自动构建发布**，无需打 tag）。
+> 已装用户可在 App「设置 → 关于 → 检查更新」直接升级 —— 支持增量补丁
+> （~14MB vs 全量 300MB+）与高速节点/镜像加速下载。
 > 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
 > `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
 

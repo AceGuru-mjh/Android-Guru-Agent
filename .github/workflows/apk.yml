@@ -135,7 +135,7 @@ jobs:
           VARIANT=${{ steps.variant.outputs.type }}
           APK_DIR="app/build/outputs/apk/$VARIANT"
           SHA8=$(echo "${{ github.sha }}" | cut -c1-8)
-          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          VERSION=$(grep -oP 'versionName\s*=.*"\K[^"]+' app/build.gradle.kts)
           echo "### 📦 APK 产物" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ "$VARIANT" = "release" ]; then

@@ -16,20 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,9 +33,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.apex.agent.BuildConfig
 import com.apex.agent.R
-import com.apex.agent.update.UpdateCheckResult
-import com.apex.agent.update.UpdateChecker
-import kotlinx.coroutines.launch
 
 /** 项目仓库地址 —— About 区对外跳转目标（源代码 / Issue / PR）。 */
 private const val REPO_URL = "https://github.com/AceGuru-mjh/Android-Guru-Agent"
@@ -50,28 +40,17 @@ private const val REPO_URL = "https://github.com/AceGuru-mjh/Android-Guru-Agent"
 /** Star 引导行图标色：琥珀色，与 M3 主色拉开距离，白/深底上都醒目。 */
 private val StarAmber = Color(0xFFF59E0B)
 
-/** 更新检查 UI 状态机：Idle → Checking → Done(result) —— 按钮驱动的简单闭环。 */
-private sealed interface UpdateUiState {
-    data object Idle : UpdateUiState
-    data object Checking : UpdateUiState
-    data class Done(val result: UpdateCheckResult) : UpdateUiState
-}
-
 /**
  * 设置页「关于」区（SettingsScreen 界面页签第 4 区块）。
  *
  * 从 SettingsScreen.kt 拆出（文件行数预算 1200）。
  * 全部真实数据：BuildConfig 版本号 + 实际依赖清单 —— 无写死版本串。
- * v1.4.1 起内置更新检查：读取发布仓库 version.json（双仓库发布架构客户端侧）。
+ * v1.4.1 起内置更新检查（发布仓库 version.json）；v1.4.2 起更新面板升级为
+ * 独立组件 [UpdatePanel]：补丁增量更新 + 高速节点/镜像选择（见该文件头注释）。
  */
 @Composable
 internal fun AboutSection() {
     val context = LocalContext.current
-    // Toast 在非 Compose lambda 中触发：字符串上提到组合层取词
-    val noBrowserHint = stringResource(R.string.settings_about_no_browser)
-    val checker = remember { UpdateChecker() }
-    val scope = rememberCoroutineScope()
-    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
 
     SectionCard(
         title = stringResource(R.string.settings_about_title),
@@ -84,67 +63,8 @@ internal fun AboutSection() {
         SettingInfoRow(stringResource(R.string.settings_about_package), BuildConfig.APPLICATION_ID)
         SettingInfoRow(stringResource(R.string.settings_about_build_type), BuildConfig.BUILD_TYPE)
 
-        // ── 更新检查（发布仓库 version.json → versionCode 比对）────────────
-        OutlinedButton(
-            onClick = {
-                if (updateState == UpdateUiState.Checking) return@OutlinedButton
-                updateState = UpdateUiState.Checking
-                scope.launch {
-                    updateState = UpdateUiState.Done(checker.check(BuildConfig.VERSION_CODE))
-                }
-            },
-            enabled = updateState != UpdateUiState.Checking,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(Icons.Outlined.SystemUpdateAlt, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (updateState == UpdateUiState.Checking) {
-                    stringResource(R.string.settings_about_update_checking)
-                } else {
-                    stringResource(R.string.settings_about_update_check)
-                }
-            )
-        }
-        when (val state = updateState) {
-            is UpdateUiState.Done -> when (val result = state.result) {
-                is UpdateCheckResult.UpToDate -> Text(
-                    stringResource(
-                        R.string.settings_about_update_latest,
-                        result.latest.versionName
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                is UpdateCheckResult.Available -> Column {
-                    Text(
-                        stringResource(
-                            R.string.settings_about_update_available,
-                            result.latest.versionName
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    val downloadUrl = checker.preferredDownloadUrl(result.latest)
-                    if (downloadUrl != null) {
-                        Button(
-                            onClick = { openUrl(context, downloadUrl, noBrowserHint) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Outlined.Download, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.settings_about_update_download))
-                        }
-                    }
-                }
-                is UpdateCheckResult.Failed -> Text(
-                    stringResource(R.string.settings_about_update_failed, result.reason),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-            else -> Unit
-        }
+        // ── 更新面板（检查更新 / 增量补丁 / 高速节点镜像）────────────────────
+        UpdatePanel()
 
         // 开源组件（本项目直接引入的运行时依赖 —— 真实清单，非装饰）
         Text(
@@ -160,6 +80,8 @@ internal fun AboutSection() {
 
         // 仓库跳转：ACTION_VIEW 直接打开 GitHub 仓库页（不再走剪贴板复制）。
         // runCatching 兜底：极端环境无浏览器 Activity 时不崩溃，Toast 告知。
+        // Toast 文案上提到组合层取词（stringResource 不可在非 Compose lambda 中调用）
+        val noBrowserHint = stringResource(R.string.settings_about_no_browser)
         val openRepo: () -> Unit = { openUrl(context, REPO_URL, noBrowserHint) }
         Button(
             onClick = openRepo,
@@ -203,9 +125,9 @@ internal fun AboutSection() {
 
 /**
  * ACTION_VIEW 打开外链的统一出口：runCatching 兜底极端环境无浏览器 Activity
- * 时不崩溃，Toast 告知（仓库页与更新下载共用）。
+ * 时不崩溃，Toast 告知（仓库页与更新下载共用 —— 本区与 [UpdatePanel] 同包）。
  */
-private fun openUrl(context: android.content.Context, url: String, noBrowserHint: String) {
+internal fun openUrl(context: android.content.Context, url: String, noBrowserHint: String) {
     runCatching {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }.onFailure {

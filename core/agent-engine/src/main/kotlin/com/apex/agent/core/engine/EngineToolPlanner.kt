@@ -170,7 +170,14 @@ internal fun buildUserText(input: UserInput): String {
         if (input.files.isNotEmpty()) {
             appendLine("[用户附加文件]")
             input.files.forEach { f ->
-                appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes) path=${f.localPath}")
+                // 文档类附件标注「已支持文本提取」——引导模型放心用 read_file 读正文，
+                // 而不是看到 .pdf 就当作二进制放弃（旧链路确实读不了，现在能读）。
+                val docHint = when {
+                    f.mimeType.contains("pdf", ignoreCase = true) || f.name.endsWith(".pdf", true) -> "，read_file 可提取文本"
+                    f.mimeType.contains("wordprocessingml", ignoreCase = true) || f.name.endsWith(".docx", true) -> "，read_file 可提取文本"
+                    else -> ""
+                }
+                appendLine("- ${f.name} (${f.mimeType}, ${f.sizeBytes} bytes$docHint) path=${f.localPath}")
             }
         }
         appendLine()

@@ -26,12 +26,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * 输入以 "/" 开头且命令词尚未出现空格时，在输入行上方弹出斜杠命令候选；
  * 点击候选项回填完整命令（自带尾随空格，可继续输入参数）。
  * 数据复用斜杠菜单的 [SlashMenuProvider]，技能/MCP/插件/连接器同源。
+ *
+ * v2：选中回调携带完整 [SlashMenuItem]（label + command）—— 调用方把选中项
+ * 挂成输入栏迷你胶囊需要展示名；信息严格超集于旧的命令串回调。
  */
 @Composable
 fun SlashAutoCompleteHost(
     inputText: String,
     slashMenuProvider: SlashMenuProvider,
-    onCommandSelected: (String) -> Unit,
+    onItemSelected: (SlashMenuItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // 用户点击外部关闭后记住被关闭时的文本；继续输入（文本变化）即重新弹出
@@ -99,7 +102,7 @@ fun SlashAutoCompleteHost(
                     )
                 },
                 onClick = {
-                    onCommandSelected(item.command)
+                    onItemSelected(item)
                     dismissedFor = item.command
                 }
             )

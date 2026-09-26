@@ -247,7 +247,8 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
 
     companion object {
         private const val TAG = "PredictivePreproc"
-        private const val DIR_PRE = "attachments_pre"
+        // 目录名与 AttachmentCleanupManager 统一（清理 Worker 双目录同扫依赖同名）
+        private const val DIR_PRE = AttachmentCleanupManager.DIR_ATTACHMENTS_PRE
         private const val BUFFER_SIZE = 128 * 1024 // 128KB
         private const val EXPIRE_MS = 30L * 60 * 1000 // 30 分钟
     }

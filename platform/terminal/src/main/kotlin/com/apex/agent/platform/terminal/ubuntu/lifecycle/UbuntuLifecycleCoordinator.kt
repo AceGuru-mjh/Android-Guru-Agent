@@ -82,6 +82,14 @@ class UbuntuLifecycleCoordinator(
      * 否则升级用户永远拿不到新环境。
      */
     private val bundledChecksumFn: (suspend () -> String?)? = null,
+    /**
+     * P1（DNS 快照刷新）端口：宿主 DNS 变化时重写 rootfs 内 resolv.conf
+     * （生产：RootfsConfigurator.refreshDnsIfChanged(current().location)；
+     * null=未接线，行为与旧版一致）。resolv.conf 是安装时刻的 DNS 快照，
+     * 切网后 guest 内 apt/pip/curl DNS 全灭且无修复通道 —— ensureReady
+     * 短路前刷一次（文件对比，毫秒级），切网自愈。
+     */
+    private val dnsRefreshFn: (suspend () -> Boolean)? = null,
     private val target: RootfsTarget,
     private val defaultTimeoutMs: Long = DEFAULT_ENSURE_TIMEOUT_MS,
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -285,6 +293,12 @@ class UbuntuLifecycleCoordinator(
                     _state.value.phase == Phase.READY &&
                     _state.value.bootstrapNote == null
                 ) {
+                    // P1（DNS 快照刷新）：短路前对一次宿主 DNS —— resolv.conf 是安装时刻
+                    // 的快照，切网（Wi-Fi→蜂窝/VPN）后 guest DNS 全灭；文件对比毫秒级，
+                    // 失败静默（刷新失败不影响 AlreadyReady 语义，下次再试）。
+                    dnsRefreshFn?.let { refresh ->
+                        runCatching { refresh() }
+                    }
                     return@withLock EnsureResult.AlreadyReady(
                         _state.value.capabilities ?: emptyList()
                     )

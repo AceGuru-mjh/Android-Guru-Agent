@@ -248,7 +248,10 @@ class VtParser {
     }
 
     private fun handleStringIgnore(cp: Int, sink: (Event) -> Unit) {
-        if (cp == '\\'.code) state = State.GROUND   // ST ends the (discarded) string
+        // P2：BEL(0x07) 与 ESC \ 同为 OSC/DCS 的合法终止符（handleOscString 已认 BEL）。
+        // 旧实现只认 '\' —— 超长串进入 STRING_IGNORE 后，BEL 终止的 OSC 之后的
+        // 全部输出（含 LF/可打印字符）被静默吞掉，终端表现为「卡死不刷新」。
+        if (cp == 0x07 || cp == '\\'.code) state = State.GROUND
         // otherwise: stay ignoring until a terminator arrives
     }
 

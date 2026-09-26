@@ -160,20 +160,31 @@ object TerminalModule {
         nativeLibraryDir = context.applicationInfo.nativeLibraryDir ?: ""
     )
 
-    /** T83 生产 provisioner（内置交付转向）：APK 内置档案本地拷贝 + SHA-256 复验 +
-     *  原子解压 + 配置 + 健康检查 + 阶段证据 —— 下游与 T72 下载时代完全同构
-     *  （downloader/extractor 源无关；见 BundledRootfsSource KDoc 的三层校验链）。
-     *
-     *  T82（Termux 基线 §3.5/§3.6/§9.2）：DNS 注入（Android LinkProperties —— 此前
+    /** T82（Termux 基线 §3.5/§3.6/§9.2）：DNS 注入（Android LinkProperties —— 此前
      *  DI 未传，public-DNS fallback 在 DNS 受限网络直接失败）；locale.gen（zh_CN/
      *  en_US —— locales 包 postinst 自动生成）；timezone（Android 当前时区写入
-     *  /etc/timezone，tzdata postinst 生效）。 */
+     *  /etc/timezone，tzdata postinst 生效）。
+     *
+     *  P1（DNS 快照刷新）：抽为独立 Provider —— 协调器的 dnsRefreshFn 端口需要
+     *  同一实例（ensureReady 短路前对宿主 DNS，切网自愈；见
+     *  RootfsConfigurator.refreshDnsIfChanged）。 */
+    @Provides
+    @Singleton
+    fun provideRootfsConfigurator(
+        @ApplicationContext context: Context
+    ): RootfsConfigurator = RootfsConfigurator(
+        dnsServers = { resolveAndroidDnsServers(context) },
+        localeGen = listOf("zh_CN.UTF-8 UTF-8", "en_US.UTF-8 UTF-8"),
+        timezone = java.util.TimeZone.getDefault().id
+    )
+
     @Provides
     @Singleton
     fun provideRootfsProvisioner(
         @ApplicationContext context: Context,
         target: RootfsTarget,
-        bundledSource: BundledRootfsSource
+        bundledSource: BundledRootfsSource,
+        configurator: RootfsConfigurator
     ): RootfsProvisioner {
         val layout = RootfsInstallLayout.under(
             AbsolutePath(File(context.filesDir, "rootfs/ubuntu").absolutePath)
@@ -183,11 +194,7 @@ object TerminalModule {
             validator = null,                       // 布局校验由 health inspector 承担（T72）
             layout = layout,
             metadataStore = RootfsMetadataStore(File(layout.metadataFile.value)),
-            configurator = RootfsConfigurator(
-                dnsServers = { resolveAndroidDnsServers(context) },
-                localeGen = listOf("zh_CN.UTF-8 UTF-8", "en_US.UTF-8 UTF-8"),
-                timezone = java.util.TimeZone.getDefault().id
-            ),
+            configurator = configurator,
             healthCheck = RootfsHealthInspector(expectedArch = target.architecture)
         )
     }
@@ -416,6 +423,7 @@ object TerminalModule {
         capabilityProbe: com.apex.agent.platform.terminal.environment.LinuxCapabilityProbe,
         repairService: com.apex.agent.platform.terminal.health.EnvironmentRepairService,
         bundledSource: BundledRootfsSource,
+        configurator: RootfsConfigurator,
         target: RootfsTarget
     ): UbuntuLifecycleCoordinator {
         return UbuntuLifecycleCoordinator(
@@ -492,6 +500,13 @@ object TerminalModule {
             // T84：注册表指纹端口 —— warmUp 新鲜度迁移（APK 换档案 → 删旧装新，
             // 防 AlreadyReady 短路把旧 rootfs 永久钉死）。
             bundledChecksumFn = { bundledSource.registryChecksumFor(target) },
+            // P1（DNS 快照刷新）：ensureReady 短路前对一次宿主 DNS，切网自愈
+            //（resolv.conf 是安装时刻快照，不刷新则切网后 guest DNS 全灭）。
+            dnsRefreshFn = {
+                provisioner.current()?.location?.let { loc ->
+                    configurator.refreshDnsIfChanged(java.io.File(loc.value))
+                } ?: false
+            },
             target = target
         )
     }

@@ -22,7 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 
 /**
  * 附件按钮（+ → × 旋转动画）
@@ -63,7 +65,9 @@ fun AttachButton(
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
-                    contentDescription = if (isMenuExpanded) "关闭" else "添加附件",
+                    // P2 i18n：无障碍描述随语言取词
+                    contentDescription = if (isMenuExpanded) stringResource(R.string.chat_cd_attach_close)
+                    else stringResource(R.string.chat_cd_attach_add),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .size(24.dp)
@@ -77,7 +81,7 @@ fun AttachButton(
             onDismissRequest = { isMenuExpanded = false }
         ) {
             DropdownMenuItem(
-                text = { Text("上传文件") },
+                text = { Text(stringResource(R.string.chat_attach_file)) },
                 leadingIcon = { Icon(Icons.Default.AttachFile, null, tint = MaterialTheme.colorScheme.primary) },
                 onClick = {
                     isMenuExpanded = false
@@ -85,7 +89,7 @@ fun AttachButton(
                 }
             )
             DropdownMenuItem(
-                text = { Text("上传图片") },
+                text = { Text(stringResource(R.string.chat_attach_image)) },
                 leadingIcon = { Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.primary) },
                 onClick = {
                     isMenuExpanded = false

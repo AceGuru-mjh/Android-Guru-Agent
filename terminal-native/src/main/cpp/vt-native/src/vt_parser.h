@@ -322,7 +322,12 @@ class Parser {
   }
 
   void handleStringIgnore(uint32_t cp) {
-    if (cp == '\\') state_ = State::kGround;  // ST ends the (discarded) string
+    // P2 (Kotlin parity): BEL (0x07) terminates OSC/DCS just like ESC \ —
+    // handleOscString already accepts BEL. Accepting only '\' meant that after
+    // an overlong sequence pushed us into kStringIgnore, every later byte
+    // (including printable output and LF) was silently swallowed — the terminal
+    // appeared frozen until a literal '\' happened to arrive.
+    if (cp == 0x07 || cp == '\\') state_ = State::kGround;
   }
 
   // ─── emitters ──────────────────────────────────────────────────────────

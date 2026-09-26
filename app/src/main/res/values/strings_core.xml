@@ -25,6 +25,7 @@
     <string name="context_used_tokens">Tokens used</string>
     <string name="context_max_tokens">Context limit</string>
     <string name="context_usage_ratio">Usage</string>
+    <string name="context_session_total_tokens">Session total</string>
     <string name="context_status">Status</string>
     <string name="context_status_danger">Critical</string>
     <string name="context_status_warning">Warning</string>
@@ -503,4 +504,10 @@
     <string name="core_notif_channel_name">Apex Agent service</string>
     <string name="core_notif_channel_desc">AI assistant background runtime notification</string>
     <string name="core_notif_running">AI assistant running</string>
+    <!-- ═══ P2 i18n: GitHub connect menu (GithubIconButton) + common ═══ -->
+    <string name="github_menu_connected">Connected: %1$s</string>
+    <string name="github_menu_disconnect">Tap to disconnect</string>
+    <string name="github_menu_connect">Connect GitHub</string>
+    <string name="github_menu_token">GitHub Token (ghp_*) key access</string>
+    <string name="common_done">Done</string>
 </resources>

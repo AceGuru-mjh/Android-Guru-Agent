@@ -47,6 +47,12 @@ import kotlinx.coroutines.flow.StateFlow
  * 菜单数据由 [SlashMenuProvider] 实时提供，覆盖 Skills / MCP / 插件 / 连接器 四类，
  * 并随插件加载状态自动刷新。每个条目附带状态角标（已连接 / 离线 / 未安装 / 示例）。
  *
+ * ## v4：选中回调携带完整 [SlashMenuItem]
+ *
+ * 调用方（AgentChatScreen）需要 label（展示名）把选中项挂成输入栏迷你胶囊
+ * （`[</> skill: 名字]`）；旧回调只给 command 字符串，展示名被迫丢失。
+ * 非斜杠管线场景可自行从 item.command 取命令串，信息严格超集，无回退需求。
+ *
  * ## v3 修复：点击卡死（ANR）
  * 旧实现把 [Popup]（`PopupProperties(focusable = true)`）**无条件**留在组合树里，
  * 仅靠内层 AnimatedVisibility 控制内容显隐 —— 这与 Material3 DropdownMenu 的
@@ -63,7 +69,7 @@ import kotlinx.coroutines.flow.StateFlow
 @Composable
 fun SlashCommandButton(
     slashMenuProvider: SlashMenuProvider,
-    onCommandSelected: (String) -> Unit,
+    onItemSelected: (SlashMenuItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -102,8 +108,8 @@ fun SlashCommandButton(
                 menuFlow = slashMenuProvider.menu,
                 onRefresh = slashMenuProvider::refresh,
                 onDismiss = { showMenu = false },
-                onCommandSelected = { command ->
-                    onCommandSelected(command)
+                onItemSelected = { item ->
+                    onItemSelected(item)
                     showMenu = false
                 }
             )
@@ -122,7 +128,7 @@ private fun SlashMenuPopup(
     menuFlow: StateFlow<SlashMenuData>,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
-    onCommandSelected: (String) -> Unit
+    onItemSelected: (SlashMenuItem) -> Unit
 ) {
     val menuData by menuFlow.collectAsStateWithLifecycle()
     var expandedCategory by remember { mutableStateOf<String?>(null) }
@@ -191,7 +197,7 @@ private fun SlashMenuPopup(
                                 expandedCategory =
                                     if (expandedCategory == category.id) null else category.id
                             },
-                            onItemClick = { command -> onCommandSelected(command) }
+                            onItemClick = { item -> onItemSelected(item) }
                         )
                     }
                 }
@@ -205,7 +211,7 @@ private fun DynamicCategoryItem(
     category: SlashMenuCategory,
     isExpanded: Boolean,
     onToggle: () -> Unit,
-    onItemClick: (String) -> Unit
+    onItemClick: (SlashMenuItem) -> Unit
 ) {
     val arrowRotation by animateFloatAsState(
         targetValue = if (isExpanded) 90f else 0f,
@@ -280,7 +286,7 @@ private fun DynamicCategoryItem(
                     )
                 } else {
                     category.items.forEach { item ->
-                        SlashItemRow(item = item, onClick = { onItemClick(item.command) })
+                        SlashItemRow(item = item, onClick = { onItemClick(item) })
                     }
                 }
             }

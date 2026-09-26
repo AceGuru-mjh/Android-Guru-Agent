@@ -61,15 +61,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
-import com.apex.agent.core.engine.ThinkingLevel
-import com.apex.agent.core.engine.longtask.LongTaskCheckpoint
-import com.apex.agent.core.engine.longtask.LongTaskCopyOptions
-import com.apex.agent.core.engine.longtask.LongTaskDetector
-import com.apex.agent.core.engine.longtask.LongTaskMagnitude
-import com.apex.agent.core.engine.longtask.LongTaskRecord
-import com.apex.agent.core.engine.longtask.LongTaskStatus
-import com.apex.agent.core.engine.longtask.LongTaskTemplates
-import com.apex.agent.core.engine.thinking.ThinkingEvolutionTracker
+import com.apex.agent.core.code.longtask.LongTaskCheckpoint
+import com.apex.agent.core.code.longtask.LongTaskCopyOptions
+import com.apex.agent.core.code.longtask.LongTaskDetector
+import com.apex.agent.core.code.longtask.LongTaskMagnitude
+import com.apex.agent.core.code.longtask.LongTaskRecord
+import com.apex.agent.core.code.longtask.LongTaskStatus
+import com.apex.agent.core.code.longtask.LongTaskTemplates
+import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -110,7 +110,7 @@ fun CodeLongTaskSheet(
     visible: Boolean,
     records: List<LongTaskRecord>,
     loading: Boolean,
-    stats: ThinkingEvolutionTracker.WorkspaceThinkingStats?,
+    stats: CodeThinkingEvolutionTracker.WorkspaceThinkingStats?,
     onDismiss: () -> Unit,
     onCopy: (id: String, options: LongTaskCopyOptions, relaunch: Boolean) -> Unit,
     onRelaunch: (id: String) -> Unit,
@@ -747,7 +747,7 @@ private fun CopyOptionsDialog(
     var includeFiles by remember { mutableStateOf(true) }
     var relaunch by remember { mutableStateOf(true) }
     var title by remember { mutableStateOf("") }
-    var thinkingOverride by remember { mutableStateOf<ThinkingLevel?>(null) }
+    var thinkingOverride by remember { mutableStateOf<CodeThinkingLevel?>(null) }
     var thinkingMenuOpen by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -808,7 +808,7 @@ private fun CopyOptionsDialog(
                                 thinkingOverride = null
                             }
                         )
-                        ThinkingLevel.entries.forEach { level ->
+                        CodeThinkingLevel.entries.forEach { level ->
                             DropdownMenuItem(
                                 text = { Text("${level.name} · ${level.description}") },
                                 onClick = {
@@ -871,7 +871,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChecked: (Boolean) -> U
  * 数据源 ThinkingEvolutionTracker——帮用户用自己的历史选档，而非凭感觉。
  */
 @Composable
-private fun ThinkingStatsTab(stats: ThinkingEvolutionTracker.WorkspaceThinkingStats?) {
+private fun ThinkingStatsTab(stats: CodeThinkingEvolutionTracker.WorkspaceThinkingStats?) {
     val levels = stats?.levels?.values.orEmpty()
     if (levels.isEmpty()) {
         Column(

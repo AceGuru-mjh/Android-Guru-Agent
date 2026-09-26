@@ -3,23 +3,24 @@ package com.apex.agent.ui.screen.code
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.code.CodeAgentEngine
+import com.apex.agent.core.code.longtask.LongTaskCopyOptions
+import com.apex.agent.core.code.longtask.LongTaskDiff
+import com.apex.agent.core.code.longtask.LongTaskStatus
+import com.apex.agent.core.code.longtask.LongTaskStore
+import com.apex.agent.core.code.longtask.LongTaskTemplates
+import com.apex.agent.core.code.longtask.LongTaskTracker
+import com.apex.agent.core.code.longtask.TaskCopyEngine
+import com.apex.agent.core.code.thinking.CodeAdaptiveThinkingSelector
+import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.core.engine.AgentAnswer
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.AgentQuestion
-import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.engine.UserQuestionBridge
-import com.apex.agent.core.engine.longtask.LongTaskCopyOptions
-import com.apex.agent.core.engine.longtask.LongTaskDiff
-import com.apex.agent.core.engine.longtask.LongTaskStatus
-import com.apex.agent.core.engine.longtask.LongTaskStore
-import com.apex.agent.core.engine.longtask.LongTaskTemplates
-import com.apex.agent.core.engine.longtask.LongTaskTracker
-import com.apex.agent.core.engine.longtask.TaskCopyEngine
-import com.apex.agent.core.engine.thinking.ThinkingEvolutionTracker
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
@@ -102,7 +103,9 @@ class CodeViewModel @Inject constructor(
     private val longTaskTracker: LongTaskTracker,
     private val taskCopyEngine: TaskCopyEngine,
     private val longTaskStore: LongTaskStore,
-    private val thinkingEvolutionTracker: ThinkingEvolutionTracker
+    private val thinkingEvolutionTracker: CodeThinkingEvolutionTracker,
+    // AUTO 档自治选档器（发送前预检 + 运行中深水区升级观察）
+    private val adaptiveSelector: CodeAdaptiveThinkingSelector
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CodeUiState())
@@ -119,6 +122,23 @@ class CodeViewModel @Inject constructor(
 
     /** 当前绑定的会话归属工作区（null = 尚未绑定，不落盘）。 */
     private var boundWorkspaceId: String? = null
+
+    // ═══ AUTO 档自治状态（coding 专属，引擎零参与）═══
+
+    /** 本轮 run 累计工具调用数（深水区升级观察器信号）。 */
+    private var runToolCalls = 0
+
+    /** 本轮 run 最近 3 次工具成败滑窗（true = 成功）。 */
+    private val recentToolOutcomes = ArrayDeque<Boolean>()
+
+    /** 本轮 run 生效的深度档（AUTO 预检解析结果；非 AUTO = 用户显式档）。 */
+    private var effectiveRunLevel: CodeThinkingLevel = CodeThinkingLevel.STANDARD
+
+    /** 上一轮 run 的工具调用总数（下轮 AUTO 预检的错误史信号）。 */
+    private var lastRunToolCalls = 0
+
+    /** 上一轮 run 的错误数（引擎 3 滑窗口径近似：run 内滑窗错误峰值）。 */
+    private var lastRunErrors = 0
 
     /** 工作区恢复/冲刷串行锁（快速连续切换时防交错）。 */
     private val sessionMutex = Mutex()
@@ -169,8 +189,15 @@ class CodeViewModel @Inject constructor(
 
         codeEngineImpl?.prepareForTask()
 
+        // ═══ AUTO 档自治：发送前预检选档（coding 专属，引擎零参与）═══
+        // 解析结果直接下发给引擎（引擎从不接收 AUTO）；决策进系统消息 +
+        // uiState.adaptiveDecision（选择器旁回显）。非 AUTO 档直接用用户显式档。
+        resolveRuntimeThinkingLevel(trimmed)
+
         // v1.2 长任务追踪：本次运行的开始（旧 run 若未收尾会被自动 ABORTED
-        // 收尾判定——见 LongTaskTracker.beginRun 防御语义）。
+        // 收尾判定——见 LongTaskTracker.beginRun 防御语义）。记录的档位
+        // 用用户选择（AUTO 记 AUTO——诚实口径：统计的是"选 AUTO 这个
+        // 决策"的表现，实际生效档在 adaptiveDecision 可追溯）。
         longTaskTracker.beginRun(
             goal = trimmed,
             workspaceId = boundWorkspaceId ?: "",
@@ -179,12 +206,17 @@ class CodeViewModel @Inject constructor(
             agentMode = "BUILD"
         )
 
+        // 深水区升级观察器归零（新 run 重新计数）。
+        runToolCalls = 0
+        recentToolOutcomes.clear()
+
         runJob = viewModelScope.launch {
             _uiState.update { it.copy(isRunning = true, error = null) }
             var aborted = false
             try {
                 codeEngine.execute(UserInput(text = engineInput)).collect { event ->
                     longTaskTracker.onEvent(event)
+                    maybeEscalateOnDeepWater(event)
                     reduce(event)
                 }
             } catch (e: CancellationException) {
@@ -202,6 +234,9 @@ class CodeViewModel @Inject constructor(
                         todos = codeTodoTool.snapshot()
                     )
                 }
+                // 上一轮错误史归档（下轮 AUTO 预检的输入信号）。
+                lastRunToolCalls = runToolCalls
+                lastRunErrors = recentToolOutcomes.count { !it }
                 // v1.2 长任务收尾：状态裁决（中止/失败/完成）+ 长任务判定入库
                 // （短任务返回 null 静默丢弃）；入库后刷新面板数据。
                 val finalError = _uiState.value.error
@@ -272,18 +307,17 @@ class CodeViewModel @Inject constructor(
         }
     }
 
-    // ═══ 思考档位（v1.2 七档思考系统）═══
+    // ═══ 思考档位（coding 专属七档）═══
 
     /**
-     * 切换思考档位：持久化（codeThinkingLevel）+ 引擎双通道（通用画像 +
-     * 编码特化指令）+ 模型原生 reasoning 强度同步（T1 通道，镜像
-     * AgentChatViewModel.setThinkingLevel 语义；AUTO 档不动原生 effort——
-     * 逐轮档位由引擎侧选档器决定）。
+     * 切换思考档位：持久化（codeThinkingLevel）+ 引擎三通道（档位映射 +
+     * 旋钮补偿 + 编码特化指令）+ 模型原生 reasoning 强度同步（T1 通道；
+     * AUTO 档不动原生 effort——实际档位由发送前预检决定）。
      */
-    fun setThinkingLevel(level: ThinkingLevel) {
+    fun setThinkingLevel(level: CodeThinkingLevel) {
         settingsRepository.updateAgentSettings { copy(codeThinkingLevel = level.name.lowercase()) }
         applyThinkingLevel(level)
-        if (level == ThinkingLevel.AUTO) return
+        if (level == CodeThinkingLevel.AUTO) return
         val effort = level.toReasoningEffortName()
             ?.let { name -> runCatching { ReasoningEffort.valueOf(name) }.getOrNull() }
             ?: ReasoningEffort.NONE
@@ -291,19 +325,72 @@ class CodeViewModel @Inject constructor(
             ?.let { settingsRepository.upsertProfile(it.copy(reasoningEffort = effort)) }
     }
 
-    /** 档位 → UI 状态 + 引擎双通道（setThinkingLevel 与启动恢复共用）。 */
-    private fun applyThinkingLevel(level: ThinkingLevel) {
-        _uiState.update { it.copy(thinkingLevel = level) }
+    /** 档位 → UI 状态 + 引擎三通道（setThinkingLevel 与启动恢复共用）。 */
+    private fun applyThinkingLevel(level: CodeThinkingLevel) {
+        _uiState.update { it.copy(thinkingLevel = level, adaptiveDecision = null) }
         codeEngineImpl?.updateThinkingLevel(level)
+        effectiveRunLevel = if (level == CodeThinkingLevel.AUTO) effectiveRunLevel else level
     }
 
     /** 启动恢复：codeThinkingLevel 字符串 → 档位（空/未知 → STANDARD）。 */
     private fun restoreThinkingLevel() {
-        val stored = settingsRepository.agentSettings.value.codeThinkingLevel
-        val level = stored.takeIf { it.isNotBlank() }
-            ?.let { s -> ThinkingLevel.entries.firstOrNull { it.name.lowercase() == s } }
-            ?: ThinkingLevel.STANDARD
+        val level = CodeThinkingLevel.fromName(settingsRepository.agentSettings.value.codeThinkingLevel)
+            ?: CodeThinkingLevel.STANDARD
         applyThinkingLevel(level)
+    }
+
+    /**
+     * AUTO 档发送前预检：解析出本轮生效深度档并下发引擎。
+     *
+     * - 预检信号：任务 goal + 上一轮 lastRun 计数/错误史；
+     * - 决策进系统消息（可解释）+ uiState.adaptiveDecision（选择器旁回显）；
+     * - 生效档写 [effectiveRunLevel]（深水区升级观察器的比较基准）；
+     * - 非 AUTO 档：直接用用户显式档（effectiveRunLevel 同步）。
+     *
+     * 注意：引擎 patchConfig 只接受解析后的具体档（toAgentLevel 映射 +
+     * 旋钮补偿在 CodeAgentEngine.updateThinkingLevel 内完成），
+     * 引擎从不感知 AUTO——coding 自治语义。
+     */
+    private fun resolveRuntimeThinkingLevel(goal: String) {
+        val selected = _uiState.value.thinkingLevel
+        if (selected != CodeThinkingLevel.AUTO) {
+            effectiveRunLevel = selected
+            codeEngineImpl?.updateThinkingLevel(selected)
+            return
+        }
+        val decision = adaptiveSelector.select(
+            goalText = goal,
+            lastRunToolCalls = lastRunToolCalls,
+            lastRunErrors = lastRunErrors
+        )
+        effectiveRunLevel = decision.level
+        codeEngineImpl?.updateThinkingLevel(decision.level)
+        _uiState.update { it.copy(adaptiveDecision = decision.reason) }
+        appendSystemMessage("🧠 自适应预检：$decision.reason")
+    }
+
+    /**
+     * 运行中深水区升级观察器（AUTO 档专属）：ToolCallComplete 计数 +
+     * 3 次成败滑窗 → [CodeAdaptiveThinkingSelector.escalateOnDeepWater]。
+     *
+     * 升级落地：引擎档位热切换（下轮迭代生效）+ 系统消息说明。
+     * 仅 AUTO 档参与（用户显式选档被尊重，不自动加码）；APEXCODE 已是
+     * 顶档（观察器内部短路）。
+     */
+    private fun maybeEscalateOnDeepWater(event: AgentEvent) {
+        if (event !is AgentEvent.ToolCallComplete) return
+        runToolCalls++
+        recentToolOutcomes.addLast(event.success)
+        while (recentToolOutcomes.size > RECENT_OUTCOME_WINDOW) recentToolOutcomes.removeFirst()
+        if (_uiState.value.thinkingLevel != CodeThinkingLevel.AUTO) return
+        val decision = adaptiveSelector.escalateOnDeepWater(
+            runToolCalls = runToolCalls,
+            recentWindowErrors = recentToolOutcomes.count { !it },
+            current = effectiveRunLevel
+        ) ?: return
+        effectiveRunLevel = decision.level
+        codeEngineImpl?.updateThinkingLevel(decision.level)
+        appendSystemMessage("⚠️ ${decision.reason}")
     }
 
     // ═══ 长任务中心（v1.2）═══
@@ -461,8 +548,8 @@ class CodeViewModel @Inject constructor(
             ws?.workspaceId ?: "",
             ws?.name ?: ""
         )
-        // 推荐档位落地（持久化 + 引擎 + 原生 effort 同步）
-        ThinkingLevel.entries.firstOrNull { it.name == template.recommendedThinkingLevel }
+        // 推荐档位落地（持久化 + 引擎三通道 + 原生 effort 同步）
+        CodeThinkingLevel.fromName(template.recommendedThinkingLevel)
             ?.let { setThinkingLevel(it) }
         // todo 骨架预置（pending 状态，模型后续可改写）
         runCatching {
@@ -690,14 +777,9 @@ class CodeViewModel @Inject constructor(
         when (event) {
             is AgentEvent.IterationStart -> {
                 _uiState.update { it.copy(currentIteration = event.iteration) }
-                // v1.2 AUTO 档可解释性：引擎在 emit IterationStart 前已解析
-                // 本轮档位，此处拉取即最新决策（镜像 Agent 模式 EventApplier
-                // 通道）；仅 AUTO 档展示，避免噪音。
-                if (_uiState.value.thinkingLevel == ThinkingLevel.AUTO) {
-                    codeEngineImpl?.currentThinkingDecision()?.let { decision ->
-                        appendSystemMessage("🧠 自适应选档：$decision")
-                    }
-                }
+                // AUTO 可解释性已前移到发送前预检（resolveRuntimeThinkingLevel
+                // 产生 adaptiveDecision + 系统消息）；引擎侧从不接收 AUTO，
+                // 此处不再拉取引擎决策。
             }
 
             is AgentEvent.ResponseChunk -> _uiState.update { state ->
@@ -841,5 +923,10 @@ class CodeViewModel @Inject constructor(
             }
         }
         super.onCleared()
+    }
+
+    private companion object {
+        /** 深水区升级观察器的工具成败滑窗长度（与选档器口径一致：最近 3 次）。 */
+        const val RECENT_OUTCOME_WINDOW = 3
     }
 }

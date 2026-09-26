@@ -138,8 +138,8 @@ fun CodeScreen(
             ErrorBar(message = err, onDismiss = viewModel::dismissError)
         }
 
-        // v1.2 七档思考系统：输入栏上方的档位选择器（紧凑入口，点开下拉；
-        // 下拉底部可进档位指南）
+        // coding 七档思考系统：输入栏上方的档位选择器（紧凑入口，点开下拉；
+        // 下拉底部可进档位指南；AUTO 档旁回显预检决策）
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -148,6 +148,7 @@ fun CodeScreen(
         ) {
             CodeThinkingSelector(
                 current = state.thinkingLevel,
+                adaptiveDecision = state.adaptiveDecision,
                 onSelect = viewModel::setThinkingLevel,
                 onOpenGuide = { showThinkingGuide = true }
             )
@@ -180,7 +181,7 @@ fun CodeScreen(
         )
     }
 
-    // v1.2 思考档位指南（ModalBottomSheet）：阶梯总表 + 逐档卡片，可直切档
+    // coding 七档思考指南（ModalBottomSheet）：阶梯总表 + 逐档卡片，可直切档
     if (showThinkingGuide) {
         CodeThinkingGuideSheet(
             currentLevel = state.thinkingLevel,

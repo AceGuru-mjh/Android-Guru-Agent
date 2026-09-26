@@ -87,7 +87,9 @@
     <string name="code_thinking_standard_desc">标准编码循环：读→改→验→回读，diff 最小化</string>
     <string name="code_thinking_deep_desc">改动集思维：先建改动清单再动手，每处改动关联验证方式</string>
     <string name="code_thinking_maximum_desc">不变量守护：识别不变量与连锁影响，改后全链路核对</string>
-    <string name="code_thinking_auto_desc">自适应：引擎按任务复杂度逐轮选档（编码纪律基线：DEEP）</string>
+    <string name="code_thinking_ultracode_desc">编码深推理闭环：依赖地图→候选改法→风险排序→最小修改→即时验证；迭代×2.0</string>
+    <string name="code_thinking_apexcode_desc">架构级穷举推理 + 对抗性自审 + 全量验证矩阵；迭代×3.0，仅手动可选</string>
+    <string name="code_thinking_auto_desc">自适应：发送前预检选档，深水区连环失败自动升级（永不自动选 APEXCODE）</string>
 
     <!-- v1.2 思考档位指南（CodeThinkingGuideSheet） -->
     <string name="code_thinking_guide_title">思考档位指南</string>

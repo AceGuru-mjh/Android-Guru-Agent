@@ -1,4 +1,4 @@
-package com.apex.agent.core.engine.longtask
+package com.apex.agent.core.code.longtask
 
 /**
  * # 内置长任务模板——高质量任务的「起点菜单」

@@ -1,10 +1,10 @@
 package com.apex.agent.di
 
 import android.content.Context
-import com.apex.agent.core.engine.longtask.LongTaskStore
-import com.apex.agent.core.engine.longtask.LongTaskTracker
-import com.apex.agent.core.engine.longtask.TaskCopyEngine
-import com.apex.agent.core.engine.thinking.ThinkingEvolutionTracker
+import com.apex.agent.core.code.longtask.LongTaskStore
+import com.apex.agent.core.code.longtask.LongTaskTracker
+import com.apex.agent.core.code.longtask.TaskCopyEngine
+import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import dagger.Module
@@ -20,7 +20,7 @@ import javax.inject.Qualifier
 import javax.inject.Singleton
 
 /**
- * # Long Task Module — 长任务中心 DI（v1.2）
+ * # Code Long Task Module — 长任务中心 DI（coding 专属，v1.2 起归属 code-engine）
  *
  * 三件单例的装配关系（+ 档位效能追踪）：
  *
@@ -31,7 +31,7 @@ import javax.inject.Singleton
  *   fire-and-forget 落库绝不阻塞 VM 主线程，单条落库失败不传染后续
  *   （SupervisorJob 语义）；
  * - [TaskCopyEngine]：复制引擎（无状态，持 store 引用做读改写）；
- * - [ThinkingEvolutionTracker]：档位效能统计（长任务记录 → 工作区 ×
+ * - [CodeThinkingEvolutionTracker]：档位效能统计（长任务记录 → 工作区 ×
  *   档位聚合），与长任务共用 [LongTaskPersistScope] 落盘。
  *
  * 附带启动维护：provide 的副作用里后台跑一次 [LongTaskStore.prune]
@@ -45,7 +45,7 @@ import javax.inject.Singleton
  */
 @Module
 @InstallIn(SingletonComponent::class)
-object LongTaskModule {
+object CodeLongTaskModule {
 
     /** 长任务落库专用 scope（Supervisor：单条失败不取消兄弟落库任务）。 */
     @Qualifier
@@ -64,14 +64,14 @@ object LongTaskModule {
                 .onSuccess { pruned ->
                     if (pruned > 0) {
                         AppLogger.instance.info(
-                            LogCategory.SYSTEM, "LongTaskModule",
+                            LogCategory.SYSTEM, "CodeLongTaskModule",
                             "长任务存储启动裁剪：清理 $pruned 条旧记录"
                         )
                     }
                 }
                 .onFailure {
                     AppLogger.instance.warn(
-                        LogCategory.SYSTEM, "LongTaskModule",
+                        LogCategory.SYSTEM, "CodeLongTaskModule",
                         "长任务启动裁剪失败（不影响功能）：${it.message}"
                     )
                 }
@@ -99,10 +99,10 @@ object LongTaskModule {
 
     @Provides
     @Singleton
-    fun provideThinkingEvolutionTracker(
+    fun provideCodeThinkingEvolutionTracker(
         @ApplicationContext context: Context,
         @LongTaskPersistScope persistScope: CoroutineScope
-    ): ThinkingEvolutionTracker = ThinkingEvolutionTracker(
+    ): CodeThinkingEvolutionTracker = CodeThinkingEvolutionTracker(
         baseDir = java.io.File(context.filesDir, "longtask/thinking-stats"),
         persistScope = persistScope
     )

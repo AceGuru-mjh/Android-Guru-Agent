@@ -1,9 +1,9 @@
 package com.apex.agent.ui.screen.code
 
+import com.apex.agent.core.code.longtask.LongTaskRecord
+import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.codetools.tools.CodeTodoTool
-import com.apex.agent.core.engine.ThinkingLevel
-import com.apex.agent.core.engine.longtask.LongTaskRecord
-import com.apex.agent.core.engine.thinking.ThinkingEvolutionTracker
 import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.screen.code.editor.EditorFile
 
@@ -29,10 +29,18 @@ data class CodeUiState(
     val contextUsedTokens: Int = 0,
     val contextMaxTokens: Int = 0,
 
-    // ── 思考档位（v1.2 七档思考系统）──
-    // 选择器直改 + AgentSettings.codeThinkingLevel 持久化，
-    // 引擎侧双通道（通用画像 + 编码特化指令）同步见 CodeAgentEngine.updateThinkingLevel。
-    val thinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD,
+    // ── 思考档位（coding 专属七档）──
+    // 选择器直改 + AgentSettings.codeThinkingLevel 持久化，引擎侧三通道
+    // （档位映射 + 旋钮补偿 + 编码特化指令）同步见
+    // CodeAgentEngine.updateThinkingLevel。
+    val thinkingLevel: CodeThinkingLevel = CodeThinkingLevel.STANDARD,
+
+    /**
+     * AUTO 档最近一次预检决策（"因子→评分→档位"）；非 AUTO 档或尚无
+     * 预检 → null。发送前由 CodeViewModel.resolveRuntimeThinkingLevel
+     * 产生，选择器旁回显（深水区升级另有系统消息通道）。
+     */
+    val adaptiveDecision: String? = null,
 
     // ── 长任务中心（v1.2）──
     // 长任务面板可见性 + 当前工作区的长任务记录（updatedAt 降序）；
@@ -42,7 +50,7 @@ data class CodeUiState(
     val longTaskLoading: Boolean = false,
 
     /** 档位效能统计（当前工作区；null = 未加载/无工作区）。 */
-    val thinkingStats: ThinkingEvolutionTracker.WorkspaceThinkingStats? = null,
+    val thinkingStats: CodeThinkingEvolutionTracker.WorkspaceThinkingStats? = null,
 
     // ── 编辑器面板（v1.0 #154）──
     // editorFilePath 非空即挂载面板；editorFile 为加载结果（null = 加载中/失败态）。

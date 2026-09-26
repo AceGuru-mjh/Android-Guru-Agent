@@ -140,14 +140,7 @@
     <string name="chat_effort_medium">中</string>
     <string name="chat_effort_high">高</string>
     <string name="chat_effort_max">最大</string>
-    <string name="chat_thinking_none_desc">直接执行，不生成推理过程</string>
-    <string name="chat_thinking_light_desc">简短分析后立即行动</string>
-    <string name="chat_thinking_standard_desc">分析任务→选择方案→执行</string>
-    <string name="chat_thinking_deep_desc">多方案对比→风险评估→最优选择</string>
-    <string name="chat_thinking_maximum_desc">完整推理链+自我反思+多轮验证</string>
     <!-- v1.2 七级思考：新深度档描述（= ThinkingProfile.uiDescriptionZh 要点版，含执行策略差异） -->
-    <string name="chat_thinking_ultracode_desc">编码特化深推理：不变量→候选改法→风险排序→最小修改→即时验证（迭代×2.0）</string>
-    <string name="chat_thinking_apexcode_desc">架构级穷举推理 + 对抗性自审 + 全量验证矩阵（迭代×3.0，保留更多上下文）</string>
     <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionZh，含执行策略差异） -->
     <string name="thinking_level_none_desc">直接执行，不生成推理；快进快出（迭代×0.8、更早压缩省 token）</string>
     <string name="thinking_level_light_desc">1-2 句简短思考后立即行动，省 token 的轻量推理</string>

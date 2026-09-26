@@ -14,7 +14,8 @@ import com.apex.agent.core.engine.AgentConfig
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ApexAgentEngine
-import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.code.thinking.CodeAdaptiveThinkingSelector
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.ExecutionMemoryObserver
 import com.apex.agent.core.llm.LlmClient
@@ -59,6 +60,12 @@ object CodeModule {
     @Provides
     @Singleton
     fun provideCodeTodoTool(): CodeTodoTool = CodeTodoTool()
+
+    /** AUTO 档自治选档器（纯函数无状态；VM 发送前预检 + 运行中深水区升级观察）。 */
+    @Provides
+    @Singleton
+    fun provideCodeAdaptiveThinkingSelector(): CodeAdaptiveThinkingSelector =
+        CodeAdaptiveThinkingSelector()
 
     /**
      * 编码会话 UI 快照仓库（#152）：按 workspaceId 存消息/todos/lastActiveFile。
@@ -162,7 +169,7 @@ object CodeModule {
     ): AgentEngine {
         val codeConfig = AgentConfig(
             mode = AgentMode.BUILD,
-            thinkingLevel = ThinkingLevel.STANDARD,
+            thinkingLevel = CodeThinkingLevel.STANDARD.toAgentLevel(),
             maxIterations = 40,
             maxContextTokens = 128_000,
             maxToolOutputLength = 8_000,

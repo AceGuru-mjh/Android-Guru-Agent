@@ -1,7 +1,7 @@
-package com.apex.agent.core.engine.thinking
+package com.apex.agent.core.code.thinking
 
-import com.apex.agent.core.engine.longtask.LongTaskRecord
-import com.apex.agent.core.engine.longtask.LongTaskStatus
+import com.apex.agent.core.code.longtask.LongTaskRecord
+import com.apex.agent.core.code.longtask.LongTaskStatus
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import java.io.File
@@ -24,7 +24,7 @@ import kotlinx.serialization.json.Json
  *
  * ## 数据口径（与长任务中心对齐）
  *
- * - **只统计长任务**：短任务不留档（[com.apex.agent.core.engine.longtask.LongTaskDetector]
+ * - **只统计长任务**：短任务不留档（[com.apex.agent.core.code.longtask.LongTaskDetector]
  *   闸门），本类的输入就是留档记录——统计基数少但都是"值得复盘"的运行；
  * - **AUTO 聚合在 AUTO 名下**：AUTO 运行记录的 thinkingLevel 字段是
  *   "AUTO"（逐轮实际档位在引擎侧决策，不落记录）——统计语义是"选 AUTO
@@ -46,7 +46,7 @@ import kotlinx.serialization.json.Json
  * 落盘协程捕获的是**已组装完成的不可变快照**（LevelRunStat data class），
  * 与后续状态无共享可变引用。
  */
-class ThinkingEvolutionTracker(
+class CodeThinkingEvolutionTracker(
     private val baseDir: File,
     private val persistScope: CoroutineScope
 ) {

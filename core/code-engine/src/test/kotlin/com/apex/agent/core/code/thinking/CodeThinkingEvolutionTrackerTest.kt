@@ -1,8 +1,8 @@
-package com.apex.agent.core.engine.thinking
+package com.apex.agent.core.code.thinking
 
-import com.apex.agent.core.engine.longtask.LongTaskCheckpoint
-import com.apex.agent.core.engine.longtask.LongTaskRecord
-import com.apex.agent.core.engine.longtask.LongTaskStatus
+import com.apex.agent.core.code.longtask.LongTaskCheckpoint
+import com.apex.agent.core.code.longtask.LongTaskRecord
+import com.apex.agent.core.code.longtask.LongTaskStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -16,7 +16,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * [ThinkingEvolutionTracker] 档位效能统计测试。
+ * [CodeThinkingEvolutionTracker] 档位效能统计测试。
  *
  * 真实文件存储（TemporaryFolder）+ runTest scope（advanceUntilIdle 等
  * fire-and-forget 落盘）；断言聚合口径（状态三分计数 / 均值派生 / AUTO
@@ -28,11 +28,11 @@ class ThinkingEvolutionTrackerTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    private lateinit var tracker: ThinkingEvolutionTracker
+    private lateinit var tracker: CodeThinkingEvolutionTracker
 
     @Before
     fun setup() {
-        tracker = ThinkingEvolutionTracker(tmp.newFolder("stats"), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        tracker = CodeThinkingEvolutionTracker(tmp.newFolder("stats"), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
     }
 
     /** 造一条长任务记录（最小必填字段 + 可选状态/档位/统计）。 */
@@ -128,7 +128,7 @@ class ThinkingEvolutionTrackerTest {
         tracker.ingest(record(level = "APEXCODE"))
         advanceUntilIdle()
         // 新实例（同目录）——从盘上恢复
-        val revived = ThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val revived = CodeThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         assertEquals(1, revived.statsFor("ws-a").levels["APEXCODE"]?.runs)
     }
 
@@ -138,7 +138,7 @@ class ThinkingEvolutionTrackerTest {
         advanceUntilIdle()
         // 写坏统计文件
         trackerDir().walkTopDown().filter { it.name.startsWith("stats_") }.forEach { it.writeText("not-json{{{") }
-        val revived = ThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val revived = CodeThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         assertTrue(revived.statsFor("ws-a").levels.isEmpty())
         // 复活后可继续正常累计
         revived.ingest(record(level = "DEEP"))
@@ -158,7 +158,7 @@ class ThinkingEvolutionTrackerTest {
         advanceUntilIdle()
         tracker.reset("ws-a")
         assertTrue(tracker.statsFor("ws-a").levels.isEmpty())
-        val revived = ThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val revived = CodeThinkingEvolutionTracker(trackerDir(), kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
         assertTrue(revived.statsFor("ws-a").levels.isEmpty())
     }
 

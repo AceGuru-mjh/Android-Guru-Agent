@@ -157,7 +157,7 @@ class PromptVariableRegistry(
                 "mode", "当前执行模式（BUILD/PLAN/SPEC/...）", VariableScope.SESSION, "BUILD"
             ) { it.modeName.trim().ifBlank { "BUILD" } },
             entry(
-                "thinking_level", "当前思考档位（NONE~APEXCODE/AUTO）", VariableScope.SESSION, "DEEP"
+                "thinking_level", "当前思考档位（NONE~MAXIMUM/AUTO）", VariableScope.SESSION, "DEEP"
             ) { it.thinkingLevelName.trim().ifBlank { "STANDARD" } },
             entry(
                 "tool_count", "本轮暴露的工具数量", VariableScope.SESSION, "42"

@@ -1,6 +1,6 @@
-package com.apex.agent.core.engine.longtask
+package com.apex.agent.core.code.longtask
 
-import com.apex.agent.core.engine.ThinkingLevel
+import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -12,7 +12,7 @@ import org.junit.Test
  * 内置长任务模板（[LongTaskTemplates]）的结构与实例化契约测试。
  *
  * 模板是「起点菜单」：8 个内置模板（顺序即 UI 菜单顺序）、每个模板的
- * 推荐档位必须是合法 [ThinkingLevel] 名（v1.2 七级思考系统的字符串快照）、
+ * 推荐档位必须是合法 [CodeThinkingLevel] 名（coding 七档思考系统的字符串快照）、
  * goal 模板含百分之 s 占位符、todo 骨架 3-6 条可直接渲染。
  *
  * instantiate 的核心契约：**稳定 id**（template-前缀 + key + workspaceId，
@@ -57,17 +57,17 @@ class LongTaskTemplatesTest {
     }
 
     /**
-     * 每个模板的推荐档位都是合法 [ThinkingLevel] 枚举名（UI 切档时按名字
+     * 每个模板的推荐档位都是合法 [CodeThinkingLevel] 枚举名（UI 切档时按名字
      * 反查枚举），且 APEXCODE 不出现在任何推荐位——巅峰档只允许用户显式
      * 指定，模板推荐也不能替用户拉满成本（与 AdaptiveThinkingSelector 的
      * 成本防线同一哲学）。
      */
     @Test
     fun `每个模板推荐档位都是合法思考档名_且不含APEXCODE`() {
-        val legalNames = ThinkingLevel.entries.map { it.name }.toSet()
+        val legalNames = CodeThinkingLevel.entries.map { it.name }.toSet()
         LongTaskTemplates.ALL.forEach { template ->
             assertTrue(
-                "模板 ${template.key} 的推荐档位 ${template.recommendedThinkingLevel} 必须是合法 ThinkingLevel 名",
+                "模板 ${template.key} 的推荐档位 ${template.recommendedThinkingLevel} 必须是合法 CodeThinkingLevel 名",
                 template.recommendedThinkingLevel in legalNames
             )
             assertFalse(

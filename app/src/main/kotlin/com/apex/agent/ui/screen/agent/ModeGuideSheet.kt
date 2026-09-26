@@ -198,11 +198,9 @@ private fun ThinkingLevelsTable() {
             header = true
         )
         // 数据行（直读 core 静态表——UI 与引擎画像永远同源，杜绝文案漂移；
-        // v1.2：MAXIMUM 与 AUTO 之间插入 ULTRACODE/APEXCODE 两个新深度档）
         listOf(
             ThinkingLevel.NONE, ThinkingLevel.LIGHT, ThinkingLevel.STANDARD,
-            ThinkingLevel.DEEP, ThinkingLevel.MAXIMUM, ThinkingLevel.ULTRACODE,
-            ThinkingLevel.APEXCODE, ThinkingLevel.AUTO
+            ThinkingLevel.DEEP, ThinkingLevel.MAXIMUM, ThinkingLevel.AUTO
         ).forEach { level ->
             val profile = ThinkingProfile.forLevel(level)
             ThinkingTableRow(

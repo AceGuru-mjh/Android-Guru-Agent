@@ -87,7 +87,9 @@
     <string name="code_thinking_standard_desc">Standard coding loop: read → edit → verify → re-read, minimal diff</string>
     <string name="code_thinking_deep_desc">Changeset mindset: list every change before acting, tie each to its verification</string>
     <string name="code_thinking_maximum_desc">Invariant guarding: identify invariants &amp; ripple effects, re-check the whole chain after edits</string>
-    <string name="code_thinking_auto_desc">Adaptive: engine picks the tier per turn from task complexity (coding discipline baseline: DEEP)</string>
+    <string name="code_thinking_ultracode_desc">Coding deep-reasoning loop: dependency map → candidate edits → risk-ranking → minimal change → immediate verification; iterations x2.0</string>
+    <string name="code_thinking_apexcode_desc">Architecture-level exhaustive reasoning + adversarial self-review + full verification matrix; iterations x3.0, manual-only</string>
+    <string name="code_thinking_auto_desc">Adaptive: pre-check picks the tier before each send, and deep-water failures escalate mid-run (never auto-picks APEXCODE)</string>
 
     <!-- v1.2 思考档位指南（CodeThinkingGuideSheet） -->
     <string name="code_thinking_guide_title">Thinking tier guide</string>

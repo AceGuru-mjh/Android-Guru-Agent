@@ -196,3 +196,129 @@ dependencies {
 dependencyLocking {
     lockAllConfigurations()
 }
+
+// ═══ P0 修复（构建地雷）：内置 Ubuntu rootfs 档案守卫 ═══
+//
+// 背景（用户反馈"Ubuntu 根本用不了"的构建期根因）：libubuntu-rootfs.so 是
+// ~300MB/ABI 的大档案，.gitignore 排除不入库，只能靠 scripts/fetch_rootfs.sh
+// 构建期暂存。此前**没有任何 Gradle task 校验其存在** —— 若暂存缺失（新克隆、
+// CI 忘跑 fetch 步骤、本地缓存被清），assembleRelease 照样成功，产出的 APK
+// 安装后 BundledRootfsSource.resolve() 必然报
+// "ARCHIVE_INVALID: Bundled rootfs archive missing"（recoverable=false）→
+// Ubuntu 安装 100% 失败，且问题只暴露在真机运行期，构建期零提示。
+//
+// 守卫语义（与 scripts/fetch_rootfs.sh 的"宁可构建失败，不可带病打包"一致）：
+//  - release 构建：所需 ABI 的档案缺失或 sha256 与 rootfs-bundle.sha256 不符
+//    → 构建失败，错误信息给出修复命令；
+//  - debug 构建：仅响亮警告（开发迭代速度优先；CI PR 路径只暂存 arm64）；
+//  - 所需 ABI = -PapexAbi（逗号分隔）收窄，缺省 = 清单全集（universal）；
+//  - 逃生门：-PapexSkipRootfsCheck=true（诊断/实验构建）。
+val rootfsManifest = rootProject.layout.projectDirectory.file(
+    "platform/terminal/rootfs-bundle.sha256"
+).asFile
+val rootfsJniLibsBase = rootProject.layout.projectDirectory.dir(
+    "platform/terminal/src/main/jniLibs"
+)
+
+/** 解析清单：abi → sha256（跳过注释与空行）。 */
+fun parseRootfsManifest(): Map<String, String> {
+    if (!rootfsManifest.isFile) return emptyMap()
+    return rootfsManifest.readLines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
+        .mapNotNull { line ->
+            val parts = line.split(Regex("\\s+"), limit = 2)
+            val sha = parts.getOrNull(0) ?: return@mapNotNull null
+            val path = parts.getOrNull(1) ?: return@mapNotNull null
+            val abi = path.split("/").firstOrNull { it.startsWith("arm") || it.startsWith("x86") }
+                ?: return@mapNotNull null
+            abi to sha
+        }
+        .toMap()
+}
+
+/** 本次构建需要的 ABI 集（apexAbi 收窄，缺省全量）。 */
+fun requiredRootfsAbis(): Set<String> {
+    val all = parseRootfsManifest().keys
+    val narrowed = (project.findProperty("apexAbi") as String?)
+        ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        ?: return all
+    return all.intersect(narrowed.toSet()).ifEmpty { all }
+}
+
+tasks.register("checkBundledRootfs") {
+    group = "verification"
+    description = "P0 guard: bundled Ubuntu rootfs archives must exist and match rootfs-bundle.sha256 (release-critical)."
+    doLast {
+        if ((project.findProperty("apexSkipRootfsCheck") as String?) == "true") {
+            logger.lifecycle("[rootfs-guard] skipped via -PapexSkipRootfsCheck=true")
+            return@doLast
+        }
+        val manifest = parseRootfsManifest()
+        if (manifest.isEmpty()) {
+            throw GradleException(
+                "[rootfs-guard] rootfs-bundle.sha256 缺失或不可解析：${rootfsManifest.absolutePath} —— " +
+                    "清单是内置 rootfs 的指纹真值表，缺失意味着仓库损坏，请检查 git 状态。"
+            )
+        }
+        val required = requiredRootfsAbis()
+        val problems = mutableListOf<String>()
+        for (abi in required.sorted()) {
+            val expected = manifest.getValue(abi)
+            val f = rootfsJniLibsBase.file("$abi/libubuntu-rootfs.so").asFile
+            if (!f.isFile) {
+                problems += "$abi: 档案缺失（${f.absolutePath}）"
+                continue
+            }
+            val actual = java.security.MessageDigest.getInstance("SHA-256").let { md ->
+                f.inputStream().use { input ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        if (n > 0) md.update(buf, 0, n)
+                    }
+                }
+                md.digest().joinToString("") { "%02x".format(it) }
+            }
+            if (!actual.equals(expected, ignoreCase = true)) {
+                problems += "$abi: 指纹不符（expected=$expected actual=$actual）—— 档案损坏或版本漂移"
+            }
+        }
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("[rootfs-guard] 内置 Ubuntu rootfs 守卫失败 —— 缺失/指纹不符的 ABI：")
+                    problems.forEach { appendLine("  - $it") }
+                    appendLine("修复：scripts/fetch_rootfs.sh            # 全部 ABI（universal 发布）")
+                    appendLine("      scripts/fetch_rootfs.sh --arch arm64-v8a   # 只拉 arm64（本地快速验证）")
+                    appendLine("绝不能跳过守卫直接打包：产物安装后 Ubuntu 必然不可用（运行期才暴露）。")
+                }
+            )
+        }
+        logger.lifecycle("[rootfs-guard] OK — ${required.sorted()} 的 libubuntu-rootfs.so 就位且指纹一致")
+    }
+}
+
+tasks.register("warnBundledRootfs") {
+    group = "verification"
+    description = "Debug-friendly existence check: loudly warn when bundled rootfs archives are missing (no hash, no fail)."
+    doLast {
+        val manifest = parseRootfsManifest()
+        if (manifest.isEmpty()) return@doLast
+        val missing = requiredRootfsAbis().filter { abi ->
+            !rootfsJniLibsBase.file("$abi/libubuntu-rootfs.so").asFile.isFile
+        }
+        if (missing.isNotEmpty()) {
+            logger.warn(
+                "[rootfs-guard] ⚠️ 内置 Ubuntu rootfs 档案缺失（$missing）—— 本 debug 构建的 APK " +
+                    "安装后 Ubuntu 终端不可用（BundledRootfsSource 将报 ARCHIVE_INVALID）。" +
+                    "如需可用 Ubuntu：scripts/fetch_rootfs.sh --arch arm64-v8a"
+            )
+        }
+    }
+}
+
+// release：严格门禁（缺失/指纹不符 = 构建失败）；debug：存在性警告（不阻断迭代）
+tasks.named("preReleaseBuild") { dependsOn("checkBundledRootfs") }
+tasks.named("preBuild") { dependsOn("warnBundledRootfs") }

@@ -57,6 +57,7 @@ import com.apex.agent.update.MirrorSpeedProbe
 import com.apex.agent.update.UpdateCheckResult
 import com.apex.agent.update.UpdateChecker
 import com.apex.agent.update.UpdateDownloader
+import com.apex.agent.update.UpdateTarget
 import com.apex.agent.update.resolveAuto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -175,12 +176,14 @@ internal fun UpdatePanel() {
     }
 
     // ── 发起下载（镜像解析 → URL 改写 → DownloadManager 入队）──────────────
+    // 注意：patch（UpdatePatchAsset）与 full（UpdateAsset）经 [UpdateTarget]
+    // 统一接待 —— 否则 elvis 的公共父类型坍缩为 Any，.url/.sha256 全部失联。
     fun startDownload(usePatch: Boolean) {
         val result = (updateState as? UpdateUiState.Done)?.result
         val manifest = (result as? UpdateCheckResult.Available)?.latest ?: return
         val patch = checker.preferredPatch(manifest, BuildConfig.VERSION_NAME)
         val full = checker.preferredAsset(manifest)
-        val asset = (if (usePatch) patch else null) ?: full ?: return
+        val asset: UpdateTarget? = (if (usePatch) patch else null) ?: full ?: return
         val fileName = asset.url.substringAfterLast('/')
         val title = if (usePatch) {
             "Apex Agent ${manifest.versionName} patch"
@@ -560,65 +563,70 @@ private fun MirrorSelectionDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_about_update_source_title)) },
-        text = Column(
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.verticalScroll(rememberScrollState())
-        ) {
-            Text(
-                stringResource(R.string.settings_about_update_mirror_desc),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline
-            )
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+        // text 必须传 lambda：直接传 Column(...) 调用会得到 Unit，
+        // 导致 AlertDialog 重载解析失败并级联报出 title/confirmButton 处的
+        // 假错误（@Composable invocations can only happen…）。
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    stringResource(R.string.settings_about_update_mirror_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
 
-            val options = listOf(DownloadMirror.AUTO) + DownloadMirror.NODES
-            options.forEach { mirror ->
-                val latency = speeds[mirror]
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelect(mirror) },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = mirror == selected, onClick = { onSelect(mirror) })
-                    Column(Modifier.weight(1f)) {
-                        Text(mirrorLabel(mirror), style = MaterialTheme.typography.bodyMedium)
-                        if (mirror == DownloadMirror.AUTO) {
+                val options = listOf(DownloadMirror.AUTO) + DownloadMirror.NODES
+                options.forEach { mirror ->
+                    val latency = speeds[mirror]
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(mirror) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = mirror == selected, onClick = { onSelect(mirror) })
+                        Column(Modifier.weight(1f)) {
+                            Text(mirrorLabel(mirror), style = MaterialTheme.typography.bodyMedium)
+                            if (mirror == DownloadMirror.AUTO) {
+                                Text(
+                                    stringResource(R.string.settings_about_update_mirror_auto_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                        // 延迟徽章：测速中 spinner 文案 / 毫秒 / 不通
+                        val latencyText = when {
+                            probing && mirror != DownloadMirror.AUTO ->
+                                stringResource(R.string.settings_about_update_speedtesting)
+                            latency != null ->
+                                stringResource(R.string.settings_about_update_ms, latency)
+                            mirror != DownloadMirror.AUTO ->
+                                stringResource(R.string.settings_about_update_unreachable)
+                            else -> ""
+                        }
+                        if (latencyText.isNotEmpty()) {
                             Text(
-                                stringResource(R.string.settings_about_update_mirror_auto_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.outline
+                                latencyText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (mirror == fastest) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline
+                                }
                             )
                         }
-                    }
-                    // 延迟徽章：测速中 spinner 文案 / 毫秒 / 不通
-                    val latencyText = when {
-                        probing && mirror != DownloadMirror.AUTO ->
-                            stringResource(R.string.settings_about_update_speedtesting)
-                        latency != null ->
-                            stringResource(R.string.settings_about_update_ms, latency)
-                        mirror != DownloadMirror.AUTO ->
-                            stringResource(R.string.settings_about_update_unreachable)
-                        else -> ""
-                    }
-                    if (latencyText.isNotEmpty()) {
-                        Text(
-                            latencyText,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (mirror == fastest) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.outline
-                            }
-                        )
-                    }
-                    if (mirror == fastest) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            stringResource(R.string.settings_about_update_fastest),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (mirror == fastest) {
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.settings_about_update_fastest),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }

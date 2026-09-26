@@ -126,13 +126,20 @@ sealed interface UpdateCheckResult {
     data class Failed(val reason: String) : UpdateCheckResult
 }
 
+/** 下载目标统一视图：全量 APK（UpdateAsset）与增量补丁（UpdatePatchAsset）共有的
+ *  定位字段 —— 让 UI 层的下载入口能以单一类型接待两种资产。 */
+interface UpdateTarget {
+    val url: String
+    val sha256: String?
+}
+
 /** 单个发布资产：直链 + 体积 + SHA-256（供下载后校验）。 */
 @Serializable
 data class UpdateAsset(
-    val url: String,
+    override val url: String,
     val sizeBytes: Long = 0L,
-    val sha256: String? = null
-)
+    override val sha256: String? = null
+) : UpdateTarget
 
 /** 下载矩阵：arm64 纯净包 / universal 全 ABI 包。 */
 @Serializable
@@ -145,10 +152,10 @@ data class UpdateDownload(
 @Serializable
 data class UpdatePatchAsset(
     val fromTag: String,
-    val url: String,
+    override val url: String,
     val sizeBytes: Long = 0L,
-    val sha256: String? = null
-)
+    override val sha256: String? = null
+) : UpdateTarget
 
 /** 补丁矩阵：与 [UpdateDownload] 同构的 arm64 / universal 双变体。 */
 @Serializable

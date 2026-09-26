@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.agent
 
+import android.os.SystemClock
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
 import com.apex.agent.core.engine.AgentEvent
@@ -30,20 +31,26 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
     when (event) {
         // ═══ 思考 ═══
         is AgentEvent.ThinkingStart -> {
-            // 新一轮思考：清掉上一轮可能残留的缓冲（防串轮）。
+            // 新一轮思考：清掉上一轮可能残留的缓冲（防串轮），并开始计时（秒数显示）。
             streamBuffers.clearThinking()
-            _uiState.update { it.copy(currentThinking = "") }
+            thinkingStartElapsed = SystemClock.elapsedRealtime()
+            _uiState.update { it.copy(currentThinking = "", currentThinkingStartElapsed = thinkingStartElapsed) }
         }
         is AgentEvent.ThinkingChunk -> {
             streamBuffers.appendThinking(event.text)
         }
         is AgentEvent.ThinkingComplete -> {
-            // 最终 flush：把仍在缓冲中的思考文本刷入 UI 后再收尾。
+            // 最终 flush：把仍在缓冲中的思考文本刷入 UI 后再收尾；实测耗时落盘秒数。
             streamBuffers.flush()
+            val durationMs = if (thinkingStartElapsed > 0) {
+                SystemClock.elapsedRealtime() - thinkingStartElapsed
+            } else 0L
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 state.copy(
-                    messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought),
-                    currentThinking = ""
+                    messages = state.messages + AgentUiMessage.ThinkingMessage(event.fullThought, durationMs),
+                    currentThinking = "",
+                    currentThinkingStartElapsed = 0
                 )
             }
         }
@@ -331,9 +338,11 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
 
         // ═══ 错误/完成 ═══
         is AgentEvent.Error -> {
-            // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂。
+            // 出错时把已流式输出的部分回复落为 isPartial 消息，避免流式气泡悬挂；
+            // 思考计时同步收尾（避免残留 live 计时器）。
             streamBuffers.flush()
             finishActiveBanner()
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 val partial = state.currentResponse
                 state.copy(
@@ -349,6 +358,7 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
                         ),
                     currentResponse = "",
                     currentThinking = "",
+                    currentThinkingStartElapsed = 0,
                     currentStepIndex = -1,
                     isLoading = false
                 )
@@ -386,10 +396,13 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
         }
         is AgentEvent.Aborted -> {
             finishActiveBanner()
+            thinkingStartElapsed = 0
             _uiState.update { state ->
                 state.copy(
                     messages = state.messages + AgentUiMessage.System(str(R.string.chat_aborted)),
                     isLoading = false,
+                    currentThinking = "",
+                    currentThinkingStartElapsed = 0,
                     currentStepIndex = -1
                 )
             }

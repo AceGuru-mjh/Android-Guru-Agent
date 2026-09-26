@@ -183,6 +183,12 @@ private fun ThinkingLevelsTable() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        // 双级思考控制说明（聊天页两控件 = 模型原生强度 + 强制深度思考）。
+        Text(
+            text = stringResource(R.string.mode_guide_thinking_dual_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary
+        )
         // 表头
         ThinkingTableRow(
             level = stringResource(R.string.mode_guide_thinking_col_level),

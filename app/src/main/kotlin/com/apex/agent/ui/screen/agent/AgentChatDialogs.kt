@@ -6,12 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,16 +21,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,10 +41,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.InputType
-import com.apex.agent.core.engine.ThinkingLevel
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.R
 
@@ -94,29 +94,50 @@ internal fun CustomInstructionDialog(
     )
 }
 
-// ═══ 思考深度选择器 ═══
+// ═══ 思考控制（双级 · RikkaHub 式）═══
 
 /**
- * 思考深度选择器（#168 六档 → v1.2 扩为 7 深度档 + AUTO 元档：
- * NONE/LIGHT/STANDARD/DEEP/MAXIMUM/ULTRACODE/APEXCODE/AUTO）。
+ * 双级思考控制菜单（替换旧版六档单一选择器）。
  *
- * @param adaptiveDecision AUTO 档最近一次引擎侧自适应选档理由
- *   （"LEVEL: 因子→评分→档位"；仅 AUTO 选中且有决策时展示）。
+ * 第一级「模型思考强度」：模型**原生**推理参数（reasoning_effort /
+ * thinking.budget_tokens / enable_thinking，按 Provider 差异化下发）——
+ * 仅对支持思考模式的模型生效，档位持久化到默认 ModelProfile。
+ * 第二级「强制深度思考」：与模型原生能力无关的**提示词层强制**——引擎
+ * ThinkingLevel 钉 MAXIMUM（七步 ToT + 工具自检 + 终检清单），对任何模型
+ * 生效；两级互不干涉，可叠加（原生深思考 + 提示词强制 = 最深推理）。
  */
 @Composable
-internal fun ThinkingLevelSelector(
-    current: ThinkingLevel,
-    adaptiveDecision: String? = null,
-    onSelect: (ThinkingLevel) -> Unit
+internal fun ThinkingControlMenu(
+    reasoningEffort: ReasoningEffort,
+    forceDeepThinking: Boolean,
+    onReasoningEffortSelect: (ReasoningEffort) -> Unit,
+    onForceDeepThinkingChange: (Boolean) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val thinkingMenuCd = stringResource(R.string.chat_cd_thinking_menu)
 
     Box {
         AssistChip(
             onClick = { expanded = true },
-            label = { Text("💭 ${current.name}") },
+            label = {
+                Text(
+                    text = when {
+                        forceDeepThinking -> stringResource(R.string.chat_thinking_chip_forced)
+                        reasoningEffort != ReasoningEffort.NONE ->
+                            stringResource(R.string.chat_thinking_chip_effort, reasoningEffortLabelShort(reasoningEffort))
+                        else -> stringResource(R.string.chat_thinking_chip_default)
+                    },
+                    maxLines = 1
+                )
+            },
             leadingIcon = {
-                Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(
+                    Icons.Default.Psychology,
+                    contentDescription = thinkingMenuCd,
+                    modifier = Modifier.size(16.dp),
+                    tint = if (forceDeepThinking) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.primary
+                )
             }
         )
 
@@ -124,99 +145,85 @@ internal fun ThinkingLevelSelector(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            ThinkingLevel.entries.forEach { level ->
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text("${level.name} - " + thinkingLevelDescription(level))
-                            // AUTO：展示引擎侧最近一次自适应选档理由（可解释性）
-                            if (level == ThinkingLevel.AUTO && !adaptiveDecision.isNullOrBlank()) {
-                                Text(
-                                    text = adaptiveDecision,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
-                    onClick = {
-                        onSelect(level)
-                        expanded = false
-                    },
-                    trailingIcon = {
-                        if (level == current) {
-                            Icon(Icons.Default.Check, contentDescription = null)
-                        }
-                    }
+            Column(
+                modifier = Modifier
+                    .width(300.dp)
+                    .padding(horizontal = 4.dp)
+            ) {
+                // ── 第一级：模型思考强度（API 原生参数）──
+                Text(
+                    text = stringResource(R.string.chat_thinking_effort_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
+                Text(
+                    text = stringResource(R.string.chat_thinking_effort_desc),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    ReasoningEffort.entries.forEach { effort ->
+                        FilterChip(
+                            selected = effort == reasoningEffort,
+                            onClick = { onReasoningEffortSelect(effort) },
+                            label = { Text(reasoningEffortLabelShort(effort), style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = if (effort == reasoningEffort) {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            } else null
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+                HorizontalDivider()
+
+                // ── 第二级：强制深度思考（提示词层强制）──
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onForceDeepThinkingChange(!forceDeepThinking) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.chat_thinking_force_title),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = stringResource(R.string.chat_thinking_force_desc),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = forceDeepThinking,
+                        onCheckedChange = { onForceDeepThinkingChange(it) }
+                    )
+                }
             }
         }
     }
 }
 
-/**
- * 思考深度描述（UI 层本地化映射；#168 六档 + v1.2 新两档文案 =
- * ThinkingProfile.uiDescription 的 i18n 版，含执行策略差异说明；
- * core 枚举 description 保持引擎侧不动。
- *
- * 注：既有档位用 thinking_level_* 键（#168 批次）；ULTRACODE/APEXCODE 用
- * chat_thinking_* 键（v1.2 批次，主控指定的键名）——两批键名并存但各自
- * 两 locale 对称，不影响编译与回退。
- */
+/** 模型原生思考强度短标签（菜单内 chip 用，窄空间友好）。 */
 @Composable
-private fun thinkingLevelDescription(level: ThinkingLevel): String = when (level) {
-    ThinkingLevel.NONE -> stringResource(R.string.thinking_level_none_desc)
-    ThinkingLevel.LIGHT -> stringResource(R.string.thinking_level_light_desc)
-    ThinkingLevel.STANDARD -> stringResource(R.string.thinking_level_standard_desc)
-    ThinkingLevel.DEEP -> stringResource(R.string.thinking_level_deep_desc)
-    ThinkingLevel.MAXIMUM -> stringResource(R.string.thinking_level_maximum_desc)
-    ThinkingLevel.ULTRACODE -> stringResource(R.string.chat_thinking_ultracode_desc)
-    ThinkingLevel.APEXCODE -> stringResource(R.string.chat_thinking_apexcode_desc)
-    ThinkingLevel.AUTO -> stringResource(R.string.thinking_level_auto_desc)
-}
-
-/**
- * 模型原生思考强度显示名（UI 层本地化；ReasoningEffort.displayName 为 core 侧文案）。
- */
-@Composable
-private fun reasoningEffortLabel(effort: ReasoningEffort): String = when (effort) {
+private fun reasoningEffortLabelShort(effort: ReasoningEffort): String = when (effort) {
     ReasoningEffort.NONE -> stringResource(R.string.chat_effort_none)
     ReasoningEffort.LOW -> stringResource(R.string.chat_effort_low)
     ReasoningEffort.MEDIUM -> stringResource(R.string.chat_effort_medium)
     ReasoningEffort.HIGH -> stringResource(R.string.chat_effort_high)
     ReasoningEffort.MAX -> stringResource(R.string.chat_effort_max)
-}
-
-/**
- * 模型原生思考强度选择（内嵌版）。
- *
- * v2 布局重构：原先独立占一整行（fillMaxWidth + 自带横滚），现在内嵌到
- * 输入面板的「工具栏行」尾部（与 5 个功能按钮同一行，由父 Row 统一横向滚动），
- * 为下方输入行腾出整行宽度 —— 修复窄屏设备上输入框被按钮挤压到不足 70dp、
- * 占位文字逐字换行成竖排、输入框被撑成"多行大框"的问题。
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun RowScope.ReasoningEffortChips(
-    current: ReasoningEffort,
-    onSelect: (ReasoningEffort) -> Unit
-) {
-    Text(
-        text = stringResource(R.string.chat_reasoning_effort_label),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.align(Alignment.CenterVertically)
-    )
-    ReasoningEffort.entries.forEach { effort ->
-        FilterChip(
-            selected = effort == current,
-            onClick = { onSelect(effort) },
-            label = { Text(reasoningEffortLabel(effort), style = MaterialTheme.typography.labelSmall) },
-            leadingIcon = if (effort == current) {
-                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-            } else null
-        )
-    }
 }
 
 @Composable

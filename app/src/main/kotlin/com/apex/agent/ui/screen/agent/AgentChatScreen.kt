@@ -72,6 +72,7 @@ import com.apex.agent.ui.component.AttachmentPreviewBar
 import com.apex.agent.ui.component.FileOpener
 import com.apex.agent.ui.component.GithubIconButton
 import com.apex.agent.ui.component.GithubTokenDialog
+import com.apex.agent.ui.component.HtmlPreviewDialog
 import com.apex.agent.ui.component.ImageLightbox
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
@@ -138,6 +139,9 @@ fun AgentChatScreen(
 
     // Lightbox 状态：点击附件图片时展开全屏预览
     var lightboxImage by remember { mutableStateOf<Any?>(null) }
+
+    // HTML 产物预览状态：工具卡「预览」钮打开应用内 WebView 对话框
+    var htmlPreviewPath by remember { mutableStateOf<String?>(null) }
 
     // ═══ T76：任务状态卡 + 崩溃恢复横幅状态 ═══
     val taskState by viewModel.taskState.collectAsStateWithLifecycle()
@@ -318,11 +322,13 @@ fun AgentChatScreen(
                     )
                 }
 
-                // 思考深度（#168 六档：AUTO 自适应 + 决策理由展示）
-                ThinkingLevelSelector(
-                    current = uiState.thinkingLevel,
-                    adaptiveDecision = viewModel.lastAdaptiveDecision.collectAsStateWithLifecycle().value,
-                    onSelect = { viewModel.setThinkingLevel(it) }
+                // ═══ 双级思考控制（RikkaHub 式）：第一级 = 模型原生 reasoning effort（API 参数），
+                // 第二级 = 强制深度思考（提示词层，任何模型生效）═══
+                ThinkingControlMenu(
+                    reasoningEffort = uiState.reasoningEffort,
+                    forceDeepThinking = uiState.forceDeepThinking,
+                    onReasoningEffortSelect = { viewModel.setReasoningEffort(it) },
+                    onForceDeepThinkingChange = { viewModel.setForceDeepThinking(it) }
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -420,13 +426,21 @@ fun AgentChatScreen(
                         att.localPath?.let { FileOpener.openFile(context, it, att.mimeType) }
                     },
                     // 多模态输出：markdown 生成图片（URL / data URI）→ Lightbox
-                    onMarkdownImageClick = { url -> lightboxImage = url }
+                    onMarkdownImageClick = { url -> lightboxImage = url },
+                    // HTML 产物：工具卡预览钮 → 应用内 WebView 对话框
+                    onPreviewHtml = { path -> htmlPreviewPath = path }
                 )
             }
 
-            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）
+            // 流式思考中（UX-4：固定 key —— 列表增删时保留 ThinkingBubble 展开态）；
+            // 传入 elapsedRealtime 起点 → 头部实时秒数计时。
             if (uiState.currentThinking.isNotEmpty()) {
-                item(key = "streaming-thinking") { ThinkingBubble(uiState.currentThinking) }
+                item(key = "streaming-thinking") {
+                    ThinkingBubble(
+                        text = uiState.currentThinking,
+                        liveStartElapsed = uiState.currentThinkingStartElapsed
+                    )
+                }
             }
 
             // 流式回复中（多模态输出：生成图片直接可点开 Lightbox，与完成态一致）
@@ -654,12 +668,9 @@ fun AgentChatScreen(
                         onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
                         onConfigure = onOpenSettings
                     )
-
-                    // ═══ 模型原生思考强度 chips（内嵌同行，超宽由本行横滚承接）═══
-                    ReasoningEffortChips(
-                        current = uiState.reasoningEffort,
-                        onSelect = { viewModel.setReasoningEffort(it) }
-                    )
+                    // 注：模型原生思考强度已并入顶栏「思考控制」菜单（ThinkingControlMenu
+                    // 第一级），不再在输入工具栏重复占位 —— 单一控制点，避免两处 UI
+                    // 控同一状态造成的困惑与行宽浪费。
                 }
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -763,6 +774,14 @@ fun AgentChatScreen(
         ImageLightbox(
             imageModel = lightboxImage!!,
             onDismiss = { lightboxImage = null }
+        )
+    }
+
+    // ═══ HTML 产物应用内预览（Agent 写出的 .html → WebView 即时渲染）═══
+    htmlPreviewPath?.let { path ->
+        HtmlPreviewDialog(
+            filePath = path,
+            onDismiss = { htmlPreviewPath = null }
         )
     }
 

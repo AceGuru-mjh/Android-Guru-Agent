@@ -296,4 +296,20 @@
     <string name="chat_format_custom">自定义 Schema</string>
     <string name="chat_llm_not_configured">请先在设置中配置API（Base URL + API Key + Model）</string>
     <string name="chat_llm_not_configured_short">请先在设置中配置API</string>
+
+    <!-- ═══ 双级思考控制（模型原生强度 + 强制深度思考）═══ -->
+    <string name="chat_cd_thinking_menu">思考控制</string>
+    <string name="chat_thinking_chip_default">💭 思考</string>
+    <string name="chat_thinking_chip_effort">💭 %1$s</string>
+    <string name="chat_thinking_chip_forced">🌀 强制深度思考</string>
+    <string name="chat_thinking_effort_title">模型思考强度（API 原生）</string>
+    <string name="chat_thinking_effort_desc">以模型原生参数下发（reasoning_effort / thinking 预算），仅带思考模式的模型响应；其它模型忽略，无副作用。</string>
+    <string name="chat_thinking_force_title">强制深度思考</string>
+    <string name="chat_thinking_force_desc">提示词层强制，对任何模型生效：注入穷举式思维树推理框架 + 工具失败自检 + 终检清单。可与上方强度叠加。</string>
+
+    <!-- ═══ HTML 产物应用内预览 ═══ -->
+    <string name="chat_cd_preview_html">预览 HTML</string>
+    <string name="html_preview_refresh">重新加载</string>
+    <string name="html_preview_close">关闭预览</string>
+    <string name="html_preview_load_failed">文件读取失败</string>
 </resources>

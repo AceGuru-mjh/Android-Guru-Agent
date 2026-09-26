@@ -78,6 +78,7 @@
     <!-- ═══ Thinking levels quick table (same sheet, data from ThinkingProfile) ═══ -->
     <string name="mode_guide_thinking_title">Thinking levels at a glance</string>
     <string name="mode_guide_thinking_subtitle">Execution profiles per level (iterations scale / verification / tool-output budget) — details in the mode guide docs</string>
+    <string name="mode_guide_thinking_dual_note">Chat input exposes TWO independent controls: model-native reasoning effort (API params, thinking-capable models only) and the Force-deep-thinking switch (prompt-level, any model — pins the level at MAXIMUM). The table below is the engine-side profile reference.</string>
     <string name="mode_guide_thinking_col_level">Level</string>
     <string name="mode_guide_thinking_col_iters">Iters</string>
     <string name="mode_guide_thinking_col_verify">Verification</string>

@@ -72,7 +72,8 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **快速跳转**
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/📦_get_APK-CI_artifacts-2088FF?logo=githubactions&logoColor=white" alt="Get APK from CI"/></a>
+<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest"><img src="https://img.shields.io/badge/📦_下载_APK-发布仓库-2ea44f?logo=github&logoColor=white" alt="Download APK from Release Repo"/></a>
+<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/🧪_CI_artifacts-debug_构建-2088FF?logo=githubactions&logoColor=white" alt="Get debug APK from CI"/></a>
 <a href="#quickstart"><img src="https://img.shields.io/badge/🚀_quick_start-5_分钟-1F6FEB" alt="Quick Start"/></a>
 <a href="#docs-index"><img src="https://img.shields.io/badge/📚_docs-deep_dives-0077B5" alt="Docs"/></a>
 <a href="#faq"><img src="https://img.shields.io/badge/❓_FAQ-6_问答-8B5CF6" alt="FAQ"/></a>
@@ -207,6 +208,8 @@ Root → Shizuku → 沙箱 Shell 自动降级<br/>无 Root 也能执行特权�
 | 🛰️ | **BYO-LLM** | OpenAI 兼容协议 + DeepSeek / OpenRouter / Ollama / 自定义端点预设；多模型运行时按角色路由（含图片自动走 VISION）；原生支持 `reasoning_content` 思维链（R1 / Qwen3-thinking / o 系列） |
 | ⚡ | **三级权限链** | Root → Shizuku → 普通沙箱 shell 自动降级选择，无 Root 设备也能执行特权命令 |
 | 🧩 | **全插件化** | AIDL 跨进程插件 SDK + 技能市场（工具/技能/MCP/插件/连接器五个货架）+ 40+ 可安装技能模板 |
+| 💭 | **七档思考系统（v1.2）** | NONE→ULTRACODE→APEXCODE 七深度档 + AUTO 逐轮自适应；档位驱动提示词 / 模型参数 / 迭代倍率 / 压缩阈值 / 输出预算**全执行画像**，Agent 与 Coding 双模式可用，档位效能用历史数据说话 |
+| 🕓 | **长任务中心（v1.2）** | 超阈值运行自动留档；检查点时间线回看（轮次 / 相对时间 / todo 完成度）+ 续跑不从头、复制带上下文重跑、同目标运行对比、8 模板一键启动 |
 
 > [!IMPORTANT]
 > **这一切跑在一台普通 Android 手机上。** 不需要服务器，不需要 PC 伴侣，
@@ -460,12 +463,30 @@ stateDiagram-v2
 | **Assist** | 遇到多选（方案/目标/偏好）强制弹出选项菜单人工决策 | 不擅自猜测的谨慎场景 |
 | **Custom** | 附加用户自定义指令（输出格式/语言/行为约束），持久化保存 | 个性化定制 |
 
-### 双层思考深度
+### 双层思考深度（v1.2：7 档 + AUTO）
 
 | 层 | 控制点 | 档位 | 效果 |
 |----|--------|------|------|
-| **提示词思考** | `ThinkingLevel` | NONE / LIGHT / STANDARD / DEEP / MAXIMUM | 系统提示注入推理指令强度 |
+| **提示词思考** | `ThinkingLevel` | NONE / LIGHT / STANDARD / DEEP / MAXIMUM / ULTRACODE / APEXCODE + AUTO 元档 | 系统提示注入推理指令强度；v1.2 起档位同时驱动**执行画像**（迭代倍率 / 工具自检 / 终检清单 / 压缩阈值 / 工具输出预算，`ThinkingProfile` 静态表单源） |
 | **原生思考** | `ReasoningEffort` | NONE / LOW / MEDIUM / HIGH / MAX | 直接写 `reasoning_effort` 请求参数（o 系列 / R1 / Qwen3-thinking），MAX 档同时抬高 `max_completion_tokens` 给思维链留空间 |
+
+**v1.2 七档思考阶梯**（Agent 聊天页与 Code 屏选择器**双模式可用**；Code 屏另有「思考档位指南」弹层摊开全部画像 + 档位效能统计）：
+
+| 档位 | 定位 | budget | 迭代倍率 | 输出预算 |
+|------|------|--------|----------|----------|
+| NONE | 直接执行不推理 | 0 | ×0.8 | 6000 |
+| LIGHT | 1-2 句简思 | 256 | ×0.9 | 7000 |
+| STANDARD | CoT 三步 | 1024 | ×1.0 | 8000 |
+| DEEP | 多路径 5 步 + 工具失败自检 | 4096 | ×1.2 | 9000 |
+| MAXIMUM | ToT 7 步 + 终检三问清单 | 16384 | ×1.5 | 10000 |
+| ULTRACODE | 编码闭环 7 步（不变量→候选改法→风险排序→最小修改→即时验证） | 32768 | ×2.0 | 12000 |
+| APEXCODE | 架构级穷举 + 对抗性自审 + 全量验证矩阵 + 证据链汇报 | 65536 | ×3.0 | 16000 |
+| AUTO | 元档：按任务复杂度逐轮自适应（可升至 ULTRACODE，**永不自动选 APEXCODE**） | — | — | — |
+
+Coding 模式在通用画像之上还有一层**编码特化指令**（`CodeThinkingPrompts`：
+一读一改 / 标准编码循环 / 改动集思维 / 不变量守护 / 依赖地图→回归扫描 /
+影响半径测绘→证据链汇报）——「怎么想」与「编码时具体怎么想」三层分工，
+互不重复注入。
 
 两层**正交**：可以 NONE+MAX（纯模型原生思考）也可以 DEEP+NONE（纯提示引导）。
 原生思维链通过 `LlmStreamChunk.reasoningContent` 透传为 `ThinkingChunk` 事件，
@@ -523,6 +544,22 @@ v3 执行硬化 + v4 目录 / 技能注入 / MCP 一等工具 / 插件 / 多模�
 - **网络搜索 MCP 本地运行** —— `BuiltinSearchMcpTransport` 把成熟搜索栈
   （DuckDuckGo/Bing 三级回退 + 智能正文提取）包装为进程内 MCP 服务器，
   Agent 与 Coding 两模式共享 `mcp__search__web_search` 一等工具。
+
+### 🕓 长任务中心（v1.2）
+
+跑完即散是深度任务的死穴：几十轮迭代的重构 / 修 Bug / 评审一旦会话清理
+就全部蒸发，想「再来一遍」只能从头描述。Code 屏工作区条的「长任务」入口
+把达到规模阈值（迭代 ≥8 / 工具 ≥12 / 时长 ≥120s / 文件 ≥3，四维任一达标，
+`LongTaskDetector`）的运行**自动留档**，并在其上提供六类顶级操作：
+
+| 能力 | 说明 |
+|------|------|
+| 🕓 **检查点时间线** | 运行中每 5 轮 / 60s 拍一张廉价快照（≤10 个，超限丢最旧）；展开记录卡即是时间线渲染——轮次徽标 + 相对时间（+45s）+ 累计计数（工具 / 文件）+ monospace 对话摘要 + todo 完成度（☑3 ☐2），上次卡在哪、绕了哪些弯一眼可见 |
+| 📋 **复制任务** | 携带上次的结论再跑：上下文 / todo 快照 / 文件清单三开关 + 档位覆盖（用 ULTRACODE 重跑 DEEP 任务做对比）+ 跨工作区复制 + 复制链谱系（`parentTaskId` 溯源整条重跑历史） |
+| ⏯️ **检查点续跑** | 不从头重跑——从指定检查点（或最后检查点）接着干，上次的弯路不重走；无检查点时诚实回退为带上下文重跑 |
+| 🔄 **运行对比** | 同 parent 的兄弟记录天然是「同一目标的不同尝试」，`LongTaskDiff` 产出迭代 / 工具 / 时长 / 文件集的结构化对比报告 |
+| 🗂️ **8 内置模板** | 重构 / 修 Bug / 新功能 / 评审 / 测试 / 文档 / 性能 / 迁移——应用推荐思考档位 + 预置 todo 骨架，一键启动 |
+| 📊 **档位效能** | 工作区 × 思考档位的长任务聚合统计（runs / 成功率 / 平均迭代 / 工具 / 时长）——用自己的历史数据选档，而非凭感觉 |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 
@@ -808,9 +845,12 @@ chmod +x gradlew
 ```
 
 > [!TIP]
-> 没有本机 Gradle？CI 的 `app-debug-apk` 工件每次都产出 debug APK（保留
-> 14 天），可直接下载安装；或参考 `.github/workflows/ci.yml` 的
-> `Configure pre-installed Android SDK` 步骤配置环境。
+> 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest)
+> （arm64 / universal 两个变体；**PR 合并进 main 即自动构建发布**，无需打 tag）。
+> 已装用户可在 App「设置 → 关于 → 检查更新」直接升级 —— 支持增量补丁
+> （~14MB vs 全量 300MB+）与高速节点/镜像加速下载。
+> 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
+> `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`。
 
@@ -949,6 +989,8 @@ Android-Guru-Agent/
 - [x] 终端运行时 2.0（Ubuntu rootfs + PRoot + 原生 PTY + VT100）
 - [x] 多模型运行时（角色路由 + VISION）
 - [x] 浏览器智能体（DOM 级 + 稳定 ref）
+- [x] v1.2 七档思考系统（NONE→ULTRACODE→APEXCODE + AUTO 自适应，双模式可用 + 档位效能统计）
+- [x] v1.2 长任务中心（自动留档 / 检查点时间线与续跑 / 复制对比 / 8 模板）
 - [ ] 宏技能语义检索（嵌入索引，跨 App 近邻复用 —— Voyager 启发）
 - [ ] 记忆软删除与双时间线（Zep/Graphiti 启发）
 - [ ] 编排器并行子代理扇出（Claude Code 启发）
@@ -976,6 +1018,14 @@ Android-Guru-Agent/
 | [docs/pipeline-output-optimization.md](docs/pipeline-output-optimization.md) | 流水线输出优化记录 |
 | [docs/PERF.md](docs/PERF.md) | 性能笔记 |
 | [docs/MIGRATION_REPORT.md](docs/MIGRATION_REPORT.md) | 迁移报告 |
+| [docs/operit-rikkahub-comparison.md](docs/operit-rikkahub-comparison.md) | **P9x 系列调研**：operit vs rikkahub 全面对比（架构/执行循环/Key 管理/记忆/角色/分支/提示词/搜索/终端/生态/质量 11 域），产出 P90-P96 七项落地 |
+| [docs/key-pool.md](docs/key-pool.md) | **P90 API Key 池**：三态门控/四轮换模式/指数退避/请求层换 Key 重试环（对标 operit MultiApiKeyProvider + rikka LruKeyRoulette） |
+| [docs/prompt-variables.md](docs/prompt-variables.md) | **P91 提示词变量**：19 内置变量/转义与默认值语法/递归环安全（对标 rikka PlaceholderTransformer） |
+| [docs/prompt-template-library.md](docs/prompt-template-library.md) | **P92 提示词模板库**：10 内置模板/四级变量合并/原子持久化/导入导出（对标 operit 提示词库） |
+| [docs/message-branching.md](docs/message-branching.md) | **P93 消息分支**：MessageBranchNode 候选数组模型/九操作/树存储与迁移（对标 rikka MessageNode） |
+| [docs/search-providers.md](docs/search-providers.md) | **P94 搜索供应商框架**：Tavily/Brave/Exa/SearXNG/DDG/Bing 六供应商/三阶段回退/缓存限流（对标 rikka 19 家搜索抽象） |
+| [docs/persona-cards.md](docs/persona-cards.md) | **P95 角色卡**：SillyTavern V1/V2/PNG tEXt 导入/Lorebook 触发（对标 operit 角色卡 + rikka AssistantImporter） |
+| [docs/provider-share.md](docs/provider-share.md) | **P96 供应商分享**：四层洋葱 URI/Key 脱敏/GZIP/QR 版本估算（对标 rikka QR 分享） |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 

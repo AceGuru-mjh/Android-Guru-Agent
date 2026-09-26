@@ -431,6 +431,29 @@ data class AgentSettings(
      * AgentChatViewModel init 恢复（patchConfig 运行时生效，无需重启）。
      */
     val thinkingLevelOverride: String = "",
+    /**
+     * 双级思考控制（RikkaHub 式）第二级：强制深度思考。
+     *
+     * 与第一级（模型原生 reasoningEffort，存 ModelProfile）完全解耦：
+     * - 第一级只走 API 原生参数（reasoning_effort / thinking.budget_tokens /
+     *   enable_thinking），仅对支持思考模式的模型生效；
+     * - 本开关为 true 时，引擎侧把 ThinkingLevel 钉在 MAXIMUM —— 通过
+     *   system prompt 注入七步 Tree-of-Thoughts 深度推理框架 + 工具自检 +
+     *   终检清单（提示词层强制，对**任何**模型生效，包括不支持原生思考
+     *   参数的模型），并同步迭代上限 ×1.5 / 更大工具输出预算。
+     *
+     * false = 引擎回退 STANDARD 三步 CoT（默认）。
+     */
+    val forceDeepThinking: Boolean = false,
+    /**
+     * v1.2 Coding 模式思考档位（持久化，与聊天页 thinkingLevelOverride 互不
+     * 干扰——两模式各自记忆）："" = 未设置（回退 STANDARD）；"auto" = AUTO
+     * 自适应；其余 = ThinkingLevel 枚举名小写
+     * （none/light/standard/deep/maximum/ultracode/apexcode）。
+     * Coding 页选择器写入，CodeViewModel init 恢复（updateThinkingLevel
+     * 双通道运行时生效，无需重启）。
+     */
+    val codeThinkingLevel: String = "",
     val maxIterations: Int = 20,
     val keepAlive: Boolean = true,
 
@@ -478,7 +501,8 @@ data class AgentSettings(
     val themeMode: String = "system",         // system | dark | light
     val dynamicColor: Boolean = false,
     // 预设主题配色（mint | amber | coral | violet | ocean | rose | forest |
-    // cyan | sunset | gold | crimson）；Dynamic Color 开启时被壁纸取色覆盖。
+    // cyan | sunset | gold | crimson | lavender | magenta | lime | sakura |
+    // matcha | peach | plum）；Dynamic Color 开启时被壁纸取色覆盖。
     // 见 ui/theme/ThemePalettes.kt。
     val accentPalette: String = "mint",
     val fontScale: Float = 1.0f,              // 0.8..1.4

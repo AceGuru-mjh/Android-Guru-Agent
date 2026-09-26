@@ -25,8 +25,16 @@ option(APEX_VT_BUILD_JNI "Build the Android JNI bridge (libvt_native.so)"
 add_library(apex-vt-core STATIC
   src/vt_style.cpp
   src/vt_width.cpp
+  src/vt_unicode_data.cpp
+  src/vt_grapheme.cpp
   src/vt_screen.cpp
   src/vt_engine.cpp
+  src/vt_input.cpp
+  src/vt_mouse.cpp
+  src/vt_lines.cpp
+  src/vt_search.cpp
+  src/vt_reflow.cpp
+  src/vt_session.cpp
 )
 target_include_directories(apex-vt-core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -58,6 +66,14 @@ if(APEX_VT_BUILD_TESTS)
     tests/test_parser.cpp
     tests/test_screen.cpp
     tests/test_engine.cpp
+    tests/test_engine_ext.cpp
+    tests/test_unicode.cpp
+    tests/test_input.cpp
+    tests/test_mouse.cpp
+    tests/test_lines.cpp
+    tests/test_search.cpp
+    tests/test_reflow.cpp
+    tests/test_session.cpp
     tests/test_perf.cpp
   )
   target_link_libraries(vt_tests PRIVATE apex-vt-core)

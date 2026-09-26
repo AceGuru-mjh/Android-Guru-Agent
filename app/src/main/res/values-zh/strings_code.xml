@@ -79,4 +79,81 @@
     <string name="code_rules_project_status_no_workspace">无工作区——请先在 Code 屏创建或选择工作区</string>
     <string name="code_rules_project_create">创建模板</string>
     <string name="code_rules_section_note">优先级：项目规则（AGENTS.md）＞ 全局规则 ＞ 一般偏好；均低于安全与权限约束</string>
+
+    <!-- ═══ v1.2 七档思考系统（coding 模式专属文案；ULTRACODE/APEXCODE 与聊天页共享键） ═══ -->
+    <string name="code_thinking_selector_title">思考深度（7 档 + 自适应）</string>
+    <string name="code_thinking_none_desc">直接动手：跳过推理，快进快出（迭代×0.8）</string>
+    <string name="code_thinking_light_desc">一读一改：扫一眼目标处就改，省 token 的轻量推理</string>
+    <string name="code_thinking_standard_desc">标准编码循环：读→改→验→回读，diff 最小化</string>
+    <string name="code_thinking_deep_desc">改动集思维：先建改动清单再动手，每处改动关联验证方式</string>
+    <string name="code_thinking_maximum_desc">不变量守护：识别不变量与连锁影响，改后全链路核对</string>
+    <string name="code_thinking_auto_desc">自适应：引擎按任务复杂度逐轮选档（编码纪律基线：DEEP）</string>
+
+    <!-- v1.2 思考档位指南（CodeThinkingGuideSheet） -->
+    <string name="code_thinking_guide_title">思考档位指南</string>
+    <string name="code_thinking_guide_subtitle">7 个深度档（NONE 一路到 APEXCODE）+ AUTO 元档逐轮自适应；换档同时改提示词、模型参数与执行策略</string>
+    <string name="code_thinking_guide_table_title">档位阶梯总表</string>
+    <string name="code_thinking_guide_col_level">档位</string>
+    <string name="code_thinking_guide_col_budget">budget</string>
+    <string name="code_thinking_guide_col_effort">effort</string>
+    <string name="code_thinking_guide_col_iters">迭代</string>
+    <string name="code_thinking_guide_col_output">输出</string>
+    <string name="code_thinking_guide_auto_row">跟随</string>
+    <string name="code_thinking_guide_tap_hint">点击任意档位卡片可直接切换</string>
+    <string name="code_thinking_guide_current_badge">当前</string>
+    <string name="code_thinking_guide_coding_view">编码视角</string>
+    <string name="code_thinking_guide_footer_linkage">档位联动的不只是提示词：迭代上限、压缩阈值与工具输出预算都随档位缩放（数值见上方总表）。</string>
+    <string name="code_thinking_guide_footer_apex">APEXCODE 仅手动可选：AUTO 选档永不触及，token 成本也是全梯度天花板。</string>
+
+    <!-- ═══ v1.2 长任务中心 ═══ -->
+    <string name="code_longtask_open">长任务中心</string>
+    <string name="code_longtask_sheet_title">长任务</string>
+    <string name="code_longtask_tab_tasks">任务记录</string>
+    <string name="code_longtask_tab_templates">任务模板</string>
+    <string name="code_longtask_empty">还没有长任务记录</string>
+    <string name="code_longtask_empty_hint">超过阈值的编码运行（迭代/工具/时长/文件）会自动留档</string>
+    <string name="code_longtask_status_completed">已完成</string>
+    <string name="code_longtask_status_failed">失败</string>
+    <string name="code_longtask_status_aborted">已中止</string>
+    <string name="code_longtask_status_running">运行中</string>
+    <string name="code_longtask_copies_fmt">已复制 x%1$d</string>
+    <string name="code_longtask_stats_fmt">%1$d 轮 · %2$d 工具 · %3$s · %4$d 文件</string>
+    <string name="code_longtask_goal_label">任务目标</string>
+    <string name="code_longtask_files_header">改动文件（%1$d）</string>
+    <string name="code_longtask_todos_header">todo 快照</string>
+    <string name="code_longtask_checkpoints_fmt">检查点 x%1$d（每 5 轮 / 60s）</string>
+    <string name="code_longtask_error_label">错误：</string>
+    <string name="code_longtask_copy">复制任务</string>
+    <string name="code_longtask_relaunch">重跑</string>
+    <string name="code_longtask_compare">对比上次</string>
+    <string name="code_longtask_delete">删除</string>
+    <string name="code_longtask_delete_confirm_fmt">删除任务记录「%1$s」？此操作不可恢复。</string>
+    <string name="code_longtask_confirm">确认</string>
+    <string name="code_longtask_cancel">取消</string>
+    <string name="code_longtask_copy_dialog_title">复制任务选项</string>
+    <string name="code_longtask_option_conversation">携带上次运行上下文</string>
+    <string name="code_longtask_option_todos">携带 todo 快照</string>
+    <string name="code_longtask_option_files">携带文件清单</string>
+    <string name="code_longtask_option_relaunch">复制后立即重跑</string>
+    <string name="code_longtask_option_title">新标题（可选）</string>
+    <string name="code_longtask_thinking_current_fmt">思考档位：%1$s</string>
+    <string name="code_longtask_thinking_follow">沿用源档位</string>
+    <string name="code_longtask_template_start">开始任务</string>
+    <string name="code_longtask_template_level_fmt">推荐档位：%1$s</string>
+    <string name="code_longtask_tab_stats">档位效能</string>
+    <string name="code_longtask_filter_all">全部</string>
+    <string name="code_longtask_resume">续跑</string>
+    <string name="code_longtask_resume_latest">从最后检查点续跑</string>
+    <string name="code_longtask_resume_at_fmt">从第 %1$d 轮检查点续跑</string>
+    <string name="code_longtask_resume_fallback">无检查点——带上下文重跑</string>
+    <string name="code_longtask_stats_empty">暂无档位效能数据</string>
+    <string name="code_longtask_stats_empty_hint">长任务留档后按档位自动聚合统计</string>
+    <string name="code_longtask_stats_runs_fmt">%1$d 次运行</string>
+    <string name="code_longtask_stats_row_fmt">成功率 %1$d%% · 平均 %2$d 轮 · %3$d 工具 · %4$s</string>
+
+    <!-- v1.2 检查点时间线（CodeLongTaskSheet 展开区） -->
+    <string name="code_longtask_cp_round_fmt">第 %1$d 轮</string>
+    <string name="code_longtask_cp_counts_fmt">%1$d 工具 · %2$d 文件</string>
+    <string name="code_longtask_cp_todos_fmt">☑%1$d ☐%2$d</string>
+    <string name="code_thinking_guide_open">查看档位指南</string>
 </resources>

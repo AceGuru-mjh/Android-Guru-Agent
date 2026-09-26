@@ -10,11 +10,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #168 思考档位控制器测试。
+ * #168 思考档位控制器测试 + v1.2 新档接线用例。
  *
  * 覆盖：AUTO 选档透传（决策/理由/生效档位）、postToolCheckPrompt 各档行为、
  * 工具计数与滑窗（iteration==1 重置 / 深水区 / 错误恢复信号）、
- * finalSelfCheckPrompt 各档行为、resolve 系列纯函数。
+ * finalSelfCheckPrompt 各档行为（含 APEXCODE 五问清单切换）、resolve 系列
+ * 纯函数；v1.2 新增：ULTRACODE/APEXCODE 非 AUTO 直通路径、新档画像参数
+ * 解析（迭代倍率 ×2.0/×3.0、压缩 0.9 更晚压缩）。
  */
 class ThinkingModeControllerTest {
 
@@ -159,6 +161,73 @@ class ThinkingModeControllerTest {
         assertTrue(checklist!!.contains("Goal"))
         assertTrue(checklist.contains("Side effects"))
         assertTrue(checklist.contains("Omissions"))
+    }
+
+    // ── v1.2 新档：ULTRACODE / APEXCODE 非 AUTO 直通路径 ──────
+
+    @Test
+    fun `ultracode config returns static profile without adaptive decision`() {
+        val c = ThinkingModeController()
+        val profile = c.onIterationStart(config(ThinkingLevel.ULTRACODE), 1)
+        // 非 AUTO 路径：不走选档器，直接返回静态画像
+        assertEquals(ThinkingLevel.ULTRACODE, profile.level)
+        assertEquals(32768, profile.thinkingBudget)
+        assertEquals("MAX", profile.reasoningEffortName)
+        assertEquals(2.0f, profile.maxIterationsScale, 0.0001f)
+        assertNull(c.lastDecision)
+        assertNull(profile.decisionReason)
+        assertEquals(ThinkingLevel.ULTRACODE, c.effectiveLevel(config(ThinkingLevel.ULTRACODE)))
+    }
+
+    @Test
+    fun `ultracode final self check uses standard three-question checklist`() {
+        val c = ThinkingModeController()
+        c.onIterationStart(config(ThinkingLevel.ULTRACODE), 1)
+        // ULTRACODE 终检仍是三问清单（五问 APEX 清单为巅峰档独占）
+        assertEquals(ThinkingProfile.SELF_CHECK_CHECKLIST, c.finalSelfCheckPrompt())
+    }
+
+    @Test
+    fun `apexcode config passes through and returns apex five-question checklist`() {
+        val c = ThinkingModeController()
+        val profile = c.onIterationStart(config(ThinkingLevel.APEXCODE), 1)
+        assertEquals(ThinkingLevel.APEXCODE, profile.level)
+        assertEquals(65536, profile.thinkingBudget)
+        assertEquals(3.0f, profile.maxIterationsScale, 0.0001f)
+        assertNull(c.lastDecision)
+        // 巅峰档终检 = 五问 APEX 清单（不变量/回归两问独占）
+        val checklist = c.finalSelfCheckPrompt()
+        assertEquals(ThinkingProfile.APEX_SELF_CHECK_CHECKLIST, checklist)
+        assertTrue(checklist!!.contains("Invariants"))
+        assertTrue(checklist.contains("Regression"))
+        assertEquals(ThinkingLevel.APEXCODE, c.effectiveLevel(config(ThinkingLevel.APEXCODE)))
+    }
+
+    @Test
+    fun `new tiers resolve engine parameters with their own scales`() {
+        val c = ThinkingModeController()
+        val ultracode = ThinkingProfile.forLevel(ThinkingLevel.ULTRACODE)
+        val apexcode = ThinkingProfile.forLevel(ThinkingLevel.APEXCODE)
+        // 迭代倍率：25 × 2.0 = 50；25 × 3.0 = 75
+        assertEquals(50, c.resolveMaxIterations(25, ultracode))
+        assertEquals(75, c.resolveMaxIterations(25, apexcode))
+        // 输出预算：档位预算高于用户设置时上调
+        assertEquals(12000, c.resolveToolOutputBudget(2000, ultracode))
+        assertEquals(16000, c.resolveToolOutputBudget(2000, apexcode))
+        // APEXCODE 压缩倍率 0.9 < 1：有效阈值上移（更晚压缩，保留更多上下文）
+        assertEquals(0.8f / 0.9f, c.resolveCompressionThreshold(0.8f, apexcode), 0.0001f)
+        assertTrue(c.resolveCompressionThreshold(0.8f, apexcode) > 0.8f)
+        assertEquals(0.8f, c.resolveCompressionThreshold(0.8f, ultracode), 0.0001f)
+    }
+
+    @Test
+    fun `ultracode injects post tool check on failure like deep`() {
+        val c = ThinkingModeController()
+        c.onIterationStart(config(ThinkingLevel.ULTRACODE), 1)
+        val prompt = c.postToolCheckPrompt("code.edit", failed = true)
+        assertNotNull(prompt)
+        assertTrue(prompt!!.contains("code.edit"))
+        assertTrue(prompt.contains("FAILED"))
     }
 
     // ── resolve 系列纯函数 ─────────────────────────────────────

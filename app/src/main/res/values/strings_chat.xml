@@ -145,6 +145,9 @@
     <string name="chat_thinking_standard_desc">Analyze → pick approach → execute</string>
     <string name="chat_thinking_deep_desc">Compare options → assess risks → pick best</string>
     <string name="chat_thinking_maximum_desc">Full reasoning chain + self-review + multi-round validation</string>
+    <!-- v1.2 七级思考：新深度档描述（= ThinkingProfile.uiDescriptionEn 要点版，含执行策略差异） -->
+    <string name="chat_thinking_ultracode_desc">Coding-grade deep reasoning: invariants, candidate edits, risk-ranking, minimal change, immediate verification (iterations x2.0)</string>
+    <string name="chat_thinking_apexcode_desc">Architecture-level exhaustive reasoning + adversarial self-review + full verification matrix (iterations x3.0, retains more context)</string>
     <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionEn，含执行策略差异） -->
     <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
     <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>
@@ -293,4 +296,20 @@
     <string name="chat_format_custom">Custom schema</string>
     <string name="chat_llm_not_configured">API is not configured yet (Base URL + API Key + Model). Open Settings to set it up.</string>
     <string name="chat_llm_not_configured_short">API is not configured yet</string>
+
+    <!-- ═══ 双级思考控制（模型原生强度 + 强制深度思考）═══ -->
+    <string name="chat_cd_thinking_menu">Thinking controls</string>
+    <string name="chat_thinking_chip_default">💭 Thinking</string>
+    <string name="chat_thinking_chip_effort">💭 %1$s</string>
+    <string name="chat_thinking_chip_forced">🌀 Forced deep thinking</string>
+    <string name="chat_thinking_effort_title">Model reasoning effort (API-native)</string>
+    <string name="chat_thinking_effort_desc">Sent as native API params (reasoning_effort / thinking budget). Only models with a thinking mode respond to it; harmless for others.</string>
+    <string name="chat_thinking_force_title">Force deep thinking</string>
+    <string name="chat_thinking_force_desc">Prompt-level forcing for ANY model: injects exhaustive Tree-of-Thoughts reasoning, post-tool verification and a final self-check. Stacks with the effort above.</string>
+
+    <!-- ═══ HTML artifact in-app preview ═══ -->
+    <string name="chat_cd_preview_html">Preview HTML</string>
+    <string name="html_preview_refresh">Reload preview</string>
+    <string name="html_preview_close">Close preview</string>
+    <string name="html_preview_load_failed">Failed to load file</string>
 </resources>

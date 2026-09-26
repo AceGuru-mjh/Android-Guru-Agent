@@ -169,7 +169,7 @@ private fun GuideLabelValue(label: String, value: String) {
     }
 }
 
-/** 六档思考画像简表：档位 / 迭代倍率 / 工具自检 / 终检 / 输出预算。 */
+/** 思考档位画像简表（v1.2：7 深度档 + AUTO 元档）：档位 / 迭代倍率 / 工具自检 / 终检 / 输出预算。 */
 @Composable
 private fun ThinkingLevelsTable() {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -183,6 +183,12 @@ private fun ThinkingLevelsTable() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        // 双级思考控制说明（聊天页两控件 = 模型原生强度 + 强制深度思考）。
+        Text(
+            text = stringResource(R.string.mode_guide_thinking_dual_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary
+        )
         // 表头
         ThinkingTableRow(
             level = stringResource(R.string.mode_guide_thinking_col_level),
@@ -191,10 +197,12 @@ private fun ThinkingLevelsTable() {
             budget = stringResource(R.string.mode_guide_thinking_col_budget),
             header = true
         )
-        // 数据行（直读 core 静态表——UI 与引擎画像永远同源，杜绝文案漂移）
+        // 数据行（直读 core 静态表——UI 与引擎画像永远同源，杜绝文案漂移；
+        // v1.2：MAXIMUM 与 AUTO 之间插入 ULTRACODE/APEXCODE 两个新深度档）
         listOf(
             ThinkingLevel.NONE, ThinkingLevel.LIGHT, ThinkingLevel.STANDARD,
-            ThinkingLevel.DEEP, ThinkingLevel.MAXIMUM, ThinkingLevel.AUTO
+            ThinkingLevel.DEEP, ThinkingLevel.MAXIMUM, ThinkingLevel.ULTRACODE,
+            ThinkingLevel.APEXCODE, ThinkingLevel.AUTO
         ).forEach { level ->
             val profile = ThinkingProfile.forLevel(level)
             ThinkingTableRow(

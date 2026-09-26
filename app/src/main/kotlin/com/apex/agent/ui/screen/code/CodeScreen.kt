@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +65,7 @@ import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.screen.agent.QuestionCard
 import com.apex.agent.ui.screen.code.editor.CodeEditorPanel
+import com.apex.agent.ui.screen.code.longtask.CodeLongTaskSheet
 
 /**
  * # Code Screen — Coding 模式主屏（与 Agent 聊天屏同级别）
@@ -79,6 +81,7 @@ fun CodeScreen(
     val state by viewModel.uiState.collectAsState()
     val pendingAgentQuestion by viewModel.pendingAgentQuestion.collectAsState()
     var showNewWorkspace by remember { mutableStateOf(false) }
+    var showThinkingGuide by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -91,7 +94,8 @@ fun CodeScreen(
             onSelect = viewModel::switchWorkspace,
             onCreate = { showNewWorkspace = true },
             onDelete = viewModel::deleteWorkspace,
-            onClearChat = viewModel::clearConversation
+            onClearChat = viewModel::clearConversation,
+            onOpenLongTasks = viewModel::openLongTaskCenter
         )
 
         if (state.todos.isNotEmpty()) {
@@ -134,6 +138,21 @@ fun CodeScreen(
             ErrorBar(message = err, onDismiss = viewModel::dismissError)
         }
 
+        // v1.2 七档思考系统：输入栏上方的档位选择器（紧凑入口，点开下拉；
+        // 下拉底部可进档位指南）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 2.dp)
+        ) {
+            CodeThinkingSelector(
+                current = state.thinkingLevel,
+                onSelect = viewModel::setThinkingLevel,
+                onOpenGuide = { showThinkingGuide = true }
+            )
+        }
+
         CodeInputBar(
             draft = state.inputDraft,
             onDraftChange = viewModel::updateInputDraft,
@@ -160,6 +179,30 @@ fun CodeScreen(
             onDismiss = { showNewWorkspace = false }
         )
     }
+
+    // v1.2 思考档位指南（ModalBottomSheet）：阶梯总表 + 逐档卡片，可直切档
+    if (showThinkingGuide) {
+        CodeThinkingGuideSheet(
+            currentLevel = state.thinkingLevel,
+            onDismiss = { showThinkingGuide = false },
+            onSelect = viewModel::setThinkingLevel
+        )
+    }
+
+    // v1.2 长任务中心（ModalBottomSheet）：任务记录 + 任务模板 + 档位效能三页签
+    CodeLongTaskSheet(
+        visible = state.longTaskSheetVisible,
+        records = state.longTasks,
+        loading = state.longTaskLoading,
+        stats = state.thinkingStats,
+        onDismiss = viewModel::closeLongTaskCenter,
+        onCopy = viewModel::copyTask,
+        onRelaunch = viewModel::relaunchTask,
+        onResume = viewModel::resumeTask,
+        onDelete = viewModel::deleteLongTask,
+        onCompareWithParent = viewModel::compareWithParent,
+        onStartTemplate = viewModel::startFromTemplate
+    )
 }
 
 // ═══ 工作区条 ═══
@@ -171,7 +214,8 @@ private fun WorkspaceBar(
     onSelect: (String) -> Unit,
     onCreate: () -> Unit,
     onDelete: (String) -> Unit,
-    onClearChat: () -> Unit
+    onClearChat: () -> Unit,
+    onOpenLongTasks: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -269,6 +313,16 @@ private fun WorkspaceBar(
             }
 
             Spacer(Modifier.weight(1f))
+
+            // v1.2 长任务中心入口（记录/模板两页签的 ModalBottomSheet）
+            IconButton(onClick = onOpenLongTasks, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Outlined.History,
+                    contentDescription = stringResource(R.string.code_longtask_open),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
 
             Text(
                 text = stringResource(R.string.code_clear_chat),

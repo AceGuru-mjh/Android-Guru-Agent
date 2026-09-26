@@ -220,6 +220,8 @@ private fun githubSummary(name: String, args: String): String? {
 internal fun ToolCallCard(
     toolCall: AgentUiMessage.ToolCall,
     onRetry: (() -> Unit)? = null,
+    /** 重试门禁：流式生成中置 false（与 ErrorBlock/消息菜单同款口径）。 */
+    retryEnabled: Boolean = true,
     // HTML 产物预览：Agent 写出的 .html 文件（工作区根已解析）非空时显示预览钮。
     htmlPreviewPath: String? = null,
     onPreviewHtml: (String) -> Unit = {}
@@ -446,7 +448,7 @@ internal fun ToolCallCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    RetryChip(onRetry = onRetry)
+                    RetryChip(onRetry = onRetry, enabled = retryEnabled)
                 }
             }
         }
@@ -564,13 +566,17 @@ internal fun ToolCallCapsule(
 
 /**
  * 重试按钮（ErrorBlock 与失败 ToolCallCard 共用）：错误色底 + 刷新图标。
+ *
+ * @param enabled 门禁：流式生成中置 false —— 重试会取消在途轮次（旧工具卡
+ *   悬挂 + 部分回复丢失），与消息菜单的 UX-1 门禁同款口径。
  */
 @Composable
-internal fun RetryChip(onRetry: () -> Unit) {
+internal fun RetryChip(onRetry: () -> Unit, enabled: Boolean = true) {
     Surface(
-        color = MaterialTheme.colorScheme.error,
+        color = if (enabled) MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.error.copy(alpha = 0.38f),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.clickable { onRetry() }
+        modifier = Modifier.clickable(enabled = enabled) { onRetry() }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

@@ -1,6 +1,7 @@
 package com.apex.agent.core.engine
 
 import com.apex.agent.core.engine.assist.HumanAssistFlow
+import com.apex.agent.core.engine.assist.ReflectionFlow
 import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
@@ -69,9 +70,11 @@ class ApexAgentEngine(
     // #168：internal —— EnginePromptDelegates.kt 同包扩展需要工具清单桥接。
     internal val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
-    private var config: AgentConfig = AgentConfig.STANDARD,
-    private val memory: ConversationMemory? = null,
-    private val contextCompressor: ContextCompressor? = null,
+    // internal —— EngineCompressionGate.kt 读取 maxContextTokens/preserveRecentTurns。
+    internal var config: AgentConfig = AgentConfig.STANDARD,
+    // internal —— EngineCompressionGate.kt 同包扩展直调（历史压缩触发）。
+    internal val memory: ConversationMemory? = null,
+    internal val contextCompressor: ContextCompressor? = null,
     private val skillRegistry: SkillRegistry? = null,
     private val privilegeInfoProvider: PrivilegeInfoProvider? = null,
     private val environmentInfoProvider: EnvironmentInfoProvider? = null,
@@ -110,18 +113,20 @@ class ApexAgentEngine(
      */
     private val hookRunner: HookRunner? = null,
     /** #168 六档思考：AUTO 选档/迭代倍率/工具自检/自评清单全在此，引擎仅三个钩子。 */
-    private val thinkingController: ThinkingModeController = ThinkingModeController() // 默认值兼容旧测试
+    // internal —— EngineCompressionGate.kt 压缩阈值解析直调。
+    internal val thinkingController: ThinkingModeController = ThinkingModeController() // 默认值兼容旧测试
 ) : AgentEngine, ConfirmationSink {
 
     /** #165 插桩句柄（null 安全派生；开号时快照当前模式名）。 */
-    private val sessionHooks: SessionHookCoordinator? =
+    // internal —— EngineCompressionGate.kt PreCompact 插桩直调。
+    internal val sessionHooks: SessionHookCoordinator? =
         hookRunner?.let { SessionHookCoordinator(it) { config.mode.name } }
 
     /**
      * 实际执行 LLM 调用的运行时。null [modelRuntime] 时回退到单 client，
      * 保留旧行为；非空时使用多模型路由。
      */
-    private val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
+    internal val runtime: ModelRuntime = modelRuntime ?: SingleClientModelRuntime(llmClient)
 
     /**
      * T76 — 当前执行的诊断标签（taskId/stepId → LlmRequestContext 四元 ID）。
@@ -168,7 +173,8 @@ class ApexAgentEngine(
      */
     private var toolDegradationLevel = 0
 
-    private val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
+    // internal —— EngineCompressionGate.kt 传入压缩器/持久化。
+    internal val conversationHistory: MutableList<LlmMessage> = mutableListOf<LlmMessage>().apply {
         memory?.load()?.let { addAll(it) }
     }
     // P2-10 修复：isRunning 由 UI/abort 线程跨线程读写（abort() 在引擎循环外被调用），
@@ -177,7 +183,7 @@ class ApexAgentEngine(
     // tagsSetter 钩子从其他线程裸写，当前只能靠调用方自律；后续应改为注入
     // 显式消息队列（Channel）或统一在引擎调度器内串行化所有历史变更。
     @Volatile
-    private var isRunning = false
+    internal var isRunning = false
 
     /**
      * 任务内是否有任何工具动作失败（跨 [executeToolCallStreaming] 调用累计）。
@@ -200,7 +206,7 @@ class ApexAgentEngine(
      * Channel for the UI to deliver spec-confirmation decisions back to the engine
      * while [executeSpecMode] is suspended on [awaitSpecConfirmation].
      */
-    private var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
+    internal var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
 
     /**
      * Channel for the UI to deliver user-input answers back to the engine
@@ -260,11 +266,28 @@ class ApexAgentEngine(
     /** 当前持久化的消息条数（UI 显示历史深度）。 */
     fun historyCount(): Int = memory?.count() ?: conversationHistory.size
 
-    /** 当前上下文估算 token 数（UI 仪表盘；与自动压缩阈值计算同源）。 */
-    fun currentTokenCount(): Int = TokenEstimator.estimateHistory(conversationHistory)
+    // ═══ 真实用量统计（用户反馈「已用 token 像假的、用完还是 0」）═══
+    //
+    // 根因修复的完整背景与状态逻辑内聚于 [EngineUsageTracker]
+    // （EngineUsageTracking.kt，God-file 预算拆分）：请求体带
+    // stream_options.include_usage（客户端层），流尾统计帧解析进
+    // LlmStreamChunk.usage，每轮结束发射 [AgentEvent.UsageUpdated]，
+    // 仪表盘显示服务端返回的真实 token 数。
+    private val usageTracker = EngineUsageTracker { conversationHistory }
+
+    /** 当前上下文 token 数（UI 仪表盘）：优先真实 usage，回退启发式估算。 */
+    fun currentTokenCount(): Int = usageTracker.currentContextTokens()
+
+    /** 会话累计消耗的真实 token（多轮累加；0 = 尚无统计）。 */
+    fun sessionTotalTokens(): Long = usageTracker.sessionTotalTokens()
 
     /** 上下文 token 上限（占用百分比的分母）。 */
     fun maxContextTokens(): Int = config.maxContextTokens
+
+    /** 累加一轮真实 usage 并发射仪表盘事件（无统计时零开销；spec 流复用）。 */
+    internal suspend fun recordAndEmitUsage(u: Usage?, emit: suspend (AgentEvent) -> Unit) {
+        usageTracker.accumulate(u)?.let { emit(it) }
+    }
 
     /**
      * 主动压缩上下文（UI 仪表盘按钮触发）：与自动压缩共用 [ContextCompressor]，
@@ -496,6 +519,8 @@ class ApexAgentEngine(
                 planResponseBuilder.append(it)
                 emit(AgentEvent.ThinkingChunk(it))
             }
+            // 真实用量：规划期请求同样计入会话统计与仪表盘
+            recordAndEmitUsage(chunk.usage, emit)
         }
 
         val planResponse = planResponseBuilder.toString()
@@ -546,6 +571,7 @@ class ApexAgentEngine(
                 reflectionBuilder.append(it)
                 emit(AgentEvent.ResponseChunk(it))
             }
+            recordAndEmitUsage(chunk.usage, emit)
         }
         emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
 
@@ -554,102 +580,18 @@ class ApexAgentEngine(
 
     // awaitPlanConfirmation 已迁至 plan/PlanExecutionSupport.kt（#169：Boolean → PlanDecision）。
     // ═══════════════════════════════════════════════════════
-    // SPEC mode
+    // SPEC mode —— executeSpecMode / awaitSpecConfirmation 已迁至
+    // EngineSpecFlow.kt（同包扩展 + internal 成员直调，调用点零改动）。
     // ═══════════════════════════════════════════════════════
-
-    /**
-     * 规格模式：Think → 生成需求规格（流式）→ 解析 → 用户确认 →
-     * 按交付物逐项执行（复用 Build 循环）→ 总结。
-     *
-     * 与 [executePlanMode] 的区别：产物是 [ExecutionSpec]（目标 / 需求 /
-     * 约束 / 验收标准 / 交付物），执行阶段的每一步都携带完整规格上下文，
-     * 让模型明确"要交付什么、做成什么样才算完成"。
-     */
-    private suspend fun executeSpecMode(
-        input: String,
-        emit: suspend (AgentEvent) -> Unit
-    ): Int {
-        // Phase 1: think + generate spec (streamed as ThinkingChunk)
-        emit(AgentEvent.ThinkingStart(0, config.thinkingLevel))
-
-        val specPrompt = buildSpecPrompt(input)
-        val specResponseBuilder = StringBuilder()
-
-        // B1：不传 temperature 哨兵 → Profile 值生效（同 plan 生成）。
-        runtime.chatStream(
-            context = tagged(LlmRequestContext.reasoning("spec_generation")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(specPrompt)
-        ).collect { chunk ->
-            chunk.content?.let {
-                specResponseBuilder.append(it)
-                emit(AgentEvent.ThinkingChunk(it))
-            }
-        }
-
-        val specResponse = specResponseBuilder.toString()
-        emit(AgentEvent.ThinkingComplete(specResponse))
-
-        // Phase 2: parse spec
-        val spec = EngineResponseParsers.parseExecutionSpec(specResponse, input)
-        emit(AgentEvent.SpecGenerated(spec))
-
-        // Phase 3: await user confirmation
-        emit(AgentEvent.SpecAwaitingConfirmation(spec))
-        val confirmed = awaitSpecConfirmation()
-        if (!confirmed) {
-            emit(AgentEvent.Aborted)
-            return 0
-        }
-        emit(AgentEvent.SpecConfirmed(spec))
-
-        // Phase 4: execute each deliverable sequentially (Build loop per deliverable).
-        // 无交付物时回退到需求清单；两者皆空则直接执行目标。
-        val steps = spec.deliverables.ifEmpty { spec.requirements }.ifEmpty { listOf(spec.goal) }
-        var iterations = 0
-        for ((index, stepText) in steps.withIndex()) {
-            if (!isRunning) break
-            emit(AgentEvent.StepStart(index, stepText))
-
-            val stepPrompt = buildSpecStepPrompt(spec, stepText, index)
-            addMessage(LlmMessage.User(stepPrompt))
-
-            val stepIters = executeBuildLoop { event -> emit(event) }
-            iterations += stepIters
-        }
-
-        // Phase 5: reflection
-        val reflectPrompt = buildSpecReflectionPrompt(spec)
-        val reflectionBuilder = StringBuilder()
-        runtime.chatStream(
-            context = tagged(LlmRequestContext.primary("spec_reflection")),
-            messages = listOf(LlmMessage.System(buildSystemPrompt())) + LlmMessage.User(reflectPrompt)
-        ).collect { chunk ->
-            chunk.content?.let {
-                reflectionBuilder.append(it)
-                emit(AgentEvent.ResponseChunk(it))
-            }
-        }
-        emit(AgentEvent.ResponseComplete(reflectionBuilder.toString()))
-
-        return iterations
-    }
-
-    private suspend fun awaitSpecConfirmation(): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        specConfirmationDeferred = deferred
-        return try {
-            withTimeout(PLAN_CONFIRMATION_TIMEOUT_MS) { deferred.await() }
-        } finally {
-            specConfirmationDeferred = null
-        }
-    }
 
     // ═══════════════════════════════════════════════════════
     // BUILD mode (ReAct loop)
     // ═══════════════════════════════════════════════════════
 
-    private suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
+    internal suspend fun executeBuildLoop(emit: suspend (AgentEvent) -> Unit): Int {
         var iteration = 0
+        // P0 修复（承诺未执行催促）：每任务至多催促一次（防无限循环）
+        var promiseNudged = false
 
         while (isRunning && iteration < thinkingController.effectiveMaxIterations(config.maxIterations)) {
             iteration++
@@ -697,8 +639,13 @@ class ApexAgentEngine(
             // 计划决定请求 tools 数组（provider 安全名 + 预算钳制）与 system
             // prompt 工具清单（同一份 plan.visibleRegistryIds）——两侧永远
             // 一致；tool_open 激活的工具从下一轮自动进入计划。
+            // P0 修复（连接即可见）：已连接服务（GitHub 等）的工具 id 并入计划 ——
+            // 否则 "## Connected Services" 宣称 github_* 可用而 tools 数组里
+            // 根本没有这些函数，provider 拒绝未声明调用（用户反馈"密钥连接
+            // 没有一点作用"的机制根因）。
             val plan = EngineToolPlanner.buildToolPlan(
-                config, toolRegistry, toolActivation, toolDegradationLevel
+                config, toolRegistry, toolActivation, toolDegradationLevel,
+                serviceToolIds = connectedServicesProvider?.connectedToolIds() ?: emptySet()
             )
             currentToolPlan = plan
 
@@ -738,6 +685,9 @@ class ApexAgentEngine(
                     contentBuilder.append(it)
                     emit(AgentEvent.ResponseChunk(it))
                 }
+                // 真实用量统计帧（include_usage 流尾帧 / DeepSeek 末帧）：
+                // 记录 + 发射 UsageUpdated —— 仪表盘显示服务端真实 token。
+                recordAndEmitUsage(chunk.usage, emit)
                 // 多模态输出：图片/视频模型生成的媒体（OpenRouter image part /
                 // CogView chat 生图 / video_url）转 markdown 注入回复流，
                 // 复用 ResponseChunk 管线直达 UI（MarkdownText 渲染 + Lightbox）。
@@ -791,6 +741,20 @@ class ApexAgentEngine(
                 throw e
             }
 
+            // ═══ P1 修复（降级自动恢复）：本轮 LLM 交互成功完成 → 降级等级归零 ═══
+            // 旧状态机只在下一次 execute()（新任务）复位 —— 任务内一次误判
+            //（400/413 与工具无关的报错也曾触发）就永久降级：第一次纯 CORE，
+            // 第二次直接无工具 —— 模型"突然只用嘴回答"，余下轮次全部废掉。
+            // 现在每轮成功即恢复：孤立的失败不再有跨轮记忆；真正的工具拒绝
+            // 会在下一轮再次触发降级重试（每轮独立计数，语义不变）。
+            if (toolDegradationLevel > 0) {
+                AppLogger.instance.debug(
+                    LogCategory.ENGINE, "ApexAgentEngine",
+                    "Iteration succeeded — resetting tool degradation level to 0"
+                )
+                toolDegradationLevel = 0
+            }
+
             // 若本轮收到了原生思考内容，发射 ThinkingComplete 让 UI 收尾。
             if (reasoningBuilder.isNotEmpty()) {
                 emit(AgentEvent.ThinkingComplete(reasoningBuilder.toString()))
@@ -836,52 +800,41 @@ class ApexAgentEngine(
                     }
 
                     // ═══ Reflection 模式：生成 → 评审 → 修正 ═══
-                    // 最终纯文本轮次时，草稿已作为 ResponseChunk 流式呈现（UI 显示"生成"），
-                    // 随后执行 config.reflectionRounds 轮"评审 + 修正"：
-                    // - 评审：调用 LLM 审视草稿（不流式，完成后整段发射 ReflectionReview）；
-                    // - 修正：调用 LLM 依据评审意见重写，流式发射 ResponseChunk；
-                    // 修正产物为最终回复（ResponseComplete），并写入历史。
+                    // 循环体迁至 assist/ReflectionFlow.kt（依赖全注入，纯 Kotlin
+                    // 可单测）；此处只保留接线与收尾。
                     if (config.mode == AgentMode.REFLECTION && config.reflectionRounds > 0) {
-                        var draft = contentBuilder.toString()
-                        addMessage(LlmMessage.Assistant(draft))
+                        val final = ReflectionFlow(
+                            runtime = runtime,
+                            systemPrompt = { buildSystemPrompt() },
+                            tagged = { tagged(it) },
+                            reviewPromptOf = { buildReviewPrompt(it) },
+                            revisePromptOf = { d, r, n -> buildRevisePrompt(d, r, n) },
+                            addAssistantMessage = { addMessage(LlmMessage.Assistant(it)) }
+                        ).run(contentBuilder.toString(), config.reflectionRounds, emit)
 
-                        repeat(config.reflectionRounds) { round ->
-                            // 评审
-                            val reviewBuilder = StringBuilder()
-                            runtime.chatStream(
-                                context = tagged(LlmRequestContext.reasoning("reflection_review")),
-                                messages = listOf(LlmMessage.System(buildSystemPrompt())) +
-                                    LlmMessage.User(buildReviewPrompt(draft))
-                            ).collect { chunk ->
-                                chunk.content?.let { reviewBuilder.append(it) }
-                            }
-                            val review = reviewBuilder.toString().ifBlank { "评审未返回内容，保留草稿。" }
-                            emit(AgentEvent.ReflectionReview(review))
-
-                            // 修正
-                            val reviseBuilder = StringBuilder()
-                            runtime.chatStream(
-                                context = tagged(LlmRequestContext.primary("reflection_revise")),
-                                messages = listOf(LlmMessage.System(buildSystemPrompt())) +
-                                    LlmMessage.User(buildRevisePrompt(draft, review, round + 1))
-                            ).collect { chunk ->
-                                chunk.content?.let {
-                                    reviseBuilder.append(it)
-                                    emit(AgentEvent.ResponseChunk(it))
-                                }
-                                // 修正轮次同样透传媒体（生图模型的“重画一版”）
-                                MediaMarkdown.from(chunk.images, chunk.videos)?.let { mediaMd ->
-                                    reviseBuilder.append(mediaMd)
-                                    emit(AgentEvent.ResponseChunk(mediaMd))
-                                }
-                            }
-                            val revised = reviseBuilder.toString().ifBlank { draft }
-                            addMessage(LlmMessage.Assistant(revised))
-                            draft = revised
-                        }
-
-                        emit(AgentEvent.ResponseComplete(draft))
+                        emit(AgentEvent.ResponseComplete(final))
                         return iteration
+                    }
+
+                    // ═══ P0 修复（承诺未执行催促，BUILD 模式）：用户反馈"Agent 不会主动调用命令"═══
+                    // 纯文本轮是 BUILD 循环的终止条件 —— 弱模型常第一轮叙述计划（"我现在去
+                    // 执行 XX…"）而不带 tool_calls，任务即告结束，观感"只说不做"。这里对
+                    // 响应文本做后置检测（assist/PromiseDetector.kt，刻意保守）：
+                    // - 检出强承诺语迹 且 本任务尚未催促过 且 未到迭代上限 → 注入
+                    //   System 催促并 continue（模型获得一次"真做"的机会；每任务至多
+                    //   一次 —— 催促后仍不行动 = 合法收尾，不无限循环）；
+                    // - 未检出 / 已催促 → 照常 ResponseComplete（绝不丢已生成的回复）。
+                    if (config.mode == AgentMode.BUILD && !promiseNudged &&
+                        iteration < thinkingController.effectiveMaxIterations(config.maxIterations) - 1 &&
+                        com.apex.agent.core.engine.assist.PromiseDetector
+                            .isPromiseWithoutAction(contentBuilder.toString())
+                    ) {
+                        promiseNudged = true
+                        addMessage(LlmMessage.Assistant(contentBuilder.toString()))
+                        addMessage(
+                            LlmMessage.System(com.apex.agent.core.engine.assist.PromiseDetector.NUDGE_MESSAGE)
+                        )
+                        continue
                     }
 
                     addMessage(LlmMessage.Assistant(contentBuilder.toString()))
@@ -1086,12 +1039,12 @@ class ApexAgentEngine(
 
 
     /** T76 — executionTags（taskId/stepId）填入 LlmRequestContext；未接线时原样返回。 */
-    private fun tagged(ctx: LlmRequestContext): LlmRequestContext {
+    internal fun tagged(ctx: LlmRequestContext): LlmRequestContext {
         val tags = executionTags ?: return ctx
         return ctx.copy(taskId = tags.first, stepId = tags.second)
     }
 
-    private fun buildSystemPrompt(planningPhase: Boolean = false): String = EnginePrompts.buildSystemPrompt(
+    internal fun buildSystemPrompt(planningPhase: Boolean = false): String = EnginePrompts.buildSystemPrompt(
         config = config,
         currentProfile = thinkingController.profileFor(config),
         planningPhase = planningPhase,
@@ -1149,52 +1102,6 @@ class ApexAgentEngine(
         }
     }
 
-    // ═══════════════════════════════════════════════════════
-    // P7: 上下文压缩触发
-    // ═══════════════════════════════════════════════════════
-
-    private suspend fun maybeCompressContext(emit: suspend (AgentEvent) -> Unit) {
-        val compressor = contextCompressor ?: return
-
-        val currentTokens = TokenEstimator.estimateHistory(conversationHistory)
-        val thresholdTokens = (config.maxContextTokens * thinkingController.resolveCompressionThreshold(config.compressionThreshold)).toInt()
-
-        if (currentTokens <= thresholdTokens) return
-
-        // #165：PreCompact——自动压缩（阈值已判定）。
-        sessionHooks?.onPreCompact()
-
-        // 需要压缩
-        val report = try {
-            compressor.compress(
-                history = conversationHistory,
-                preserveRecent = config.preserveRecentTurns
-            )
-        } catch (e: Exception) {
-            // 压缩失败不应该中断主流程，但必须留痕：否则每轮迭代都会无日志地
-            // 反复触发同一个失败的压缩器，且 UI 无法感知上下文已逼近上限。
-            AppLogger.instance.error(
-                LogCategory.ENGINE, "ApexAgentEngine",
-                "上下文压缩失败，本轮跳过压缩（tokens=${currentTokens}，阈值=${thresholdTokens}）: ${e.message}",
-                e
-            )
-            return
-        }
-
-        // 同步到持久化记忆（如果存在）
-        memory?.save(conversationHistory)
-
-        // 发射压缩事件
-        emit(
-            AgentEvent.ContextCompressed(
-                beforeTokens = report.beforeTokens,
-                afterTokens = report.afterTokens,
-                strategy = report.strategy.name,
-                summary = report.summary.take(200),
-                messagesRemoved = report.messagesRemoved,
-                messagesTruncated = report.messagesTruncated
-            )
-        )
-    }
-
+    // maybeCompressContext 迁至 EngineCompressionGate.kt（同包顶层扩展，
+    // 调用点零改动 —— 模式与 EnginePromptDelegates / EngineAskUserFlow 一致）。
 }

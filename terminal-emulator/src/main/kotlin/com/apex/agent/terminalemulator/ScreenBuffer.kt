@@ -41,6 +41,14 @@ class ScreenBuffer(
         if (col > 0 && cells[row][col].isWideTrail) {
             cells[row][col - 1] = TerminalCell.BLANK
         }
+        // P2（对称修复）：窄字符覆写宽字符 lead 时，同步清掉它的 trail ——
+        // 否则 trail 残留成孤儿，下一个字符落在 col+1 会命中上面的分支把
+        // 刚写入的字符误清（CUP 原位重绘场景：bash readline / TUI 局部刷新）。
+        if (cell.width != 2 && cells[row][col].isWideLead &&
+            col + 1 < cols && cells[row][col + 1].isWideTrail
+        ) {
+            cells[row][col + 1] = TerminalCell.BLANK
+        }
         cells[row][col] = cell
         if (cell.width == 2 && col + 1 < cols) {
             cells[row][col + 1] = TerminalCell.CONTINUATION.copy(flags = TerminalCell.FLAG_WIDE_TRAIL)
@@ -59,12 +67,26 @@ class ScreenBuffer(
 
     fun row(row: Int): Array<TerminalCell> = cells[row]
 
-    /** Erase a range of cells in a row (§16: BlankCell, not ' '). */
+    /**
+     * Erase a range of cells in a row (§16: BlankCell, not ' ').
+     *
+     * P2（配对感知）：xterm 语义 —— 擦到宽字符的任一半即清整对。旧实现
+     * 按列盲清：区间从 trail 开始 → lead 孤儿（width=2 无 trail）；区间
+     * 止于 lead → trail 孤儿（渲染跳过 trail → 该行少一列后续左移）。
+     */
     fun eraseRow(row: Int, fromCol: Int = 0, toCol: Int = cols - 1, style: TerminalStyle = TerminalStyle.DEFAULT) {
         if (row !in 0 until rows) return
-        for (c in fromCol..toCol.coerceAtMost(cols - 1)) {
+        val last = toCol.coerceAtMost(cols - 1)
+        // 先探测边界是否腰斩宽字符对（清除后标志位就没了，必须先读后写）
+        val leadSplitBefore = fromCol > 0 &&
+            cells[row][fromCol].isWideTrail && cells[row][fromCol - 1].isWideLead
+        val trailSplitAfter = last < cols - 1 &&
+            cells[row][last].isWideLead && cells[row][last + 1].isWideTrail
+        for (c in fromCol..last) {
             cells[row][c] = TerminalCell.BLANK.copy(style = style)
         }
+        if (leadSplitBefore) cells[row][fromCol - 1] = TerminalCell.BLANK.copy(style = style)
+        if (trailSplitAfter) cells[row][last + 1] = TerminalCell.BLANK.copy(style = style)
     }
 
     /** Erase entire rows range. */
@@ -139,10 +161,32 @@ class ScreenBuffer(
         val copyCols = minOf(cols, newCols)
         for (r in 0 until copyRows) {
             for (c in 0 until copyCols) newCells[r][c] = cells[r][c]
+            // P2：缩列边界腰斩的宽字符对（lead 落在 newCols-1、trail 被截掉）
+            // → 清成 BLANK，防末列孤儿 lead 使 overlay 2 列步进越界。
+            if (newCols > 0 && newCells[r][newCols - 1].isWideLead) {
+                newCells[r][newCols - 1] = TerminalCell.BLANK
+            }
         }
         cells = newCells
         rows = newRows
         cols = newCols
+    }
+
+    /**
+     * P2：行级宽字符配对修复 —— 修掉移位/删除类操作（ICH / DCH / IRM，
+     * [setCell] 裸移位不做配对处理）残留的孤儿：
+     *  - trail 的左邻不是 wide-lead → 孤儿 trail（渲染跳过 → 行文本少一列）→ 清 BLANK；
+     *  - 最右列是 wide-lead（trail 被推出网格）→ 渲染步进 2 列越界 → 清 BLANK。
+     *
+     * 幂等：正常行仅读标志位，无任何写入。
+     */
+    fun repairRow(row: Int) {
+        if (row !in 0 until rows || cols <= 0) return
+        val r = cells[row]
+        for (c in 1 until cols) {
+            if (r[c].isWideTrail && !r[c - 1].isWideLead) r[c] = TerminalCell.BLANK
+        }
+        if (r[cols - 1].isWideLead) r[cols - 1] = TerminalCell.BLANK
     }
 
     fun clear() {

@@ -36,12 +36,22 @@ data class ChatHistoryMessage(
     val text: String,
     /** 仅 role == "tool"：工具名（恢复时重建工具卡标题）。 */
     val toolName: String? = null,
-    val timestamp: Long = 0
+    val timestamp: Long = 0,
+    /**
+     * 仅 role == "user"：附件本地路径集合。历史回看不重建附件，仅用于
+     * 删除会话时同步清理附件文件（旧数据无此字段 → 默认空，兼容解码）。
+     */
+    val attachmentPaths: List<String> = emptyList()
 )
 
 /** AgentUiMessage → 历史消息（null = 不入库：Thinking 等展示噪音）。 */
 internal fun AgentUiMessage.toHistoryMessage(): ChatHistoryMessage? = when (this) {
-    is AgentUiMessage.User -> ChatHistoryMessage("user", text, timestamp = timestamp)
+    is AgentUiMessage.User -> ChatHistoryMessage(
+        role = "user",
+        text = text,
+        attachmentPaths = attachments.mapNotNull { it.localPath },
+        timestamp = timestamp
+    )
     is AgentUiMessage.Agent -> ChatHistoryMessage("agent", text, timestamp = timestamp)
     is AgentUiMessage.System -> ChatHistoryMessage("system", text, timestamp = System.currentTimeMillis())
     is AgentUiMessage.Error -> ChatHistoryMessage("error", message, timestamp = timestamp)

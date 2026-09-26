@@ -246,6 +246,11 @@ class MarketViewModel @Inject constructor(
         viewModelScope.launch {
             val snapshot = withContext(Dispatchers.IO) { snapshotState() } ?: return@launch
             _uiState.update { state -> snapshot.copy(
+                // 视图与瞬时态保留：scope 不保留 →「已安装管理」里任何开关/卸载/连接
+                // （全部以 refresh() 收尾）都会把顶栏弹回「市场」视图；mcpConnecting
+                // 不保留 → 长连接期间重进屏幕丢失防双击并发保护。
+                scope = state.scope,
+                mcpConnecting = state.mcpConnecting,
                 selectedTab = state.selectedTab,
                 modelScopeQuery = state.modelScopeQuery,
                 modelScopeSkills = state.modelScopeSkills,
@@ -466,8 +471,16 @@ class MarketViewModel @Inject constructor(
             val name = config.name.trim()
             mcpManager.addServer(config.copy(name = name)).fold(
                 onSuccess = {
-                    message(languageManager.getString(R.string.market_mcp_added).format(name))
-                    mcpManager.connect(name)   // 添加后立即尝试连接
+                    // P2：连接结果不再被吞 —— 添加后立即连接失败（URL 错/命令不存在）时
+                    // 用户只看到「已添加」成功提示，错误静默丢失。fold 进同一条 snackbar。
+                    val connectMsg = mcpManager.connect(name).fold(
+                        onSuccess = { languageManager.getString(R.string.market_mcp_added).format(name) },
+                        onFailure = {
+                            languageManager.getString(R.string.market_add_failed)
+                                .format("${it.message ?: ""}")
+                        }
+                    )
+                    message(connectMsg)
                     refresh()
                 },
                 onFailure = {
@@ -581,6 +594,58 @@ class MarketViewModel @Inject constructor(
             mcpManager.removeServer(name)
             message(languageManager.getString(R.string.market_mcp_removed).format(name))
             refresh()
+        }
+    }
+
+    // ═══ MCP · 配置编辑（已安装管理「编辑」入口）═══
+
+    /** 正在编辑的 MCP 配置快照（null = 编辑器关闭）。UI 据此渲染 [EditMcpDialog]。 */
+    private val _editingMcp = MutableStateFlow<McpServerConfig?>(null)
+    val editingMcp: StateFlow<McpServerConfig?> = _editingMcp.asStateFlow()
+
+    /** 打开编辑器：按名取配置快照（不存在则忽略 —— 列表与配置极小概率失同步）。 */
+    fun openMcpEditor(name: String) {
+        val config = mcpManager.getConfigs().firstOrNull { it.name == name } ?: return
+        _editingMcp.value = config
+    }
+
+    fun closeMcpEditor() {
+        _editingMcp.value = null
+    }
+
+    /**
+     * 保存编辑后的配置：断开旧连接（配置已变，旧连接必然失效）→ 覆盖写 →
+     * enabled 时自动重连（对齐「添加并连接」的行为闭环）。
+     */
+    fun updateMcpServer(config: McpServerConfig) {
+        viewModelScope.launch {
+            val name = config.name.trim()
+            // 先断开：addServer 只覆盖配置不触碰活跃连接，旧 client 挂着旧参数
+            mcpManager.disconnect(name)
+            mcpManager.addServer(config.copy(name = name)).fold(
+                onSuccess = {
+                    // 连接结果折叠（同 addMcpServer）：编辑保存后重连失败不再静默。
+                    if (config.enabled) {
+                        val connectMsg = mcpManager.connect(name).fold(
+                            onSuccess = {
+                                languageManager.getString(R.string.market_mcp_edit_saved).format(name)
+                            },
+                            onFailure = {
+                                languageManager.getString(R.string.market_add_failed)
+                                    .format("${it.message ?: ""}")
+                            }
+                        )
+                        message(connectMsg)
+                    } else {
+                        message(languageManager.getString(R.string.market_mcp_edit_saved).format(name))
+                    }
+                    refresh()
+                },
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
+            )
+            _editingMcp.value = null
         }
     }
 

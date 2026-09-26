@@ -33,10 +33,11 @@ import com.apex.agent.R
  *   - 60-80% 警告（橙）
  *   - >80%  危险（粉/红）
  *
- * 点击长条弹出仪表盘菜单：token 详细数据 + 主动压缩按钮。
+ * 点击长条弹出仪表盘菜单：token 详细数据（含会话累计真实消耗）+ 主动压缩按钮。
  *
- * @param usedTokens 当前占用 token（分子）
+ * @param usedTokens 当前占用 token（分子；服务端真实统计优先，无则启发式估算）
  * @param maxTokens  上下文上限 token（分母，<=0 时视为 1 防除零）
+ * @param sessionTotalTokens 会话累计消耗 token（多轮真实 usage 累加；<=0 = 端点未返回统计，行隐藏）
  * @param onCompress 主动压缩回调（接 AgentChatViewModel.compressNow）
  */
 @Composable
@@ -44,6 +45,7 @@ fun ContextMeterBar(
     usedTokens: Int,
     maxTokens: Int,
     onCompress: () -> Unit,
+    sessionTotalTokens: Long = 0,
     modifier: Modifier = Modifier
 ) {
     val safeMax = if (maxTokens <= 0) 1 else maxTokens
@@ -163,6 +165,13 @@ fun ContextMeterBar(
             DashboardRow(label = stringResource(R.string.context_used_tokens), value = "$usedTokens")
             DashboardRow(label = stringResource(R.string.context_max_tokens), value = "$safeMax")
             DashboardRow(label = stringResource(R.string.context_usage_ratio), value = "$percent%")
+            // 会话累计真实消耗（服务端返回统计的端点才有；未返回则隐藏本行）
+            if (sessionTotalTokens > 0) {
+                DashboardRow(
+                    label = stringResource(R.string.context_session_total_tokens),
+                    value = "$sessionTotalTokens"
+                )
+            }
             DashboardRow(
                 label = stringResource(R.string.context_status),
                 value = when {

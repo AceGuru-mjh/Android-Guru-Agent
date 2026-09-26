@@ -134,6 +134,36 @@ class RootfsConfiguratorTest {
         assertTrue("world-writable", java.nio.file.Files.getPosixFilePermissions(tmp.toPath())
             .contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE))
     }
+    // ═══ P1（DNS 快照刷新）：切网自愈 ═══
+
+    @Test fun `refreshDnsIfChanged rewrites when host dns changed`() {
+        val root = tmpRoot()
+        // Wi-Fi 时代安装（DNS = 192.168.1.1）
+        RootfsConfigurator(dnsServers = { listOf("192.168.1.1") }).configure(root)
+        assertEquals("nameserver 192.168.1.1", File(root, "etc/resolv.conf").readText().trim())
+
+        // 切网到蜂窝（DNS = 10.0.0.1）→ 同一 rootfs 上重写（新 provider 实例模拟切网）
+        val cfgAfterSwitch = RootfsConfigurator(dnsServers = { listOf("10.0.0.1") })
+        assertTrue(cfgAfterSwitch.refreshDnsIfChanged(root))
+        assertEquals("nameserver 10.0.0.1", File(root, "etc/resolv.conf").readText().trim())
+    }
+
+    @Test fun `refreshDnsIfChanged no-op when dns unchanged`() {
+        val root = tmpRoot()
+        val cfg = RootfsConfigurator(dnsServers = { listOf("192.168.1.1") })
+        cfg.configure(root)
+        assertFalse(cfg.refreshDnsIfChanged(root))
+        // 内容原样（未被误动）
+        assertEquals("nameserver 192.168.1.1", File(root, "etc/resolv.conf").readText().trim())
+    }
+
+    @Test fun `refreshDnsIfChanged no-op on missing root`() {
+        val root = tmpRoot()
+        // 缺注入 DNS 时会走宿主 /etc/resolv.conf 兜底（CI 环境存在）→ 环境相关，
+        // 只断言环境无关的路径：rootfs 目录不存在 → 恒 no-op 不抛错。
+        val cfg = RootfsConfigurator(dnsServers = { emptyList() })
+        assertFalse(cfg.refreshDnsIfChanged(File(root, "nonexistent-dir")))
+    }
 }
 
 /**

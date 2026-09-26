@@ -298,7 +298,21 @@ internal class AttachmentManager(
 
         val targetDir = java.io.File(context.filesDir, "attachments")
         targetDir.mkdirs()
-        val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$fileName")
+        // ── 安全（路径逃逸防御）：文件名消毒 ──
+        // ContentProvider 的 DISPLAY_NAME 未消毒直接拼 File(dir, "${ts}_$name")：
+        // 名称含 "/" 或 "../" 时可把副本写到 attachments 目录之外（应用沙箱内
+        // 任意路径，如 shared_prefs / databases —— 可被后续 read_file 读回）。
+        // 与 PredictiveAttachmentPreprocessor 同口径：仅保留最后一段 + 剥控制字符。
+        val safeName = fileName.substringAfterLast('/')
+            .replace(Regex("[\\\\/:*?\"<>|\\x00-\\x1F]"), "_")
+            .trim()
+            .ifEmpty { "attachment" }
+        val targetFile = java.io.File(targetDir, "${System.currentTimeMillis()}_$safeName")
+
+        // 双保险：canonical 路径必须仍落在 attachments 目录内（防消毒遗漏的变体）。
+        if (!targetFile.canonicalPath.startsWith(targetDir.canonicalPath + java.io.File.separator)) {
+            throw IllegalStateException("非法附件文件名: $fileName")
+        }
 
         context.contentResolver.openInputStream(uri)?.use { input ->
             targetFile.outputStream().use { output ->

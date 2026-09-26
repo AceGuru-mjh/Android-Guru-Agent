@@ -17,8 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
 import kotlinx.coroutines.flow.update
 
 // ═══════════════════════════════════════════════════════════════
@@ -38,7 +40,7 @@ import kotlinx.coroutines.flow.update
  */
 fun AgentChatViewModel.deleteMessage(id: String) {
     if (_uiState.value.isLoading) {
-        _uiFeedback.tryEmit("正在生成回复，稍后再删除")
+        _uiFeedback.tryEmit(str(R.string.chat_msg_delete_busy))
         return
     }
     _uiState.update { s ->
@@ -67,7 +69,7 @@ fun AgentChatViewModel.deleteMessage(id: String) {
  */
 fun AgentChatViewModel.deleteMessagesFrom(id: String) {
     if (_uiState.value.isLoading) {
-        _uiFeedback.tryEmit("正在生成回复，稍后再删除")
+        _uiFeedback.tryEmit(str(R.string.chat_msg_delete_busy))
         return
     }
     _uiState.update { s ->
@@ -102,7 +104,7 @@ fun AgentChatViewModel.deleteMessagesFrom(id: String) {
 fun AgentChatViewModel.regenerateResponse(id: String) {
     val state = _uiState.value
     if (state.isLoading) {
-        _uiFeedback.tryEmit("正在生成回复，稍后再重生成")
+        _uiFeedback.tryEmit(str(R.string.chat_msg_regenerate_busy))
         return
     }
     val idx = state.messages.indexOfFirst { it.id == id }
@@ -110,12 +112,12 @@ fun AgentChatViewModel.regenerateResponse(id: String) {
     // 找到该 AI 消息之前最近的一条 User 消息（触发它的那条输入）
     val userIdx = (idx - 1 downTo 0).firstOrNull { i -> state.messages[i] is AgentUiMessage.User }
     if (userIdx == null) {
-        _uiFeedback.tryEmit("此回复前没有可重发的用户消息")
+        _uiFeedback.tryEmit(str(R.string.chat_msg_no_user_message))
         return
     }
     val user = state.messages[userIdx] as AgentUiMessage.User
     if (user.text.isBlank()) {
-        _uiFeedback.tryEmit("仅附件消息暂不支持重生成")
+        _uiFeedback.tryEmit(str(R.string.chat_msg_attachment_only_retry))
         return
     }
     // 截断：移除该 User 气泡及其后全部（retry→runEngine 会重新追加 User 气泡）
@@ -137,6 +139,9 @@ fun AgentChatViewModel.regenerateResponse(id: String) {
  *
  * [actionsEnabled]：流式生成期间禁用"重生成 / 删除"（破坏性操作与在途收集器
  * 交错不可预期）；"复制全文"始终可用。
+ *
+ * P2 i18n：菜单文案经 stringResource 取词（同包其余文件同模式）—— 旧实现
+ * 硬编码中文，英文 locale 下用户会看到中文菜单。
  */
 @Composable
 internal fun MessageActionsMenu(
@@ -151,22 +156,28 @@ internal fun MessageActionsMenu(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // 组合内预取文案再进 onClick（闭包捕获值而非 @Composable 调用点）
+    val copyFullLabel = stringResource(R.string.chat_msg_copy_full)
+    val copiedFullLabel = stringResource(R.string.chat_msg_copied_full)
+    val regenerateLabel = stringResource(R.string.chat_msg_regenerate)
+    val deleteLabel = stringResource(R.string.chat_msg_delete)
+    val deleteFromLabel = stringResource(R.string.chat_msg_delete_from)
     DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest) {
         DropdownMenuItem(
-            text = { Text("复制全文") },
+            text = { Text(copyFullLabel) },
             leadingIcon = {
                 Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(18.dp))
             },
             modifier = Modifier.heightIn(min = 44.dp),
             onClick = {
                 clipboard.setText(AnnotatedString(copyText))
-                Toast.makeText(context, "已复制全文", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, copiedFullLabel, Toast.LENGTH_SHORT).show()
                 onDismissRequest()
             }
         )
         if (showRegenerate) {
             DropdownMenuItem(
-                text = { Text("重生成此回复") },
+                text = { Text(regenerateLabel) },
                 leadingIcon = {
                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
                 },
@@ -179,7 +190,7 @@ internal fun MessageActionsMenu(
             )
         }
         DropdownMenuItem(
-            text = { Text("删除此消息") },
+            text = { Text(deleteLabel) },
             leadingIcon = {
                 Icon(
                     Icons.Default.Delete, null,
@@ -195,7 +206,7 @@ internal fun MessageActionsMenu(
             }
         )
         DropdownMenuItem(
-            text = { Text("删除此消息及之后") },
+            text = { Text(deleteFromLabel) },
             leadingIcon = {
                 Icon(
                     Icons.Default.DeleteSweep, null,

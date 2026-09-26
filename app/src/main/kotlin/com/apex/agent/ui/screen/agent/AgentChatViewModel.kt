@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.attachment.AttachmentCleanupManager
 import com.apex.agent.attachment.ImageAttachmentConverter
 import com.apex.agent.attachment.PredictiveAttachmentPreprocessor
 import com.apex.agent.core.engine.*
@@ -64,7 +65,11 @@ class AgentChatViewModel @Inject constructor(
     // default 工作区即 Agent 沙箱根（终端会话 guest /workspace 同源）。
     private val workspaceRoots: CodeWorkspaceRoots,
     // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
-    private val languageManager: LanguageManager
+    private val languageManager: LanguageManager,
+    // v2：斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）
+    private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
+    // P2：删除/清空历史会话时同步清理附件文件（AgentChatHistoryController 扩展使用）
+    internal val attachmentCleanup: AttachmentCleanupManager
 ) : ViewModel() {
 
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
@@ -302,6 +307,34 @@ class AgentChatViewModel @Inject constructor(
         savedStateHandle[KEY_DRAFT_INPUT] = text
     }
 
+    // ═══ 流水线指令胶囊（斜杠菜单选中 → 结构化挂起，不再裸文本入框）═══
+
+    private val _pendingCommand = MutableStateFlow<PendingPipelineCommand?>(null)
+
+    /** 当前挂在输入栏的流水线指令胶囊（null = 无）。发送时拼回 `/type:id` 走斜杠管线。 */
+    val pendingCommand: StateFlow<PendingPipelineCommand?> = _pendingCommand.asStateFlow()
+
+    /**
+     * 挂起一条流水线指令胶囊（Skill / MCP / 连接器 / 插件）。
+     *
+     * - 已有胶囊时**替换**（单条语义：一次发送触发一条流水线，避免多指令
+     *   组合出 `/skill:a /mcp:b` 这种解析器不认识的复合命令）；
+     * - 输入框里若已有同源斜杠残文（如手动输入了 `/skill:` 前缀），顺手清掉，
+     *   避免胶囊 + 残文双份指令。
+     */
+    fun setPendingCommand(command: PendingPipelineCommand) {
+        _pendingCommand.value = command
+        val draft = inputText.value
+        if (draft.isNotBlank() && draft.trimStart().startsWith("/")) {
+            updateInputText("")
+        }
+    }
+
+    /** 移除胶囊（胶囊行 × 按钮）。 */
+    fun clearPendingCommand() {
+        _pendingCommand.value = null
+    }
+
     /**
      * 自定义模式指令（持久化到 SharedPreferences）。
      *
@@ -437,12 +470,22 @@ class AgentChatViewModel @Inject constructor(
     /**
      * 运行期"活输出"步骤的唯一写入口：每次 flush 用最新尾部快照【原地替换】同一条
      * OUTPUT 步骤（而非追加新步骤），消除旧实现里逐次叠加重复文本的缺陷。
+     *
+     * 替换时**保留原步骤 id**：时间线以 s.id 作 LazyColumn key —— 每次换新 UUID
+     * 会让活输出行每 16ms 被 dispose/recreate（横滚位置重置、重组放大），
+     * 与「原地替换」的注释意图相悖。seq 仍然递增（时间线滚动感知更新靠它）。
      * （internal —— 事件归约已迁出至 AgentChatEventApplier.kt 扩展）
      */
     internal fun upsertLiveOutputStep(snapshot: String) {
-        val live = ToolStep(phase = StepPhase.OUTPUT, text = snapshot, seq = nextStepSeq())
-        val steps = currentToolCallSteps ?: emptyList()
         val existingId = liveOutputStepId
+        // 替换形态：沿用原 id（LazyColumn key 稳定）；新建形态：全新 id。
+        val live = ToolStep(
+            id = existingId ?: java.util.UUID.randomUUID().toString(),
+            phase = StepPhase.OUTPUT,
+            text = snapshot,
+            seq = nextStepSeq()
+        )
+        val steps = currentToolCallSteps ?: emptyList()
         if (existingId != null) {
             val idx = steps.indexOfFirst { it.id == existingId }
             if (idx >= 0) {
@@ -500,7 +543,9 @@ class AgentChatViewModel @Inject constructor(
         // 二轮审计 A-1：不计入 ERROR 占位附件——「空文本 + 全部附件读取失败」时
         // 不应发出空消息（P2-9 的 enabled 判定与 drainAttachments 的过滤口径对齐）。
         val hasUsableAttachment = attachmentManager.attachments.value.any { it.status != UploadStatus.ERROR }
-        if (trimmedText.isEmpty() && !hasUsableAttachment) return
+        // 胶囊挂起时输入框文本视为"附加要求"（可为空）——胶囊本身即指令主体。
+        val pendingCmd = _pendingCommand.value
+        if (trimmedText.isEmpty() && !hasUsableAttachment && pendingCmd == null) return
 
         // 取消前一个尚未完成的流式任务
         currentJob?.cancel()
@@ -511,11 +556,21 @@ class AgentChatViewModel @Inject constructor(
         // ★ 缺陷 2 修复：无条件收集并清空附件，避免斜杠指令分支 return 后附件永久残留
         val currentAttachments = attachmentManager.drainAttachments()
 
-        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）
+        // 清空草稿（无论是否斜杠指令，发送后都应清空输入框）+ 摘下胶囊
         updateInputText("")
+        _pendingCommand.value = null
+
+        // 胶囊 → 拼回斜杠命令：`/type:id` +（输入框有文本时）附加要求。
+        // 附件与斜杠指令互斥（下方分支提示后丢弃），胶囊路径同样遵循。
+        val effectiveText = if (pendingCmd != null) {
+            if (trimmedText.isEmpty()) pendingCmd.toCommandToken()
+            else pendingCmd.toCommandToken() + " " + trimmedText
+        } else {
+            trimmedText
+        }
 
         // 斜杠指令分支：附件已被收集，但不随指令发送（给出 System 提示）
-        if (trimmedText.startsWith("/")) {
+        if (effectiveText.startsWith("/")) {
             if (currentAttachments.isNotEmpty()) {
                 _uiState.update { s ->
                     s.copy(
@@ -525,11 +580,18 @@ class AgentChatViewModel @Inject constructor(
                     )
                 }
             }
-            handleSlashCommand(trimmedText)
+            handleSlashCommand(effectiveText)
             return
         }
 
         currentJob = viewModelScope.launch {
+            // P0 修复（互斥锁冲突丢消息）：旧实现只 cancel UI 收集器（currentJob），
+            // TaskRuntime 镜像收集器与执行锁不随 UI 生命周期走 —— 在途任务继续持锁。
+            // 下一轮 executeNormalMessage → taskController.execute 撞互斥锁 →
+            // "TaskRuntime rejects concurrent execution" 错误气泡，用户消息打水漂
+            //（abort 后快速重发的窗口期必现）。先 await cancel 完成再执行新消息
+            //（串行化，无竞态；无在途任务时 cancel 立即返回 false）。
+            taskController.cancel()
             executeNormalMessage(trimmedText, currentAttachments)
         }
     }
@@ -547,7 +609,8 @@ class AgentChatViewModel @Inject constructor(
         currentJob?.cancel()
         // 同 sendMessage：被取消的上一轮流水线横幅收尾，避免残留"运行中"脉冲。
         finishActiveBanner()
-        updateInputText("")
+        // P2：不清草稿 —— retry 的文本来自历史消息而非输入框；用户正在打的新草稿
+        // 不该被无声清掉（regenerateResponse 已特意保留草稿，此路径漏修对齐）。
         currentJob = viewModelScope.launch {
             runEngine(trimmed, attachments)
         }
@@ -574,7 +637,10 @@ class AgentChatViewModel @Inject constructor(
                 currentAttachments.map { att ->
                     // 尝试从预拷贝缓存获取（零等待）
                     val preprocessedPath = preprocessor.getSandboxPath(att.uri)
-                    val localPath = preprocessedPath ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
+                    // 命中预拷贝：晋升到正式 attachments 目录（生命周期归一，
+                    // 否则已发送附件留在 attachments_pre，进程重启后即成永久孤儿）
+                    val localPath = preprocessedPath?.let { attachmentCleanup.promoteToAttachments(it) }
+                        ?: attachmentManager.copyToSandboxSafe(att.uri, att.name)
 
                     MessageAttachment(
                         name = att.name,
@@ -618,15 +684,32 @@ class AgentChatViewModel @Inject constructor(
     private suspend fun runEngine(text: String, persistedAttachments: List<MessageAttachment>) {
         // 新一轮流式开始：清空上一轮可能残留的流式缓冲（防跨轮串字）；retry 路径同样受益。
         streamBuffers.reset()
+        // P1（旧工具卡悬挂）：runEngine/retry 覆盖新一轮时必须清掉上一轮的工具运行态
+        //（对比 abort() 的完整清理面）—— 否则被取消轮次的工具卡永久「运行中」脉冲
+        // + 计时器常跑；toolOutputBuffer/flush Job/activeToolCallId 同属该清理面。
+        toolFlushJob?.cancel()
+        toolFlushJob = null
+        activeToolCallId = null
+        toolOutputBuffer.setLength(0)
+        liveOutputStepId = null
+        currentToolCallSteps = null
+        // 在途部分回复保留为 isPartial（abort() 同款语义 —— 新发送取消旧任务时，
+        // 已流出的内容不该无声消失）。
+        val inFlightResponse = _uiState.value.currentResponse
         _uiState.update { state ->
             state.copy(
-                messages = state.messages + AgentUiMessage.User(
-                    text = text,
-                    attachments = persistedAttachments
-                ),
+                messages = state.messages +
+                    (if (inFlightResponse.isNotBlank())
+                        listOf(AgentUiMessage.Agent(text = inFlightResponse, isPartial = true))
+                    else emptyList()) +
+                    AgentUiMessage.User(
+                        text = text,
+                        attachments = persistedAttachments
+                    ),
                 isLoading = true,
                 currentThinking = "",
-                currentResponse = ""
+                currentResponse = "",
+                currentToolCall = null
             )
         }
 
@@ -1021,7 +1104,13 @@ class AgentChatViewModel @Inject constructor(
      * 与 [sendMessage] 共用同一个 [currentJob]：发送新指令会取消上一个流式任务。
      */
     private fun handleSlashCommand(command: String) {
-        val result = SlashCommands.handle(command, githubTokenManager)
+        // mcpConnected 快照：路由器据此对已连接的 /mcp:<id> 注入「用 mcp_call 调
+        // server=<id>」引导提示词（旧实现恒空集，模型面对 MCP 指令只能瞎猜）。
+        val result = SlashCommands.handle(
+            command,
+            githubTokenManager,
+            mcpConnected = runCatching { mcpManager.getConnectedServers().toSet() }.getOrDefault(emptySet())
+        )
 
         // 指令会取消上一个流式任务：先清空流式缓冲，防残留文本串入新一轮。
         streamBuffers.reset()
@@ -1052,7 +1141,29 @@ class AgentChatViewModel @Inject constructor(
         activeBannerId = execute.banner.id
 
         currentJob = viewModelScope.launch {
-            collectEngineFlowSafely(taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt)))
+            // P0 修复（闪退）：taskController.execute 的互斥拒绝
+            // （IllegalStateException：上一轮执行仍在途）发生在作为参数求值时 ——
+            // 位于 collectEngineFlowSafely 的 try/catch **之前**，异常冒泡到
+            // viewModelScope（无 handler）直接闪退。这里先安全求值，拒绝时转
+            // 可读错误气泡（与 executeNormalMessage 的兑底一致）。
+            val flow = try {
+                taskController.cancel() // 先串行化释放（同 sendMessage）
+                taskController.execute(com.apex.agent.core.engine.UserInput.text(execute.agentPrompt))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { s ->
+                    s.copy(
+                        messages = s.messages + AgentUiMessage.Error(
+                            message = "执行失败：${e.message ?: e::class.simpleName}",
+                            canRetry = true
+                        ),
+                        isLoading = false
+                    )
+                }
+                return@launch
+            }
+            collectEngineFlowSafely(flow)
         }.apply {
             invokeOnCompletion {
                 routeContextKind = null

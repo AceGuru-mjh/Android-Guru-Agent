@@ -265,6 +265,13 @@ class UbuntuBootstrapManager(
         // 任一成功即完成本阶段并记录所用镜像；全部失败才如实 stageFail。
         if (force || !evidence.containsKey(BootstrapState.APT_UPDATE.name)) {
             stageStart(BootstrapState.APT_UPDATE, "running apt-get update")
+            // 记录初始 sources 内容：镜像链全失败时恢复，避免 sources 永久停留在
+            // 最后一个镜像（官方源永不再被验证，海外/网络恢复用户可能更慢或被墙）
+            val rootfsDesc0 = provisioner.current()
+            val rootfsDir0 = rootfsDesc0?.location?.let { File(it.value) }
+            val originalSources: String? = rootfsDir0?.let { dir ->
+                runCatching { File(dir, "etc/apt/sources.list").readText() }.getOrNull()
+            }
             var updateResult = aptManager.update()
             var usedMirror: String? = null
             if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
@@ -290,6 +297,13 @@ class UbuntuBootstrapManager(
                             break
                         }
                     }
+                    // P2（镜像回滚）：全部镜像失败 → 恢复原 sources（含官方源），
+                    // 下次重试从官方源重新起步而非钉死在 aliyun。
+                    if (usedMirror == null && originalSources != null && rootfsDir != null) {
+                        runCatching {
+                            File(rootfsDir, "etc/apt/sources.list").writeText(originalSources)
+                        }
+                    }
                 }
             }
             if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
@@ -305,6 +319,9 @@ class UbuntuBootstrapManager(
                     System.currentTimeMillis() - started
                 ))
                 completedStages.add("${BootstrapState.APT_UPDATE.name}@mirror=$usedMirror")
+                // P2（幂等）：镜像成功路径同样写入 APT_UPDATE 阶段证据 ——
+                // 旧实现漏写，超时/崩溃恢复时本阶段会被无意义地重跑（分钟级）。
+                evidence[BootstrapState.APT_UPDATE.name] = System.currentTimeMillis()
             } else {
                 stageDone(BootstrapState.APT_UPDATE)
             }

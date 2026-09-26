@@ -142,6 +142,13 @@ class McpStdioTransport internal constructor(
     private val pendingAt = ConcurrentHashMap<Int, Long>()
     private val monitor = Object()
 
+    /**
+     * 写侧锁：registrar 的异步 tools/list 与 Agent 的 tools/call 会并发写同一
+     * writer —— BufferedWriter 无锁时 NDJSON 帧字符级交错撕裂（报文损坏 /
+     * id 不匹配 / 莫名超时）。write+flush 必须整体持锁。
+     */
+    private val writeLock = Object()
+
     @Volatile
     private var closed = false
 
@@ -164,9 +171,11 @@ class McpStdioTransport internal constructor(
 
         // 报文必须是单行：内容里的换行会撕裂 NDJSON 帧
         val line = payload.replace('\n', ' ').replace('\r', ' ')
-        writer.write(line)
-        writer.write('\n'.code)
-        writer.flush()
+        synchronized(writeLock) {
+            writer.write(line)
+            writer.write('\n'.code)
+            writer.flush()
+        }
 
         if (id == null) return@withContext null
 
@@ -196,16 +205,23 @@ class McpStdioTransport internal constructor(
         runCatching { pump.interrupt() }
     }
 
-    private fun awaitResponse(id: Int): String? {
+    /**
+     * 可取消的响应等待（P1 资源耗尽修复）：
+     *
+     * 旧实现 `monitor.wait` 是不可取消的线程阻塞 —— 上层 ToolRunPolicy 的 90s
+     * withTimeout 取消后，IO 线程仍被钉死到 180s STDIO 死限；沙箱服务器挂死 +
+     * 模型重试可耗尽 Dispatchers.IO 线程池拖垮全 App IO。改为 delay 轮询：
+     * 协程取消立即返回（线程归池），代价仅是最多 50ms 唤醒延迟（相对网络 RTT
+     * 可忽略）。
+     */
+    private suspend fun awaitResponse(id: Int): String? {
         val deadline = System.currentTimeMillis() + requestTimeoutMs
-        synchronized(monitor) {
-            while (true) {
-                pending.remove(id)?.let { return it }
-                if (closed || !handle.isAlive()) return null
-                val remaining = deadline - System.currentTimeMillis()
-                if (remaining <= 0) return null
-                monitor.wait(remaining.coerceAtMost(250L))
-            }
+        while (true) {
+            synchronized(monitor) { pending.remove(id) }?.let { return it }
+            if (closed || !handle.isAlive()) return null
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) return null
+            kotlinx.coroutines.delay(minOf(remaining, 50L))
         }
     }
 

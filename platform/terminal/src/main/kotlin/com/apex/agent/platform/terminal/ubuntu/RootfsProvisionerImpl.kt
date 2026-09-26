@@ -504,6 +504,16 @@ class RootfsProvisionerImpl(
             else -> { /* NONE or FRESH_INSTALL_REQUIRED — caller decides */ }
         }
 
+        // ── P1（进程重启状态回灌）──
+        // current() 非 null ⇔ metadata.state == READY（见上方判定），但内存 _state
+        // 在进程重启后恒 IDLE —— install() 的 AlreadyReady 短路条件是
+        // `_state.value == READY`，漏回灌导致降级引导/离线首装用户**每次冷启动都
+        // 全量重装 rootfs**（300MB+ 拷贝 + SHA + 解压，分钟级 IO、双倍磁盘抖动）。
+        // reconcile 只在启动路径调用一次，此处回灌语义与 repair():551 的回灌一致。
+        if (activeRootfs != null && _state.value == ProvisioningState.IDLE) {
+            _state.value = ProvisioningState.READY
+        }
+
         return ReconciliationResult(
             activeRootfs = activeRootfs,
             state = if (activeRootfs != null) ProvisioningState.READY else ProvisioningState.IDLE,

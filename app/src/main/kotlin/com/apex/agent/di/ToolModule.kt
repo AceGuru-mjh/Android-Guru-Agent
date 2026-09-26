@@ -32,6 +32,8 @@ import com.apex.agent.platform.terminal.tools.v2.TerminalCreateTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalExecTool
 import com.apex.agent.platform.terminal.exec.ExecEngine
 import com.apex.agent.tools.PrivilegedCommandSpawner
+import com.apex.agent.tools.ProotCommandSpawner
+import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxBootstrapTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxNetworkTool
 import com.apex.agent.platform.terminal.tools.v2.TerminalLinuxPackagesTool
@@ -485,6 +487,9 @@ object ToolModule {
         guestBridgeService: com.apex.agent.platform.terminal.bridge.GuestBridgeService,
         ubuntuSourcesList: com.apex.agent.platform.terminal.ubuntu.UbuntuSourcesList,
         rootfsBaseDir: java.io.File,
+        // P0 修复（用户反馈"Ubuntu 用不了/Shell 用不了"）：terminal.exec 的
+        // Ubuntu 沙箱通道依赖（ProotCommandSpawner）。
+        hostEnvironment: PRootHostEnvironment,
         // 注：rootfsTarget 已在上方参数区声明（同一类型），本地与远端 CI 红修复同款合并去重
         skillRegistry: SkillRegistry,
         // v2: MCP 三工具接线 + 风险门（HIGH 风险工具首次调用弹用户确认）+ 使用统计。
@@ -577,8 +582,21 @@ object ToolModule {
         // 必须经 TerminalToolAdapter：TerminalExecTool 实现的是 platform:terminal 的
         // TerminalTool（模块边界不允许它依赖 core:tool-registry 的 AgentTool），
         // 直接塞进 SafeAgentTool(AgentTool) 无法编译。
+        //
+        // P0 修复：ExecEngine 接入 ProotCommandSpawner —— rootfs 就绪且非 Android
+        // 专有命令时路由进 PRoot Ubuntu（channel="proot-ubuntu"），python3/gcc/
+        // apt/git/npm 等工具链命令不再 "not found"；未就绪/Android 命令诚实回落
+        // su > Shizuku > local-sh（行为与旧版一致）。cwd 映射与 bind 语义见
+        // ProotCommandSpawner KDoc。
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalExecTool(
-            engine = ExecEngine(PrivilegedCommandSpawner()),
+            engine = ExecEngine(ProotCommandSpawner(
+                hostEnvironment = hostEnvironment,
+                rootfsDir = rootfsBaseDir,
+                isRootfsReady = { File(rootfsBaseDir, "current").exists() },
+                defaultWorkspaceDir = File(context.filesDir, "linux/workspaces/default"),
+                persistentHomeDir = File(context.filesDir, "linux/home"),
+                fallback = PrivilegedCommandSpawner()
+            )),
             approvalGate = { cmd ->
                 if (commandPermissionGate.ensureAllowed(cmd)) null
                 else "用户拒绝执行该命令。不要重试相同命令；改用更安全或更低风险的方案，并告知用户原因。"

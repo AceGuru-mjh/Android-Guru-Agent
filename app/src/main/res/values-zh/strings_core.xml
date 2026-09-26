@@ -25,6 +25,7 @@
     <string name="context_used_tokens">已用 Token</string>
     <string name="context_max_tokens">上下文上限</string>
     <string name="context_usage_ratio">占用比例</string>
+    <string name="context_session_total_tokens">会话累计消耗</string>
     <string name="context_status">状态</string>
     <string name="context_status_danger">危险</string>
     <string name="context_status_warning">警告</string>
@@ -503,4 +504,10 @@
     <string name="core_notif_channel_name">Apex Agent 服务</string>
     <string name="core_notif_channel_desc">AI助手后台运行通知</string>
     <string name="core_notif_running">AI助手运行中</string>
+    <!-- ═══ P2 i18n: GitHub 连接菜单（GithubIconButton）+ 通用 ═══ -->
+    <string name="github_menu_connected">已连接：%1$s</string>
+    <string name="github_menu_disconnect">点击断开</string>
+    <string name="github_menu_connect">连接 GitHub</string>
+    <string name="github_menu_token">GitHub Token (ghp_*) 密钥访问</string>
+    <string name="common_done">完成</string>
 </resources>

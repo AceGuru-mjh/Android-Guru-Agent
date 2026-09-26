@@ -122,7 +122,19 @@ data class LlmStreamChunk(
      */
     val images: List<String> = emptyList(),
     /** 本 chunk 携带的生成视频 URL（`video_url` part / `delta.video_url` 字段）。 */
-    val videos: List<String> = emptyList()
+    val videos: List<String> = emptyList(),
+    /**
+     * 本 chunk 携带的**真实**用量统计（可能为 null —— 绝大多数正文帧没有）。
+     *
+     * 来源两种形态：
+     * - OpenAI 协议（请求带 `stream_options.include_usage`）在流尾追加的
+     *   统计帧（choices 为空 + usage 完整）；
+     * - DeepSeek 风格端点在末帧（choices 非空）直接携带 usage。
+     *
+     * 引擎据此刷新上下文仪表盘（替代纯启发式估算，用户可看到服务端返回的
+     * 真实 token 数）。仅携带 usage 的统计帧其余字段均为默认值。
+     */
+    val usage: Usage? = null
 )
 
 data class ToolCall(

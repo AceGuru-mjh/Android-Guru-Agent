@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Response
 import java.io.IOException
+import java.io.InputStream
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -91,7 +92,13 @@ class WebFetchTool(
 
             val response = httpClient.newCall(reqBuilder.build()).awaitOk()
             response.use {
-                val rawBody = it.body?.string() ?: ""
+                // P1（OOM）：响应体限流读入 —— 旧实现 body?.string() 无上限整体入内存，
+                // 高速网络下 30s readTimeout 可拉数百 MB 直接 OOM 闪退（同仓库
+                // ClawHubSource / 下载路径均有 2~20MB 上限，唯独这两个工具裸奔）。
+                // 下游本就只消费 maxChars（≤10万字符）级别的尾部，8MB 上限绰绰有余。
+                val rawBody = it.body?.byteStream()?.use { s ->
+                    s.readBodyLimited(MAX_RESPONSE_BODY_BYTES)
+                } ?: ""
                 val contentType = it.header("Content-Type") ?: ""
                 val statusCode = it.code
 
@@ -620,7 +627,10 @@ class HttpRequestTool(
 
             val response = httpClient.newCall(requestBuilder.build()).awaitOk()
             response.use {
-                val responseBody = it.body?.string() ?: ""
+                // P1（OOM）：同 web_fetch —— 限流读体防超大响应闪退（下游 take(5000)）。
+                val responseBody = it.body?.byteStream()?.use { s ->
+                    s.readBodyLimited(MAX_RESPONSE_BODY_BYTES)
+                } ?: ""
 
                 buildString {
                     appendLine("HTTP ${it.code} ${it.message}")
@@ -692,3 +702,26 @@ private val RX_CODE_CLOSE = Regex("</code>", RegexOption.IGNORE_CASE)
 private val RX_ANY_TAG = Regex("<[^>]+>")
 private val RX_BLANK_LINES = Regex("\\n{3,}")
 private val RX_SPACES = Regex("[ \\t]+")
+
+// ═══ P1（OOM）响应体限流：web_fetch / http_request 共用 ═══
+// 旧实现 body?.string() 无上限整体入内存 —— 高速网络下 30s readTimeout 可拉
+// 数百 MB 直接 OOM 闪退。下游只消费 maxChars / take(5000) 级别，8MB 上限绰绰
+// 有余；超限按前 8MB 处理（与 ClawHubSource.readBytesLimited 同思路，但超限
+// 截断而非失败 —— 抓取场景下“前 8MB 的可用内容”仍优于整体报错）。
+
+/** 工具直读 HTTP 响应体的字节上限（web_fetch / http_request）。 */
+internal const val MAX_RESPONSE_BODY_BYTES = 8 * 1024 * 1024
+
+/** 读至多 [max] 字节（超限截断，不失败）。 */
+internal fun InputStream.readBodyLimited(max: Int): String {
+    val out = java.io.ByteArrayOutputStream(minOf(max, 64 * 1024))
+    val buf = ByteArray(16 * 1024)
+    var total = 0
+    while (total < max) {
+        val n = read(buf, 0, minOf(buf.size, max - total))
+        if (n < 0) break
+        out.write(buf, 0, n)
+        total += n
+    }
+    return out.toString(Charsets.UTF_8.name())
+}

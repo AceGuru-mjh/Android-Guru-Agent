@@ -141,6 +141,23 @@ sealed interface AgentEvent {
     
     /** 迭代开始 */
     data class IterationStart(val iteration: Int) : AgentEvent
+
+    /**
+     * 真实用量更新：LLM 响应携带 usage 统计（stream_options.include_usage 的
+     * 流尾统计帧 / DeepSeek 末帧）到达时发射。
+     *
+     * 上下文仪表盘据此显示**服务端返回的真实 token 数**（替代纯启发式估算 ——
+     * 用户此前质疑「已用 token 是假的、永远为 0」）。低频事件（每轮 LLM 请求
+     * 至多一条），不会冲击流式管线。
+     */
+    data class UsageUpdated(
+        /** 本次请求输入侧 token（≈ 当前上下文规模）。 */
+        val promptTokens: Int,
+        /** 本次请求输出侧 token。 */
+        val completionTokens: Int,
+        /** 输入 + 输出合计。 */
+        val totalTokens: Int
+    ) : AgentEvent
     
     /** 需要用户输入/确认 */
     data class UserInputRequired(

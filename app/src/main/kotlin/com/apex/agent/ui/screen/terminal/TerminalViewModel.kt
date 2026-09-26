@@ -7,12 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
 import com.apex.agent.environment.EnvironmentProvisioner
 import com.apex.agent.platform.terminal.io.InputOwner
+import com.apex.agent.platform.terminal.io.KeyEventMapping
 import com.apex.agent.platform.terminal.io.KeySequenceEncoder
 import com.apex.agent.platform.terminal.io.TerminalKey
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.platform.terminal.state.TerminalSemanticState
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
+import com.apex.agent.terminalemulator.MouseEncoder
+import com.apex.agent.terminalemulator.TerminalMouseEventType
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
+import com.apex.agent.terminalemulator.encodeFocusEvent
 import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -227,6 +231,10 @@ class TerminalViewModel @Inject constructor(
     fun selectSession(id: Long) {
         if (_activeSessionId.value == id) return
         _activeSessionId.value = id
+        // P2（跨会话残留）：交互行缓冲随会话切换清空 —— A 会话敲到一半的命令
+        // 残留在 pendingLine 里，切到 B 后按空回车会拿旧命令做黑白名单检查，
+        // 命中则空回车被拦截并弹指向旧命令的「已拦截」提示。
+        pendingLine.setLength(0)
         observeActiveSession()
     }
 
@@ -290,7 +298,14 @@ class TerminalViewModel @Inject constructor(
                 return
             }
         }
-        val created = terminalRuntime.create(backendId = backendId)
+        // P1 修复（主线程 fork/exec）：terminalRuntime.create 链路含
+        // LinuxPRootBackend.availability()/prepare() —— 真实 ProcessBuilder fork
+        //（proot --version 探针，create 内各做一次共 2 次）、符号链接创建、home
+        // skel 拷贝、workspace mkdirs、forkpty 本身。旧实现直接跑在
+        // viewModelScope(Main.immediate)，慢设备上卡顿/StrictMode 违例/ANR 风险。
+        val created = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            terminalRuntime.create(backendId = backendId)
+        }
         val result = created.getOrElse { e ->
             _notice.value = lang.getString(R.string.term_notice_create_failed, e.message?.take(120) ?: "")
             return
@@ -305,6 +320,10 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.close(id, force = true)
             sessionBackends.remove(id)
             sessionTitles.remove(id)
+            // 关闭的是当前会话时同步清交互行缓冲（语义同 selectSession 的清理）
+            if (_activeSessionId.value == id) {
+                pendingLine.setLength(0)
+            }
             refreshSessionsInternal()
             if (_activeSessionId.value == id) {
                 _sessions.value.firstOrNull { it.isAlive }?.let { selectSession(it.id) }
@@ -425,9 +444,14 @@ class TerminalViewModel @Inject constructor(
             val bytes = KeySequenceEncoder.encodePaste(
                 text, _renderState.value?.bracketedPaste ?: false
             )
+            // P1（CJK 乱码）：bytes 直通 —— 旧实现把 UTF-8 字节经 ISO-8859-1 转
+            // String 再按 UTF-8 重编码（Runtime 侧 InputManager 按 UTF-8 写 PTY），
+            // 剪贴板里的中文/emoji/重音字符全部变成 "ä½ " 类乱码。
+            // Runtime 的 RAW 路径已支持 bytes 直通（T85，注释明言「消除双重编码」），
+            // UI 调用方此前没有同步切换 —— 现在对齐。
             terminalRuntime.write(
                 sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
-                text = String(bytes, Charsets.ISO_8859_1)
+                bytes = bytes
             )
         }
     }
@@ -440,6 +464,115 @@ class TerminalViewModel @Inject constructor(
             terminalRuntime.resize(sid, rows, cols)
         }
     }
+
+    // ═══════════════════ T86：Termux 对齐输入扩展（硬件键/鼠标/焦点/字号）═══════════════════
+
+    /**
+     * 硬件键盘完整映射（KeyEventMapping —— xterm 修饰键协议）。
+     *
+     * 覆盖旧 [sendKey] 路径之外的键位：Shift/Alt/Ctrl+方向键（`ESC[1;5A` 类）、
+     * F1-F12、小键盘（DECKPAM 感知）、Shift+Tab、Alt+字符（meta 化）。
+     * 无映射（返回 null）时 UI 放行给 IME/系统。
+     *
+     * 行缓冲语义与 [sendKey] 一致：ENTER=提交检查、BACKSPACE=退格、其余清空。
+     */
+    fun sendHardwareKey(keyCode: Int, mods: Int, unicodeChar: Int = 0) {
+        val sid = _activeSessionId.value ?: return
+        val render = _renderState.value
+        val modes = KeyEventMapping.KeyModes(
+            applicationCursor = render?.applicationCursor ?: false,
+            applicationKeypad = render?.applicationKeypad ?: false,
+            numLock = true
+        )
+        val bytes = KeyEventMapping.encode(keyCode, mods, modes, unicodeChar) ?: return
+        when (keyCode) {
+            KeyEventMapping.KEYCODE_ENTER -> {
+                val candidate = pendingLine.toString().trim()
+                if (candidate.isNotBlank() && !isCommandAllowed(candidate)) {
+                    _notice.value = lang.getString(R.string.term_notice_blocked, candidate.take(40))
+                    return
+                }
+                pendingLine.setLength(0)
+            }
+            KeyEventMapping.KEYCODE_DEL -> if (pendingLine.isNotEmpty()) pendingLine.setLength(pendingLine.length - 1)
+            else -> pendingLine.setLength(0)
+        }
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /**
+     * 鼠标事件（触摸/手写笔 → MouseEncoder → PTY）。
+     *
+     * guest 开启 DECSET 1000/1002/1003 后，vim/tmux/htop 把触摸点击当鼠标用。
+     * 坐标 1-based（xterm 习惯）；未开启跟踪时编码器返回 null → 静默忽略。
+     */
+    fun sendMouseEvent(type: TerminalMouseEventType, button: Int, mods: Int, col: Int, row: Int) {
+        val sid = _activeSessionId.value ?: return
+        val mode = _renderState.value?.mouseMode ?: return
+        val bytes = MouseEncoder.encode(type, button, mods, col, row, mode) ?: return
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /**
+     * 滚轮路由：跟踪开启 → 滚轮当鼠标事件进 PTY（vim 里滚 = 移动光标）；
+     * 备用屏 + 1007 → 方向键；否则返回 false 让 UI 滚动视口（正常行为）。
+     *
+     * @return true = 已编码进 PTY（UI 不要再滚视口）
+     */
+    fun sendWheel(up: Boolean): Boolean {
+        val sid = _activeSessionId.value ?: return false
+        val render = _renderState.value ?: return false
+        val bytes = when {
+            render.mouseMode.enabled -> MouseEncoder.encode(
+                if (up) TerminalMouseEventType.WHEEL_UP else TerminalMouseEventType.WHEEL_DOWN,
+                0, 0, render.cursorCol + 1, render.cursorRow + 1, render.mouseMode
+            )
+            render.mouseMode.altScroll && render.alternateScreen -> MouseEncoder.altScrollArrow(up)
+            else -> null
+        } ?: return false
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+        return true
+    }
+
+    /**
+     * 窗口焦点变化 → ESC[I / ESC[O（DECSET 1004）。
+     * vim FocusGained/FocusLost、tmux focus-events 依赖此序列。
+     */
+    fun notifyTerminalFocus(gained: Boolean) {
+        val sid = _activeSessionId.value ?: return
+        val mode = _renderState.value?.focusMode ?: return
+        val bytes = encodeFocusEvent(gained, mode) ?: return
+        viewModelScope.launch {
+            terminalRuntime.write(
+                sid, InputOwner.USER, TerminalRuntime.WriteKind.RAW,
+                text = String(bytes, Charsets.ISO_8859_1)
+            )
+        }
+    }
+
+    /** 双指捏合调字号（Termux 手势）：步进 1，钳制 6..32。 */
+    fun adjustFontSize(delta: Int) {
+        if (delta == 0) return
+        updateSettings { copy(fontSize = (fontSize + delta).coerceIn(6, 32)) }
+    }
+
+    /** OSC 8 链接 URI 查询（屏内 link id → URI；悬空/未知 → null）。 */
+    fun linkUriOf(linkId: Int): String? = _renderState.value?.linkTable?.get(linkId)
 
     // ═══════════════════════ Ubuntu 生命周期入口 ═══════════════════════
 
@@ -506,8 +639,12 @@ class TerminalViewModel @Inject constructor(
             ubuntuLifecycle.progressFlow().collect { p ->
                 _ubuntuProgress.value = p
                 // 安装完成后刷新占用（下载/解压会显著改变磁盘占用）
+                // P1 修复（布尔优先级）：&& 先于 || 结合 —— 旧写法
+                // `a && b || c` 等价于 `(a && b) || c`，任何以 REMOVED 结尾的
+                // stage（含未来 bootstrap 可能新增的移除态）都会触发刷新；
+                // 显式括号表达意图：install 域内的 READY / REMOVED 才刷新。
                 if (p.stage.startsWith("install:") &&
-                    p.stage.endsWith("READY") || p.stage.endsWith("REMOVED")
+                    (p.stage.endsWith("READY") || p.stage.endsWith("REMOVED"))
                 ) {
                     refreshRootfsSize()
                 }

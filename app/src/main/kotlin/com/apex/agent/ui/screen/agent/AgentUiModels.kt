@@ -36,7 +36,9 @@ data class AgentChatUiState(
     val historyDepth: Int = 0,
     /** 上下文仪表盘：当前占用 token 数与上限（分子/分母） */
     val contextUsedTokens: Int = 0,
-    val contextMaxTokens: Int = 1
+    val contextMaxTokens: Int = 1,
+    /** 会话累计消耗 token（多轮真实 usage 累加；0 = 端点未返回统计）。 */
+    val sessionTotalTokens: Long = 0
 )
 
 /**
@@ -58,6 +60,49 @@ data class UserInputRequest(
  * 与通用连接器（Link 图标 + 紫色）视觉区分。
  */
 enum class ToolKind { LOCAL, MCP, WEB_SEARCH, WEB_FETCH, SKILL, GITHUB, CONNECTOR, PLUGIN }
+
+/**
+ * 待发送的流水线指令（迷你胶囊）。
+ *
+ * 用户从斜杠菜单选中 Skill / MCP / 插件 / 连接器时，不再把 `/skill:xxx`
+ * 裸文本塞进输入框，而是以结构化胶囊挂在输入栏上：
+ * - 胶囊按类型渲染图标（Skill 用 Material `Code`（即 `</>`）/ MCP 用 Api /
+ *   连接器用 Link / 插件用 Extension）与「type: 名称」标签；
+ * - 发送时与输入框文本拼回 `"/type:id 附加文本"` 走既有斜杠管线
+ *   （解析/路由/横幅/工具来源标记全部复用，零新链路）；
+ * - 再选一条直接替换当前胶囊（单条语义：一次发送触发一条流水线）。
+ *
+ * @param type 指令类型（"skill" / "mcp" / "connector" / "plugin"）。
+ * @param id 指令 id（斜杠命令冒号后的部分）。
+ * @param label 展示名（菜单项 label，优先于裸 id 呈现）。
+ */
+@Immutable
+data class PendingPipelineCommand(
+    val type: String,
+    val id: String,
+    val label: String
+) {
+    /** 拼回斜杠命令首词：`/skill:web_search`。 */
+    fun toCommandToken(): String = "/$type:$id"
+
+    companion object {
+        /**
+         * 从斜杠菜单命令串解析胶囊（宽容失败 → null 走旧文本插入路径）。
+         * 输入形态：`/skill:web_search `（菜单命令自带尾随空格）或无空格裸命令。
+         */
+        fun fromCommand(command: String, label: String): PendingPipelineCommand? {
+            val token = command.trim()
+            if (!token.startsWith("/")) return null
+            val colon = token.indexOf(':')
+            if (colon <= 1) return null
+            val type = token.substring(1, colon).lowercase()
+            val id = token.substring(colon + 1).trim()
+            if (id.isEmpty()) return null
+            if (type !in setOf("skill", "mcp", "connector", "plugin")) return null
+            return PendingPipelineCommand(type = type, id = id, label = label.ifBlank { id })
+        }
+    }
+}
 
 @Immutable
 sealed interface AgentUiMessage {

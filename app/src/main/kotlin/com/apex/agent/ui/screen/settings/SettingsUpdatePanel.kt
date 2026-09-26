@@ -183,7 +183,7 @@ internal fun UpdatePanel() {
         val manifest = (result as? UpdateCheckResult.Available)?.latest ?: return
         val patch = checker.preferredPatch(manifest, BuildConfig.VERSION_NAME)
         val full = checker.preferredAsset(manifest)
-        val asset: UpdateTarget? = (if (usePatch) patch else null) ?: full ?: return
+        val asset: UpdateTarget = (if (usePatch) patch else null) ?: full ?: return
         val fileName = asset.url.substringAfterLast('/')
         val title = if (usePatch) {
             "Apex Agent ${manifest.versionName} patch"

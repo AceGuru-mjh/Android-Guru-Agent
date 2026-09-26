@@ -14,11 +14,15 @@ data class AgentChatUiState(
     val messages: List<AgentUiMessage> = emptyList(),
     val isLoading: Boolean = false,
     val currentThinking: String = "",       // 当前思考内容（流式）
+    /** 当前流式思考的开始时刻（SystemClock.elapsedRealtime 基；0 = 无进行中思考）。ThinkingBubble 实时秒数计时用。 */
+    val currentThinkingStartElapsed: Long = 0,
     val currentResponse: String = "",       // 当前回复内容（流式）
     val currentToolCall: AgentToolCallUi? = null, // 当前执行的工具
     val mode: AgentMode = AgentMode.BUILD,
     val thinkingLevel: ThinkingLevel = ThinkingLevel.STANDARD,
     val reasoningEffort: ReasoningEffort = ReasoningEffort.NONE,
+    /** 双级思考控制第二级：强制深度思考（引擎档位钉 MAXIMUM，提示词层强制深推理）。 */
+    val forceDeepThinking: Boolean = false,
     val plan: ExecutionPlan? = null,
     val awaitingPlanConfirmation: Boolean = false,
     /** #169：计划已确认锁定（PlanConfirmed 后置 true；锁定后执行期间不可改）。 */
@@ -190,6 +194,8 @@ sealed interface AgentUiMessage {
     @Immutable
     data class ThinkingMessage(
         val thought: String,
+        /** 本次思考耗时（毫秒；ThinkingStart→ThinkingComplete 实测）。UI 显示秒数用。 */
+        val durationMs: Long = 0,
         override val id: String = java.util.UUID.randomUUID().toString()
     ) : AgentUiMessage
     /**

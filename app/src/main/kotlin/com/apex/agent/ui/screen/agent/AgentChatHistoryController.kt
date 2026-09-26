@@ -231,6 +231,9 @@ internal fun AgentChatViewModel.resetStreamingState() {
     activeBannerId = null
     routeContextKind = null
     routeContextName = null
+    // 思考计时器同步归零（防会话切换后 live 秒数残留）。
+    thinkingStartElapsed = 0
+    _uiState.update { it.copy(currentThinkingStartElapsed = 0) }
 }
 
 private const val PERSIST_DEBOUNCE_MS = 800L

@@ -14,6 +14,7 @@ import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.engine.modes.ModePreset
+import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.tools.ToolRegistry
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
@@ -60,6 +61,9 @@ class AgentChatViewModel @Inject constructor(
     private val taskController: AgentTaskStatusController,
     // 历史对话仓库（归档/恢复/删除；逻辑主体在 AgentChatHistoryController.kt）
     internal val chatHistory: ChatHistoryManager,
+    // 工作区根解析（HTML 预览路径用）：code_* 工具写的 HTML 按此根解析相对路径；
+    // default 工作区即 Agent 沙箱根（终端会话 guest /workspace 同源）。
+    private val workspaceRoots: CodeWorkspaceRoots,
     // i18n：用户可见 toast / 系统行 / 工具步骤文案按当前语言取词（组合外场景）
     private val languageManager: LanguageManager,
     // v2：斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）
@@ -97,10 +101,20 @@ class AgentChatViewModel @Inject constructor(
         viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
         // P2-8/P3（6-c）：reasoningEffort chip 初始跟随默认 Profile；contextMaxTokens 回填引擎真实值（原恒 1 → 仪表盘 0%/上限1）。
         settingsRepository.profiles.value.firstOrNull { it.isDefault }?.let { p -> _uiState.update { it.copy(reasoningEffort = p.reasoningEffort) } }
-        // #168：恢复聊天页持久化的思考档位覆盖（"" = 跟随启动默认档位，不动）。
-        settingsRepository.agentSettings.value.thinkingLevelOverride
+        // 双级思考控制第二级：恢复强制深度思考开关（优先读新字段 forceDeepThinking；
+        // 旧版本仅存 thinkingLevelOverride —— deep/maximum 视为强制开；旧档位
+        // （如 auto 自适应）按原档回放，行为零回归）。
+        val agentSettingsSnapshot = settingsRepository.agentSettings.value
+        val savedOverrideLevel = agentSettingsSnapshot.thinkingLevelOverride
             .takeIf { it.isNotBlank() }
-            ?.let { saved -> thinkingLevelFromOverride(saved)?.let(::applyThinkingLevel) }
+            ?.let { thinkingLevelFromOverride(it) }
+        val forcedDeep = agentSettingsSnapshot.forceDeepThinking ||
+            savedOverrideLevel == ThinkingLevel.DEEP || savedOverrideLevel == ThinkingLevel.MAXIMUM
+        when {
+            forcedDeep -> applyThinkingLevel(ThinkingLevel.MAXIMUM)
+            savedOverrideLevel != null -> applyThinkingLevel(savedOverrideLevel)
+            else -> Unit // 未覆盖：跟随启动默认档位（AgentModule 快照）
+        }
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
         // 历史对话：会话列表初始加载 + 消息流防抖自动归档
         installChatHistoryAutoPersist()
@@ -495,6 +509,12 @@ class AgentChatViewModel @Inject constructor(
     /** 正在展示中的流水线横幅 id（[AgentUiMessage.PipelineBanner]），收尾时原地置为完成态。 */
     internal var activeBannerId: String? = null
 
+    // ═══ 思考耗时计时（ThinkingBubble 秒数显示）═══
+    /** 当前一轮思考的起始时刻（SystemClock.elapsedRealtime 基；0 = 未在思考）。
+     *  [AgentEvent.ThinkingStart] 置位、[AgentEvent.ThinkingComplete]/abort 清零；
+     *  ThinkingComplete 用它与当前时刻差值落盘 ThinkingMessage.durationMs。 */
+    internal var thinkingStartElapsed: Long = 0
+
     /** 引擎一轮执行收尾时调用：把未完成的流水线横幅置为完成态（停止脉冲、显示耗时）。 */
     internal fun finishActiveBanner() {
         val id = activeBannerId ?: return
@@ -796,35 +816,66 @@ class AgentChatViewModel @Inject constructor(
     }
 
     fun setThinkingLevel(level: ThinkingLevel) {
-        // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）；
-        // AUTO 档不动模型原生 reasoning effort——逐轮档位由引擎侧选档器决定。
+        // #168：档位选择持久化到 AgentSettings（跨重启恢复，patchConfig 即时生效）。
         settingsRepository.updateAgentSettings { copy(thinkingLevelOverride = level.name.lowercase()) }
         applyThinkingLevel(level)
         if (level == ThinkingLevel.AUTO) {
             _lastAdaptiveDecision.value = null // 决策理由由下一轮 IterationStart 刷新
-            return
         }
-        // T1（思考程度真实化）：思考档位同步映射为模型原生 reasoning 强度并
-        // 持久化到默认 Profile —— DynamicLlmClient 监听 profiles 即时重建，
-        // 配合能力位/差异化 body 修复后，下一次请求真实下发
-        // reasoning_effort / thinking.budget_tokens / enable_thinking。
-        // NONE 档 → ReasoningEffort.NONE（不发 reasoning 字段，覆盖旧档位）。
-        val effort = level.toReasoningEffortName()
-            ?.let { name -> runCatching { ReasoningEffort.valueOf(name) }.getOrNull() }
-            ?: ReasoningEffort.NONE
-        setReasoningEffort(effort)
+        // 双级思考控制（RikkaHub 式）：档位不再自动映射/覆写模型原生 reasoning effort ——
+        // 第一级（模型原生强度）由 ReasoningEffort chips 独立控制并持久化到 Profile，
+        // 与本档位（引擎提示词层）完全解耦，两者独立生效。
     }
 
     /** 档位 → UI 状态 + 引擎配置（setThinkingLevel 与启动恢复共用）。 */
     private fun applyThinkingLevel(level: ThinkingLevel) {
-        _uiState.update { it.copy(thinkingLevel = level) }
+        _uiState.update { it.copy(thinkingLevel = level, forceDeepThinking = level == ThinkingLevel.MAXIMUM) }
         // P1-1（6-c）：patchConfig 只改 thinkingLevel，保留其余引擎配置。
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg -> cfg.copy(thinkingLevel = level) }
+    }
+
+    /**
+     * 双级思考控制第二级：强制深度思考开关。
+     *
+     * ON → 引擎 ThinkingLevel 钉 MAXIMUM（七步 ToT 提示词 + 工具自检 + 终检清单，
+     * 提示词层强制，对任何模型生效）；OFF → 回退 STANDARD 三步 CoT。
+     * 与第一级（模型原生 reasoning effort，Profile 字段）互不干涉。
+     */
+    fun setForceDeepThinking(enabled: Boolean) {
+        settingsRepository.updateAgentSettings {
+            copy(forceDeepThinking = enabled, thinkingLevelOverride = if (enabled) "maximum" else "standard")
+        }
+        applyThinkingLevel(if (enabled) ThinkingLevel.MAXIMUM else ThinkingLevel.STANDARD)
     }
 
     /** #168：thinkingLevelOverride 字符串 → ThinkingLevel（未知/空值 → null = 不覆盖）。 */
     private fun thinkingLevelFromOverride(value: String): ThinkingLevel? =
         runCatching { ThinkingLevel.valueOf(value.trim().uppercase()) }.getOrNull()
+
+    // ═══ HTML 产物预览（应用内 WebView）═══
+
+    /**
+     * 把工具调用中提取的 HTML 路径（相对 / 绝对 / guest /workspace 前缀）
+     * 解析为宿主侧可读文件路径；解析失败（不存在/不可读）返回 null。
+     *
+     * 三段式判定：
+     * 1. guest `/workspace/...` → 工作区根替换（终端会话与 code_* 同源目录）；
+     * 2. 宿主绝对路径直接验证存在性；
+     * 3. 相对路径 → activeRoot（null 时兜底 default 工作区）下解析。
+     */
+    fun resolveHtmlPreviewPath(rawPath: String): String? {
+        val root = workspaceRoots.activeRoot()
+            ?: File(context.filesDir, "linux/workspaces/default")
+        val candidate: File = when {
+            rawPath.startsWith("/workspace/", ignoreCase = true) ->
+                File(root, rawPath.removePrefix("/workspace/"))
+            rawPath.startsWith("/") -> File(rawPath)
+            else -> File(root, rawPath)
+        }
+        return if (HtmlArtifactDetector.isPreviewableHostFile(candidate.absolutePath)) {
+            candidate.absolutePath
+        } else null
+    }
 
     /**
      * #169 计划确认（人控升级）：confirmed=false 取消；true 时可携带步骤勾选
@@ -871,15 +922,19 @@ class AgentChatViewModel @Inject constructor(
         // T76：取消走任务运行时（引擎 abort + CANCELLED 落盘，重启不复活）
         viewModelScope.launch { taskController.cancel() }
 
-        // 取消后：部分产物落盘 + 状态复位。
+        // 取消后：部分产物落盘 + 状态复位（部分思考附带实测秒数）。
         finishActiveBanner()
+        val partialThinkingDurationMs = if (thinkingStartElapsed > 0) {
+            android.os.SystemClock.elapsedRealtime() - thinkingStartElapsed
+        } else 0L
+        thinkingStartElapsed = 0
         _uiState.update { state ->
             val extra = buildList<AgentUiMessage> {
                 if (partialResponse.isNotBlank()) {
                     add(AgentUiMessage.Agent(text = partialResponse, isPartial = true))
                 }
                 if (partialThinking.isNotBlank()) {
-                    add(AgentUiMessage.ThinkingMessage(partialThinking))
+                    add(AgentUiMessage.ThinkingMessage(partialThinking, partialThinkingDurationMs))
                 }
                 add(AgentUiMessage.System(str(R.string.chat_aborted)))
             }
@@ -888,6 +943,7 @@ class AgentChatViewModel @Inject constructor(
                 isLoading = false,
                 currentResponse = "",
                 currentThinking = "",
+                currentThinkingStartElapsed = 0,
                 currentToolCall = null
             )
         }
@@ -946,6 +1002,9 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
             cfg.copy(temperature = target.temperature)
         }
+        // 修复：模型原生思考强度跟随当前模型（每 Profile 独立持久化）——
+        // 切换后同步 UI 状态，避免 chip 显示上一个模型的档位（旧实现遗漏）。
+        _uiState.update { it.copy(reasoningEffort = target.reasoningEffort) }
     }
 
     /**

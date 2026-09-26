@@ -137,13 +137,17 @@ jobs:
           # The pattern matches literal id declarations only; dynamic ids
           # (randomUUID/ID-constant references) are runtime values, not
           # declarations, and are excluded by design.
-          IDS=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | sort | uniq -d)
+          # 注意：常/变量引用必须排除 —— P94 六个搜索供应商各自声明
+          # `override val id = PROVIDER_ID`（取值 bing-web / brave /
+          # duckduckgo-html / exa / searxng / tavily），源码文本完全一致但运行期
+          # id 各不相同，按文本判重会把这 6 处唯一 id 误报为重复。
+          IDS=$(grep -rhF 'override val id = "' core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | sort | uniq -d)
           if [ -n "$IDS" ]; then
             echo "❌ Duplicate tool IDs found:"
             echo "$IDS"
             exit 1
           fi
-          TOTAL=$(grep -rh "override val id = " core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | wc -l)
+          TOTAL=$(grep -rhF 'override val id = "' core/tool-registry/src/main/kotlin/ platform/terminal/src/main/kotlin/ app/src/main/kotlin/ | wc -l)
           echo "✅ $TOTAL unique tool IDs, no duplicates"
 
       - name: Check duplicate classes

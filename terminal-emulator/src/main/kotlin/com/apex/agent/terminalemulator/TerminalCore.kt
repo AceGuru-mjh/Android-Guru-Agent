@@ -885,12 +885,15 @@ data class TerminalScreenSnapshot(
  * @param fg    foreground as opaque 0xAARRGGBB; **0 = theme default**
  * @param bg    background as opaque 0xAARRGGBB; **0 = transparent / theme default**
  * @param flags [RenderCell] FLAG_* bit set (bold/dim/italic/underline/blink/hidden/strike/inverse/wide)
+ * @param link  OSC 8 hyperlink id — 1-based index into the session's URI table
+ *              (0 = no link). v0.2 native capability; the Kotlin fallback never sets it.
  */
 data class RenderCell(
     val text: String,
     val fg: Long,
     val bg: Long,
-    val flags: Int
+    val flags: Int,
+    val link: Int = 0
 ) {
     companion object {
         const val FLAG_BOLD = 1

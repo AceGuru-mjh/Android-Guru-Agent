@@ -3,27 +3,38 @@ package com.apex.agent.vtnative
 // ═══════════════════════════════════════════════════════════════════════════
 // NativeVtCore — JNI wrapper over libvt_native.so (apex-vt-native engine).
 //
-// Vendored from the upstream library repo (see terminal-native/VENDOR.md);
-// adapted for this project: real imports, no JvmName/finalize.
+// Vendored from upstream apex-vt-native v0.2 (kotlin/NativeVtCore.kt) and
+// adapted for this project: real imports (TerminalEngine contract types),
+// no @file:JvmName, no finalize — see VENDOR.md for the vendoring rules.
+//
+// v0.2 foundation capabilities (native-only; TerminalCore reports them as
+// unsupported via TerminalEngine's default methods):
+//   * search / selection / hyperlinks (OSC 8) — global-row addressing
+//   * session persistence (save/restore across process death)
+//   * input encoders — key (DECCKM/DECKPAM/modifyOtherKeys/Kitty), paste
+//     (anti-injection brackets), mouse (4 modes × 4 encodings), focus, wheel
 //
 // Design:
 //  * feed() is a single JNI call per PTY read (critical array pinning).
 //  * renderSnapshot() is ONE JNI call returning a flat IntArray — the object
-//    model is built on the JVM side (bounded by rows×cols per frame).
-//  * responseSink: the native engine buffers DA/DSR self-generated responses;
-//    the wrapper polls them after every feed()/flush() and forwards.
-//  * Lifecycle: create() → handle; close() releases it deterministically.
-//    Engines owned by RealVirtualTerminal live for the whole session (same
-//    lifecycle as the Kotlin TerminalCore they replace).
+//    model is built on the JVM side (bounded by rows*cols per 33ms frame).
+//    v0.2 header: 32 ints; cell tuple: cp, fg, bg, flags, link, nComb, combs.
+//  * responseSink: the native engine buffers DA/DSR/DECRQM self-generated
+//    responses; the wrapper polls them after every feed()/flush().
+//  * Lifecycle: create() → handle; destroy() from close().
 // ═══════════════════════════════════════════════════════════════════════════
 
 import com.apex.agent.terminalemulator.CursorStyle
 import com.apex.agent.terminalemulator.ScreenMutation.MutationType
+import com.apex.agent.terminalemulator.MouseTrackingMode
+import com.apex.agent.terminalemulator.MouseWireEncoding
 import com.apex.agent.terminalemulator.RenderCell
 import com.apex.agent.terminalemulator.ScreenMutation
 import com.apex.agent.terminalemulator.TerminalEngine
+import com.apex.agent.terminalemulator.TerminalKey
+import com.apex.agent.terminalemulator.TerminalMouseEventType
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
-import com.apex.agent.terminalemulator.TerminalScreenSnapshot
+import com.apex.agent.terminalemulator.TerminalSearchMatch
 
 class NativeVtCore(
     initialRows: Int,
@@ -33,10 +44,37 @@ class NativeVtCore(
 
     companion object {
         init {
-            // UnsatisfiedLinkError when the .so is absent — VtEngineFactory
-            // catches it once and falls back to the pure-Kotlin TerminalCore.
+            // Throws UnsatisfiedLinkError when the .so is absent — callers
+            // (VtEngineFactory) catch it once and fall back to TerminalCore.
             System.loadLibrary("vt_native")
         }
+
+        /**
+         * Rehydrate an engine from a [saveSession] blob (process-death
+         * recovery). Returns null when the blob fails validation —
+         * corruption never crashes.
+         */
+        fun restoreSession(
+            data: ByteArray,
+            offset: Int = 0,
+            length: Int = data.size,
+            maxScrollback: Int = 1000
+        ): NativeVtCore? {
+            val handle = nativeRestoreSession(data, offset, length, maxScrollback)
+            if (handle == 0L) return null
+            return NativeVtCore(handle)
+        }
+
+        private external fun nativeRestoreSession(
+            data: ByteArray, off: Int, len: Int, maxScrollback: Int
+        ): Long
+    }
+
+    /** Secondary constructor from an already-created native handle. */
+    private constructor(handle: Long) : this(1, 1, 0) {
+        if (this.handle != 0L) nativeDestroy(this.handle)
+        this.handle = handle
+        this.closed = false
     }
 
     private var handle: Long = nativeCreate(initialRows, initialCols, maxScrollback)
@@ -77,22 +115,23 @@ class NativeVtCore(
 
     // ─── state accessors ───────────────────────────────────────────────
 
+    override val rows: Int get() = header()[0].toInt()
+    override val cols: Int get() = header()[1].toInt()
+
     private fun header(): LongArray {
         checkHandle()
         return requireNotNull(nativeHeader(handle)) { "nativeHeader returned null" }
     }
 
-    override val rows: Int get() = header()[0].toInt()
-    override val cols: Int get() = header()[1].toInt()
     override val cursorVisible: Boolean get() = header()[4] != 0L
 
     // ─── snapshots ─────────────────────────────────────────────────────
 
-    override fun snapshot(): TerminalScreenSnapshot {
+    override fun snapshot(): com.apex.agent.terminalemulator.TerminalScreenSnapshot {
         checkHandle()
         val text = nativeRenderedText(handle) ?: ""
         val h = header()
-        return TerminalScreenSnapshot(
+        return com.apex.agent.terminalemulator.TerminalScreenSnapshot(
             rows = h[0].toInt(),
             cols = h[1].toInt(),
             cursorRow = h[2].toInt(),
@@ -105,14 +144,26 @@ class NativeVtCore(
         )
     }
 
+    // Latest v0.2 mode mirrors (filled by [renderSnapshot]).
+    private var lastMouseMode: MouseTrackingMode = MouseTrackingMode.OFF
+    private var lastMouseEncoding: MouseWireEncoding = MouseWireEncoding.X11
+    private var lastFocusReport = false
+    private var lastAltScroll = false
+    private var lastApplicationKeypad = false
+    private var lastModifyLevel = 0
+
     override fun renderSnapshot(maxScrollbackLines: Int): TerminalRenderSnapshot {
         checkHandle()
-        val flat =
-            requireNotNull(nativeSnapshotCells(handle, maxScrollbackLines)) {
-                "nativeSnapshotCells returned null"
-            }
+        val flat = nativeSnapshotCells(handle, maxScrollbackLines) ?: IntArray(32)
         fun u64(hi: Int, lo: Int): Long = (hi.toLong() shl 32) or (lo.toLong() and 0xFFFFFFFFL)
-        var p = 16  // header: 16 ints (see vt_jni.cpp nativeSnapshotCells layout)
+        // v0.2 header (32 ints) — see vt_jni.cpp nativeSnapshotCells docs.
+        lastMouseMode = MouseTrackingMode.entries.firstOrNull { it.id == flat[24] } ?: MouseTrackingMode.OFF
+        lastMouseEncoding = MouseWireEncoding.entries.firstOrNull { it.id == flat[25] } ?: MouseWireEncoding.X11
+        lastFocusReport = flat[26] != 0
+        lastAltScroll = flat[27] != 0
+        lastApplicationKeypad = flat[28] != 0
+        lastModifyLevel = flat[29]
+        var p = 32  // header size
         fun decodeRow(): List<RenderCell> {
             val n = flat[p++]
             if (n == 0) return emptyList()
@@ -122,11 +173,14 @@ class NativeVtCore(
                 val fg = flat[p++].toLong() and 0xFFFFFFFFL
                 val bg = flat[p++].toLong() and 0xFFFFFFFFL
                 val flags = flat[p++]
+                val link = flat[p++]  // 1-based URI table index (0 = none)
                 val nComb = flat[p++]
                 val text = StringBuilder(1 + nComb)
                 text.appendCodePoint(if (cp == 0) ' '.code else cp)
                 repeat(nComb) { text.appendCodePoint(flat[p++]) }
-                out.add(RenderCell(text = text.toString(), fg = fg, bg = bg, flags = flags))
+                out.add(
+                    RenderCell(text = text.toString(), fg = fg, bg = bg, flags = flags, link = link)
+                )
             }
             return out
         }
@@ -159,6 +213,140 @@ class NativeVtCore(
             bellSeq = u64(flat[14], flat[15])
         )
     }
+
+    // ─── v0.2: search ──────────────────────────────────────────────────
+
+    override fun search(pattern: String, caseInsensitive: Boolean, wholeWord: Boolean): Int {
+        checkHandle()
+        return nativeSearch(handle, pattern, caseInsensitive, wholeWord)
+    }
+
+    override fun clearSearch() {
+        checkHandle()
+        nativeClearSearch(handle)
+    }
+
+    override fun searchHitCount(): Int {
+        checkHandle()
+        return nativeSearchHitCount(handle)
+    }
+
+    override fun searchHits(): List<TerminalSearchMatch> {
+        checkHandle()
+        val flat = nativeSearchHits(handle) ?: return emptyList()
+        val out = ArrayList<TerminalSearchMatch>(flat.size / 4)
+        var i = 0
+        while (i + 3 < flat.size) {
+            out.add(
+                TerminalSearchMatch(flat[i], flat[i + 1].toInt(), flat[i + 2], flat[i + 3].toInt())
+            )
+            i += 4
+        }
+        return out
+    }
+
+    override fun setActiveSearchHit(index: Int) {
+        checkHandle()
+        nativeSetActiveSearchHit(handle, index)
+    }
+
+    override fun activeSearchHit(): Int {
+        checkHandle()
+        return nativeActiveSearchHit(handle)
+    }
+
+    // ─── v0.2: selection (touch copy/paste) ─────────────────────────────
+
+    override fun beginSelection(globalRow: Long, col: Int) {
+        checkHandle()
+        nativeBeginSelection(handle, globalRow, col)
+    }
+
+    override fun extendSelection(globalRow: Long, col: Int) {
+        checkHandle()
+        nativeExtendSelection(handle, globalRow, col)
+    }
+
+    override fun clearSelection() {
+        checkHandle()
+        nativeClearSelection(handle)
+    }
+
+    override fun expandSelectionWord(globalRow: Long, col: Int) {
+        checkHandle()
+        nativeExpandSelectionWord(handle, globalRow, col)
+    }
+
+    override fun expandSelectionLine(globalRow: Long, col: Int) {
+        checkHandle()
+        nativeExpandSelectionLine(handle, globalRow, col)
+    }
+
+    override fun selectionText(): String {
+        checkHandle()
+        return nativeSelectionText(handle) ?: ""
+    }
+
+    // ─── v0.2: hyperlinks (OSC 8) ──────────────────────────────────────
+
+    override fun linkAt(screenRow: Int, col: Int): String? {
+        checkHandle()
+        return nativeLinkAt(handle, screenRow, col)
+    }
+
+    override fun links(): List<String> {
+        checkHandle()
+        return nativeLinks(handle)?.toList() ?: emptyList()
+    }
+
+    // ─── v0.2: session persistence ─────────────────────────────────────
+
+    override fun saveSession(maxScrollbackRows: Int): ByteArray {
+        checkHandle()
+        return nativeSaveSession(handle, maxScrollbackRows) ?: ByteArray(0)
+    }
+
+    // ─── v0.2: input encoders (mode-aware) ─────────────────────────────
+
+    override fun encodeKey(key: TerminalKey, mods: Int): ByteArray {
+        checkHandle()
+        return nativeEncodeKey(handle, key.nativeId, mods) ?: ByteArray(0)
+    }
+
+    override fun encodePaste(text: String): ByteArray {
+        checkHandle()
+        return nativeEncodePaste(handle, text) ?: ByteArray(0)
+    }
+
+    override fun encodeMouseEvent(
+        type: TerminalMouseEventType,
+        button: Int,
+        mods: Int,
+        col: Int,
+        row: Int
+    ): ByteArray {
+        checkHandle()
+        return nativeEncodeMouseEvent(handle, type.nativeId, button, mods, col, row) ?: ByteArray(0)
+    }
+
+    override fun encodeFocus(focused: Boolean): ByteArray {
+        checkHandle()
+        return nativeEncodeFocus(handle, focused) ?: ByteArray(0)
+    }
+
+    override fun encodeWheel(up: Boolean): ByteArray {
+        checkHandle()
+        return nativeEncodeWheel(handle, if (up) 0 else 1) ?: ByteArray(0)
+    }
+
+    // ─── v0.2: mode mirrors (latest snapshot values) ───────────────────
+
+    override fun mouseTrackingMode(): MouseTrackingMode = lastMouseMode
+    override fun mouseWireEncoding(): MouseWireEncoding = lastMouseEncoding
+    override fun focusReportEnabled(): Boolean = lastFocusReport
+    override fun altScrollEnabled(): Boolean = lastAltScroll
+    override fun applicationKeypadMode(): Boolean = lastApplicationKeypad
+    override fun modifyOtherKeysLevel(): Int = lastModifyLevel
 
     // ─── drains ────────────────────────────────────────────────────────
 
@@ -207,7 +395,7 @@ class NativeVtCore(
         return nativeScrollbackText(handle, maxLines)?.toList() ?: emptyList()
     }
 
-    // ─── response sink (DA/DSR write-back) ─────────────────────────────
+    // ─── response sink (DA/DSR/DECRQM write-back) ──────────────────────
 
     private var responseSinkField: ((ByteArray) -> Unit)? = null
 
@@ -221,7 +409,7 @@ class NativeVtCore(
         if (bytes.isNotEmpty()) sink(bytes)
     }
 
-    // ─── JNI surface — symbols must match src/main/cpp/vt-native/src/jni/vt_jni.cpp
+    // ─── JNI surface (symbols must match vt_jni.cpp exactly) ───────────
 
     private external fun nativeCreate(rows: Int, cols: Int, maxScrollback: Int): Long
     private external fun nativeDestroy(handle: Long)
@@ -239,6 +427,32 @@ class NativeVtCore(
     private external fun nativeDrainBell(handle: Long): Long
     private external fun nativeDrainClipboardRequests(handle: Long): Array<String>?
     private external fun nativePollResponses(handle: Long): ByteArray?
+
+    // v0.2
+    private external fun nativeLinks(handle: Long): Array<String>?
+    private external fun nativeLinkAt(handle: Long, screenRow: Int, col: Int): String?
+    private external fun nativeSearch(
+        handle: Long, pattern: String, caseInsensitive: Boolean, wholeWord: Boolean
+    ): Int
+    private external fun nativeClearSearch(handle: Long)
+    private external fun nativeSearchHits(handle: Long): LongArray?
+    private external fun nativeSearchHitCount(handle: Long): Int
+    private external fun nativeSetActiveSearchHit(handle: Long, index: Int)
+    private external fun nativeActiveSearchHit(handle: Long): Int
+    private external fun nativeBeginSelection(handle: Long, globalRow: Long, col: Int)
+    private external fun nativeExtendSelection(handle: Long, globalRow: Long, col: Int)
+    private external fun nativeClearSelection(handle: Long)
+    private external fun nativeExpandSelectionWord(handle: Long, globalRow: Long, col: Int)
+    private external fun nativeExpandSelectionLine(handle: Long, globalRow: Long, col: Int)
+    private external fun nativeSelectionText(handle: Long): String?
+    private external fun nativeSaveSession(handle: Long, maxScrollbackRows: Int): ByteArray?
+    private external fun nativeEncodeKey(handle: Long, key: Int, mods: Int): ByteArray?
+    private external fun nativeEncodePaste(handle: Long, text: String): ByteArray?
+    private external fun nativeEncodeMouseEvent(
+        handle: Long, type: Int, button: Int, mods: Int, col: Int, row: Int
+    ): ByteArray?
+    private external fun nativeEncodeFocus(handle: Long, focused: Boolean): ByteArray?
+    private external fun nativeEncodeWheel(handle: Long, dir: Int): ByteArray?
 
     private fun checkHandle() {
         check(!closed && handle != 0L) { "NativeVtCore already closed" }

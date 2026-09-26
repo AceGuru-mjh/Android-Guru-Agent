@@ -59,6 +59,68 @@ void RowExtras::shiftCols(int fromCol, int delta, int cols) {
   }
 }
 
+// ── hyperlink spans ──
+
+void RowExtras::addLink(uint16_t colStart, uint16_t colEnd, uint16_t linkId) {
+  if (colEnd <= colStart || linkId == 0) return;
+  // Merge with an adjacent/overlapping same-id span; otherwise append sorted.
+  for (LinkSpan& s : links) {
+    if (s.linkId == linkId && colStart <= s.colEnd && s.colStart <= colEnd) {
+      s.colStart = std::min(s.colStart, colStart);
+      s.colEnd = std::max(s.colEnd, colEnd);
+      return;
+    }
+  }
+  links.push_back(LinkSpan{colStart, colEnd, linkId});
+  std::sort(links.begin(), links.end(),
+            [](const LinkSpan& a, const LinkSpan& b) { return a.colStart < b.colStart; });
+}
+
+void RowExtras::invalidateLinkAt(uint16_t col) {
+  // Trim or drop spans covering the cell — an overwritten cell is no longer
+  // part of the link run.
+  std::vector<LinkSpan> next;
+  next.reserve(links.size());
+  for (LinkSpan& s : links) {
+    if (uint32_t(col) < s.colStart || uint32_t(col) >= s.colEnd) {
+      next.push_back(s);
+      continue;
+    }
+    if (s.colStart < col) next.push_back(LinkSpan{s.colStart, uint16_t(col), s.linkId});
+    if (uint32_t(col) + 1 < s.colEnd) {
+      next.push_back(LinkSpan{uint16_t(col + 1), s.colEnd, s.linkId});
+    }
+  }
+  links = std::move(next);
+}
+
+void RowExtras::shiftLinks(int fromCol, int delta, int cols) {
+  std::vector<LinkSpan> next;
+  next.reserve(links.size());
+  for (LinkSpan& s : links) {
+    if (s.colEnd <= uint16_t(fromCol)) {
+      next.push_back(s);  // entirely before the shift point
+      continue;
+    }
+    int ns = int(s.colStart) + delta;
+    int ne = int(s.colEnd) + delta;
+    if (ne <= 0 || ns >= cols) continue;  // shifted off-screen
+    if (ns < 0) ns = 0;
+    if (ne > cols) ne = cols;
+    next.push_back(LinkSpan{uint16_t(ns), uint16_t(ne), s.linkId});
+  }
+  links = std::move(next);
+  std::sort(links.begin(), links.end(),
+            [](const LinkSpan& a, const LinkSpan& b) { return a.colStart < b.colStart; });
+}
+
+const LinkSpan* RowExtras::linkAt(uint16_t col) const {
+  for (const LinkSpan& s : links) {
+    if (uint32_t(col) >= s.colStart && uint32_t(col) < s.colEnd) return &s;
+  }
+  return nullptr;
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────
 
 Screen::Screen(int rows, int cols, int maxScrollbackLines, bool hasScrollback, StyleTable& styles)
@@ -70,6 +132,7 @@ Screen::Screen(int rows, int cols, int maxScrollbackLines, bool hasScrollback, S
       blankStyleId_(styles_.defaultId()) {
   cells_.assign(size_t(rows_) * cols_, blankCell());
   extras_.resize(rows_);
+  wrapFlags_.assign(rows_, 0);
 }
 
 void Screen::setCell(int r, int c, const Cell& cell) {
@@ -81,10 +144,18 @@ void Screen::put(int r, int c, const Cell& cell) {
   // Overwriting a wide trail blanks the lead first (Kotlin §9 parity).
   if (c > 0 && (cells_[idx(r, c)].flags & kCellWideTrail)) {
     cells_[idx(r, c - 1)] = blankCell();
-    if (RowExtras* ex = extrasAt(r)) ex->removeCol(uint16_t(c - 1));
+    if (RowExtras* ex = extrasAt(r)) {
+      ex->removeCol(uint16_t(c - 1));
+      ex->invalidateLinkAt(uint16_t(c - 1));
+    }
   }
   // A fresh cell has no combining marks — clear any stale mark at this col.
-  if (RowExtras* ex = extrasAt(r)) ex->removeCol(uint16_t(c));
+  if (RowExtras* ex = extrasAt(r)) {
+    ex->removeCol(uint16_t(c));
+    ex->invalidateLinkAt(uint16_t(c));
+    if (c + 1 < cols_ && (cell.flags & kCellWideLead)) ex->invalidateLinkAt(uint16_t(c + 1));
+    if (ex->empty()) extras_[size_t(r)].reset();
+  }
   cells_[idx(r, c)] = cell;
   if ((cell.flags & kCellWideLead) && c + 1 < cols_) {
     Cell trail{};
@@ -92,7 +163,7 @@ void Screen::put(int r, int c, const Cell& cell) {
     trail.style = blankStyleId_;
     trail.flags = kCellWideTrail;
     cells_[idx(r, c + 1)] = trail;
-    if (RowExtras* ex = extrasAt(r)) ex->removeCol(uint16_t(c + 1));
+    if (RowExtras* ex2 = extrasAt(r)) ex2->removeCol(uint16_t(c + 1));
   }
 }
 
@@ -122,6 +193,7 @@ void Screen::insertChars(int row, int fromCol, int count) {
   for (int c = fromCol; c < fromCol + count && c < cols_; ++c) cells_[idx(row, c)] = b;
   if (RowExtras* ex = extrasAt(row)) {
     ex->shiftCols(fromCol, count, cols_);
+    ex->shiftLinks(fromCol, count, cols_);
     if (ex->empty()) extras_[size_t(row)].reset();
   }
 }
@@ -139,6 +211,7 @@ void Screen::deleteChars(int row, int fromCol, int count) {
   for (int c = std::max(fromCol, cols_ - count); c < cols_; ++c) cells_[idx(row, c)] = b;
   if (RowExtras* ex = extrasAt(row)) {
     ex->shiftCols(fromCol, -count, cols_);
+    ex->shiftLinks(fromCol, -count, cols_);
     if (ex->empty()) extras_[size_t(row)].reset();
   }
 }
@@ -154,6 +227,7 @@ void Screen::eraseRow(int row, int fromCol, int toCol, uint16_t styleId) {
   }
   if (RowExtras* ex = extrasAt(row)) {
     ex->removeRange(fromCol < 0 ? 0 : fromCol, last);
+    ex->invalidateAllLinks();  // erased rows lose their span structure
     if (ex->empty()) extras_[size_t(row)].reset();
   }
 }
@@ -167,6 +241,7 @@ void Screen::eraseRows(int fromRow, int toRow, uint16_t styleId) {
       dst.flags = 0;
     }
     extras_[size_t(r)].reset();
+    wrapFlags_[size_t(r)] = 0;  // fully erased row breaks any wrap chain
   }
 }
 
@@ -189,10 +264,14 @@ void Screen::scrollUp(int n, int top, int bottom) {
     auto& tmp = rotateScratch_;
     std::rotate(tmp.begin(), tmp.begin() + count, tmp.end());
     std::move(tmp.begin(), tmp.end(), extras_.begin() + top);
+    // Wrap flags follow their rows through the rotation.
+    std::rotate(wrapFlags_.begin() + top, wrapFlags_.begin() + top + count,
+                wrapFlags_.begin() + bottom + 1);
   }
   for (int r = bottom - count + 1; r <= bottom; ++r) {
     fillRowBlank(r);
     extras_[size_t(r)].reset();
+    wrapFlags_[size_t(r)] = 0;
   }
 }
 
@@ -211,9 +290,13 @@ void Screen::scrollDown(int n, int top, int bottom) {
                  size_t(bottom - top + 1 - count) * cols_ * sizeof(Cell));
   }
   std::move(tmp.begin(), tmp.end(), extras_.begin() + top);
+  std::rotate(wrapFlags_.rbegin() + (rows_ - 1 - bottom),
+              wrapFlags_.rbegin() + (rows_ - 1 - bottom) + count,
+              wrapFlags_.rbegin() + (rows_ - top));
   for (int r = top; r < top + count; ++r) {
     fillRowBlank(r);
     extras_[size_t(r)].reset();
+    wrapFlags_[size_t(r)] = 0;
   }
 }
 
@@ -232,9 +315,13 @@ void Screen::insertLines(int row, int n, int top, int bottom) {
                  size_t(bottom - row + 1 - count) * cols_ * sizeof(Cell));
   }
   std::move(tmp.begin(), tmp.end(), extras_.begin() + row);
+  std::rotate(wrapFlags_.rbegin() + (rows_ - 1 - bottom),
+              wrapFlags_.rbegin() + (rows_ - 1 - bottom) + count,
+              wrapFlags_.rbegin() + (rows_ - row));
   for (int r = row; r < row + count; ++r) {
     fillRowBlank(r);
     extras_[size_t(r)].reset();
+    wrapFlags_[size_t(r)] = 0;
   }
 }
 
@@ -253,9 +340,12 @@ void Screen::deleteLines(int row, int n, int top, int bottom) {
                  size_t(bottom - row + 1 - count) * cols_ * sizeof(Cell));
   }
   std::move(tmp.begin(), tmp.end(), extras_.begin() + row);
+  std::rotate(wrapFlags_.begin() + row, wrapFlags_.begin() + row + count,
+              wrapFlags_.begin() + bottom + 1);
   for (int r = bottom - count + 1; r <= bottom; ++r) {
     fillRowBlank(r);
     extras_[size_t(r)].reset();
+    wrapFlags_[size_t(r)] = 0;
   }
 }
 
@@ -265,14 +355,17 @@ void Screen::resize(int newRows, int newCols) {
   if (newRows == rows_ && newCols == cols_) return;
   std::vector<Cell> newCells(size_t(newRows) * newCols, blankCell());
   std::vector<std::unique_ptr<RowExtras>> newExtras(newRows);
+  std::vector<uint8_t> newWrap(newRows, 0);
   int copyRows = std::min(rows_, newRows);
   int copyCols = std::min(cols_, newCols);
   for (int r = 0; r < copyRows; ++r) {
     std::memcpy(&newCells[size_t(r) * newCols], &cells_[idx(r, 0)], size_t(copyCols) * sizeof(Cell));
     newExtras[size_t(r)] = std::move(extras_[size_t(r)]);
+    newWrap[size_t(r)] = wrapFlags_[size_t(r)];
   }
   cells_ = std::move(newCells);
   extras_ = std::move(newExtras);
+  wrapFlags_ = std::move(newWrap);
   rows_ = newRows;
   cols_ = newCols;
 }
@@ -284,6 +377,7 @@ void Screen::clear() {
     c.flags = 0;
   }
   for (auto& e : extras_) e.reset();
+  std::fill(wrapFlags_.begin(), wrapFlags_.end(), 0);
   clearScrollback();
 }
 
@@ -303,6 +397,72 @@ const Cell* Screen::scrollbackRowCells(int i) const {
 const RowExtras* Screen::scrollbackRowExtras(int i) const {
   size_t phys = (sbHead_ + size_t(i)) % ring_.size();
   return ring_[phys].extras.get();
+}
+
+// ── wrap flags ──
+
+void Screen::setRowWrapped(int r, bool wrapped) {
+  if (r >= 0 && r < rows_) wrapFlags_[size_t(r)] = wrapped ? 1 : 0;
+}
+
+bool Screen::rowWrapped(int r) const {
+  return r >= 0 && r < rows_ ? wrapFlags_[size_t(r)] != 0 : false;
+}
+
+bool Screen::scrollbackRowWrapped(int i) const {
+  if (i < 0 || size_t(i) >= sbCount_) return false;
+  size_t phys = (sbHead_ + size_t(i)) % ring_.size();
+  return ring_[phys].wrapped;
+}
+
+// ── reflow rebuild ──
+
+void Screen::pushScrollbackRowCells(std::vector<Cell>&& cells,
+                                     std::unique_ptr<RowExtras>&& extras, bool wrapped) {
+  if (cells.size() != size_t(cols_)) return;  // caller contract violation
+  ++linesEver_;
+  if (maxScrollback_ == 0) return;
+  SbRow* dst;
+  if (ring_.size() < maxScrollback_) {
+    ring_.emplace_back();
+    dst = &ring_.back();
+    sbCount_ = ring_.size();
+    sbHead_ = 0;
+  } else {
+    dst = &ring_[sbHead_];
+    sbHead_ = (sbHead_ + 1) % ring_.size();
+  }
+  dst->cells = std::move(cells);
+  dst->extras = std::move(extras);
+  dst->wrapped = wrapped;
+  cells = std::vector<Cell>{};
+  extras.reset();
+}
+
+void Screen::loadRow(int row, const Cell* cells, int cellCount,
+                     std::unique_ptr<RowExtras>&& extras, bool wrapped) {
+  if (row < 0 || row >= rows_) return;
+  if (cells && cellCount > 0) {
+    int n = std::min(cellCount, cols_);
+    std::memcpy(&cells_[idx(row, 0)], cells, size_t(n) * sizeof(Cell));
+  }
+  extras_[size_t(row)] = std::move(extras);
+  wrapFlags_[size_t(row)] = wrapped ? 1 : 0;
+}
+
+void Screen::resetTo(int newRows, int newCols) {
+  newRows = newRows < 1 ? 1 : newRows;
+  newCols = newCols < 1 ? 1 : newCols;
+  rows_ = newRows;
+  cols_ = newCols;
+  cells_.assign(size_t(rows_) * cols_, blankCell());
+  extras_.clear();
+  extras_.resize(rows_);
+  wrapFlags_.assign(rows_, 0);
+  ring_.clear();
+  sbHead_ = 0;
+  sbCount_ = 0;
+  // linesEver_ intentionally preserved (monotonic global row baseline).
 }
 
 std::string Screen::rowText(int r) const {
@@ -350,6 +510,7 @@ void Screen::pushScrollbackRow(int srcRow) {
   } else {
     dst->extras.reset();
   }
+  dst->wrapped = wrapFlags_[size_t(srcRow)] != 0;
 }
 
 void Screen::ensureExtras(int r) {

@@ -5,6 +5,8 @@ name: Quality Gate
 #   • file-size budget  — blocks God-files (SRP enforcement, 1200/1600 lines)
 #   • anti-pattern gate — blocks `javaClass.getMethod` reflective dispatch &
 #                          `printStackTrace()` in main sources
+#   • terminal contract — blocks terminal tool drift: implementation must
+#                          equal registration (ToolModule) equal docs table
 #   • audit report      — empty catch blocks + TODO/FIXME census (job summary)
 #
 # Runs fast (<30s, no compilation) on every push & PR, and manually via
@@ -46,6 +48,15 @@ jobs:
         run: |
           chmod +x scripts/check_code_quality.sh
           ./scripts/check_code_quality.sh
+
+      - name: Terminal tool-surface contract gate (implementation = registration = docs)
+        run: |
+          chmod +x scripts/check_terminal_tools.sh
+          # Three-way contract: every implemented terminal.* tool must be
+          # registered in ToolModule (Agent-callable) and listed in the
+          # authoritative docs/terminal-api.md table — no ghosts, no dead
+          # wiring. Fails the build on drift in either direction.
+          ./scripts/check_terminal_tools.sh
 
       - name: Kotlin source inventory
         run: |

@@ -2,6 +2,14 @@
 
 > **Frozen at P60 (API Version 1.0)**
 > After merge: can ADD optional fields/methods; MUST NOT change existing semantics.
+>
+> **Scope note (T87)**: the freeze above covers the **runtime kernel API**
+> (`Terminal` / `TerminalSession` / `JobHandle` semantics). The **agent tool
+> surface** (`terminal.*` tool ids) evolves additively (new tools allowed,
+> existing parameter meaning never changed) and is machine-verified against
+> the implementation by `scripts/check_terminal_tools.sh` — see the
+> [Agent Tool Surface](#agent-tool-surface-t87-snapshot--machine-verified)
+> table below.
 
 ## Architecture
 
@@ -174,6 +182,112 @@ Linux sessions get two host-backed persistent mounts on top of the rootfs:
   attached (backpressure contract); `CSI 3 J` now erases only the scrollback;
   HTS / CBT implemented; F1-F12 key encodings added; `changedRows` wired via
   drained dirty-region mutations.
+
+## Agent Tool Surface (T87 snapshot — machine-verified)
+
+The single question this section answers with certainty:
+**"which terminal tools can the Agent actually call, right now?"**
+
+### Integration path (how a tool-call reaches the PTY)
+
+```
+Agent (LLM function-call)
+  → ToolRegistry                 (core:tool-registry — catalog & dispatch)
+    → SafeAgentTool              (error containment: never throws at the Agent)
+      → TerminalToolAdapter      (app/di — AgentTool ⇄ TerminalTool bridge)
+        → TerminalXxxTool        (platform:terminal tools/v2 — JSON schema,
+          │                        parameter validation, semantics)
+          └→ TerminalRuntime     (P60 frozen kernel — sessions / jobs /
+              │                        observation / input arbitration)
+              └→ ExecutionBackendRegistry
+                    ├── LocalShellBackend   (id="local", forkpty + /system/bin/sh)
+                    └── LinuxPRootBackend   (id="linux-ubuntu", rootfs + /bin/bash)
+```
+
+Every box above is wired at startup by `app/di/ToolModule.kt`. A tool class
+that exists in `tools/v2` but is missing from that wiring is **dead code** —
+which is exactly what the contract gate below exists to catch.
+
+### Authoritative tool table
+
+This table is the contract. `scripts/check_terminal_tools.sh` (runs in the
+Quality Gate workflow) verifies three-way agreement on every push:
+
+1. every id below is really implemented in `platform/terminal tools`;
+2. every v2 class below is really registered in `app/di/ToolModule.kt`;
+3. no implemented tool is missing here, and no ghost entry lingers here.
+
+<!-- terminal-tool-surface begin (authoritative; verified by scripts/check_terminal_tools.sh) -->
+| Tool ID | Class | Group | Purpose |
+|---|---|---|---|
+| `terminal.exec` | TerminalExecTool | One-shot | Structured single command: stdout/stderr split, real exit code, channel routing (Ubuntu sandbox when ready, else su > Shizuku > local-sh), cd memory, approval gate |
+| `terminal.create` | TerminalCreateTool | Session | Open a PTY session (backend + workspace selectable) |
+| `terminal.run` | TerminalRunTool | Session | Execute a command inside a session (job model) |
+| `terminal.observe` | TerminalObserveTool | Session | Incremental output observation (cursor-based, SEMANTIC / EVENT / SCREEN / RAW modes, scrollback readable since T82) |
+| `terminal.wait` | TerminalWaitTool | Session | Await a condition (exit / idle / prompt / text) |
+| `terminal.write` | TerminalWriteTool | Session | Send input (RAW / LINE / PASTE — bracketed paste T82) |
+| `terminal.signal` | TerminalSignalTool | Session | Signal with scope=ALL or JOB — Ctrl-C kills the foreground group, not the shell (T82 native `signalForegroundGroup`) |
+| `terminal.resize` | TerminalResizeTool | Session | PTY+VT+screen resize (SIGWINCH) |
+| `terminal.snapshot` | TerminalSnapshotTool | Session | Full session state snapshot |
+| `terminal.close` | TerminalCloseTool | Session | Idempotent close, full cleanup |
+| `terminal.backends` | TerminalBackendsTool | Discovery | Backend availability: READY / NEEDS_ROOTFS / FAILED |
+| `terminal.diagnostics` | TerminalDiagnosticsTool | Discovery | T87 self-diagnosis: sessions / backends / exec probe over the same engine the Agent will use |
+| `terminal.ubuntu.install` | TerminalUbuntuInstallTool | Ubuntu | Idempotent, resumable rootfs provisioning |
+| `terminal.ubuntu.ensure` | TerminalUbuntuEnsureTool | Ubuntu | T82 one-shot lifecycle: install → bootstrap → capability aggregate |
+| `terminal.ubuntu.status` | TerminalUbuntuStatusTool | Ubuntu | Read-only Ubuntu lifecycle snapshot |
+| `terminal.linux.status` | TerminalLinuxStatusTool | Linux env | 6-dimension health snapshot + bootstrap state |
+| `terminal.linux.bootstrap` | TerminalLinuxBootstrapTool | Linux env | rootfs → sources → network → apt-update → base-packages → READY |
+| `terminal.linux.network` | TerminalLinuxNetworkTool | Linux env | DNS / HTTP / HTTPS / APT_REPOSITORY per-probe diagnosis |
+| `terminal.linux.packages` | TerminalLinuxPackagesTool | Linux env | Structured apt API (update/install/remove/upgrade/search, real dpkg-query installed list, mirror switch, autoremove/clean) |
+| `terminal.linux.capabilities` | TerminalLinuxCapabilitiesTool | Linux env | Honest capability probe + `ensure` action (probe → install missing → re-probe) |
+| `terminal.linux.repair` | TerminalLinuxRepairTool | Linux env | Single-round automatic repair orchestration |
+| `terminal.workspaces` | TerminalWorkspacesTool | Workspace | list / create / inspect / delete isolated workspaces |
+| `terminal.workspace.environment` | TerminalWorkspaceEnvironmentTool | Workspace | Project-aware toolchain analyze (read-only) / ensure (batched apt install + honest re-verify) |
+| `terminal.fs` | TerminalFsTool | Files | Structured guest file API (write-sandboxed, base64 binary-safe) |
+| `terminal.bridge` | TerminalBridgeTool | Files | apexctl Android capability bridge (termux-api equivalent: clipboard / device info / battery …) |
+| `terminal_exec` | LegacyExecTool | Legacy | @Deprecated compat alias — registered |
+| `terminal_send` | LegacySendTool | Legacy | @Deprecated compat alias — registered |
+| `terminal_read` | LegacyReadTool | Legacy | @Deprecated compat alias — registered |
+| `terminal_list` | LegacyListTool | Legacy | @Deprecated compat alias — registered |
+| `terminal_close` | LegacyCloseTool | Legacy | Superseded by `terminal.close` — intentionally NOT registered |
+| `terminal_signal` | LegacySignalTool | Legacy | Superseded by `terminal.signal` — intentionally NOT registered |
+<!-- terminal-tool-surface end -->
+
+### Capability increments since P83 (T82 → T87)
+
+- **T82 — Termux-baseline full capability**: real exit codes via OSC 633
+  shell markers (no more heuristic exit=0); foreground-group signals
+  (`signalForegroundGroup`, tcgetpgrp-only — one Ctrl-C no longer kills the
+  shell); F1-F12 / DECCKM SS3 arrows / bracketed paste; scrollback becomes
+  readable (`scrollbackLines` in SCREEN observe); ED 3 / DEC graphics /
+  OSC 52 clipboard / LNM; `/proc` `/dev` `/sys` binds via
+  `SystemBindProfile.STANDARD`; shared-storage bridge (guest `/sdcard`);
+  `terminal.fs` + `terminal.bridge`; apt mirror registry
+  (official / TUNA / USTC / Aliyun); locale + timezone + Android DNS +
+  guest proxy injection; real `dpkg-query` installed list; one-shot
+  toolchain ensure. P60 frozen SDK adapters landed (`api/TerminalSdk`).
+- **T85**: parity & UX rework (waiting-input suppression fixed as
+  "stash + silent replay", no frame loss).
+- **T86**: mouse reporting, focus events, OSC 8 hyperlinks, width tables,
+  full key matrix.
+- **T87**: terminal experience overhaul from 7 real-user pain points —
+  31 color schemes, Termux-style extra keys & history, exec failure-path
+  regression tests (`SessionSpawnErrorTest`), structured spawn errors
+  (no zombie sessions).
+
+### Differentiation vs operit-class baselines
+
+| Dimension | operit-class baseline | This project |
+|---|---|---|
+| One-shot execution | opaque run_command | `terminal.exec`: stdout/stderr split + real waitpid exit code + duration + channel routing |
+| Session lifecycle | none | nine-tool session kit (create → … → close) with job model & crash recovery |
+| Exit codes | heuristic (can lie) | OSC 633 marker protocol — honest per-command status |
+| Error model | generic exceptions | `TerminalError` code enum + layered Linux error codes; Agent matches codes, not messages |
+| Signal control | kill everything | `signal` scope=JOB — Ctrl-C stops the foreground job, shell survives |
+| Output observation | single blob | four observe modes + opaque cursor increments + scrollback API |
+| Linux environment | none | Ubuntu 24.04 rootfs, apt, isolated workspaces, mirrors, DNS/proxy/locale injection |
+| Android bridge | none | `terminal.bridge` (termux-api equivalent) |
+| Agent-callability guarantee | trust me | three-way contract gate in CI (implementation = registration = this table) |
 
 ## API Freeze Rules
 

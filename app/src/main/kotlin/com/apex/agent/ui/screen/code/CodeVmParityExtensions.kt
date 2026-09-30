@@ -2,9 +2,9 @@ package com.apex.agent.ui.screen.code
 
 import com.apex.agent.core.code.stream.StreamEntry
 import com.apex.agent.core.engine.AgentEvent
+import com.apex.agent.core.llm.ModelProfile
+import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.ui.screen.agent.HtmlArtifactDetector
-import com.apex.agent.ui.screen.settings.ModelProfile
-import com.apex.agent.ui.screen.settings.ProviderConfig
 import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update

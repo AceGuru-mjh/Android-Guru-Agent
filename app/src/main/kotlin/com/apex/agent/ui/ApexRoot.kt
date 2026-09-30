@@ -281,7 +281,9 @@ fun ApexRoot() {
                             onOpenSettings = { currentDestination = DrawerDestination.Settings }
                         )
                         DrawerDestination.Code -> CodeScreen(
-                            viewModel = hiltViewModel()
+                            viewModel = hiltViewModel(),
+                            // 工位对等：「小大脑」菜单 → 配置模型（跳设置页）
+                            onOpenSettings = { currentDestination = DrawerDestination.Settings }
                         )
                         DrawerDestination.Templates -> TemplateStudioScreen()
                         DrawerDestination.Terminal -> TerminalScreen(

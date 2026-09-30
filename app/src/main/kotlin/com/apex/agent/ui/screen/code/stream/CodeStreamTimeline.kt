@@ -55,7 +55,9 @@ import kotlinx.coroutines.launch
 internal fun CodeStreamTimeline(
     snapshot: CodeStreamSnapshot,
     isStreaming: Boolean,
-    onToolClick: (StreamToolCall) -> Unit
+    onToolClick: (StreamToolCall) -> Unit,
+    onRetry: () -> Unit = {},
+    onFileOpen: (String) -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val grouped = remember(snapshot.entries) { groupConsecutive(snapshot.entries) }
@@ -81,7 +83,12 @@ internal fun CodeStreamTimeline(
                 when (segment) {
                     is Segment.Single ->
                         item(key = segment.entry.id) {
-                            StreamCard(entry = segment.entry, onToolClick = onToolClick)
+                            StreamCard(
+                                entry = segment.entry,
+                                onToolClick = onToolClick,
+                                onRetry = onRetry,
+                                onFileOpen = onFileOpen
+                            )
                         }
 
                     is Segment.Group -> {

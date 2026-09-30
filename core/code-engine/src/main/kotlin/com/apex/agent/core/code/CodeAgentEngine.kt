@@ -156,6 +156,15 @@ class CodeAgentEngine(
     }
 
     /**
+     * 工位对等：模型快速切换时的引擎温度同步（BrainMenuButton →
+     * CodeViewModel.selectProfile → 此处）。与 Agent 屏 selectProfile 的
+     * patchConfig(temperature) 同链路；下一轮请求生效。
+     */
+    fun updateTemperature(temperature: Float) {
+        delegate.patchConfig { cfg -> cfg.copy(temperature = temperature) }
+    }
+
+    /**
      * #197 计划确认/驳回（PLAN 模式人控门）：透传给 delegate。
      * confirmed=true 时可携带步骤勾选与重排（原 index 口径）。
      */

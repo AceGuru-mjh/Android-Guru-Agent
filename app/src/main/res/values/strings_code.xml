@@ -197,4 +197,7 @@
     <string name="code_stream_detail_output_title">Tool output</string>
     <string name="code_stream_run_streaming">Running · capsule timeline</string>
     <string name="code_stream_run_idle">Describe a coding task to start the capsule timeline</string>
+    <!-- Workspace parity: bubble actions + file chips -->
+    <string name="code_stream_retry_run">Re-run this request</string>
+    <string name="code_stream_preview_html">Preview HTML artifact</string>
 </resources>

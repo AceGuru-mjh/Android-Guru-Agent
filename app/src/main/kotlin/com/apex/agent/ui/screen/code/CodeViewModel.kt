@@ -10,7 +10,6 @@ import com.apex.agent.core.code.longtask.LongTaskStore
 import com.apex.agent.core.code.longtask.LongTaskTemplates
 import com.apex.agent.core.code.longtask.LongTaskTracker
 import com.apex.agent.core.code.longtask.TaskCopyEngine
-import com.apex.agent.core.code.stream.CodeStreamCheckpoint
 import com.apex.agent.core.code.stream.CodeStreamSession
 import com.apex.agent.core.code.stream.CodeStreamSnapshot
 import com.apex.agent.core.code.stream.StreamToolCall
@@ -109,13 +108,15 @@ import java.util.concurrent.atomic.AtomicLong
 class CodeViewModel @Inject constructor(
     @Named("code") private val codeEngine: AgentEngine,
     private val workspaceManager: CodeWorkspaceManager,
-    private val codeTodoTool: CodeTodoTool,
-    private val codeSessionStore: CodeSessionStore,
-    private val workspaceRoots: CodeWorkspaceRoots,
+    internal val codeTodoTool: CodeTodoTool,
+    internal val codeSessionStore: CodeSessionStore,
+    // internal —— CodeVmParityExtensions（HTML 预览路径基准）共用。
+    internal val workspaceRoots: CodeWorkspaceRoots,
     private val userQuestionBridge: UserQuestionBridge,
     // Issue #164：全局规则（设置页 RulesSettingsSection 编辑）——每次发送前
-    // 同步到引擎，refreshContext 时经 RulesProvider 注入 additionalSystemContext
-    private val settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
+    // 同步到引擎，refreshContext 时经 RulesProvider 注入 additionalSystemContext。
+    // internal —— CodeVmParityExtensions（模型切换/通知判定）共用。
+    internal val settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
     // v1.2 长任务中心：追踪器（事件流聚合）+ 复制引擎 + 存储（列表面板直读）
     // + 档位效能统计（长任务记录 → 工作区×档位聚合，档位效能页签数据源）
     private val longTaskTracker: LongTaskTracker,
@@ -134,19 +135,23 @@ class CodeViewModel @Inject constructor(
     /** 斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）。 */
     private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
     // i18n：用户可见系统消息按当前语言取词（组合外场景）
-    private val languageManager: com.apex.agent.ui.language.LanguageManager
+    private val languageManager: com.apex.agent.ui.language.LanguageManager,
+    // ═══ 工位对等（后台完成通知 + HTML 预览路径基准；见 CodeVmParityExtensions.kt）═══
+    internal val notifications: com.apex.agent.notify.ApexNotifications,
+    internal val foregroundTracker: com.apex.agent.notify.ForegroundTracker,
+    @dagger.hilt.android.qualifiers.ApplicationContext internal val appContext: android.content.Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(CodeUiState())
+    internal val _uiState = MutableStateFlow(CodeUiState())
     val uiState: StateFlow<CodeUiState> = _uiState.asStateFlow()
 
     /** 工具/权限门的主动提问（AgentQuestion 结构化选项；与 ask_user 的纯文本通道并存）。 */
     val pendingAgentQuestion: StateFlow<AgentQuestion?> = userQuestionBridge.pendingQuestion
 
-    private val idGen = AtomicLong(0)
+    internal val idGen = AtomicLong(0)
     private var runJob: Job? = null
     private var editorJob: Job? = null
-    private var sessionPersistJob: Job? = null
+    internal var sessionPersistJob: Job? = null
     private var sessionLoadJob: Job? = null
 
     // ═══ 胶囊时间轴（渲染通道数据源）═══
@@ -154,14 +159,14 @@ class CodeViewModel @Inject constructor(
     // 副作用半边（长任务追踪/深水区观察器/落盘）仍走既有 reduce——双通道
     // 彻底分流，引擎与既有功能零改动。
 
-    /** 胶囊时间轴会话（VM 自持，跨 run 累积；恢复/清空见 bind/clear）。 */
-    private val streamSession = CodeStreamSession()
+    /** 胶囊时间轴会话（VM 自持，跨 run 累积；恢复/清空见 bind/clear；重试截断见 CodeVmParityExtensions）。 */
+    internal val streamSession = CodeStreamSession()
 
     /** 渲染 ticker：运行期每 25ms 拉一次快照（≤40Hz 攒批）。 */
     private var renderJob: Job? = null
 
     /** 当前绑定的会话归属工作区（null = 尚未绑定，不落盘）。 */
-    private var boundWorkspaceId: String? = null
+    internal var boundWorkspaceId: String? = null
 
     // ═══ AUTO 档自治状态（coding 专属，引擎零参与）═══
 
@@ -189,7 +194,8 @@ class CodeViewModel @Inject constructor(
      */
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val codeEngineImpl: CodeAgentEngine?
+    // internal —— CodeVmParityExtensions（selectProfile 温度同步）共用。
+    internal val codeEngineImpl: CodeAgentEngine?
         get() = codeEngine as? CodeAgentEngine
 
     init {
@@ -337,13 +343,14 @@ class CodeViewModel @Inject constructor(
     }
 
     /**
-     * 引擎执行主路径（sendMessage 与斜杠路由共用）：同步全局规则/小圆环参数
+     * 引擎执行主路径（sendMessage 与斜杠路由共用；末轮重试经
+     * CodeVmParityExtensions.retryLastRun 复用）：同步全局规则/小圆环参数
      * （#197）→ 预检档位 → 长任务入账 → 胶囊入轴 → 事件双通道收集。
      *
      * @param engineInput 进引擎的完整输入（含 @引用块/斜杠路由提示词）
      * @param displayGoal 长任务追踪的目标文案（用户原始输入）
      */
-    private fun runEngine(engineInput: String, displayGoal: String? = null) {
+    internal fun runEngine(engineInput: String, displayGoal: String? = null) {
         val goal = displayGoal ?: engineInput
 
         // Issue #164：发送前同步全局规则（设置页改动无需重启，下轮生效）。
@@ -744,8 +751,8 @@ class CodeViewModel @Inject constructor(
         sendMessage(record.goal)
     }
 
-    /** 追加一条系统消息（时间轴主通道 + 旧消息通道双写，仅 UI 展示）。 */
-    private fun appendSystemMessage(text: String) {
+    /** 追加一条系统消息（时间轴主通道 + 旧消息通道双写；重试反馈共用）。 */
+    internal fun appendSystemMessage(text: String) {
         streamSession.injectSystem(text)
         _uiState.update {
             it.copy(messages = it.messages + CodeChatMessage(idGen.incrementAndGet(), CodeChatMessage.Role.SYSTEM, text))
@@ -900,86 +907,8 @@ class CodeViewModel @Inject constructor(
         }
     }
 
-    /** 恢复当前工作区的 UI 会话快照；无快照 = 全新会话（欢迎提示）。 */
-    private suspend fun restoreSessionSnapshot(ws: CodeWorkspace) {
-        val snapshot = withContext(Dispatchers.IO) {
-            runCatching { codeSessionStore.load(ws.workspaceId) }.getOrNull()
-        }
-        if (snapshot != null && (snapshot.messages.isNotEmpty() || snapshot.stream != null)) {
-            val restored = snapshot.messages.withFreshIds(1L)
-            idGen.set(restored.lastOrNull()?.id ?: 0L)
-            codeTodoTool.restore(snapshot.todos.toCodeTodos())
-            // 时间轴恢复：stream 检查点优先（含 diff 原文/轮次红绿态）；
-            // 旧档（null）走 messages → 条目的兼容映射（降级：无 diff 细节）
-            val timeline = snapshot.stream
-                ?.let { cp -> CodeStreamCheckpoint.toEntries(cp) }
-                ?: snapshot.messages.toStreamEntries()
-            streamSession.replaceAll(timeline)
-            _uiState.update {
-                it.copy(
-                    messages = restored,
-                    todos = snapshot.todos.toCodeTodos(),
-                    stream = streamSession.snapshot()
-                )
-            }
-            snapshot.lastActiveFile?.let { lastFile -> openEditorFile(lastFile) }
-        } else {
-            // 全新会话：清 UI 态（引擎侧 setActiveWorkspace 已重置上下文）+ 欢迎提示
-            codeTodoTool.clear()
-            // P1 回归：时间轴与 streamSession 必须一并清空——否则工作区 A 的
-            // 胶囊时间轴泄漏进新工作区 B，并经 buildSessionSnapshot 污染 B 的
-            // 落盘检查点（跨工作区数据污染被持久化）
-            streamSession.clear()
-            _uiState.update {
-                it.copy(
-                    messages = emptyList(),
-                    todos = emptyList(),
-                    stream = CodeStreamSnapshot()
-                )
-            }
-            val env = ws.detectedEnvironment ?: "空工作区"
-            _uiState.update { state ->
-                state.copy(
-                    messages = state.messages + CodeChatMessage(
-                        id = idGen.incrementAndGet(),
-                        role = CodeChatMessage.Role.SYSTEM,
-                        text = "已切换到工作区「${ws.name}」（$env）。描述你的编码任务开始吧。"
-                    )
-                )
-            }
-        }
-    }
-
-    /** 从当前 UI 态构造会话快照（消息 + todos + 当前文件 + 时间轴检查点）。 */
-    private fun buildSessionSnapshot(workspaceId: String): CodeSessionSnapshot {
-        val state = _uiState.value
-        return CodeSessionSnapshot(
-            workspaceId = workspaceId,
-            messages = state.messages.toStorable(),
-            todos = codeTodoTool.snapshot().toStorable(),
-            lastActiveFile = state.editorFilePath,
-            stream = CodeStreamCheckpoint.toCheckpoint(
-                session = streamSession,
-                workspaceId = workspaceId,
-                committedFiles = state.stream.affectedFiles
-            ),
-            updatedAt = System.currentTimeMillis()
-        )
-    }
-
-    /** 会话快照防抖落盘（800ms；对齐 Agent 模式 ChatHistoryManager 惯例）。 */
-    private fun scheduleSessionPersist() {
-        val wsId = boundWorkspaceId ?: return
-        sessionPersistJob?.cancel()
-        sessionPersistJob = viewModelScope.launch {
-            delay(800)
-            // 守卫：防抖期间工作区已切换 → 旧快照已由 bindWorkspace 冲刷，跳过
-            if (boundWorkspaceId != wsId) return@launch
-            val snapshot = buildSessionSnapshot(wsId)
-            withContext(Dispatchers.IO) { runCatching { codeSessionStore.save(snapshot) } }
-                .onFailure { AppLogger.instance.warn(LogCategory.UI, "CodeSession", "会话快照落盘失败：${it.message}") }
-        }
-    }
+    // 会话持久化三件套（restore/build/schedule）迁至 CodeVmSessionPersist.kt
+    // （同包 internal 扩展，调用点零改动；God-file 预算腾挪）。
 
     // ═══ 事件归约 ═══
 
@@ -1126,6 +1055,8 @@ class CodeViewModel @Inject constructor(
                         todos = codeTodoTool.snapshot()
                     )
                 }
+                // 工位对等：后台完成通知（判定链见 CodeVmParityExtensions）。
+                notifyTaskComplete(event)
                 scheduleSessionPersist()
             }
 

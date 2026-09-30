@@ -1,7 +1,10 @@
 package com.apex.agent.ui.screen.code.stream
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,10 +21,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -32,7 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,11 +61,19 @@ import com.apex.agent.ui.component.MarkdownText
  * 胶囊）/ 结构化错误卡 / 停止卡 / 受影响文件 chips / 流式结论气泡 /
  * 用户气泡 / 状态与系统行。正文气泡只放结论（Markdown 渲染，容忍不完整
  * 片段），思考链与工具细节全部走独立卡片——规格书【0】的「非聊天」立场。
+ *
+ * 工位对等：用户/结论气泡支持长按操作菜单（复制 / 重跑）；文件 chips
+ * 可点击（html → 预览，其余 → 编辑器打开）。
  */
 @Composable
-internal fun StreamCard(entry: StreamEntry, onToolClick: (StreamToolCall) -> Unit) {
+internal fun StreamCard(
+    entry: StreamEntry,
+    onToolClick: (StreamToolCall) -> Unit,
+    onRetry: () -> Unit = {},
+    onFileOpen: (String) -> Unit = {}
+) {
     when (entry) {
-        is StreamEntry.UserEntry -> UserBubble(entry.text)
+        is StreamEntry.UserEntry -> UserBubble(entry.text, onRetry)
         is StreamEntry.AssistantEntry -> AssistantBubble(entry.text, entry.isStreaming)
         is StreamEntry.ThinkingEntry -> ThinkingCard(entry.text, entry.isStreaming)
         is StreamEntry.ToolCapsuleEntry -> CodeCapsule(entry.call, onToolClick)
@@ -62,20 +82,23 @@ internal fun StreamCard(entry: StreamEntry, onToolClick: (StreamToolCall) -> Uni
         is StreamEntry.SystemEntry -> SystemLine(entry.text)
         is StreamEntry.ErrorEntry -> ErrorCard(entry)
         is StreamEntry.StopEntry -> StopCard(entry.reason)
-        is StreamEntry.FileChipsEntry -> FileChipsCard(entry.files)
+        is StreamEntry.FileChipsEntry -> FileChipsCard(entry.files, onFileOpen)
     }
 }
 
-// ═══ 用户气泡 ═══
+// ═══ 用户气泡（长按：复制 / 重跑此需求）═══
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun UserBubble(text: String) {
+private fun UserBubble(text: String, onRetry: () -> Unit) {
+    var menuOpen by remember { mutableStateOf(false) }
     Surface(
         shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
+            .combinedClickable(onClick = {}, onLongClick = { menuOpen = true })
     ) {
         Text(
             text = text,
@@ -83,17 +106,30 @@ private fun UserBubble(text: String) {
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
         )
+        EntryActionsMenu(
+            expanded = menuOpen,
+            onDismiss = { menuOpen = false },
+            copyText = text,
+            showRetry = true,
+            onRetry = {
+                menuOpen = false
+                onRetry()
+            }
+        )
     }
 }
 
-// ═══ 结论气泡（Markdown，流式容忍）═══
+// ═══ 结论气泡（Markdown，流式容忍；长按复制）═══
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AssistantBubble(text: String, isStreaming: Boolean) {
+    var menuOpen by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
+            .combinedClickable(onClick = {}, onLongClick = { menuOpen = true })
     ) {
         MarkdownText(markdown = text)
         if (isStreaming) {
@@ -101,6 +137,52 @@ private fun AssistantBubble(text: String, isStreaming: Boolean) {
                 text = "▍",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary
+            )
+        }
+        EntryActionsMenu(
+            expanded = menuOpen,
+            onDismiss = { menuOpen = false },
+            copyText = text,
+            showRetry = false,
+            onRetry = {}
+        )
+    }
+}
+
+/** 气泡操作菜单（复制全文；用户气泡另有「重跑此需求」）。 */
+@Composable
+private fun EntryActionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    copyText: String,
+    showRetry: Boolean,
+    onRetry: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val copyLabel = stringResource(R.string.chat_msg_copy_full)
+    val copiedLabel = stringResource(R.string.chat_msg_copied_full)
+    val retryLabel = stringResource(R.string.code_stream_retry_run)
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = { Text(copyLabel) },
+            leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(18.dp)) },
+            modifier = Modifier.heightIn(min = 44.dp),
+            onClick = {
+                clipboard.setText(AnnotatedString(copyText))
+                Toast.makeText(context, copiedLabel, Toast.LENGTH_SHORT).show()
+                onDismiss()
+            }
+        )
+        if (showRetry) {
+            DropdownMenuItem(
+                text = { Text(retryLabel) },
+                leadingIcon = { Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp)) },
+                modifier = Modifier.heightIn(min = 44.dp),
+                onClick = {
+                    onDismiss()
+                    onRetry()
+                }
             )
         }
     }
@@ -332,7 +414,7 @@ private fun StopCard(reason: String) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FileChipsCard(files: List<String>) {
+private fun FileChipsCard(files: List<String>, onFileOpen: (String) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -359,21 +441,37 @@ private fun FileChipsCard(files: List<String>) {
             modifier = Modifier.padding(top = 4.dp)
         ) {
             files.take(FILE_CHIPS_MAX).forEach { file ->
-                // 非交互展示 chip（原 AssistChip + 空 onClick 是欺骗性可供性：
-                // TalkBack 播报可激活但无行为）
+                // 工位对等：chip 可点击——.html 产物预览（图标区分），其余在
+                // 编辑器打开（原非交互 chip 是欺骗性可供性，见下方历史注释）
+                val isHtml = file.substringAfterLast('.', "").equals("html", true) ||
+                    file.substringAfterLast('.', "").equals("htm", true)
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.clickable { onFileOpen(file) }
                 ) {
-                    Text(
-                        text = file.substringAfterLast('/'),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
+                    ) {
+                        if (isHtml) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = stringResource(R.string.code_stream_preview_html),
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = file.substringAfterLast('/'),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             if (files.size > FILE_CHIPS_MAX) {

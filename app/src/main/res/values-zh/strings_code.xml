@@ -197,4 +197,7 @@
     <string name="code_stream_detail_output_title">工具输出</string>
     <string name="code_stream_run_streaming">运行中 · 胶囊时间轴</string>
     <string name="code_stream_run_idle">描述一个编码任务，开启胶囊时间轴</string>
+    <!-- 工位对等：气泡操作 + 文件 chips -->
+    <string name="code_stream_retry_run">重跑此需求</string>
+    <string name="code_stream_preview_html">预览 HTML 产物</string>
 </resources>

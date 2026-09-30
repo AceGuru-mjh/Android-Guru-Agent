@@ -67,6 +67,7 @@ import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.component.GithubIconButton
 import com.apex.agent.ui.component.GithubTokenDialog
+import com.apex.agent.ui.component.HtmlPreviewDialog
 import com.apex.agent.ui.component.MarkdownText
 import com.apex.agent.ui.component.SlashAutoCompleteHost
 import com.apex.agent.ui.component.SlashCommandButton
@@ -78,6 +79,7 @@ import com.apex.agent.ui.screen.agent.PendingPipelineCommand
 import com.apex.agent.ui.screen.agent.PipelineCapsuleRow
 import com.apex.agent.ui.screen.agent.PlanConfirmationCard
 import com.apex.agent.ui.screen.agent.QuestionCard
+import com.apex.agent.ui.screen.agent.BrainMenuButton
 import com.apex.agent.ui.screen.agent.ToolRef
 import com.apex.agent.ui.screen.agent.ToolkitChipsRow
 import com.apex.agent.ui.screen.agent.ToolkitRingButton
@@ -102,7 +104,9 @@ import com.apex.agent.ui.screen.code.stream.CodeToolDetailSheet
 @Composable
 fun CodeScreen(
     viewModel: CodeViewModel,
-    slashMenuProvider: SlashMenuProvider = rememberSlashMenuProvider()
+    slashMenuProvider: SlashMenuProvider = rememberSlashMenuProvider(),
+    // 工位对等：「小大脑」菜单 → 配置模型（跳设置页；AgentChatScreen 同款）
+    onOpenSettings: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState()
     val pendingAgentQuestion by viewModel.pendingAgentQuestion.collectAsState()
@@ -136,6 +140,16 @@ fun CodeScreen(
     var selectedToolCallId by remember { mutableStateOf<String?>(null) }
     // 终端面板折叠态（默认展开——BASH 是 Coding 工作流主舞台）
     var terminalCollapsed by remember { mutableStateOf(false) }
+
+    // ═══ 工位对等：HTML 产物预览（文件 chip 点击 → 路径解析成功才弹窗）═══
+    var htmlPreviewPath by remember { mutableStateOf<String?>(null) }
+
+    // ═══ 工位对等：模型快速切换（「小大脑」菜单，Agent 屏同款组件）═══
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val currentProfileId by remember(profiles) {
+        mutableStateOf(profiles.firstOrNull { it.isDefault }?.id ?: profiles.firstOrNull()?.id)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -185,7 +199,14 @@ fun CodeScreen(
             CodeStreamTimeline(
                 snapshot = state.stream,
                 isStreaming = state.isRunning,
-                onToolClick = { call -> selectedToolCallId = call.id }
+                onToolClick = { call -> selectedToolCallId = call.id },
+                // 工位对等：用户气泡长按「重跑此需求」
+                onRetry = viewModel::retryLastRun,
+                // 工位对等：文件 chip 点击（html → 预览；其余 → 编辑器）
+                onFileOpen = { file ->
+                    viewModel.resolveHtmlPreviewPath(file)?.let { htmlPreviewPath = it }
+                        ?: viewModel.openEditorFile(file)
+                }
             )
         }
 
@@ -233,6 +254,19 @@ fun CodeScreen(
                 adaptiveDecision = state.adaptiveDecision,
                 onSelect = viewModel::setThinkingLevel,
                 onOpenGuide = { showThinkingGuide = true }
+            )
+            Spacer(Modifier.weight(1f))
+            // 工位对等：模型快速切换「小大脑」（深水档切 reasoning 强模型
+            // 的高频路径；Agent 屏同款组件，共享 ModelRuntime 下一轮生效）
+            BrainMenuButton(
+                profiles = profiles,
+                currentProfileId = currentProfileId ?: "",
+                providerNameOf = { providerId ->
+                    providers.firstOrNull { it.id == providerId }?.displayName ?: "?"
+                },
+                onSelectProfile = { viewModel.selectProfile(it) },
+                onParamsChanged = { t, p, m -> viewModel.updateModelParams(t, p, m) },
+                onConfigure = onOpenSettings
             )
         }
 
@@ -311,6 +345,14 @@ fun CodeScreen(
                 viewModel.githubTokenManager.saveToken(token, username)
                 showGithubConnectDialog = false
             }
+        )
+    }
+
+    // 工位对等：HTML 产物预览（文件 chip 点击；Agent 屏同款 WebView 即时渲染）
+    htmlPreviewPath?.let { path ->
+        HtmlPreviewDialog(
+            filePath = path,
+            onDismiss = { htmlPreviewPath = null }
         )
     }
 

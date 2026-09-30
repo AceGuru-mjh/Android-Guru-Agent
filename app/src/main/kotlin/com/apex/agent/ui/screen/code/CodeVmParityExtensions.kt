@@ -137,6 +137,6 @@ internal fun CodeViewModel.selectProfile(profileId: String) {
 internal fun CodeViewModel.updateModelParams(temperature: Float, topP: Float, maxTokens: Int) {
     val cur = settingsRepository.getProfile(currentProfileIdOrNull() ?: return) ?: return
     settingsRepository.upsertProfile(
-        cur.copy(temperature = temperature, topP = topP, maxTokens = maxTokens)
+        cur.copy(temperature = temperature, topP = topP, maxOutputTokens = maxTokens)
     )
 }

@@ -1,6 +1,8 @@
 package com.apex.agent.ui.screen.code
 
+import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.code.stream.CodeStreamCheckpoint
+import com.apex.agent.core.code.stream.CodeStreamSnapshot
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.platform.code.ws.CodeWorkspace
@@ -11,6 +13,7 @@ import com.apex.agent.ui.screen.code.session.toStreamEntries
 import com.apex.agent.ui.screen.code.session.withFreshIds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 

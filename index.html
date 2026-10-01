@@ -4,7 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Android Guru Agent —— 装进口袋的自主智能体</title>
-<meta name="description" content="Android 原生自主智能体：真实 Ubuntu 终端、109 个工具、自愈长任务引擎、MCP 生态。无需服务器，数据不出设备。">
+<meta name="description" content="Android 原生自主智能体：真实 Ubuntu 终端、109 个工具、自愈长任务引擎、双向 MCP 生态、仿生认知记忆。无需服务器，数据不出设备。">
+<meta name="theme-color" content="#EAEEE6">
+<link rel="canonical" href="https://aceguru-mjh.github.io/Android-Guru-Agent/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Android Guru Agent">
+<meta property="og:title" content="Android Guru Agent —— 装进口袋的自主智能体">
+<meta property="og:description" content="真实 Ubuntu 终端 · 109 个工具 · 自愈长任务引擎 · 双向 MCP 生态 · 仿生认知记忆。无需服务器，数据不出设备。">
+<meta property="og:url" content="https://aceguru-mjh.github.io/Android-Guru-Agent/">
+<meta property="og:image" content="https://aceguru-mjh.github.io/Android-Guru-Agent/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Android Guru Agent —— 手机上的终端会话预览">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Android Guru Agent —— 装进口袋的自主智能体">
+<meta name="twitter:description" content="真实 Ubuntu 终端 · 109 个工具 · 自愈长任务引擎 · 双向 MCP 生态。无需服务器，数据不出设备。">
+<meta name="twitter:image" content="https://aceguru-mjh.github.io/Android-Guru-Agent/og-image.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F1410'/%3E%3Ctext x='14' y='44' font-family='monospace' font-size='34' fill='%23DFA53F'%3E%24%3C/text%3E%3Crect x='32' y='34' width='16' height='5' fill='%238CD7A0'/%3E%3C/svg%3E">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Android Guru Agent",
+  "operatingSystem": "Android 8.0+",
+  "applicationCategory": "DeveloperApplication",
+  "description": "Android 原生自主智能体：真实 Ubuntu 终端（PRoot 沙箱）、109 个内置工具、自愈长任务引擎、双向 MCP 生态、仿生认知记忆 cs-mem。无需服务器，数据不出设备。",
+  "url": "https://aceguru-mjh.github.io/Android-Guru-Agent/",
+  "downloadUrl": "https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest",
+  "codeRepository": "https://github.com/AceGuru-mjh/Android-Guru-Agent",
+  "softwareVersion": "1.4.4",
+  "programmingLanguage": "Kotlin",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -52,7 +85,7 @@ body {
 ::selection { background: var(--pine); color: #F3F7EE; }
 a { color: var(--pine); text-decoration: none; }
 a:hover { color: var(--pine-deep); text-decoration: underline; text-underline-offset: 3px; }
-a:focus-visible, button:focus-visible {
+a:focus-visible, button:focus-visible, summary:focus-visible {
   outline: 2px solid var(--pine);
   outline-offset: 3px;
   border-radius: 4px;
@@ -91,7 +124,7 @@ a:focus-visible, button:focus-visible {
   transition: background 0.15s;
 }
 .navlinks .nav-cta:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
-@media (max-width: 640px) { .navlinks a:not(.nav-cta) { display: none; } }
+@media (max-width: 760px) { .navlinks a:not(.nav-cta) { display: none; } }
 
 /* ── 英雄区 ── */
 .hero { padding: 88px 0 96px; }
@@ -255,6 +288,140 @@ a:focus-visible, button:focus-visible {
   max-width: 40em;
 }
 
+/* ── 六模式 ── */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: rgba(23, 27, 22, 0.14);
+  border: 1px solid rgba(23, 27, 22, 0.14);
+  border-radius: var(--radius-win);
+  overflow: hidden;
+}
+@media (max-width: 860px) { .mode-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .mode-grid { grid-template-columns: 1fr; } }
+.mode {
+  background: var(--paper);
+  padding: 28px 26px 24px;
+  position: relative;
+}
+.mode .mode-tag {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+  color: var(--pine);
+  background: rgba(22, 107, 69, 0.09);
+  border: 1px solid rgba(22, 107, 69, 0.22);
+  border-radius: 6px;
+  padding: 2px 9px;
+  display: inline-block;
+  margin-bottom: 12px;
+  letter-spacing: 0.06em;
+}
+.mode h3 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+.mode p { font-size: 14.5px; line-height: 1.68; color: var(--ink-soft); }
+.mode .mode-when {
+  margin-top: 12px;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink-faint);
+}
+.mode .mode-when b { color: var(--pine); font-weight: 500; }
+
+/* ── 对比表 ── */
+.compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15.5px;
+  border: 1px solid rgba(23, 27, 22, 0.14);
+  border-radius: var(--radius-win);
+  overflow: hidden;
+}
+.compare caption { caption-side: bottom; text-align: left; font-size: 13.5px; color: var(--ink-faint); padding-top: 14px; }
+.compare th, .compare td {
+  padding: 14px 18px;
+  text-align: left;
+  border-bottom: 1px solid rgba(23, 27, 22, 0.10);
+  vertical-align: top;
+}
+.compare thead th {
+  background: var(--paper-deep);
+  font-size: 14px; font-weight: 600;
+}
+.compare tbody th {
+  font-weight: 600; white-space: nowrap;
+  background: rgba(234, 238, 230, 0.6);
+}
+.compare td.aga { background: rgba(22, 107, 69, 0.06); }
+.compare .yes { color: var(--pine); font-weight: 600; }
+.compare .no { color: var(--ink-faint); }
+.compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom: none; }
+@media (max-width: 720px) {
+  .compare { font-size: 14px; }
+  .compare th, .compare td { padding: 11px 12px; }
+}
+
+/* ── MCP 双向 ── */
+.mcp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+@media (max-width: 860px) { .mcp-grid { grid-template-columns: 1fr; } }
+.mcp-dir {
+  border: 1px solid rgba(23, 27, 22, 0.14);
+  border-radius: var(--radius-win);
+  padding: 32px 30px;
+  background: var(--paper);
+}
+.mcp-dir .dir-tag {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--ink-faint); letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+.mcp-dir h3 {
+  font-family: var(--font-display); font-weight: 560;
+  font-size: 22px; margin-bottom: 10px;
+}
+.mcp-dir p { font-size: 15.5px; color: var(--ink-soft); }
+.mcp-dir ul { margin: 14px 0 0; list-style: none; }
+.mcp-dir li {
+  font-size: 15px; color: var(--ink-soft);
+  padding: 5px 0 5px 22px; position: relative;
+}
+.mcp-dir li::before {
+  content: "▸"; position: absolute; left: 2px;
+  color: var(--pine); font-family: var(--font-mono);
+}
+
+/* ── FAQ ── */
+.faq { border-top: 1px solid rgba(23, 27, 22, 0.14); }
+.faq details { border-bottom: 1px solid rgba(23, 27, 22, 0.14); }
+.faq summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 22px 44px 22px 0;
+  position: relative;
+  font-weight: 600; font-size: 17px; line-height: 1.5;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: "+";
+  position: absolute; right: 8px; top: 20px;
+  font-family: var(--font-mono); font-size: 22px; font-weight: 400;
+  color: var(--pine);
+  transition: transform 0.15s;
+}
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq .faq-body {
+  padding: 0 44px 26px 0;
+  color: var(--ink-soft); font-size: 16px;
+  max-width: 52em;
+}
+.faq .faq-body p + p { margin-top: 10px; }
+.faq .faq-body code {
+  font-family: var(--font-mono); font-size: 14px;
+  background: rgba(23, 27, 22, 0.06);
+  padding: 1px 7px; border-radius: 5px;
+}
+
 /* ── 内核事实 ── */
 .facts {
   display: grid;
@@ -274,6 +441,13 @@ a:focus-visible, button:focus-visible {
   margin-right: 10px; line-height: 1;
 }
 .fact p { color: var(--ink-soft); font-size: 16px; max-width: 28em; }
+
+/* ── 徽章行 ── */
+.gh-badges {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 30px;
+}
+.gh-badges img { height: 22px; display: block; }
 
 /* ── 获取面板 ── */
 .install-panel {
@@ -306,7 +480,25 @@ footer {
   padding-top: 32px;
 }
 .foot-grid .foot-meta { max-width: 30em; line-height: 1.8; }
-.foot-links { display: flex; gap: 22px; align-items: flex-start; }
+.foot-links { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+
+/* ── 回到顶部 ── */
+.totop {
+  position: fixed; right: 26px; bottom: 26px;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(23, 27, 22, 0.35);
+  background: rgba(234, 238, 230, 0.94);
+  color: var(--ink);
+  font-family: var(--font-mono); font-size: 18px;
+  cursor: pointer;
+  opacity: 0; visibility: hidden; transform: translateY(8px);
+  transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+  z-index: 20;
+}
+.totop.show { opacity: 1; visibility: visible; transform: translateY(0); }
+.totop:hover { border-color: var(--pine); color: var(--pine-deep); }
+@media (prefers-reduced-motion: reduce) { .totop { transition: none; } }
 </style>
 </head>
 <body>
@@ -318,8 +510,9 @@ footer {
       Android&nbsp;Guru&nbsp;Agent<span class="dot">.</span>
     </a>
     <nav class="navlinks" aria-label="主导航">
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki" target="_blank" rel="noopener">Wiki</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">源码</a>
-      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#docs-index" target="_blank" rel="noopener">文档</a>
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">发布</a>
       <a class="nav-cta" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK</a>
     </nav>
   </div>
@@ -373,7 +566,7 @@ footer {
     <dl class="deflist">
       <div class="defrow">
         <dt>真正的终端</dt>
-        <dd><p>PRoot 沙箱里跑完整的 Ubuntu 24.04，npx、python、git 在手机上可用。命令走真实进程，输出逐行流回上下文。</p></dd>
+        <dd><p>PRoot 沙箱里跑完整的 Ubuntu 24.04，npx、python、git 在手机上可用。命令走真实进程，输出逐行流回上下文；自研 VT100 模拟器纯 Kotlin 零依赖。</p></dd>
       </div>
       <div class="defrow">
         <dt>长任务自愈</dt>
@@ -381,15 +574,15 @@ footer {
       </div>
       <div class="defrow">
         <dt>认知记忆</dt>
-        <dd><p>cs-mem 把重复操作蒸馏成可回放的肌肉记忆：第二次干同样的事，直接旁路执行，更快。</p></dd>
+        <dd><p>cs-mem 把重复操作蒸馏成可回放的肌肉记忆：第二次干同样的事，直接旁路执行，更快，不花 token。</p></dd>
       </div>
       <div class="defrow">
-        <dt>MCP 生态</dt>
-        <dd><p>官方 Hub 与 <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a> 社区目录一键安装 MCP 服务器，本地沙箱运行，工具自动注册进引擎。</p></dd>
+        <dt>双向 MCP 生态</dt>
+        <dd><p>当客户端：官方 Hub 仓库与 <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a> 目录一键安装 MCP 服务器，npm 生态经沙箱接入，工具自动注册进引擎。当服务器：逆向 MCP Host 让 PC 上的 Cline / Claude 直接调用手机工具。</p></dd>
       </div>
       <div class="defrow">
         <dt>你掌握一切</dt>
-        <dd><p>Root、Shizuku、无障碍三级权限链；每一步执行可见、可中断。API Key 与会话数据只存在你的设备上。</p></dd>
+        <dd><p>Root、Shizuku、无障碍三级权限链；每一步执行可见、可中断。API Key 与会话数据只存在你的设备上，金库密钥绝不经外部通道出入。</p></dd>
       </div>
     </dl>
   </section>
@@ -422,27 +615,196 @@ footer {
     </div>
   </section>
 
+  <!-- ═══ 六种执行模式 ═══ -->
+  <section class="section wrap" aria-labelledby="modes-title">
+    <h2 class="section-head" id="modes-title">一种内核，六种干活姿势。</h2>
+    <p class="section-sub">六个模式共享同一个 ReAct 主循环与工具注册表，按任务形态切换，不是六个产品。</p>
+    <div class="mode-grid">
+      <div class="mode">
+        <span class="mode-tag">BUILD</span>
+        <h3>默认干活档</h3>
+        <p>读文件、改配置、批量整理——日常任务的默认选择，工具全开。</p>
+        <p class="mode-when"><b>何时用</b> · 不涉及破坏性操作的大多数任务</p>
+      </div>
+      <div class="mode">
+        <span class="mode-tag">CHAT</span>
+        <h3>纯对话档</h3>
+        <p>问答、翻译、写作。不触发工具调用，响应最快、最省 token。</p>
+        <p class="mode-when"><b>何时用</b> · 只要嘴，不要手</p>
+      </div>
+      <div class="mode">
+        <span class="mode-tag">AGENT</span>
+        <h3>自主执行档</h3>
+        <p>多步规划、连续工具调用、遇错自愈，长任务的完整智能体闭环。</p>
+        <p class="mode-when"><b>何时用</b> · 「帮我从头到尾搞定这件事」</p>
+      </div>
+      <div class="mode">
+        <span class="mode-tag">PLAN</span>
+        <h3>先计划后执行</h3>
+        <p>删除、安装、批量改动前先给出完整计划，你确认了才动手。</p>
+        <p class="mode-when"><b>何时用</b> · 高风险操作，想先看方案</p>
+      </div>
+      <div class="mode">
+        <span class="mode-tag">SPEC</span>
+        <h3>规格驱动档</h3>
+        <p>从需求文档到实现的工程化路径：拆解规格、逐步交付、可回溯。</p>
+        <p class="mode-when"><b>何时用</b> · 写清楚要什么，让它照着做</p>
+      </div>
+      <div class="mode">
+        <span class="mode-tag">REFLECTION</span>
+        <h3>复盘档</h3>
+        <p>对已完成的任务做回顾与总结，沉淀进记忆供下次复用。</p>
+        <p class="mode-when"><b>何时用</b> · 干完了，让它自己想想哪里能更好</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 对比：为什么是它 ═══ -->
+  <section class="section wrap" aria-labelledby="cmp-title">
+    <h2 class="section-head" id="cmp-title">和其它方案比，它站在哪。</h2>
+    <p class="section-sub">PC 端智能体工程深度更强，手机 AI 聊天更轻——它的差异化是「完整闭环装进口袋」。</p>
+    <table class="compare">
+      <thead>
+        <tr>
+          <th scope="col">维度</th>
+          <th scope="col">Android Guru Agent</th>
+          <th scope="col">PC 端编码智能体</th>
+          <th scope="col">手机 AI 聊天 App</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">运行位置</th>
+          <td class="aga"><span class="yes">📱 全程在设备上</span></td>
+          <td>💻 PC / 服务器</td>
+          <td>☁️ 厂商云端</td>
+        </tr>
+        <tr>
+          <th scope="row">需要服务器 / PC</th>
+          <td class="aga"><span class="yes">不需要</span></td>
+          <td>需要</td>
+          <td>需要（厂商云）</td>
+        </tr>
+        <tr>
+          <th scope="row">LLM 可换性</th>
+          <td class="aga"><span class="yes">任意 OpenAI 兼容端点 / 局域网 Ollama</span></td>
+          <td>固定模型或自配</td>
+          <td><span class="no">固定</span></td>
+        </tr>
+        <tr>
+          <th scope="row">执行能力</th>
+          <td class="aga"><span class="yes">109 工具：终端 / 文件 / UI 自动化 / 浏览器 / MCP</span></td>
+          <td>文件 + shell + web</td>
+          <td><span class="no">仅对话</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Linux 环境</th>
+          <td class="aga"><span class="yes">PRoot Ubuntu 24.04 沙箱</span></td>
+          <td>宿主 OS</td>
+          <td><span class="no">无</span></td>
+        </tr>
+        <tr>
+          <th scope="row">跨会话记忆</th>
+          <td class="aga"><span class="yes">语义图 + FSM 宏 0-token 旁路回放</span></td>
+          <td>仓库内 markdown</td>
+          <td><span class="no">云端会话</span></td>
+        </tr>
+        <tr>
+          <th scope="row">MCP 生态</th>
+          <td class="aga"><span class="yes">双向：客户端接入 + 逆向 Host 供 PC 调用</span></td>
+          <td>客户端接入</td>
+          <td><span class="no">无</span></td>
+        </tr>
+      </tbody>
+      <caption>定性归纳，基于各方案公开形态；PC 端智能体在代码工程深度上依然更强。</caption>
+    </table>
+  </section>
+
+  <!-- ═══ MCP 双向生态 ═══ -->
+  <section class="band" aria-labelledby="mcp-title">
+    <div class="wrap">
+      <h2 class="section-head" id="mcp-title">MCP 双向：手机既是客户端，也是服务器。</h2>
+      <p class="section-sub" style="margin-bottom:48px">同一条 v3 执行管线门控（环境门 → 权限门 → 风险门 → 限流 → 熔断），内外一致，不旁路。</p>
+      <div class="mcp-grid">
+        <div class="mcp-dir">
+          <p class="dir-tag">AS CLIENT · 客户端方向</p>
+          <h3>把 npm 生态装进口袋</h3>
+          <p>市场页直连官方 Hub 仓库与 mcp.so 社区目录，一键安装 MCP 服务器；本地命令形态的 server 在 PRoot Ubuntu 沙箱里真实运行。</p>
+          <ul>
+            <li>官方 <code style="font-family:var(--font-mono);font-size:14px">apex-mcp-hub</code> 仓库 8 台预编目：context7 · fetch · memory · fs …</li>
+            <li>HTTP / SSE / 沙箱 STDIO / BUILTIN 四种传输</li>
+            <li>安装 ≠ 启动：显式启动，斜杠菜单只列运行中的服务器</li>
+            <li>工具发现自动注册进引擎（tools/list → ToolRegistry）</li>
+          </ul>
+        </div>
+        <div class="mcp-dir">
+          <p class="dir-tag">AS SERVER · 服务器方向</p>
+          <h3>让 PC 的 AI 调用你的手机</h3>
+          <p>逆向 MCP Host 监听 <code style="font-family:var(--font-mono);font-size:14px">0.0.0.0:8765</code>：PC 上的 Cline / Claude Desktop 经局域网把手机当一台 MCP Server 调用。</p>
+          <ul>
+            <li>Bearer Token 常时比较鉴权 + 每地址限速</li>
+            <li>分类白名单：vault 与分享类工具硬拦截，绝不外露</li>
+            <li>外部调用与 Agent 内部调用同一门控链</li>
+            <li>纯 Kotlin JVM 模块，79 个测试用例含真实端口集成</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ═══ 内核事实 ═══ -->
   <section class="section wrap" aria-labelledby="core-title">
     <h2 class="section-head" id="core-title">内核是什么做的。</h2>
-    <p class="section-sub">工程上较真，才敢把“自主执行”放进你的手机。</p>
+    <p class="section-sub">工程上较真，才敢把「自主执行」放进你的手机。</p>
     <div class="facts">
       <div class="fact">
-        <div class="fact-term"><span class="figure">14</span>个 Gradle 模块</div>
-        <p>引擎、LLM 适配、工具注册表、编码工作区、终端运行时各司其职；核心六模块纯 JVM，可直接单测。</p>
+        <div class="fact-term"><span class="figure">20</span>个 Gradle 模块</div>
+        <p>引擎、LLM 适配、工具注册表、编码工作区、终端运行时、MCP Host 各司其职；核心模块纯 JVM，可直接单测。</p>
       </div>
       <div class="fact">
-        <div class="fact-term"><span class="figure">1100+</span>单元测试</div>
-        <p>任务运行时、编排器韧性、上下文压缩、市场解析全部有回归门禁，CI 红了就不合入。</p>
+        <div class="fact-term"><span class="figure">4,000+</span>测试用例</div>
+        <p>252 个测试文件、约 4,008 个 <span style="font-family:var(--font-mono);font-size:14px">@Test</span>：任务运行时、编排器韧性、上下文压缩、市场解析、MCP Host 全部有回归门禁，CI 红了就不合入。</p>
       </div>
       <div class="fact">
         <div class="fact-term"><span class="figure">6</span>种执行模式</div>
         <p>BUILD、CHAT、AGENT、PLAN、SPEC、REFLECTION 共享同一个 ReAct 主循环，按任务形态切换。</p>
       </div>
       <div class="fact">
-        <div class="fact-term"><span class="figure">3</span>架构 ABI</div>
-        <p>arm64、x86_64、v7a 全覆盖，Android 8.0 起步；PRoot rootfs 离线可装。</p>
+        <div class="fact-term"><span class="figure">18万</span>行 Kotlin 主源码</div>
+        <p>802 个文件的纯手写工程；另有 37 个 C++ 文件承载 PTY 与 VT 原生加速层，三 ABI 全覆盖，Android 8.0 起步。</p>
       </div>
+    </div>
+  </section>
+
+  <!-- ═══ 常见问答 ═══ -->
+  <section class="section wrap" aria-labelledby="faq-title">
+    <h2 class="section-head" id="faq-title">问得最多的几件事。</h2>
+    <p class="section-sub">完整版在 GitHub Wiki 的 FAQ 页；这里只放决定你要不要装的四条。</p>
+    <div class="faq">
+      <details>
+        <summary>模型从哪来？要付钱给你们吗？</summary>
+        <div class="faq-body">
+          <p>模型完全自带（BYO-LLM）：设置里填任意 OpenAI 兼容端点——OpenAI、DeepSeek、OpenRouter、中转站，或局域网 Ollama。应用本身免费开源，不经手任何模型费用；API Key 只存在设备私有目录的加密存储里。</p>
+        </div>
+      </details>
+      <details>
+        <summary>为什么提示「应用针对旧版 Android 开发」？</summary>
+        <div class="faq-body">
+          <p>这是预期的：项目钉死 <code>targetSdk = 28</code>。Android 10 起系统禁止应用从可写私有目录执行二进制，而 Ubuntu rootfs 依赖这条路径——Termux 至今钉 28 是同一个原因。升上去，终端就没了。</p>
+        </div>
+      </details>
+      <details>
+        <summary>没有 Root 的手机能用多少？</summary>
+        <div class="faq-body">
+          <p>全部功能可用，只是权限链自动降级：Root → Shizuku（ADB 级，免 Root 授权）→ 应用沙箱 shell。装 Shizuku 后 <code>pm install</code>、<code>settings put</code>、UI 自动化都能跑；什么都不装也有文件操作、终端沙箱和完整对话。</p>
+        </div>
+      </details>
+      <details>
+        <summary>数据会上传到哪里？</summary>
+        <div class="faq-body">
+          <p>只和你自己配置的 LLM 端点通信。会话、记忆库、密钥全在本地 Room 数据库与加密存储；无埋点、无统计、无云端账号。逆向 MCP Host 默认关闭，开启也仅限局域网 + Token 鉴权。</p>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -451,14 +813,23 @@ footer {
     <div class="install-panel">
       <h2 id="get-title">开始使用。</h2>
       <p class="note">alpha 阶段，能力在快速生长。APK 在独立发布仓库，源码与文档都在 GitHub。</p>
+      <div class="gh-badges" aria-label="仓库动态徽章">
+        <img src="https://img.shields.io/github/stars/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=yellow" alt="Stars" loading="lazy">
+        <img src="https://img.shields.io/github/forks/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=blue" alt="Forks" loading="lazy">
+        <img src="https://img.shields.io/github/v/release/AceGuru-mjh/Android-Guru-Agent-Release?style=flat-square&display_name=release&label=latest" alt="Latest Release" loading="lazy">
+        <img src="https://img.shields.io/github/last-commit/AceGuru-mjh/Android-Guru-Agent?style=flat-square&label=last%20commit" alt="Last Commit" loading="lazy">
+        <img src="https://img.shields.io/github/languages/top/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=7F52FF" alt="Top Language" loading="lazy">
+      </div>
       <div class="install-actions">
         <a class="btn btn-primary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK（发布仓库）</a>
         <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">GitHub 源码</a>
       </div>
       <p class="install-links">
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki" target="_blank" rel="noopener">官方 Wiki（58 页）</a> ·
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki/Quick-Start" target="_blank" rel="noopener">五分钟上手</a> ·
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki/FAQ" target="_blank" rel="noopener">常见问答</a> ·
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki/MCP-Ecosystem" target="_blank" rel="noopener">MCP 生态</a> ·
         <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml" target="_blank" rel="noopener">CI 构建产物</a>
-        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#quickstart" target="_blank" rel="noopener">五分钟上手</a>
-        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#faq" target="_blank" rel="noopener">常见问答</a>
       </p>
     </div>
   </section>
@@ -468,39 +839,55 @@ footer {
 <footer>
   <div class="wrap foot-grid">
     <p class="foot-meta">
-      Android Guru Agent · active alpha，持续开发中<br>
+      Android Guru Agent · v1.4.4 · active alpha，持续开发中<br>
       一台手机，无需服务器，模型与数据都归你。
     </p>
     <nav class="foot-links" aria-label="页脚链接">
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">仓库</a>
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki" target="_blank" rel="noopener">Wiki</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases" target="_blank" rel="noopener">发布</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/issues" target="_blank" rel="noopener">议题</a>
     </nav>
   </div>
 </footer>
 
+<button class="totop" id="totop" aria-label="回到顶部">↑</button>
+
 <script>
 (function () {
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var term = document.getElementById("hero-terminal");
-  if (!term) return;
-  var lines = term.querySelectorAll(".ln");
-  if (reduced || lines.length === 0) {
-    term.classList.add("no-replay");
-    return;
-  }
-  // 唯一的开场编排：英雄终端逐行回放一次（约 2s），此后静止。
-  var i = 0;
-  function step() {
-    if (i < lines.length) {
-      lines[i].style.display = "block";
-      i++;
-      setTimeout(step, 170);
+  if (term) {
+    var lines = term.querySelectorAll(".ln");
+    if (reduced || lines.length === 0) {
+      term.classList.add("no-replay");
     } else {
-      term.classList.add("replay-done");
+      // 唯一的开场编排：英雄终端逐行回放一次（约 2s），此后静止。
+      var i = 0;
+      function step() {
+        if (i < lines.length) {
+          lines[i].style.display = "block";
+          i++;
+          setTimeout(step, 170);
+        } else {
+          term.classList.add("replay-done");
+        }
+      }
+      setTimeout(step, 450);
     }
   }
-  setTimeout(step, 450);
+  // 回到顶部：滚动过一屏后出现
+  var totop = document.getElementById("totop");
+  if (totop) {
+    var onScroll = function () {
+      totop.classList.toggle("show", window.scrollY > window.innerHeight * 0.9);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    totop.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+    });
+  }
 })();
 </script>
 </body>

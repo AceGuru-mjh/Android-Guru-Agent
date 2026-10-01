@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aceguru-mjh.github.io/Android-Guru-Agent/sitemap.xml

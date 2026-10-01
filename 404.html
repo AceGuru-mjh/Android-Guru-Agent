@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 —— 页面不在 · Android Guru Agent</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F1410'/%3E%3Ctext x='14' y='44' font-family='monospace' font-size='34' fill='%23DFA53F'%3E%24%3C/text%3E%3Crect x='32' y='34' width='16' height='5' fill='%238CD7A0'/%3E%3C/svg%3E">
+<style>
+:root {
+  --paper: #EAEEE6; --paper-deep: #E0E6DA;
+  --ink: #171B16; --ink-soft: #49514A; --ink-faint: #6C756C;
+  --pine: #166B45; --pine-deep: #0E4A30;
+  --term-bg: #0F1410; --term-edge: #1C241E;
+  --term-text: #E4EBDF; --term-dim: #8FA08F; --term-green: #8CD7A0; --term-amber: #DFA53F; --term-red: #D98873;
+  --font-display: "Fraunces", "Songti SC", "Noto Serif SC", serif;
+  --font-body: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-body); background: var(--paper); color: var(--ink);
+  font-size: 17px; line-height: 1.75; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--pine); text-decoration: none; }
+a:hover { color: var(--pine-deep); text-decoration: underline; text-underline-offset: 3px; }
+.card { max-width: 640px; padding: 48px 40px; }
+h1 {
+  font-family: var(--font-display); font-weight: 520;
+  font-size: clamp(34px, 6vw, 52px); line-height: 1.16;
+  letter-spacing: -0.015em; margin-bottom: 18px;
+}
+.lede { color: var(--ink-soft); margin-bottom: 36px; max-width: 30em; }
+.window {
+  background: var(--term-bg); border: 1px solid var(--term-edge);
+  border-radius: 14px; overflow: hidden; margin-bottom: 36px;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.75;
+  box-shadow: 0 14px 28px -14px rgba(23,27,22,0.35);
+}
+.window-bar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  background: #131811; border-bottom: 1px solid var(--term-edge);
+}
+.window-bar .dot { width: 10px; height: 10px; border-radius: 50%; background: #2A332B; }
+.window-bar .dot:first-child { background: #3E4A3E; }
+.window-bar .title { margin-left: 8px; color: var(--term-dim); font-size: 12px; }
+.terminal { padding: 16px 18px 20px; color: var(--term-text); }
+.terminal .err { color: var(--term-red); }
+.terminal .dim { color: var(--term-dim); }
+.terminal .ok { color: var(--term-green); }
+.terminal .prompt { color: var(--term-amber); }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center;
+  font-weight: 600; font-size: 15.5px;
+  padding: 11px 22px; border-radius: 10px;
+  border: 1.5px solid transparent; cursor: pointer; text-decoration: none;
+}
+.btn-primary { background: var(--pine); color: #F3F7EE; }
+.btn-primary:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
+.btn-secondary { background: transparent; color: var(--ink); border-color: rgba(23,27,22,0.5); }
+.btn-secondary:hover { border-color: var(--ink); background: rgba(23,27,22,0.04); text-decoration: none; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>这里没有页面。<br>但终端还在。</h1>
+  <p class="lede">你要找的地址不存在（或者搬家了）。回首页看看，或者去仓库逛逛。</p>
+  <div class="window" role="img" aria-label="终端输出 404">
+    <div class="window-bar" aria-hidden="true">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="title">apex-agent · http</span>
+    </div>
+    <div class="terminal">
+      <div><span class="prompt">$</span> GET <span class="dim">/not/found</span></div>
+      <div class="err">✗ 404 Not Found —— 该资源不在本机</div>
+      <div class="dim">提示：可用导航直达首页 / 仓库 / Wiki</div>
+      <div class="ok">✓ 连接保持 · 返回首页继续</div>
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-primary" href="https://aceguru-mjh.github.io/Android-Guru-Agent/">返回首页</a>
+    <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent">GitHub 仓库</a>
+    <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki">官方 Wiki</a>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Android Guru Agent —— 装进口袋的自主智能体</title>
+<meta name="description" content="Android 原生自主智能体：真实 Ubuntu 终端、109 个工具、自愈长任务引擎、MCP 生态。无需服务器，数据不出设备。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════
+   Android Guru Agent —— 口袋里的机房
+   纸面：青调鼠尾草灰 · 松绿工作色 · 编辑衬线与工程无衬线
+   暗色仅存在于终端物件内部（道具，不是页面语言）
+   ══════════════════════════════════════════════════════════ */
+:root {
+  --paper: #EAEEE6;
+  --paper-deep: #E0E6DA;
+  --ink: #171B16;
+  --ink-soft: #49514A;
+  --ink-faint: #6C756C;
+  --pine: #166B45;
+  --pine-deep: #0E4A30;
+  --term-bg: #0F1410;
+  --term-edge: #1C241E;
+  --term-text: #E4EBDF;
+  --term-dim: #8FA08F;
+  --term-green: #8CD7A0;
+  --term-amber: #DFA53F;
+  --term-red: #D98873;
+  --radius-win: 16px;
+  --radius-btn: 10px;
+  --font-display: "Fraunces", "Songti SC", "Noto Serif SC", serif;
+  --font-body: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+body {
+  font-family: var(--font-body);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--pine); color: #F3F7EE; }
+a { color: var(--pine); text-decoration: none; }
+a:hover { color: var(--pine-deep); text-decoration: underline; text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.skip-link {
+  position: absolute; left: -9999px; top: 0;
+  background: var(--ink); color: var(--paper);
+  padding: 10px 18px; border-radius: 0 0 8px 0; z-index: 99;
+}
+.skip-link:focus { left: 0; }
+.wrap { max-width: 1064px; margin: 0 auto; padding: 0 28px; }
+
+/* ── 顶栏 ── */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(234, 238, 230, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(23, 27, 22, 0.08);
+}
+.topbar-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 64px;
+}
+.wordmark {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 560; letter-spacing: -0.01em;
+  color: var(--ink); text-decoration: none;
+}
+.wordmark:hover { text-decoration: none; color: var(--pine-deep); }
+.wordmark .dot { color: var(--pine); }
+.navlinks { display: flex; gap: 26px; align-items: center; }
+.navlinks a { font-size: 15px; font-weight: 500; }
+.navlinks .nav-cta {
+  background: var(--pine); color: #F3F7EE;
+  padding: 8px 18px; border-radius: var(--radius-btn);
+  transition: background 0.15s;
+}
+.navlinks .nav-cta:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
+@media (max-width: 640px) { .navlinks a:not(.nav-cta) { display: none; } }
+
+/* ── 英雄区 ── */
+.hero { padding: 88px 0 96px; }
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
+  gap: 64px; align-items: center;
+}
+@media (max-width: 940px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 56px; }
+  .hero { padding: 56px 0 80px; }
+}
+.hero h1 {
+  font-family: var(--font-display);
+  font-weight: 520;
+  font-size: clamp(40px, 5.4vw, 62px);
+  line-height: 1.14;
+  letter-spacing: -0.015em;
+  font-variation-settings: "SOFT" 40, "WONK" 1;
+  margin-bottom: 24px;
+  text-wrap: balance;
+}
+.hero .lede {
+  max-width: 30em;
+  font-size: 18.5px; line-height: 1.78;
+  color: var(--ink-soft);
+  margin-bottom: 14px;
+}
+.hero .standline {
+  font-size: 16px; color: var(--ink-soft);
+  margin-bottom: 44px;
+}
+.cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-body); font-weight: 600; font-size: 16px;
+  padding: 13px 26px; border-radius: var(--radius-btn);
+  border: 1.5px solid transparent;
+  cursor: pointer; text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-primary { background: var(--pine); color: #F3F7EE; }
+.btn-primary:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
+.btn-secondary {
+  background: transparent; color: var(--ink);
+  border: 1.5px solid rgba(23, 27, 22, 0.5);
+}
+.btn-secondary:hover { border-color: var(--ink); background: rgba(23,27,22,0.04); text-decoration: none; }
+
+/* ── 手机终端道具 ── */
+.phone {
+  background: #10140F;
+  border-radius: 34px;
+  padding: 12px;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 24px 48px -18px rgba(23, 27, 22, 0.42),
+    0 4px 12px rgba(23, 27, 22, 0.18);
+}
+.phone-screen {
+  background: var(--term-bg);
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid var(--term-edge);
+}
+.phone-status {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 18px 8px;
+  color: var(--term-dim);
+  font-family: var(--font-mono); font-size: 12px;
+}
+.phone-status .glyphs { letter-spacing: 3px; }
+.terminal {
+  font-family: var(--font-mono);
+  font-size: 13px; line-height: 1.72;
+  padding: 14px 18px 20px;
+  color: var(--term-text);
+  min-height: 300px;
+}
+.terminal .ln { white-space: pre-wrap; word-break: break-all; display: none; }
+.terminal.replay-done .ln, .terminal.no-replay .ln { display: block; }
+.terminal .cmd { color: var(--term-green); }
+.terminal .out { color: var(--term-dim); }
+.terminal .err { color: var(--term-red); }
+.terminal .ok { color: var(--term-amber); }
+.terminal .think { color: var(--term-text); opacity: 0.88; }
+.terminal .cursor {
+  display: inline-block; width: 7px; height: 15px;
+  background: var(--term-green); vertical-align: -2px;
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.terminal .prompt { color: var(--term-amber); }
+
+/* ── 区块骨架 ── */
+.section { padding: 96px 0; }
+.section + .section { padding-top: 0; }
+.section-head {
+  font-family: var(--font-display);
+  font-weight: 520;
+  font-size: clamp(28px, 3.6vw, 40px);
+  line-height: 1.22; letter-spacing: -0.01em;
+  font-variation-settings: "SOFT" 40, "WONK" 1;
+  margin-bottom: 12px;
+  text-wrap: balance;
+}
+.section-sub { max-width: 34em; color: var(--ink-soft); margin-bottom: 56px; }
+
+/* ── 能力：定义列表（非卡片）── */
+.deflist { border-top: 1px solid rgba(23, 27, 22, 0.14); }
+.defrow {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 28px;
+  padding: 30px 0;
+  border-bottom: 1px solid rgba(23, 27, 22, 0.14);
+}
+@media (max-width: 720px) {
+  .defrow { grid-template-columns: 1fr; gap: 8px; padding: 24px 0; }
+}
+.defrow dt {
+  font-weight: 600; font-size: 17.5px; line-height: 1.5;
+}
+.defrow dd p {
+  max-width: 46em; color: var(--ink-soft);
+  font-size: 16.5px;
+}
+.defrow dd a { white-space: nowrap; }
+
+/* ── 通栏终端带 ── */
+.band {
+  background: var(--paper-deep);
+  border-top: 1px solid rgba(23, 27, 22, 0.1);
+  border-bottom: 1px solid rgba(23, 27, 22, 0.1);
+  padding: 88px 0;
+}
+.band .window {
+  background: var(--term-bg);
+  border: 1px solid var(--term-edge);
+  border-radius: var(--radius-win);
+  overflow: hidden;
+  box-shadow: 0 18px 36px -14px rgba(23, 27, 22, 0.35);
+}
+.window-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 18px;
+  background: #131811;
+  border-bottom: 1px solid var(--term-edge);
+}
+.window-bar .dot { width: 11px; height: 11px; border-radius: 50%; background: #2A332B; }
+.window-bar .dot:first-child { background: #3E4A3E; }
+.window-bar .title {
+  margin-left: 10px;
+  color: var(--term-dim);
+  font-family: var(--font-mono); font-size: 12px;
+}
+.band .terminal { min-height: 0; font-size: 13.5px; }
+.band-caption {
+  margin-top: 18px;
+  font-size: 14.5px; color: var(--ink-faint);
+  max-width: 40em;
+}
+
+/* ── 内核事实 ── */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0 64px;
+  border-top: 1px solid rgba(23, 27, 22, 0.14);
+}
+@media (max-width: 720px) { .facts { grid-template-columns: 1fr; } }
+.fact {
+  padding: 30px 0;
+  border-bottom: 1px solid rgba(23, 27, 22, 0.14);
+}
+.fact .fact-term { font-weight: 600; font-size: 17.5px; margin-bottom: 6px; }
+.fact .fact-term .figure {
+  font-family: var(--font-display);
+  font-size: 30px; font-weight: 560; color: var(--pine);
+  margin-right: 10px; line-height: 1;
+}
+.fact p { color: var(--ink-soft); font-size: 16px; max-width: 28em; }
+
+/* ── 获取面板 ── */
+.install-panel {
+  background: #FFFFFF;
+  border: 1px solid rgba(23, 27, 22, 0.16);
+  border-radius: var(--radius-win);
+  padding: 56px 56px 52px;
+  box-shadow: 0 14px 30px -18px rgba(23, 27, 22, 0.25);
+}
+@media (max-width: 640px) { .install-panel { padding: 36px 26px; } }
+.install-panel h2 {
+  font-family: var(--font-display);
+  font-weight: 520; font-size: clamp(26px, 3.2vw, 36px);
+  line-height: 1.2; margin-bottom: 12px;
+  font-variation-settings: "SOFT" 40, "WONK" 1;
+}
+.install-panel .note { color: var(--ink-soft); margin-bottom: 32px; max-width: 36em; }
+.install-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 26px; }
+.install-links { font-size: 15px; color: var(--ink-faint); }
+.install-links a { margin-right: 6px; white-space: nowrap; }
+
+/* ── 页脚 ── */
+footer {
+  padding: 72px 0 56px;
+  color: var(--ink-faint); font-size: 15px;
+}
+.foot-grid {
+  display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+  border-top: 1px solid rgba(23, 27, 22, 0.14);
+  padding-top: 32px;
+}
+.foot-grid .foot-meta { max-width: 30em; line-height: 1.8; }
+.foot-links { display: flex; gap: 22px; align-items: flex-start; }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到正文</a>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="wordmark" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">
+      Android&nbsp;Guru&nbsp;Agent<span class="dot">.</span>
+    </a>
+    <nav class="navlinks" aria-label="主导航">
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">源码</a>
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#docs-index" target="_blank" rel="noopener">文档</a>
+      <a class="nav-cta" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ═══ 英雄区：标题 + 手机终端道具（唯一开场动效）═══ -->
+  <section class="hero wrap" aria-label="产品简介">
+    <div class="hero-grid">
+      <div>
+        <h1>把会动手的智能体，<br>装进口袋。</h1>
+        <p class="lede">
+          Android Guru Agent 是一个 Android 原生应用。它有一台真正的
+          Ubuntu 终端、109 个可执行工具，和一套遇错自愈的长任务引擎：
+          你选模型，它干活，数据不出设备。
+        </p>
+        <p class="standline">无需服务器，无需 PC，模型自己带（OpenAI 兼容接口）。</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK</a>
+          <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">查看源码</a>
+        </div>
+      </div>
+
+      <div class="phone" role="img" aria-label="手机屏幕上的终端会话：智能体整理相册，中途遇到网络限流后自动重试并完成任务">
+        <div class="phone-screen">
+          <div class="phone-status" aria-hidden="true">
+            <span>21:36</span><span class="glyphs">▮▮▯ ⏻</span>
+          </div>
+          <div class="terminal" id="hero-terminal" aria-hidden="true">
+<div class="ln"><span class="prompt">$</span> <span class="cmd">apex run “整理相册：截图按月份归档，重复的删掉”</span></div>
+<div class="ln think">● 思考 1/7  先看截图分布与目录结构</div>
+<div class="ln"><span class="prompt">$</span> <span class="out">ls /sdcard/DCIM/Screenshots</span></div>
+<div class="ln out">238 个文件 · 跨度 2025-11 → 2026-09</div>
+<div class="ln err">✗ 网络限流 429 —— 1.2s 后自动重试（1/3）</div>
+<div class="ln ok">✓ 重试成功，索引完成</div>
+<div class="ln"><span class="prompt">$</span> <span class="out">md5sum · 比对 11 组疑似重复</span></div>
+<div class="ln think">▸ fs.move 238 张 → Screenshots/月份目录</div>
+<div class="ln ok">● 完成：已归档 6 个月份目录，清理 11 组重复，1 张占用中跳过</div>
+<div class="ln"><span class="prompt">$</span> <span class="cursor"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 能力：定义列表 ═══ -->
+  <section class="section wrap" aria-labelledby="cap-title">
+    <h2 class="section-head" id="cap-title">它不是聊天壳，是会动手的智能体。</h2>
+    <p class="section-sub">每一项能力都有真实的执行管线在背后，不是提示词模拟。</p>
+    <dl class="deflist">
+      <div class="defrow">
+        <dt>真正的终端</dt>
+        <dd><p>PRoot 沙箱里跑完整的 Ubuntu 24.04，npx、python、git 在手机上可用。命令走真实进程，输出逐行流回上下文。</p></dd>
+      </div>
+      <div class="defrow">
+        <dt>长任务自愈</dt>
+        <dd><p>限流、超时、网络断连自动退避重试；工具连续失败时，引擎注入换路提示，让模型换工具、换参数、换方法——任务不轻易死掉。</p></dd>
+      </div>
+      <div class="defrow">
+        <dt>认知记忆</dt>
+        <dd><p>cs-mem 把重复操作蒸馏成可回放的肌肉记忆：第二次干同样的事，直接旁路执行，更快。</p></dd>
+      </div>
+      <div class="defrow">
+        <dt>MCP 生态</dt>
+        <dd><p>官方 Hub 与 <a href="https://mcp.so" target="_blank" rel="noopener">mcp.so</a> 社区目录一键安装 MCP 服务器，本地沙箱运行，工具自动注册进引擎。</p></dd>
+      </div>
+      <div class="defrow">
+        <dt>你掌握一切</dt>
+        <dd><p>Root、Shizuku、无障碍三级权限链；每一步执行可见、可中断。API Key 与会话数据只存在你的设备上。</p></dd>
+      </div>
+    </dl>
+  </section>
+
+  <!-- ═══ 通栏终端带：一次真实任务 ═══ -->
+  <section class="band" aria-labelledby="session-title">
+    <div class="wrap">
+      <h2 class="section-head" id="session-title" style="margin-bottom:40px">从装一个 MCP 到干完活，<br>全程在手机本地。</h2>
+      <div class="window">
+        <div class="window-bar" aria-hidden="true">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="title">apex-agent · ubuntu-24.04 · arm64</span>
+        </div>
+        <div class="terminal no-replay">
+<div class="ln"><span class="prompt">$</span> <span class="cmd">market install mcp.so/context7</span></div>
+<div class="ln out">解析详情页 mcpServers 配置 · streamable http</div>
+<div class="ln ok">✓ context7 已安装（安装 ≠ 启动）</div>
+<div class="ln"><span class="prompt">$</span> <span class="cmd">market connect context7</span></div>
+<div class="ln out">initialize → tools/list: resolve-library-id, get-library-docs</div>
+<div class="ln"><span class="prompt">$</span> <span class="cmd">apex run “参考最新文档，把 Gradle 迁到 8.12”</span></div>
+<div class="ln think">● 思考 1/5  检索迁移要点与当前 wrapper 版本</div>
+<div class="ln out">▸ context7.get-library-docs  gradle/migration-8.12</div>
+<div class="ln out">▸ terminal.exec  grep -r "gradle-8.10" gradle/wrapper</div>
+<div class="ln think">▸ 编辑 3 个文件 · gradle sync · assembleDebug</div>
+<div class="ln ok">✓ BUILD SUCCESSFUL in 41s</div>
+<div class="ln think">● 迁移完成：wrapper 与两处插件版本已更新，构建通过。</div>
+        </div>
+      </div>
+      <p class="band-caption">这是一段典型会话的结构化示意：安装、连接、检索、执行、验证，每一步都有事件流回放到界面。</p>
+    </div>
+  </section>
+
+  <!-- ═══ 内核事实 ═══ -->
+  <section class="section wrap" aria-labelledby="core-title">
+    <h2 class="section-head" id="core-title">内核是什么做的。</h2>
+    <p class="section-sub">工程上较真，才敢把“自主执行”放进你的手机。</p>
+    <div class="facts">
+      <div class="fact">
+        <div class="fact-term"><span class="figure">14</span>个 Gradle 模块</div>
+        <p>引擎、LLM 适配、工具注册表、编码工作区、终端运行时各司其职；核心六模块纯 JVM，可直接单测。</p>
+      </div>
+      <div class="fact">
+        <div class="fact-term"><span class="figure">1100+</span>单元测试</div>
+        <p>任务运行时、编排器韧性、上下文压缩、市场解析全部有回归门禁，CI 红了就不合入。</p>
+      </div>
+      <div class="fact">
+        <div class="fact-term"><span class="figure">6</span>种执行模式</div>
+        <p>BUILD、CHAT、AGENT、PLAN、SPEC、REFLECTION 共享同一个 ReAct 主循环，按任务形态切换。</p>
+      </div>
+      <div class="fact">
+        <div class="fact-term"><span class="figure">3</span>架构 ABI</div>
+        <p>arm64、x86_64、v7a 全覆盖，Android 8.0 起步；PRoot rootfs 离线可装。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 获取 ═══ -->
+  <section class="section wrap" aria-labelledby="get-title">
+    <div class="install-panel">
+      <h2 id="get-title">开始使用。</h2>
+      <p class="note">alpha 阶段，能力在快速生长。APK 在独立发布仓库，源码与文档都在 GitHub。</p>
+      <div class="install-actions">
+        <a class="btn btn-primary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK（发布仓库）</a>
+        <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">GitHub 源码</a>
+      </div>
+      <p class="install-links">
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml" target="_blank" rel="noopener">CI 构建产物</a>
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#quickstart" target="_blank" rel="noopener">五分钟上手</a>
+        <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent#faq" target="_blank" rel="noopener">常见问答</a>
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-grid">
+    <p class="foot-meta">
+      Android Guru Agent · active alpha，持续开发中<br>
+      一台手机，无需服务器，模型与数据都归你。
+    </p>
+    <nav class="foot-links" aria-label="页脚链接">
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">仓库</a>
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases" target="_blank" rel="noopener">发布</a>
+      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/issues" target="_blank" rel="noopener">议题</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var term = document.getElementById("hero-terminal");
+  if (!term) return;
+  var lines = term.querySelectorAll(".ln");
+  if (reduced || lines.length === 0) {
+    term.classList.add("no-replay");
+    return;
+  }
+  // 唯一的开场编排：英雄终端逐行回放一次（约 2s），此后静止。
+  var i = 0;
+  function step() {
+    if (i < lines.length) {
+      lines[i].style.display = "block";
+      i++;
+      setTimeout(step, 170);
+    } else {
+      term.classList.add("replay-done");
+    }
+  }
+  setTimeout(step, 450);
+})();
+</script>
+</body>
+</html>

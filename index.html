@@ -40,7 +40,8 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
 <style>
 /* ══════════════════════════════════════════════════════════
    Android Guru Agent —— 口袋里的机房
@@ -52,7 +53,7 @@
   --paper-deep: #E0E6DA;
   --ink: #171B16;
   --ink-soft: #49514A;
-  --ink-faint: #6C756C;
+  --ink-faint: #5A635A;
   --pine: #166B45;
   --pine-deep: #0E4A30;
   --term-bg: #0F1410;
@@ -124,7 +125,17 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   transition: background 0.15s;
 }
 .navlinks .nav-cta:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
-@media (max-width: 760px) { .navlinks a:not(.nav-cta) { display: none; } }
+@media (max-width: 760px) {
+    /* 修复：导航不再消失 —— 紧凑保留 Wiki/发布 + CTA。
+       「源码」链接与 wordmark 点击目标相同（主仓库），窄屏隐藏属语义无损去重。 */
+    .navlinks { gap: 2px; }
+    .navlinks a { min-height: 40px; }
+    .navlinks a:not(.nav-cta):not(.nav-src) { display: inline-flex; align-items: center; }
+    .navlinks .nav-src { display: none; }
+    .navlinks a:not(.nav-cta) { font-size: 13.5px; padding: 9px 10px; border-radius: 8px; }
+    .navlinks .nav-cta { font-size: 13.5px; padding: 9px 13px; }
+    .wordmark { font-size: 15px; }
+  }
 
 /* ── 英雄区 ── */
 .hero { padding: 88px 0 96px; }
@@ -299,7 +310,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   overflow: hidden;
 }
 @media (max-width: 860px) { .mode-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .mode-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+    .mode-grid { grid-template-columns: 1fr; }
+    /* 修复：H1 在窄屏的视觉压迫（40px → 33px，行高同步放宽）。
+       选择器用 .hero h1 —— 与基础规则同优先级（0,1,1）且源码更晚，稳定生效。 */
+    .hero h1 { font-size: 33px; line-height: 1.22; }
+    .lede { font-size: 15.5px; }
+  }
 .mode {
   background: var(--paper);
   padding: 28px 26px 24px;
@@ -354,9 +371,55 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 .compare .no { color: var(--ink-faint); }
 .compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 720px) {
-  .compare { font-size: 14px; }
-  .compare th, .compare td { padding: 11px 12px; }
-}
+    /* 修复：4 列表格在窄屏不可读 → 卡片式堆叠（每维度一张卡） */
+    .compare { font-size: 14px; border: none; }
+    .compare thead { display: none; }
+    .compare tr {
+      display: block;
+      border: 1px solid rgba(23, 27, 22, 0.14);
+      border-radius: 14px;
+      margin: 0 0 12px;
+      padding: 14px 16px 12px;
+      background: rgba(255, 255, 255, 0.38);
+    }
+    .compare tr:last-child { margin-bottom: 0; }
+    .compare th[scope="row"] {
+      display: block;
+      padding: 0 0 10px;
+      border-bottom: 1px dashed rgba(23, 27, 22, 0.16);
+      margin-bottom: 8px;
+      font-size: 15px;
+      text-align: left;
+    }
+    .compare td {
+      display: block;
+      padding: 7px 0 7px 12px;
+      border: none;
+      border-left: 3px solid rgba(23, 27, 22, 0.14);
+      margin: 0 0 6px;
+      border-radius: 0;
+    }
+    .compare td::before {
+      content: attr(data-label) " · ";
+      display: inline;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-faint);
+      letter-spacing: 0.02em;
+    }
+    .compare td.aga {
+      border-left: 3px solid var(--pine);
+      background: rgba(22, 107, 69, 0.07);
+      border-radius: 0 8px 8px 0;
+      padding-top: 9px; padding-bottom: 9px;
+    }
+    .compare td.aga::before {
+      content: "Android Guru Agent · ";
+      color: var(--pine-deep);
+      font-weight: 600;
+    }
+    .compare caption { padding-top: 16px; }
+  }
 
 /* ── MCP 双向 ── */
 .mcp-grid {
@@ -511,7 +574,7 @@ footer {
     </a>
     <nav class="navlinks" aria-label="主导航">
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki" target="_blank" rel="noopener">Wiki</a>
-      <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">源码</a>
+      <a class="nav-src" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">源码</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">发布</a>
       <a class="nav-cta" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK</a>
     </nav>
@@ -664,6 +727,7 @@ footer {
     <h2 class="section-head" id="cmp-title">和其它方案比，它站在哪。</h2>
     <p class="section-sub">PC 端智能体工程深度更强，手机 AI 聊天更轻——它的差异化是「完整闭环装进口袋」。</p>
     <table class="compare">
+      <caption>定性归纳，基于各方案公开形态；PC 端智能体在代码工程深度上依然更强。</caption>
       <thead>
         <tr>
           <th scope="col">维度</th>
@@ -675,48 +739,48 @@ footer {
       <tbody>
         <tr>
           <th scope="row">运行位置</th>
-          <td class="aga"><span class="yes">📱 全程在设备上</span></td>
-          <td>💻 PC / 服务器</td>
-          <td>☁️ 厂商云端</td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">📱 全程在设备上</span></td>
+          <td data-label="PC 端编码智能体">💻 PC / 服务器</td>
+          <td data-label="手机 AI 聊天 App">☁️ 厂商云端</td>
         </tr>
         <tr>
           <th scope="row">需要服务器 / PC</th>
-          <td class="aga"><span class="yes">不需要</span></td>
-          <td>需要</td>
-          <td>需要（厂商云）</td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">不需要</span></td>
+          <td data-label="PC 端编码智能体">需要</td>
+          <td data-label="手机 AI 聊天 App">需要（厂商云）</td>
         </tr>
         <tr>
           <th scope="row">LLM 可换性</th>
-          <td class="aga"><span class="yes">任意 OpenAI 兼容端点 / 局域网 Ollama</span></td>
-          <td>固定模型或自配</td>
-          <td><span class="no">固定</span></td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">任意 OpenAI 兼容端点 / 局域网 Ollama</span></td>
+          <td data-label="PC 端编码智能体">固定模型或自配</td>
+          <td data-label="手机 AI 聊天 App"><span class="no">固定</span></td>
         </tr>
         <tr>
           <th scope="row">执行能力</th>
-          <td class="aga"><span class="yes">109 工具：终端 / 文件 / UI 自动化 / 浏览器 / MCP</span></td>
-          <td>文件 + shell + web</td>
-          <td><span class="no">仅对话</span></td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">109 工具：终端 / 文件 / UI 自动化 / 浏览器 / MCP</span></td>
+          <td data-label="PC 端编码智能体">文件 + shell + web</td>
+          <td data-label="手机 AI 聊天 App"><span class="no">仅对话</span></td>
         </tr>
         <tr>
           <th scope="row">Linux 环境</th>
-          <td class="aga"><span class="yes">PRoot Ubuntu 24.04 沙箱</span></td>
-          <td>宿主 OS</td>
-          <td><span class="no">无</span></td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">PRoot Ubuntu 24.04 沙箱</span></td>
+          <td data-label="PC 端编码智能体">宿主 OS</td>
+          <td data-label="手机 AI 聊天 App"><span class="no">无</span></td>
         </tr>
         <tr>
           <th scope="row">跨会话记忆</th>
-          <td class="aga"><span class="yes">语义图 + FSM 宏 0-token 旁路回放</span></td>
-          <td>仓库内 markdown</td>
-          <td><span class="no">云端会话</span></td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">语义图 + FSM 宏 0-token 旁路回放</span></td>
+          <td data-label="PC 端编码智能体">仓库内 markdown</td>
+          <td data-label="手机 AI 聊天 App"><span class="no">云端会话</span></td>
         </tr>
         <tr>
           <th scope="row">MCP 生态</th>
-          <td class="aga"><span class="yes">双向：客户端接入 + 逆向 Host 供 PC 调用</span></td>
-          <td>客户端接入</td>
-          <td><span class="no">无</span></td>
+          <td data-label="Android Guru Agent" class="aga"><span class="yes">双向：客户端接入 + 逆向 Host 供 PC 调用</span></td>
+          <td data-label="PC 端编码智能体">客户端接入</td>
+          <td data-label="手机 AI 聊天 App"><span class="no">无</span></td>
         </tr>
       </tbody>
-      <caption>定性归纳，基于各方案公开形态；PC 端智能体在代码工程深度上依然更强。</caption>
+      
     </table>
   </section>
 

@@ -16,6 +16,16 @@
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
+**🎬 54 秒宣传片 · 一眼看懂全貌**
+
+<p align="center">
+  <video src="docs/promo/android-guru-agent-promo.mp4" poster="docs/promo/promo-poster.jpg" width="880" controls muted loop preload="metadata">
+    您的浏览器不支持 video 标签 —— 前往 docs/promo/android-guru-agent-promo.mp4 下载观看
+  </video>
+</p>
+
+<p align="center"><sub>纯代码生成 · Material Design 3 暗色 · 1080p30 · 合成电子配乐（120 BPM 帧级卡点 · −14 LUFS 流媒体响度）</sub></p>
+
 **CI · 质量门禁 · 贡献**
 
 <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>

@@ -38,6 +38,17 @@ data class ChatSessionSummary(
     val customTitle: Boolean = false
 )
 
+/**
+ * 归档区载荷（Issue #220）：活跃索引滚动封顶时被移出的会话，一档一文件
+ * 落盘 filesDir/chat_archive/session_{id}.json（原子写）。summary + messages
+ * 全量保留 —— 滚动归档不删数据，恢复经 ChatHistoryManager.restoreArchivedSession。
+ */
+@Serializable
+data class ArchivedChatSession(
+    val summary: ChatSessionSummary,
+    val messages: List<ChatHistoryMessage>
+)
+
 /** 历史消息（扁平展示语义）。 */
 @Serializable
 data class ChatHistoryMessage(

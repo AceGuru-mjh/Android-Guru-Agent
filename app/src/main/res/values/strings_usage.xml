@@ -1,26 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 用量仪表盘字符串（英文默认）—— 页面标题 / 时间范围 / 汇总卡 / 每日图表 /
-     模型分解 / 会话排行 / 导出与清空。中文在 values-zh/strings_usage.xml。 -->
+<!-- Usage dashboard strings (English default) — page title / time range / summary cards / daily chart /
+     model breakdown / session rankings / export and clear. Chinese lives in values-zh/strings_usage.xml. -->
 <resources>
-    <!-- ═══ 页面与头部（UsageDashboardScreen）═══ -->
+    <!-- ═══ Pages and headers (UsageDashboardScreen) ═══ -->
     <string name="usage_title">Usage Dashboard</string>
     <string name="usage_subtitle">Token usage across all sessions</string>
     <string name="usage_refresh">Refresh usage data</string>
     <string name="usage_loading">Loading…</string>
 
-    <!-- ═══ 时间范围（FilterChip 行，作用于每日图表）═══ -->
+    <!-- ═══ Time range (FilterChip row, drives the daily chart) ═══ -->
     <string name="usage_range_label">Time range</string>
     <string name="usage_range_7d">7 days</string>
     <string name="usage_range_30d">30 days</string>
     <string name="usage_range_90d">90 days</string>
     <string name="usage_range_all">All</string>
 
-    <!-- ═══ 全空态（无任何记录）═══ -->
+    <!-- ═══ All-empty state (no records at all) ═══ -->
     <string name="usage_empty_title">No usage yet</string>
     <string name="usage_empty_desc">Usage is recorded after each LLM round with the real token counts returned by the server.</string>
     <string name="usage_empty_local_note">Records never leave this device</string>
 
-    <!-- ═══ 汇总卡（2×2 大数字）═══ -->
+    <!-- ═══ Summary cards (2×2 big numbers) ═══ -->
     <string name="usage_summary_title">Overview</string>
     <string name="usage_summary_note">Covers all locally recorded history</string>
     <string name="usage_stat_all_time">All-time tokens</string>
@@ -31,21 +31,21 @@
     <string name="usage_stat_avg_per_request">avg %1$s / request</string>
     <string name="usage_tokens_count">%1$s tokens</string>
 
-    <!-- ═══ 每日用量图表（Vico 柱状图）═══ -->
+    <!-- ═══ Daily usage chart (Vico bar chart) ═══ -->
     <string name="usage_chart_title">Daily usage</string>
     <string name="usage_chart_hint">Total tokens per day</string>
     <string name="usage_chart_empty">No usage in this range</string>
     <string name="usage_prompt_label">Prompt</string>
     <string name="usage_completion_label">Completion</string>
 
-    <!-- ═══ 模型用量分解 ═══ -->
+    <!-- ═══ Model usage breakdown ═══ -->
     <string name="usage_models_title">By model</string>
     <string name="usage_models_hint">Share of all-time tokens per model</string>
     <string name="usage_models_empty">No model usage recorded yet</string>
     <string name="usage_model_share">%1$.1f%% of total</string>
     <string name="usage_requests_count">%1$d requests</string>
 
-    <!-- ═══ 会话排行 Top5 ═══ -->
+    <!-- ═══ Session ranking Top5 ═══ -->
     <string name="usage_sessions_title">Top sessions</string>
     <string name="usage_sessions_hint">Ranked by total tokens</string>
     <string name="usage_sessions_empty">No session usage recorded yet</string>
@@ -56,7 +56,7 @@
     <string name="usage_rel_hours_ago">%1$d h ago</string>
     <string name="usage_rel_days_ago">%1$d d ago</string>
 
-    <!-- ═══ 数据管理（导出 / 清空）═══ -->
+    <!-- ═══ Data management (export / clear) ═══ -->
     <string name="usage_actions_title">Manage data</string>
     <string name="usage_records_stored">%1$d records stored locally</string>
     <string name="usage_export_csv">Export CSV</string>
@@ -65,7 +65,7 @@
     <string name="usage_clear_desc">Delete all locally stored usage records</string>
     <string name="usage_clear_irreversible">This action cannot be undone</string>
 
-    <!-- ═══ 清空确认对话框 / 分享 ═══ -->
+    <!-- ═══ Clear confirmation dialog / share ═══ -->
     <string name="usage_clear_confirm_title">Clear usage data?</string>
     <string name="usage_clear_confirm_text">All locally stored usage records will be deleted. This action cannot be undone.</string>
     <string name="usage_clear_confirm_ok">Clear</string>

@@ -232,6 +232,12 @@ class CodeStreamSession {
             // 真实用量更新（服务端 token 统计）—— 归 VM/仪表盘通道消费，
             // 胶囊时间轴不展示用量条目（低频元数据，非工作流事件）。
             is AgentEvent.UsageUpdated -> Unit
+
+            // #214 用户输入等待超时：引擎已按「未决」继续 —— 时间轴留痕说明，
+            // 挂起的提问输入框由 VM 侧收到同一事件后关闭。
+            is AgentEvent.UserInputExpired -> {
+                append(StreamEntry.StatusEntry(nextId(), "输入等待超时，已按未决继续"))
+            }
         }
     }
 

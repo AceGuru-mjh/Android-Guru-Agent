@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
 import com.apex.agent.core.llm.LlmClientFactory
 import com.apex.agent.core.llm.LlmConfig
+import com.apex.agent.core.llm.LlmErrorText
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelRoleConfig
 import com.apex.agent.core.llm.ModelsCatalog
@@ -143,7 +144,9 @@ class SettingsViewModel @Inject constructor(
                     languageManager.getString(R.string.settings_error_base_url_empty)
                 )
             }
-            if (config.apiKey.isBlank()) {
+            // #217：本地推理端点（Ollama / LM Studio / vLLM / 内网自建）免鉴权，
+            // 不再因空 API Key 拦截测试连接 —— 与 LlmConfig.isValid 同一口径。
+            if (config.apiKey.isBlank() && !config.isLocalEndpoint) {
                 return@withContext TestResult(
                     false,
                     languageManager.getString(R.string.settings_error_api_key_empty)
@@ -169,8 +172,10 @@ class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 TestResult(
                     false,
+                    // #213：LLM 域错误给中文指引（这里是服务端英文 JSON 原样透传点），
+                    // 其余异常走兜底中文 + 截断摘要（summarize 保留关键信息）。
                     languageManager.getString(R.string.settings_test_failed)
-                        .format(e.message ?: e.javaClass.simpleName)
+                        .format(LlmErrorText.userMessage(e))
                 )
             }
         }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -184,8 +186,12 @@ private fun GrepDetailBody(call: StreamToolCall) {
                 .fillMaxWidth()
                 .heightIn(max = 480.dp)
         ) {
-            items(hits) { line ->
-                GrepHitRow(line)
+            // #245：grep 命中行可能重复（同文本多行）—— key 掺入下标防撞，
+            // 换 query 重算时行状态不再错位复用。
+            itemsIndexed(hits) { index, line ->
+                key("$index-${line.take(64)}") {
+                    GrepHitRow(line)
+                }
             }
         }
     }

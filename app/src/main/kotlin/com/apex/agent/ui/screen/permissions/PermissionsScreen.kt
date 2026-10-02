@@ -49,7 +49,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -58,16 +60,41 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.apex.agent.R
 import com.apex.agent.platform.privilege.PrivilegeDetector
+import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.shizuku.ShizukuCommandExecutor
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * #210：权限页 ViewModel —— 把 PrivilegeManager.refreshStatus() 接进 UI 生命周期。
+ *
+ * 此前 refreshStatus() 全仓零调用：用户在 Shizuku/无障碍授权后，
+ * DefaultPrivilegeManager 的 StateFlow 恒为初始值 false，PrivilegeUiProvider
+ * 判定不可用，ui_tap/ui_swipe 永远回退 input 命令。现在 ON_RESUME 与授权
+ * 动作返回时都会重探并回灌（事件驱动的 binder/服务监听之外的双保险）。
+ */
+@HiltViewModel
+class PermissionsViewModel @Inject constructor(
+    private val privilegeManager: PrivilegeManager
+) : ViewModel() {
+
+    /** 重探 Root/Shizuku/无障碍并回灌 StateFlow（幂等，IO 调度由实现内收敛）。 */
+    fun refresh() {
+        viewModelScope.launch {
+            runCatching { privilegeManager.refreshStatus() }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PermissionsScreen() {
+fun PermissionsScreen(viewModel: PermissionsViewModel = hiltViewModel()) {
     val context = LocalContext.current
     var hasRoot by remember { mutableStateOf(false) }
     var hasShizuku by remember { mutableStateOf(false) }
@@ -109,6 +136,9 @@ fun PermissionsScreen() {
     // 用户跳到系统设置授权后返回本屏，状态仍显示"未获得"直到切屏重进
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         scope.launch { refreshPermissionStates() }
+        // #210：回到前台即重探特权状态并回灌 StateFlow ——
+        // 从 Shizuku/无障碍授权页返回后，执行链选路与遥测不再用旧状态
+        viewModel.refresh()
     }
 
     LaunchedEffect(Unit) {
@@ -162,7 +192,11 @@ fun PermissionsScreen() {
             // Shizuku — 专用卡片，带安装/授权引导
             ShizukuPermissionCard(
                 shizukuAvailable = hasShizuku,
-                onStatusChanged = { hasShizuku = PrivilegeDetector.detectShizuku() }
+                onStatusChanged = {
+                    hasShizuku = PrivilegeDetector.detectShizuku()
+                    // #210：授权动作后立即重探 StateFlow（授权结果事件之外的双保险）
+                    viewModel.refresh()
+                }
             )
 
             // 无障碍

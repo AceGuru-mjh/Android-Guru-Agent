@@ -1,9 +1,13 @@
 package com.apex.agent.ui.screen.agent
 
 import android.content.Context
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,6 +18,8 @@ import javax.inject.Singleton
 // 存储：SharedPreferences「apex_chat_history」——
 //  - key "index"     → List<ChatSessionSummary> JSON（会话索引，按 updatedAt 倒序读出）
 //  - key "msg_{id}"  → 该会话的 List<ChatHistoryMessage> JSON
+// 归档区（Issue #220）：filesDir/chat_archive/session_{id}.json，一档一文件 ——
+//  活跃索引封顶 MAX_SESSIONS 条，被挤出的最旧会话移入此处而非物理删除
 //
 // 所有方法均为同步阻塞 IO，调用方（ViewModel / 控制器扩展）必须切
 // Dispatchers.IO —— 与 SharedPrefsConversationMemory 的进程内缓存策略
@@ -41,6 +47,11 @@ class ChatHistoryManager @Inject constructor(
     }
     private val indexSerializer = ListSerializer(ChatSessionSummary.serializer())
     private val messagesSerializer = ListSerializer(ChatHistoryMessage.serializer())
+    private val archivedSerializer = ArchivedChatSession.serializer()
+
+    // 归档区放文件而非 SharedPreferences：归档体量大且 prefs 全量驻内存，
+    // 会把「封顶控索引体积」的初衷整个抵消（Issue #220 取舍见 saveSession）。
+    private val archiveDir = File(context.filesDir, ARCHIVE_DIR_NAME)
 
     /** 全部写路径的串行锁（方法均为同步阻塞 IO，监视器锁最贴合调用约定）。 */
     private val ioLock = Any()
@@ -78,28 +89,163 @@ class ChatHistoryManager @Inject constructor(
     fun sessionCreatedAt(sessionId: String): Long? =
         loadSessions().firstOrNull { it.id == sessionId }?.createdAt
 
-    /** upsert：索引合并 + 消息全量覆写（写路径串行 + 墓碑拦截）。 */
-    fun saveSession(summary: ChatSessionSummary, messages: List<ChatHistoryMessage>) {
+    /**
+     * upsert：索引合并 + 消息全量覆写（写路径串行 + 墓碑拦截）。
+     *
+     * Issue #220：活跃索引仍封顶 [MAX_SESSIONS] 条（索引反序列化性能考量），
+     * 但被挤出的最旧会话**不再物理删除** —— 旧实现 editor.remove(msg_ 键)，
+     * 第 101 个会话归档时最旧会话连同消息被无声抹掉。现在归档到
+     * filesDir/chat_archive（原子写，见 [archiveSession]），数据保留可恢复。
+     *
+     * @return 本次被移入归档区的会话（空 = 无滚动归档发生）；调用方可据此
+     *   给用户可见提示（不再无声动数据）。
+     */
+    fun saveSession(
+        summary: ChatSessionSummary,
+        messages: List<ChatHistoryMessage>
+    ): List<ChatSessionSummary> {
         synchronized(ioLock) {
             // 已删除会话的迟到归档：直接丢弃（deleteSession 后在途的防抖快照）
-            if (summary.id in tombstones) return
+            if (summary.id in tombstones) return emptyList()
             val existing = loadSessions()
             val sorted = (existing.filter { it.id != summary.id } + summary)
                 .sortedByDescending { it.updatedAt }
-            // 会话数量封顶：最近 100 个 —— 历史无限增长会拖慢索引反序列化
+            // 会话数量封顶：最近 MAX_SESSIONS 个 —— 历史无限增长会拖慢索引反序列化
             val merged = sorted.take(MAX_SESSIONS)
-            // 被裁掉的旧会话：从索引消失的同时删除其 msg_ 键，防孤儿数据
-            // 单向膨胀（旧实现只重写索引，被裁会话的消息键永久残留）。
-            val keptIds = merged.map { it.id }.toSet()
+            val evicted = sorted.drop(MAX_SESSIONS)
             val editor = prefs.edit()
                 .putString(KEY_INDEX, json.encodeToString(indexSerializer, merged))
                 .putString(keyMessages(summary.id), json.encodeToString(messagesSerializer, messages))
-            sorted.filter { it.id !in keptIds }.forEach { editor.remove(keyMessages(it.id)) }
+            val archivedNow = mutableListOf<ChatSessionSummary>()
+            evicted.forEach { old ->
+                // 读消息必须在 editor apply 之前（msg_ 键此刻尚在）
+                val oldMessages = loadMessages(old.id)
+                when {
+                    oldMessages.isEmpty() ->
+                        // 无消息可归档（空会话/数据损坏）：摘键防孤儿，与旧语义一致
+                        editor.remove(keyMessages(old.id))
+                    archiveSession(old, oldMessages) -> {
+                        // 归档成功才摘 msg_ 键（数据已落归档文件，不丢）
+                        editor.remove(keyMessages(old.id))
+                        archivedNow += old
+                    }
+                    else ->
+                        // 归档失败：保留 msg_ 键为孤儿 —— 宁可孤儿也不静默丢数据
+                        // （archiveSession 已 error 留痕；clearAll 全键清扫兜底）。
+                        Unit
+                }
+            }
             editor.apply()
+            return archivedNow
         }
     }
 
-    /** 删除单个会话（索引 + 消息；登记墓碑拦截在途归档）。 */
+    // ═══ Issue #220：归档区（滚动归档不删数据）═══
+
+    /** 归档单会话落盘（原子写；失败返回 false，绝不影响主索引写入）。 */
+    private fun archiveSession(summary: ChatSessionSummary, messages: List<ChatHistoryMessage>): Boolean {
+        return runCatching {
+            if (!archiveDir.exists() && !archiveDir.mkdirs()) {
+                error("archive dir create failed: ${archiveDir.path}")
+            }
+            val payload = json.encodeToString(
+                archivedSerializer,
+                ArchivedChatSession(summary = summary, messages = messages)
+            )
+            atomicWrite(File(archiveDir, archiveFileName(summary.id)), payload)
+        }.onSuccess {
+            AppLogger.instance.info(
+                LogCategory.UI, TAG,
+                "会话归档：${summary.id}（${messages.size} 条消息）移入归档区，数据保留未删除"
+            )
+        }.onFailure { e ->
+            AppLogger.instance.error(
+                LogCategory.UI, TAG,
+                "会话归档失败（保留原 msg_ 键防数据丢失）：${summary.id}: ${e.message}", e
+            )
+        }.isSuccess
+    }
+
+    /** 归档区会话数（历史抽屉 / 存储页可观测）。 */
+    fun archivedSessionCount(): Int = archiveJsonFiles().size
+
+    /**
+     * 归档区会话摘要（按最近更新倒序）。防御式 IO：单文件损坏跳过 + warn 留痕，
+     * 绝不让整表读取失败。
+     */
+    fun loadArchivedSessions(): List<ChatSessionSummary> {
+        return archiveJsonFiles().mapNotNull { file ->
+            runCatching { json.decodeFromString(archivedSerializer, file.readText()).summary }
+                .onFailure { e ->
+                    AppLogger.instance.warn(
+                        LogCategory.UI, TAG, "归档文件损坏，跳过：${file.name}: ${e.message}"
+                    )
+                }
+                .getOrNull()
+        }.sortedByDescending { it.updatedAt }
+    }
+
+    /** 读取归档会话的消息（空 = 无此归档或数据损坏）。 */
+    fun loadArchivedMessages(sessionId: String): List<ChatHistoryMessage> {
+        val file = File(archiveDir, archiveFileName(sessionId))
+        if (!file.exists()) return emptyList()
+        return runCatching { json.decodeFromString(archivedSerializer, file.readText()).messages }
+            .onFailure { e ->
+                AppLogger.instance.warn(
+                    LogCategory.UI, TAG, "归档消息损坏：$sessionId: ${e.message}"
+                )
+            }
+            .getOrDefault(emptyList())
+    }
+
+    /**
+     * 恢复归档会话：从归档区搬回活跃索引（走 [saveSession] 正常通道，满员时
+     * 会再次触发滚动归档），成功后删除归档文件。false = 归档不存在或为空。
+     * （存储页「归档会话」区块后续接入。）
+     */
+    fun restoreArchivedSession(sessionId: String): Boolean {
+        synchronized(ioLock) {
+            val messages = loadArchivedMessages(sessionId)
+            if (messages.isEmpty()) return false
+            val summary = loadArchivedSessions().firstOrNull { it.id == sessionId } ?: return false
+            saveSession(summary, messages)
+            runCatching { File(archiveDir, archiveFileName(sessionId)).delete() }
+            return true
+        }
+    }
+
+    /** 归档目录内全部载荷文件（目录不存在/IO 异常折叠为空表）。 */
+    private fun archiveJsonFiles(): List<File> =
+        runCatching {
+            archiveDir.listFiles { f -> f.isFile && f.name.endsWith(".json") }
+                ?.toList()
+                .orEmpty()
+        }.getOrDefault(emptyList())
+
+    /** 会话 id → 归档文件名（id 本应为 UUID；防御式清洗非法路径字符）。 */
+    private fun archiveFileName(sessionId: String): String =
+        "session_" + sessionId.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json"
+
+    /** 原子写（仓库纪律：tmp + renameTo，rename 失败直写目标兜底；失败抛异常）。 */
+    private fun atomicWrite(target: File, content: String) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        try {
+            FileOutputStream(tmp).use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+                out.flush()
+                out.fd.sync()
+            }
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            runCatching { tmp.delete() }
+            throw e
+        }
+    }
+
+    /** 删除单个会话（索引 + 消息；登记墓碑拦截在途归档；归档副本一并清理）。 */
     fun deleteSession(sessionId: String) {
         synchronized(ioLock) {
             rememberTombstone(sessionId)
@@ -107,6 +253,7 @@ class ChatHistoryManager @Inject constructor(
                 .putString(KEY_INDEX, json.encodeToString(indexSerializer, loadSessions().filter { it.id != sessionId }))
                 .remove(keyMessages(sessionId))
                 .apply()
+            runCatching { File(archiveDir, archiveFileName(sessionId)).delete() }
         }
     }
 
@@ -211,15 +358,24 @@ class ChatHistoryManager @Inject constructor(
             // 直接按 msg_ 前缀全键清扫，一次性兜底。
             prefs.all.keys.filter { it.startsWith(KEY_MSG_PREFIX) }.forEach { editor.remove(it) }
             editor.apply()
+            // 归档区一并清空（显式「清空全部历史会话」语义覆盖归档安全网）
+            runCatching {
+                archiveDir.listFiles()?.forEach { it.delete() }
+                archiveDir.delete()
+            }.onFailure { e ->
+                AppLogger.instance.warn(LogCategory.UI, TAG, "归档区清空失败: ${e.message}")
+            }
         }
     }
 
     private fun keyMessages(sessionId: String) = "$KEY_MSG_PREFIX$sessionId"
 
     private companion object {
+        const val TAG = "ChatHistoryManager"
         const val PREFS_NAME = "apex_chat_history"
         const val KEY_INDEX = "index"
         const val KEY_MSG_PREFIX = "msg_"
+        const val ARCHIVE_DIR_NAME = "chat_archive"
         const val MAX_SESSIONS = 100
         const val MAX_TOMBSTONES = 256
         /** 重命名标题上限（与 historyTitle 的 40 字截断对齐，给自定义命名留余量）。 */

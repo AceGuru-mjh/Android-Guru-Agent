@@ -542,6 +542,9 @@ jobs:
 
       - name: Comment APK size on PR
         if: github.event_name == 'pull_request' && env.APK_SIZE_MB != ''
+        # fork PR 的 GITHUB_TOKEN 天然只读（issues=write 被 403）——
+        # 本步骤仅是装饰性评论，失败不应挡住构建结果。
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |

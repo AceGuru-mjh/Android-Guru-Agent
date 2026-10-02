@@ -21,13 +21,26 @@ import com.apex.agent.core.llm.runtime.ModelRuntime
 class HybridCompressor(
     private val llmClient: LlmClient,
     private val toolTruncator: ToolOutputTruncator = ToolOutputTruncator(),
-    private val maxContextTokens: Int = 128000,
+    maxContextTokens: Int = 128000,
     private val threshold: Float = 0.8f,
     modelRuntime: ModelRuntime? = null
 ) : ContextCompressor {
 
     private val slidingWindow = SlidingWindowCompressor()
     private val llmSummarizer = LlmSummaryCompressor(llmClient, modelRuntime)
+
+    /**
+     * Issue #222：分层收敛的停止阈值，必须与引擎压缩门同源（可热更新）。
+     * 构造参数 → 可变字段：模型切换时经 [updateContextWindow] 同步，
+     * @Volatile 保证 IO 线程压缩路径对新值可见；≤0 非法值拒收
+     * （防外部形状异常把阈值打穿）。
+     */
+    @Volatile
+    private var contextWindowTokens: Int = maxContextTokens
+
+    override fun updateContextWindow(tokens: Int) {
+        if (tokens > 0) contextWindowTokens = tokens
+    }
 
     override fun needsCompression(
         history: List<LlmMessage>,
@@ -43,7 +56,7 @@ class HybridCompressor(
         preserveRecent: Int
     ): CompressionReport {
         val beforeTokens = TokenEstimator.estimateHistory(history)
-        val thresholdTokens = (maxContextTokens * threshold).toInt()
+        val thresholdTokens = (contextWindowTokens * threshold).toInt()
         var totalTruncated = 0
         var totalRemoved = 0
 

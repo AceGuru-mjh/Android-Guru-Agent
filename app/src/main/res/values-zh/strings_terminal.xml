@@ -108,6 +108,9 @@
     <string name="term_open_link">打开链接</string>
     <string name="term_copy_link">复制链接</string>
 
+    <string name="term_copy_done">已复制 %1$d 个字符</string>
+    <string name="term_clipboard_empty">剪贴板为空，无内容可粘贴</string>
+
     <!-- ═══ ViewModel notices (LanguageManager.getString) ═══ -->
     <string name="term_notice_ubuntu_unavailable">Ubuntu 环境不可用：%1$s</string>
     <string name="term_notice_create_failed">会话创建失败：%1$s</string>

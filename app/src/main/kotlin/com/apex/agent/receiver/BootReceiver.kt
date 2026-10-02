@@ -51,17 +51,9 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 
-    /** 快读 agent_settings_v2 JSON 的 keepAlive 布尔（缺省/损坏 → true）。 */
-    private fun keepAliveEnabled(context: Context): Boolean {
-        val raw = runCatching {
-            context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
-                .getString("agent_settings_v2", null)
-        }.getOrNull() ?: return true
-        // "keepAlive":false 才是关；true / 缺字段 / 格式异常都视为开
-        return !KEEP_ALIVE_OFF_REGEX.containsMatchIn(raw ?: "")
-    }
-
-    private companion object {
-        val KEEP_ALIVE_OFF_REGEX = Regex("\"keepAlive\"\\s*:\\s*false")
-    }
+    /** 快读 agent_settings_v2 JSON 的 keepAlive 布尔（缺省/损坏 → true）。
+     * 实现已收口到 [CoreServiceGate.keepAliveEnabled]（MainActivity.onDestroy /
+     * 无障碍心跳同源，单一实现点）。 */
+    private fun keepAliveEnabled(context: Context): Boolean =
+        com.apex.agent.service.CoreServiceGate.keepAliveEnabled(context)
 }

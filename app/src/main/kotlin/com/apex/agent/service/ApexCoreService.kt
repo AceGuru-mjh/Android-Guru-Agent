@@ -15,7 +15,9 @@ import com.apex.agent.R
 import com.apex.agent.browser.BrowserEngine
 import com.apex.agent.browser.BrowserOverlay
 import com.apex.agent.browser.CyberNeonBallManager
+import com.apex.agent.notify.ForegroundTracker
 import com.apex.agent.plugin.host.PluginManager
+import com.apex.agent.platform.terminal.runtime.TerminalRuntime
 import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -56,6 +58,15 @@ class ApexCoreService : LifecycleService() {
     // i18n：前台通知文案按当前语言取词（LanguageManager 维护 resolvedContext）
     @Inject
     lateinit var lang: LanguageManager
+
+    /** P0-1（#223）：终端运行时宿主接线 —— 服务销毁且 app 不在前台时优雅
+     * 收尾（详见 onDestroy 注释）。 */
+    @Inject
+    lateinit var terminalRuntime: TerminalRuntime
+
+    /** 前台判定（Activity STARTED 计数）—— 收尾分工用，见 onDestroy。 */
+    @Inject
+    lateinit var foregroundTracker: ForegroundTracker
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -112,6 +123,37 @@ class ApexCoreService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        // ═══ P0-1（#223）：TerminalRuntime 生命周期接线 ═══
+        // TerminalRuntime.shutdown() 此前在生产代码零调用（fd/Job/pump 全靠
+        // 进程死亡后的内核回收；会话元数据仅 2s autosave 兜底）。服务销毁时
+        // 优雅收尾：cancel 全部 job → close 全部 session（HUP→TERM→KILL）→
+        // nativeCloseAll 兜底 → 停 pump/协程域。
+        //
+        // 收尾分工（防双宿主打架）：
+        //  - app **在后台**（用户划走/系统停服务/Keep Alive 心跳场景）：服务
+        //    销毁 = 运行时收尾（后台无 UI 消费者，安全）；
+        //  - app **在前台**（用户在设置里关 Keep Alive / toggle 场景）：跳过
+        //    —— MainActivity.onDestroy(isFinishing) 拥有前台收尾权，避免误杀
+        //    用户正在敲字的活跃会话。
+        // 幂等（runtime 内部 shutdownGate）+ 10s 有界等待；独立作用域执行
+        // （本 service 的 scope 即将 cancel）。
+        if (!foregroundTracker.isForeground) {
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                runCatching {
+                    withTimeout(10_000L) { terminalRuntime.shutdown() }
+                }.onSuccess { result ->
+                    result.getOrNull()?.let {
+                        android.util.Log.i(
+                            "ApexCoreService",
+                            "terminal runtime shutdown: sessionsClosed=${it.sessionsClosed}, " +
+                                "jobsCancelled=${it.jobsCancelled}, clean=${it.clean}"
+                        )
+                    }
+                }.onFailure {
+                    android.util.Log.w("ApexCoreService", "terminal runtime shutdown failed: ${it.message}")
+                }
+            }
+        }
         scope.cancel()
         super.onDestroy()
     }

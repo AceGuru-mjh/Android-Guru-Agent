@@ -123,14 +123,93 @@ data class LlmConfig(
     /** 该 Profile 挂载的 Provider id。运行时按此判定是否发送 top_k/min_p/ repetition_penalty 等 provider 专有字段。 */
     val providerId: String = "",
 ) {
+    /**
+     * 是否为本地推理端点（#217）。
+     *
+     * 判定按 (providerId, baseUrl) 双信号：
+     *  - providerId 命中内置本地推理 Provider（Ollama / LM Studio / vLLM）；
+     *  - 或 baseUrl 的 host 指向本机 / 内网（localhost / 127.x / RFC1918 私网段 /
+     *    .local mDNS），含 Android 模拟器宿主别名 10.0.2.2 / 10.0.3.2。
+     *
+     * 本地推理服务（Ollama / llama.cpp / LM Studio / vLLM 自建）不校验鉴权，
+     * 该标记用于豁免 [isValid] 的 apiKey 强制检查。
+     */
+    val isLocalEndpoint: Boolean
+        get() = isLocalEndpoint(baseUrl, providerId)
+
+    /**
+     * 配置是否可发起真实请求（DynamicLlmClient 以此决定真 client vs NoOp 降级）。
+     *
+     * #217 根因修复：旧实现无条件要求 apiKey 非空——Ollama / LM Studio 等
+     * 免鉴权本地端点（内置 Provider 的 apiKeys 为空）被判「未配置」，用户被迫
+     * 伪造占位 Key 才能出话。现在本地推理端点（[isLocalEndpoint]）豁免 apiKey
+     * 检查，只要求 baseUrl + model 就绪；云端 provider 维持原校验不变。
+     *
+     * scheme 仍强制 http/https：本地端点同样不允许 file:// / 无 scheme 字符串
+     * 混过校验（否则延迟到 OkHttp 构造 Request 才抛原始异常，难以定位）。
+     */
     val isValid: Boolean
-        get() = baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank() &&
-            // 强制 http/https scheme：旧实现仅检查非空，导致 file://、ftp://、
-            // 或无 scheme 的字符串通过校验，延迟到 OkHttp 构造 Request 时才以
-            // 原始 IllegalArgumentException 抛出，用户难以定位。
-            (baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))
-    
+        get() = baseUrl.isNotBlank() && model.isNotBlank() &&
+            (baseUrl.startsWith("http://") || baseUrl.startsWith("https://")) &&
+            (apiKey.isNotBlank() || isLocalEndpoint)
+
     companion object {
+        /**
+         * 内置本地推理 Provider id 集合（与 [ModelProfileDefaults.builtInProviders]
+         * 中 ollama / lmstudio / vllm 三项对应）。这些 Provider 的服务运行在
+         * 用户自己的设备或局域网内，不校验 API Key。
+         *
+         * 注：custom_openai 不入列——自定义端点可能是远程鉴权网关，是否本地
+         * 仅由 baseUrl host 判定。
+         */
+        val LOCAL_PROVIDER_IDS: Set<String> = setOf("ollama", "lmstudio", "vllm")
+
+        /**
+         * 判定 (providerId, baseUrl) 是否指向本地推理端点（详见 [isLocalEndpoint] 实例属性）。
+         * 静态入口供 ProviderConfigValidator 等无实例场景复用，保证全仓同一口径。
+         */
+        fun isLocalEndpoint(baseUrl: String, providerId: String): Boolean {
+            if (providerId.isNotBlank() && providerId.lowercase() in LOCAL_PROVIDER_IDS) return true
+            return isLocalHostUrl(baseUrl)
+        }
+
+        /** 解析 baseUrl 的 host 并判定是否本机 / 内网地址。 */
+        private fun isLocalHostUrl(baseUrl: String): Boolean {
+            val trimmed = baseUrl.trim().lowercase()
+            if (trimmed.isEmpty()) return false
+            val schemeIdx = trimmed.indexOf("://")
+            val afterScheme = if (schemeIdx >= 0) trimmed.substring(schemeIdx + 3) else trimmed
+            val hostPort = afterScheme.substringBefore('/')
+            if (hostPort.isEmpty()) return false
+            // IPv6 字面量（如 [::1]:11434）取方括号内地址；普通 host:port 截掉端口。
+            val host = if (hostPort.startsWith("[")) {
+                hostPort.substringAfter('[').substringBefore(']')
+            } else {
+                hostPort.substringBefore(':')
+            }
+            return isLocalHost(host)
+        }
+
+        /** host 归属判定：本机回环 / RFC1918 私网段 / mDNS 本地域。 */
+        private fun isLocalHost(host: String): Boolean = when {
+            host.isEmpty() -> false
+            // 本机回环（localhost / 127.0.0.0/8 / IPv6 ::1）与通配地址
+            host == "localhost" || host.endsWith(".localhost") -> true
+            host == "::1" || host == "0.0.0.0" -> true
+            host.startsWith("127.") -> true
+            // RFC1918 私网段：10.0.0.0/8（含 Android 模拟器宿主别名 10.0.2.2 /
+            // 10.0.3.2）、172.16.0.0/12、192.168.0.0/16 —— 局域网自建推理服务。
+            host.startsWith("10.") -> true
+            host.startsWith("192.168.") -> true
+            host.startsWith("172.") -> {
+                val second = host.removePrefix("172.").substringBefore('.').toIntOrNull()
+                second != null && second in 16..31
+            }
+            // mDNS 本地域名（如 ollama.local）
+            host.endsWith(".local") -> true
+            else -> false
+        }
+
         /** 预设：OpenAI */
         fun openai(apiKey: String, model: String = "gpt-4o") = LlmConfig(
             baseUrl = "https://api.openai.com/v1",

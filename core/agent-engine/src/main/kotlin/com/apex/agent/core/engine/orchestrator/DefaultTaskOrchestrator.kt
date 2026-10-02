@@ -17,6 +17,7 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.llm.LlmClient
+import com.apex.agent.core.llm.LlmErrorText
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.LlmStreamChunk
 import com.apex.agent.core.llm.ToolCall
@@ -774,7 +775,8 @@ class DefaultTaskOrchestrator(
                 return@channelFlow
             } else {
                 // Empty response — emit recoverable error and continue
-                send(AgentEvent.Error("Empty response from LLM", recoverable = true))
+                // #213：用户可见文案走 LlmErrorText 中文映射（原为英文裸文案）
+                send(AgentEvent.Error(LlmErrorText.RESPONSE_INVALID, recoverable = true))
             }
         }
 

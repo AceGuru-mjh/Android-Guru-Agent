@@ -86,7 +86,7 @@
     <string name="mode_guide_thinking_follow">follows pick</string>
     <string name="mode_guide_thinking_self_check">post-tool + final</string>
     <string name="mode_guide_thinking_post_tool">post-tool</string>
-    <!-- ═══ #197 Agent 屏双模式指南（Chat/Agent）═══ -->
+    <!-- ═══ #197 Agent screen dual-mode guide (Chat/Agent) ═══ -->
     <string name="mode_guide_chat_cases">Casual conversation, emotional companionship, knowledge Q&amp;A, creative writing</string>
     <string name="mode_guide_chat_flow">Single-turn streaming reply; persona + chat skills injected; no tools, no ceremony</string>
     <string name="mode_guide_chat_tools">None — pure conversation; the toolkit ring lives in the Coding screen</string>

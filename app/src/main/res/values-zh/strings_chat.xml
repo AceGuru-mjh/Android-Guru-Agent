@@ -226,6 +226,7 @@
     <string name="chat_history_title">历史对话（%1$d）</string>
     <string name="chat_clear_all">清空全部</string>
     <string name="chat_history_hint">会话自动归档；点击恢复到当前聊天，上下文接续可用</string>
+    <string name="chat_history_archived_notice">已达历史会话上限 —— 最早会话「%1$s」已移入归档区（数据保留，未删除）</string>
     <string name="chat_history_empty">还没有历史会话\n发出第一条消息后自动归档</string>
     <string name="chat_delete_session_title">删除会话</string>
     <string name="chat_delete_session_text">删除「%1$s」？\n\n该会话的消息记录将被清除，不可恢复。</string>
@@ -279,6 +280,11 @@
     <string name="chat_tool_step_done">完成（%1$dms）：%2$s</string>
     <string name="chat_tool_step_failed">失败（%1$dms）：%2$s</string>
     <string name="chat_aborted">⏹ 已中止</string>
+
+    <!-- ═══ #214/#215 用户输入超时诚实提示（引擎按「超时未决」继续）═══ -->
+    <string name="chat_user_input_expired">⏱ 等待 5 分钟未获回答，提问已关闭，Agent 继续执行。需要时可重新提问。</string>
+    <string name="chat_user_input_late">⚠️ 该提问已等待超时，你的回答未能送达引擎。如仍想补充，请直接发送新消息。</string>
+    <string name="chat_question_expired">⏱ 确认等待超时（5 分钟），已按未决处理：本次未执行，下次调用将再次询问。</string>
 
     <!-- ═══ SlashMenuProvider（斜杠菜单分组）═══ -->
     <string name="chat_slash_no_skills">暂无已启用 Skill</string>

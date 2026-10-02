@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.plan.PLAN_CONFIRMATION_TIMEOUT_MS
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.ToolCall
 import kotlinx.serialization.json.JsonPrimitive
@@ -13,6 +14,11 @@ import kotlinx.serialization.json.jsonObject
  * 语义：模型调用 `ask_user` 时，引擎暂停循环 → 发 [AgentEvent.UserInputRequired]
  * → 挂起等待 UI 回传（[ApexAgentEngine.awaitUserInput]）→ 以 ToolResult
  * 形式回填"User answered: …" → 发 ToolCallComplete（success=true）→ 循环继续。
+ *
+ * #214 超时语义：等待超时 → awaitUserInput 返回 null（并已发射
+ * [AgentEvent.UserInputExpired] 让 UI 关闭挂起的输入框）→ 以
+ * 「用户输入超时」显式收场（ToolCallComplete success=false + ToolResult
+ * 说明），绝不拿空答案继续跑 —— 模型不会把用户的沉默误读为默许。
  */
 internal suspend fun ApexAgentEngine.handleAskUserToolCall(
     toolCall: ToolCall,
@@ -36,7 +42,25 @@ internal suspend fun ApexAgentEngine.handleAskUserToolCall(
         else -> InputType.TEXT
     }
     emit(AgentEvent.UserInputRequired(question, eventType))
-    val answer = awaitUserInput()
+    val answer = awaitUserInput { emit(AgentEvent.UserInputExpired) }
+    if (answer == null) {
+        // #214 超时未决：显式失败收场（UserInputExpired 已由 onExpired 发射）。
+        val timeoutNote = "User input timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s; " +
+            "the question was closed unanswered. Do not treat silence as consent — " +
+            "proceed with the safest default or re-ask the user later."
+        addMessage(LlmMessage.ToolResult(toolCall.id, timeoutNote))
+        emit(
+            AgentEvent.ToolCallComplete(
+                callId = toolCall.id,
+                toolName = toolCall.name,
+                arguments = toolCall.arguments,
+                output = timeoutNote,
+                success = false,
+                durationMs = 0
+            )
+        )
+        return true
+    }
     addMessage(LlmMessage.ToolResult(toolCall.id, "User answered: $answer"))
     emit(
         AgentEvent.ToolCallComplete(

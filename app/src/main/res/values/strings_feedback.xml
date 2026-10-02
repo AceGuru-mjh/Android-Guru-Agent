@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 统一反馈层 + 网络状态字符串（英文默认）—— FeedbackController/FeedbackHost
-     （Snackbar 收敛层）+ OfflineBanner（离线横幅）+ NetworkMonitor（网络类型名）。
-     中文在 values-zh/strings_feedback.xml；格式与转义规范（撇号 \'）对齐
-     strings_core.xml。注意：net_status_* / feedback_hint_* / feedback_action_retry /
-     feedback_dismiss 为迁移接线预留（主控替换 17 处裸 Toast 与网络事件提示时消费），
-     先于消费方入库，勿删。 -->
+<!-- Unified feedback layer + network state strings (English default) — FeedbackController/FeedbackHost
+     (Snackbar convergence layer) + OfflineBanner (offline banner) + NetworkMonitor (network type names).
+     Chinese lives in values-zh/strings_feedback.xml; escaping conventions (apostrophe \') aligned with
+     strings_core.xml. Note: net_status_* / feedback_hint_* / feedback_action_retry /
+     feedback_dismiss are reserved for migration wiring (consumed when the host replaces the 17 bare Toasts
+     and network event toasts); landed ahead of consumers, do not delete. -->
 <resources>
-    <!-- ═══ 网络类型名（NetworkMonitor.currentSummaryRes）═══ -->
+    <!-- ═══ Network type names (NetworkMonitor.currentSummaryRes) ═══ -->
     <string name="net_kind_wifi">Wi-Fi</string>
     <string name="net_kind_cellular">Mobile data</string>
     <string name="net_kind_ethernet">Ethernet</string>
@@ -14,21 +14,21 @@
     <string name="net_kind_other">Other network</string>
     <string name="net_kind_offline">Offline</string>
 
-    <!-- ═══ 离线横幅（OfflineBanner）═══ -->
+    <!-- ═══ Offline banner (OfflineBanner) ═══ -->
     <string name="net_banner_offline">No network connection. Some features won\'t be available.</string>
     <string name="net_banner_icon_desc">Network offline</string>
 
-    <!-- ═══ 网络事件提示（主控接线：NetworkMonitor.isOnline 边沿 → FeedbackController）═══ -->
+    <!-- ═══ Network event toasts (host wiring: NetworkMonitor.isOnline edge → FeedbackController) ═══ -->
     <string name="net_status_lost">Network connection lost</string>
     <string name="net_status_reconnected">Back online (%1$s)</string>
 
-    <!-- ═══ 反馈级别名（FeedbackSeverity.labelRes）═══ -->
+    <!-- ═══ Feedback severity names (FeedbackSeverity.labelRes) ═══ -->
     <string name="feedback_severity_info">Info</string>
     <string name="feedback_severity_success">Success</string>
     <string name="feedback_severity_warning">Warning</string>
     <string name="feedback_severity_error">Error</string>
 
-    <!-- ═══ 反馈层通用文案（Toast 迁移 / 离线请求失败提示预留）═══ -->
+    <!-- ═══ Feedback layer generic copy (Toast migration / offline request failure toast reserved) ═══ -->
     <string name="feedback_hint_offline">You\'re offline. Check your connection and try again.</string>
     <string name="feedback_hint_request_failed">Request failed. Please try again.</string>
     <string name="feedback_action_retry">Retry</string>

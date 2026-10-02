@@ -3,6 +3,7 @@ package com.apex.agent.platform.terminal.ubuntu.lifecycle
 import com.apex.agent.platform.terminal.ubuntu.ProvisioningResult
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
+import com.apex.agent.platform.terminal.ubuntu.userMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -330,7 +331,7 @@ class UbuntuLifecycleCoordinator(
             is ProvisioningResult.Failed -> {
                 return markFailed(
                     Stage.INSTALL,
-                    "${installResult.error.code}: ${installResult.error.message}",
+                    "${installResult.error.code}: ${installResult.error.message} | ${installResult.error.userMessage}",
                     installResult.error.recoverable
                 )
             }

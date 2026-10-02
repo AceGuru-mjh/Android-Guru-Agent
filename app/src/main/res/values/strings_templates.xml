@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ═══ #197 模板工坊（Template Studio）═══ -->
+    <!-- ═══ #197 Template Studio ═══ -->
     <string name="templates_tab_agent">Agent Templates</string>
     <string name="templates_tab_coding">Coding Templates</string>
     <string name="templates_agent_list_title">Agent prompt templates</string>

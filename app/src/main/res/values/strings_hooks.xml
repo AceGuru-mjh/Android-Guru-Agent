@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Hooks 钩子系统字符串（英文默认）。中文在 values-zh/strings_hooks.xml。 -->
+<!-- Hooks system strings (English default). Chinese lives in values-zh/strings_hooks.xml. -->
 <resources>
-    <!-- 钩子分区（设置 → Agent 页） -->
+    <!-- Hooks section (Settings → Agent page) -->
     <string name="code_hooks_section_title">Hooks</string>
     <string name="code_hooks_section_subtitle">Tool &amp; session lifecycle hooks</string>
     <string name="code_hooks_builtin_badge">Built-in</string>
     <string name="code_hooks_enabled_label">Enable hook</string>
     <string name="code_hooks_no_hooks">No hooks configured</string>
 
-    <!-- 事件徽标 -->
+    <!-- Event badges -->
     <string name="code_hooks_event_pre_tool_use">Before tool</string>
     <string name="code_hooks_event_post_tool_use">After tool</string>
     <string name="code_hooks_event_user_prompt_submit">Prompt submit</string>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文文案（对应默认英文 values/strings.xml；#208 语言基建补齐）。
+     英文在 values/strings.xml；语言切换经 LanguageManager +
+     MainActivity attachBaseContext/recreate 生效。 -->
+<resources>
+    <string name="accessibility_description">Apex AI Agent需要无障碍权限来读取屏幕内容和执行UI操作。这是Agent"看见"和"操作"设备的核心能力。</string>
+</resources>

@@ -790,6 +790,8 @@ private fun AdvancedSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
 
 @Composable
 private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit) {
+    // #236：Keep Alive 开关的运行时接线需要 Context（start/stopService）。
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     SectionCard(stringResource(R.string.settings_section_agent), Icons.Outlined.Psychology, initiallyExpanded = true) {
         DropdownRow("Execution Mode",
             listOf(
@@ -823,7 +825,8 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
             description = stringResource(R.string.settings_max_iterations_desc), min = 1, max = 200) {
             onUpdate(agent.copy(maxIterations = it))
         }
-        SwitchRow("Keep Alive", agent.keepAlive) { onUpdate(agent.copy(keepAlive = it)) }
+        // #236：Keep Alive 真接线 —— 关 = 立即停服务（此前是假开关；收口 CoreServiceGate）。
+        SwitchRow("Keep Alive", agent.keepAlive) { on -> com.apex.agent.service.CoreServiceGate.apply(ctx, on); onUpdate(agent.copy(keepAlive = on)) }
         // v1.4.4 #4：任务完成通知（✅已接线——EventApplier Complete 钩子；前台静音）
         SwitchRow(stringResource(R.string.settings_task_notify_title), agent.taskCompletionNotify,
             description = stringResource(R.string.settings_task_notify_desc)) {

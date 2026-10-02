@@ -164,6 +164,14 @@ sealed interface AgentEvent {
         val prompt: String,
         val type: InputType = InputType.CONFIRMATION
     ) : AgentEvent
+
+    /**
+     * #214 用户输入等待超时：ask_user / HUMAN_ASSIST 决策点在超时窗口内
+     * 未获回答，引擎已按「超时未决」继续执行。UI 收到后关闭挂起的输入
+     * 对话框并给出提示行；迟到的提交由 VM 侧 [ApexAgentEngine.submitUserInputIfAwaiting]
+     * 回执驱动显式失败提示，不再静默丢弃。
+     */
+    data object UserInputExpired : AgentEvent
     
     /** 错误 */
     data class Error(

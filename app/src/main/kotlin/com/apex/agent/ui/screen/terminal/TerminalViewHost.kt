@@ -437,12 +437,31 @@ private class TerminalViewHostClient(
 
     override fun onTerminalClipboardCopy(text: String) {
         clipboardManager?.setPrimaryClip(ClipData.newPlainText("terminal", text))
+        // #234：复制成功反馈（此前完全静默——用户无从确认是否已复制到剪贴板）。
+        runCatching {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.term_copy_done, text.length),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     override fun onTerminalPasteRequest() {
         val text = clipboardManager?.primaryClip?.getItemAt(0)
             ?.coerceToText(context)?.toString()
-        if (!text.isNullOrEmpty()) viewModel.pasteText(text)
+        if (!text.isNullOrEmpty()) {
+            viewModel.pasteText(text)
+        } else {
+            // #234：空剪贴板粘贴——旧实现无任何动作（用户以为 app 没响应）。
+            runCatching {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.term_clipboard_empty),
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     override fun onTerminalLinkOpen(uri: String) {

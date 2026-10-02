@@ -254,11 +254,17 @@ class ApexAgentEngine(
     /**
      * Channel for the UI to deliver user-input answers back to the engine
      * while [executeBuildLoop] is suspended on [awaitUserInput].
+     *
+     * #214：@Volatile —— [submitUserInputIfAwaiting] 在 VM 主线程读、
+     * 引擎协程写，投递回执（超时后迟到提交必须拿到 false）依赖可见性。
      */
+    @Volatile
     private var userInputDeferred: CompletableDeferred<String>? = null
 
     fun updateConfig(newConfig: AgentConfig) {
+        val old = config
         config = newConfig
+        syncCompressorWindow(old, newConfig)
     }
 
     /**
@@ -283,7 +289,20 @@ class ApexAgentEngine(
      * 把 maxIterations / maxContextTokens / temperature 等字段重置回默认值。
      */
     fun patchConfig(transform: (AgentConfig) -> AgentConfig) {
+        val old = config
         config = transform(config)
+        syncCompressorWindow(old, config)
+    }
+
+    /**
+     * Issue #222 — 上下文窗口变更同步到压缩器：HybridCompressor 分层收敛的
+     * 停止阈值必须与引擎压缩门（EngineCompressionGate 读 config.maxContextTokens）
+     * 同源，否则模型切换后小窗口压缩不到底、大窗口过早丢上下文。
+     */
+    private fun syncCompressorWindow(old: AgentConfig, new: AgentConfig) {
+        if (old.maxContextTokens != new.maxContextTokens) {
+            contextCompressor?.updateContextWindow(new.maxContextTokens)
+        }
     }
 
     /**
@@ -527,7 +546,8 @@ class ApexAgentEngine(
                 throw e
             }
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "计划/规格确认超时: ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s")
-            emit(AgentEvent.Error("Plan/Spec confirmation timed out after ${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s", recoverable = false))
+            // #216：引擎自身产生的用户可见错误文案统一中文（技术细节留在 AppLogger）。
+            emit(AgentEvent.Error("计划/规格确认超时（${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s 无响应），任务已中止", recoverable = false))
         } catch (e: CancellationException) {
             AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "任务被中止 (CancellationException)")
             emit(AgentEvent.Aborted)
@@ -536,16 +556,20 @@ class ApexAgentEngine(
             // 单独分类记录，便于诊断。可降级类（限流/超时/不可用/鉴权）标记 recoverable，
             // 配置/能力类标记不可恢复（需用户改设置）。
             val fatal = !e.isFallbackEligible && e !is ModelRuntimeException.ModelFallbackExhausted
+            // #213：原始错误细节只进日志（body 含服务端英文 JSON，不透传给用户）；
+            // 用户可见文案经 LlmErrorText 映射为中文指引（原因 + 下一步动作）。
             AppLogger.instance.error(
                 LogCategory.LLM, "ApexAgentEngine",
                 "模型运行时错误 [${e::class.simpleName}]: ${e.message}"
             )
             taskHadFailure = true
-            emit(AgentEvent.Error(e.message ?: "模型运行时错误", recoverable = !fatal))
+            emit(AgentEvent.Error(LlmErrorText.userMessage(e), recoverable = !fatal))
         } catch (e: Exception) {
+            // #213：同上——原始 message 落日志，用户气泡给中文指引（未识别错误
+            // 由 LlmErrorText 兜底：中文文案 + 截断的原始摘要）。
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
             taskHadFailure = true
-            emit(AgentEvent.Error(e.message ?: "Unknown error", recoverable = false))
+            emit(AgentEvent.Error(LlmErrorText.userMessage(e), recoverable = false))
         } finally {
             isRunning = false
             // 隐式记忆采集（报告 P2）：任务结束，提交 episode。
@@ -918,8 +942,12 @@ class ApexAgentEngine(
                     // 检测规则（编号方案/疑问选择/显式请求降级）见
                     // assist/DecisionPointDetector.kt；流程见 assist/HumanAssistFlow.kt。
                     if (config.mode == AgentMode.HUMAN_ASSIST) {
-                        val followUp = HumanAssistFlow(emit) { awaitUserInput() }
-                            .interceptResponse(contentBuilder.toString())
+                        // #214 决策点等待超时 → 发 UserInputExpired 让 UI 关闭
+                        // 挂起的 CHOICE 对话框；null 折叠为空串，保持
+                        // HumanAssistFlow 既有「安全降级：草稿照常收尾」语义。
+                        val followUp = HumanAssistFlow(emit) {
+                            awaitUserInput { emit(AgentEvent.UserInputExpired) } ?: ""
+                        }.interceptResponse(contentBuilder.toString())
                         if (followUp != null) {
                             addMessage(LlmMessage.Assistant(contentBuilder.toString()))
                             addMessage(LlmMessage.User(followUp))
@@ -990,17 +1018,23 @@ class ApexAgentEngine(
                         iteration--
                         continue
                     }
-                    emit(AgentEvent.Error("Empty response from LLM"))
+                    // #213：空响应属于模型响应无效类错误，用户文案走统一中文映射
+                    emit(AgentEvent.Error(LlmErrorText.RESPONSE_INVALID))
                     return iteration
                 }
             }
         }
 
+        // #216：最大迭代超限不是死局 —— 对话上下文仍在，用户点「重试/继续」
+        // 即可接着推进。recoverable=true 让 UI 渲染重试入口（Agent 屏
+        // ErrorBlock 的 RetryChip / Coding 屏错误条的重试按钮）；文案与
+        // LlmErrorText 同口径：中文、先说原因、再给下一步动作。
         if (iteration >= thinkingController.effectiveMaxIterations(config.maxIterations)) {
+            val maxIterations = thinkingController.effectiveMaxIterations(config.maxIterations)
             emit(
                 AgentEvent.Error(
-                    "Reached maximum iterations (${thinkingController.effectiveMaxIterations(config.maxIterations)}). Task may be incomplete.",
-                    recoverable = false
+                    "已达到最大迭代轮次（$maxIterations），任务可能未完成——可点击重试继续推进",
+                    recoverable = true
                 )
             )
         }
@@ -1084,11 +1118,30 @@ class ApexAgentEngine(
         userInputDeferred?.complete(answer)
     }
 
+    /**
+     * #214 带投递回执的用户输入提交：存在挂起等待且投递成功 → true；
+     * 等待已超时收场（或无 pending 请求）→ false —— 调用方（VM）据此
+     * 给出「回答未送达」的显式提示，迟到的输入不再被静默丢弃。
+     */
+    fun submitUserInputIfAwaiting(answer: String): Boolean {
+        val deferred = userInputDeferred ?: return false
+        return deferred.complete(answer)
+    }
+
     override fun cancelUserInput() {
         userInputDeferred?.complete("")
     }
 
-    internal suspend fun awaitUserInput(): String {
+    /**
+     * 挂起等待 UI 回传用户输入。
+     *
+     * @return 用户答案（cancelUserInput/abort 路径为空串）；
+     *   null = 等待超时 —— #214 语义：不再静默以空串继续，而是先关闭
+     *   投递通道（迟到的 [submitUserInputIfAwaiting] 拿到 false），
+     *   再触发 [onExpired]（调用方发射 UserInputExpired 让 UI 关对话框），
+     *   返回 null 让调用方产生「用户输入超时」的显式结果。
+     */
+    internal suspend fun awaitUserInput(onExpired: (suspend () -> Unit)? = null): String? {
         val deferred = CompletableDeferred<String>()
         userInputDeferred = deferred
         return try {
@@ -1098,9 +1151,12 @@ class ApexAgentEngine(
         } catch (e: TimeoutCancellationException) {
             AppLogger.instance.warn(
                 LogCategory.ENGINE, "ApexAgentEngine",
-                "ask_user 输入超时 (${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s)，自动以空串恢复"
+                "ask_user 输入超时 (${PLAN_CONFIRMATION_TIMEOUT_MS / 1000}s)，按超时未决收场"
             )
-            ""
+            // 先关投递通道再通知：保证 UI 先看到对话框关闭，迟交才有失败提示。
+            userInputDeferred = null
+            onExpired?.invoke()
+            null
         } finally {
             userInputDeferred = null
         }

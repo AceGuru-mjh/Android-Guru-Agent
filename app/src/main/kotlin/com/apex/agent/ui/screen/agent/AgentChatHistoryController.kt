@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.agent
 
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.R
 import com.apex.agent.core.engine.ApexAgentEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -89,8 +90,13 @@ internal fun AgentChatViewModel.persistChatHistorySnapshot(
         customTitle = customTitle
     )
     viewModelScope.launch(Dispatchers.IO) {
-        chatHistory.saveSession(summary, historyMessages)
+        // Issue #220：滚动归档不再静默删数据 —— 有会话被移入归档区时给用户
+        // 可见提示（旧实现直接 editor.remove，最旧会话无声消失）。
+        val evicted = chatHistory.saveSession(summary, historyMessages)
         _chatSessions.value = chatHistory.loadSessions()
+        evicted.firstOrNull()?.let { oldest ->
+            _uiFeedback.tryEmit(strFmt(R.string.chat_history_archived_notice, oldest.title))
+        }
     }
 }
 
@@ -217,9 +223,11 @@ internal fun AgentChatViewModel.clearAllChatSessions() {
     currentHistorySessionId = null
     currentHistorySessionCreatedAt = null
     viewModelScope.launch(Dispatchers.IO) {
-        val attachmentPaths = chatHistory.loadSessions().flatMap { s ->
-            chatHistory.loadMessages(s.id).flatMap { it.attachmentPaths }
-        }
+        val attachmentPaths = (
+            chatHistory.loadSessions().flatMap { s -> chatHistory.loadMessages(s.id) } +
+                // Issue #220：归档区一并清空 —— 归档会话引用的附件文件同步回收
+                chatHistory.loadArchivedSessions().flatMap { s -> chatHistory.loadArchivedMessages(s.id) }
+            ).flatMap { it.attachmentPaths }
         chatHistory.clearAll()
         if (attachmentPaths.isNotEmpty()) {
             attachmentCleanup.cleanupFiles(attachmentPaths)

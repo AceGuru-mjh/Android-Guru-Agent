@@ -185,6 +185,21 @@ data class ModelProfile(
         contextWindow >= 32_000 -> "32K"
         else -> "${contextWindow / 1000}K"
     }
+
+    /**
+     * Issue #222 — 上下文水位条 / 压缩门的有效分母。
+     *
+     * [contextWindow]（Profile 自带字段，设置页可按模型编辑）是「安全仪表」
+     * 的单一事实源：8k 模型水位条不该显示 6%、200k 模型不该 102k 就提前压缩。
+     * 全局 AgentConfig.maxContextTokens 旧语义（恒定全局值）降级为回退：
+     * 仅当本 Profile 的窗口字段缺失/非法（≤0，旧版本落盘数据 / 手改 JSON 的
+     * 形状异常）时采用 [fallbackTokens]，绝不让分母塌成 0。
+     *
+     * 消费方：AgentModule 启动快照、AgentChatViewModel 模型切换（selectProfile
+     * + profiles collector 热更新）。
+     */
+    fun effectiveContextWindow(fallbackTokens: Int): Int =
+        if (contextWindow > 0) contextWindow else fallbackTokens.coerceAtLeast(1)
 }
 
 /**

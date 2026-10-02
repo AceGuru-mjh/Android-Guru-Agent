@@ -110,6 +110,22 @@ internal suspend fun AgentChatViewModel.handleEvent(event: AgentEvent) {
                 )
             }
         }
+        is AgentEvent.UserInputExpired -> {
+            // #214 等待超时：关闭挂起的输入对话框 + 系统行提示（引擎已按
+            // 未决继续）；迟到的提交由 VM.submitUserInput 经引擎投递回执
+            // 给出显式失败提示，不再静默丢弃。
+            _uiState.update { state ->
+                if (state.pendingUserInput == null) {
+                    state
+                } else {
+                    state.copy(
+                        pendingUserInput = null,
+                        messages = state.messages +
+                            AgentUiMessage.System(str(R.string.chat_user_input_expired))
+                    )
+                }
+            }
+        }
         is AgentEvent.PlanConfirmed -> {
             _uiState.update { state ->
                 state.copy(

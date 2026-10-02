@@ -173,7 +173,7 @@
     <string name="market_mcp_apikey_label">API Key (optional, sent as Bearer)</string>
     <string name="market_mcp_add_connect">Add &amp; connect</string>
 
-    <!-- ═══ Dialogs · Edit MCP（已安装管理 · 配置编辑）═══ -->
+    <!-- ═══ Dialogs · Edit MCP (installed management · config editing) ═══ -->
     <string name="market_mcp_edit_title">Edit tool source</string>
     <string name="market_mcp_edit_name_locked">Name is fixed after creation (delete &amp; re-add to rename)</string>
     <string name="market_mcp_edit_save">Save &amp; reconnect</string>

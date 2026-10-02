@@ -72,7 +72,11 @@ class NativeVtCore(
 
     /** Secondary constructor from an already-created native handle. */
     private constructor(handle: Long) : this(1, 1, 0) {
-        if (this.handle != 0L) nativeDestroy(this.handle)
+        if (this.handle != 0L) {
+            nativeDestroy(this.handle)
+            // #F-⑰：抵消主构造为临时句柄记的黑匣子计数（restore 路径配平）。
+            VtFeedTrail.onEngineClosed()
+        }
         this.handle = handle
         this.closed = false
     }
@@ -80,12 +84,19 @@ class NativeVtCore(
     private var handle: Long = nativeCreate(initialRows, initialCols, maxScrollback)
     private var closed = false
 
+    init {
+        // #F-⑰：黑匣子计数（全部引擎干净关闭时落 CLEAN 标记）。
+        VtFeedTrail.onEngineCreated()
+    }
+
     @Synchronized
     override fun close() {
         if (!closed && handle != 0L) {
             nativeDestroy(handle)
             handle = 0L
             closed = true
+            // #F-⑰：仅在真实生命周期转换时计数（重复 close 幂等，不重复扣）。
+            VtFeedTrail.onEngineClosed()
         }
     }
 
@@ -93,6 +104,8 @@ class NativeVtCore(
 
     override fun feed(bytes: ByteArray, offset: Int, length: Int) {
         checkHandle()
+        // #F-⑰：黑匣子 —— 最近 4KB feed 字节环（崩溃后归因到具体 ANSI 序列）。
+        VtFeedTrail.note(bytes, offset, length)
         nativeFeed(handle, bytes, offset, length)
         pollResponsesToSink()
     }

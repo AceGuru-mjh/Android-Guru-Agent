@@ -22,8 +22,13 @@ data class TerminalViewSettings(
     val fontSizeSp: Float = 14f,
     /** 捏合缩放下限（sp）。 */
     val minFontSp: Float = 8f,
-    /** 捏合缩放上限（sp）。 */
-    val maxFontSp: Float = 32f,
+    /** 捏合缩放上限（sp）。
+     *
+     * #233：模块默认与 app 侧 TerminalSettings.MAX_FONT_SIZE(=24) 对齐 ——
+     * 旧默认 32 与宿主注入的 24 边界不同步：直接复用本库而忘记注入 min/max 的
+     * 宿主会在捏合到 25..32sp 时得到与 UI 显示不一致的渲染字号（8 级跳变
+     * 的库级残留根因）。app 宿主仍显式注入 8/24，此处仅消除默认漂移。 */
+    val maxFontSp: Float = 24f,
     /** 字体样式（android.graphics.Typeface 常量：NORMAL/BOLD/ITALIC/BOLD_ITALIC）。 */
     val typefaceStyle: Int = 0,
     /** 行高系数（Termux 1.2 附近；旧渲染器 1.25 —— 沿用以保视觉连续）。 */
@@ -68,7 +73,7 @@ data class TerminalViewSettings(
     /**
      * 双指捏合调字号开关 —— **T91（D1）默认关闭**。
      *
-     * 关闭理由（用户反馈「缩放一坨」的定性收敛）：
+     * 关闭理由（用户反馈「缩放一坨」的定性收敛；#282 深度修复批次同结论）：
      *  - 捏合与双指拖动/鼠标模式的手势上下文天然冲突，T90 修的
      *    pinchScaleAccum 残积只是症状层；默认关闭后该路径成为死代码，
      *    稳定性上限拉满；

@@ -4,6 +4,7 @@ import com.apex.agent.platform.terminal.tools.TerminalTool
 import com.apex.agent.platform.terminal.ubuntu.ProvisioningResult
 import com.apex.agent.platform.terminal.ubuntu.RootfsProvisioner
 import com.apex.agent.platform.terminal.ubuntu.RootfsTarget
+import com.apex.agent.platform.terminal.ubuntu.userMessage
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -101,7 +102,10 @@ class TerminalUbuntuInstallTool(
             result is ProvisioningResult.Failed -> {
                 status = "FAILED"
                 payload["error"] = "${result.error.code}: ${result.error.message}"
-                payload["message"] = "安装失败于 ${result.partialState} 阶段" +
+                // #235：用户可读的中文文案（内部码保留在 error 字段供诊断）。
+                payload["user_message"] = result.error.userMessage
+                payload["message"] = "安装失败于 ${result.partialState} 阶段：" +
+                    result.error.userMessage +
                     (if (result.error.recoverable) "（可恢复 — 重试本工具）" else "")
             }
             result is ProvisioningResult.Cancelled -> {

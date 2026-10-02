@@ -308,24 +308,32 @@ object TerminalModule {
     @Provides
     @Singleton
     fun provideTerminalRuntime(
+        @ApplicationContext context: android.content.Context,
         native: NativePty,
         policy: TerminalPolicy,
         store: SessionMetadataStore,
         backends: ExecutionBackendRegistry,
         workspaceBinder: LinuxWorkspaceManager,
         provisioner: RootfsProvisioner
-    ): TerminalRuntime = TerminalRuntimeImpl(
-        native, policy,
-        backendRegistry = backends,
-        persistenceStore = store,
-        workspaceBinder = workspaceBinder,
-        // T81 (U-10)：rootfs 活跃会话绑定（provisioner.remove 门禁）。
-        rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner),
-        // T82：Shell Marker Protocol —— 每个前台 job 携带 OSC 633 marker（真实
-        // 退出码 + jobId）；prompt 启发式降级为 fallback。生产默认开启。
-        enableShellMarkers = true
-    ).also {
-        com.apex.agent.platform.terminal.service.TerminalRuntimeRegistry.install(it)
+    ): TerminalRuntime {
+        // #F-⑰：native VT 引擎黑匣子接线（幂等）—— 上一次未干净收尾的 feed
+        // trail 在此归因（logcat + .crash 留档）；必须在首个引擎创建前调用。
+        com.apex.agent.vtnative.VtFeedTrail.install(java.io.File(context.filesDir, "logs"))
+        return TerminalRuntimeImpl(
+            native, policy,
+            backendRegistry = backends,
+            persistenceStore = store,
+            workspaceBinder = workspaceBinder,
+            // T81 (U-10)：rootfs 活跃会话绑定（provisioner.remove 门禁）。
+            rootfsBinder = com.apex.agent.platform.terminal.ubuntu.RootfsUsageBinderImpl(provisioner),
+            // T82：Shell Marker Protocol —— 每个前台 job 携带 OSC 633 marker（真实
+            // 退出码 + jobId）；prompt 启发式降级为 fallback。生产默认开启。
+            enableShellMarkers = true
+        ).also {
+            // T91 (D2–D4)：AIDL 终端服务注册 —— 首个 Runtime 创建后立即可被
+            // 外部进程绑定（Operit 对齐）；与 #F-⑰ 前置黑匣子接线共同生效。
+            com.apex.agent.platform.terminal.service.TerminalRuntimeRegistry.install(it)
+        }
     }
 
     /** Compat facade: old TerminalManager API → new Runtime (settle-time DELETED). Spec §35. */

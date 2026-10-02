@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Coding 模式（Code 屏）字符串（英文默认）。中文在 values-zh/strings_code.xml。 -->
+<!-- Coding mode (Code screen) strings (English default). Chinese lives in values-zh/strings_code.xml. -->
 <resources>
-    <!-- 抽屉目的地 -->
+    <!-- Drawer destinations -->
     <string name="drawer_code">Code</string>
 
-    <!-- 工作区条 -->
+    <!-- Workspace bar -->
     <string name="code_no_workspace">No workspace</string>
     <string name="code_switch_workspace">Switch workspace</string>
     <string name="code_delete_workspace">Delete workspace</string>
     <string name="code_new_workspace">New workspace…</string>
     <string name="code_clear_chat">New chat</string>
 
-    <!-- Todo 面板 -->
+    <!-- Todo panel -->
     <string name="code_todo_progress">Tasks %1$d/%2$d</string>
 
-    <!-- 消息流 / 输入 -->
+    <!-- Message stream / input -->
     <string name="code_working">Working…</string>
     <string name="code_input_hint">Describe a coding task…</string>
     <string name="code_input_hint_no_api">Model API not configured — open Settings to add one…</string>
@@ -23,19 +23,19 @@
     <string name="code_stop">Stop</string>
     <string name="code_dismiss">Dismiss</string>
 
-    <!-- ask_user 对话框 -->
+    <!-- ask_user dialog -->
     <string name="code_question_title">Agent needs your input</string>
     <string name="code_question_hint">Type your answer…</string>
     <string name="code_question_default_yes">yes</string>
     <string name="code_question_submit">Answer</string>
 
-    <!-- 新建工作区对话框 -->
+    <!-- New workspace dialog -->
     <string name="code_new_workspace_title">New coding workspace</string>
     <string name="code_workspace_name_hint">Workspace name (e.g. my-app)</string>
     <string name="code_create">Create</string>
     <string name="code_cancel">Cancel</string>
 
-    <!-- 编辑器面板（v1.0 #154） -->
+    <!-- Editor panel (v1.0 #154) -->
     <string name="code_editor_close">Close editor</string>
     <string name="code_editor_loading">Loading…</string>
     <string name="code_editor_binary">Binary file — preview not supported</string>
@@ -43,7 +43,7 @@
     <string name="code_editor_lines_fmt">%1$d lines</string>
     <string name="code_editor_truncated_fmt">Showing first %1$d of %2$d lines</string>
 
-    <!-- 工具权限（v1.0 #155） -->
+    <!-- Tool permissions (v1.0 #155) -->
     <string name="code_perm_section_title">Tool permissions</string>
     <string name="code_perm_section_subtitle">opencode-style permission mode and rules</string>
     <string name="code_perm_mode_label">Permission mode</string>
@@ -69,7 +69,7 @@
     <string name="code_perm_save">Save</string>
     <string name="code_perm_cancel">Cancel</string>
 
-    <!-- 行为规则（v1.1 #164） -->
+    <!-- Behavior rules (v1.1 #164) -->
     <string name="code_rules_section_title">Behavioral rules</string>
     <string name="code_rules_section_subtitle">Global rules and AGENTS.md project rules</string>
     <string name="code_rules_global_label">Global rules</string>
@@ -82,7 +82,7 @@
     <string name="code_rules_project_create">Create template</string>
     <string name="code_rules_section_note">Priority: project rules (AGENTS.md) &gt; global rules &gt; general preferences; all sit below safety and permission constraints</string>
 
-    <!-- ═══ v1.2 七档思考系统（coding 模式专属文案；ULTRACODE/APEXCODE 与聊天页共享键） ═══ -->
+    <!-- ═══ v1.2 seven-level thinking system (coding-mode-specific copy; ULTRACODE/APEXCODE share keys with the chat page) ═══ -->
     <string name="code_thinking_selector_title">Thinking depth (7 tiers + Auto)</string>
     <string name="code_thinking_none_desc">Act directly: skip reasoning, fast in-and-out (iterations x0.8)</string>
     <string name="code_thinking_light_desc">Glance-edit: read the spot, patch, glance the result — token-light</string>
@@ -93,7 +93,7 @@
     <string name="code_thinking_apexcode_desc">Architecture-level exhaustive reasoning + adversarial self-review + full verification matrix; iterations x3.0, manual-only</string>
     <string name="code_thinking_auto_desc">Adaptive: pre-check picks the tier before each send, and deep-water failures escalate mid-run (never auto-picks APEXCODE)</string>
 
-    <!-- v1.2 思考档位指南（CodeThinkingGuideSheet） -->
+    <!-- v1.2 thinking tier guide (CodeThinkingGuideSheet) -->
     <string name="code_thinking_guide_title">Thinking tier guide</string>
     <string name="code_thinking_guide_subtitle">7 depth tiers (NONE up to APEXCODE) plus an AUTO meta tier that re-picks per turn; switching a tier changes the prompt, model params and execution policy together</string>
     <string name="code_thinking_guide_table_title">Tier ladder</string>
@@ -109,7 +109,7 @@
     <string name="code_thinking_guide_footer_linkage">A tier drives more than the prompt: iteration cap, compression threshold and tool-output budget all scale with it (see the ladder above).</string>
     <string name="code_thinking_guide_footer_apex">APEXCODE is manual-only: the adaptive selector never picks it, and its token cost sits at the top of the whole ladder.</string>
 
-    <!-- ═══ v1.2 长任务中心 ═══ -->
+    <!-- ═══ v1.2 long-task center ═══ -->
     <string name="code_longtask_open">Long-task center</string>
     <string name="code_longtask_sheet_title">Long Tasks</string>
     <string name="code_longtask_tab_tasks">Task records</string>
@@ -155,12 +155,12 @@
     <string name="code_longtask_stats_runs_fmt">%1$d runs</string>
     <string name="code_longtask_stats_row_fmt">success %1$d%% · avg %2$d iters · %3$d tools · %4$s</string>
 
-    <!-- v1.2 检查点时间线（CodeLongTaskSheet 展开区） -->
+    <!-- v1.2 checkpoint timeline (CodeLongTaskSheet expanded section) -->
     <string name="code_longtask_cp_round_fmt">Round %1$d</string>
     <string name="code_longtask_cp_counts_fmt">%1$d tools · %2$d files</string>
     <string name="code_longtask_cp_todos_fmt">☑%1$d ☐%2$d</string>
     <string name="code_thinking_guide_open">View tier guide</string>
-    <!-- ═══ 胶囊流式输出（Coding 工作流时间轴）═══ -->
+    <!-- ═══ Capsule streaming output (coding workflow timeline) ═══ -->
     <string name="code_stream_group_more_fmt">%1$d tool capsules collapsed</string>
     <string name="code_stream_group_expand">Expand</string>
     <string name="code_stream_diff_unnamed">(file)</string>
@@ -197,7 +197,7 @@
     <string name="code_stream_detail_output_title">Tool output</string>
     <string name="code_stream_run_streaming">Running · capsule timeline</string>
     <string name="code_stream_run_idle">Describe a coding task to start the capsule timeline</string>
-    <!-- ═══ 思考档位选择器 v2：短档名 + 胶囊标签 ═══ -->
+    <!-- ═══ Thinking tier selector v2: short tier names + capsule labels ═══ -->
     <string name="code_thinking_chip">Thinking · %1$s</string>
     <string name="code_thinking_short_none">Off</string>
     <string name="code_thinking_short_light">Light</string>

@@ -99,7 +99,10 @@ object AgentModule {
             thinkingLevel = effectiveThinkingLevel,
             maxIterations = agent.maxIterations,
             // 上下文压缩（对应 AgentSettings 同名字段，重启应用/新会话后生效）
-            maxContextTokens = agent.maxContextTokens,
+            // Issue #222：生效窗口取当前默认 Profile 的真实 contextWindow ——
+            // 压缩门与水位条分母跟随所选模型，不再钉在全局默认 128k；
+            // agent.maxContextTokens 仅作 Profile 窗口字段非法（≤0）时的回退。
+            maxContextTokens = profile.effectiveContextWindow(agent.maxContextTokens),
             compressionThreshold = agent.compressionThreshold,
             preserveRecentTurns = agent.preserveRecentTurns,
             maxToolOutputLength = agent.maxToolOutputLength,

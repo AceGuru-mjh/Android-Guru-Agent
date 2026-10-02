@@ -148,6 +148,9 @@ class TerminalCore(
 
     /** Feed raw PTY bytes. Emits mutations via [onMutation] (batched). */
     override fun feed(bytes: ByteArray, offset: Int, length: Int) {
+        // #C-⑦：chunk 边界上的停滞检测 —— 中途态停留超过 SEQUENCE_STALE_TIMEOUT_MS
+        // 即复位（半截序列不再吞掉后续 chunk 的正常文本）。
+        parser.chunkArrived()
         utf8.feed(bytes, offset, length) { cp ->
             parser.feed(cp) { ev -> handleEvent(ev) }
         }

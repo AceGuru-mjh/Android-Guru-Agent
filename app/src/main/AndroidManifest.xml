@@ -32,6 +32,11 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- #E-⑮：多级返回（收键盘 → 收菜单 → 退出）依赖 KeyEvent 派发路径
+         （TerminalView.onKeyPreIme）；预测性返回会绕过它直接预览“退出
+         app”。本 app 钉 targetSdk 28（侧载红线）本就不受 Android 16 默认
+         开启影响 —— 显式声明 false 是防未来 targetSdk 升级时的行为漂移
+         （届时应改为逐层 OnBackPressedCallback 适配后移除）。 -->
     <application
         android:name=".ApexApp"
         android:allowBackup="true"
@@ -42,6 +47,7 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/legacy_backup_rules"
+        android:enableOnBackInvokedCallback="false"
         tools:targetApi="36">
 
         <activity

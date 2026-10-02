@@ -45,7 +45,11 @@ class TerminalGestureModel(
     /** 速度估计窗口（ms）。 */
     private val velocityWindowMs: Long = 120L,
     /** 捏合旋转拒绝角（度）。 */
-    private val rotationRejectDeg: Float = 32f
+    private val rotationRejectDeg: Float = 32f,
+    /** 捏合起手最小指距（px）：两指几乎同时落下但初始距离过近（如并指误触）时
+     * 距离比率噪声极大 —— 直接冻结捏合输出（仍保留第二指快击语义），
+     * 避免起手阶段的 scale 抖动误触发 ±1sp 步进。 */
+    private val minPinchStartDistPx: Float = 96f
 ) {
     /** 清洗后的触摸样本（View 由 MotionEvent 构造）。
      *
@@ -291,6 +295,9 @@ class TerminalGestureModel(
                 multiSecondPointerId = s.pointerId
                 pinchRejected = false
                 multiBaseDist = hypot(s.x - multiFirstX, s.y - multiFirstY).coerceAtLeast(1f)
+                // 起手指距过近 → 冻结捏合（距离比率在极小基线下噪声被放大；
+                // Termux 同款“观察态”思想的入口门控）。
+                if (multiBaseDist < minPinchStartDistPx) pinchRejected = true
                 multiBaseAngle = atan2(s.y - multiFirstY, s.x - multiFirstX)
                 state = State.MULTI
             }

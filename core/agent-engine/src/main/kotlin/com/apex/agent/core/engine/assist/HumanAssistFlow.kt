@@ -41,8 +41,11 @@ import com.apex.agent.core.engine.assist.DecisionPointDetector.DecisionPoint
  * 引擎接线（executeBuildLoop 纯文本响应分支，#168）：
  * ```kotlin
  * if (config.mode == AgentMode.HUMAN_ASSIST) {
- *     val followUp = HumanAssistFlow(emit) { awaitUserInput() }
- *         .interceptResponse(contentBuilder.toString())
+ *     // #214：awaitUserInput 超时返回 null → 折叠空串（安全降级不变），
+ *     // 并经 onExpired 发 UserInputExpired 让 UI 关闭挂起的 CHOICE 对话框
+ *     val followUp = HumanAssistFlow(emit) {
+ *         awaitUserInput { emit(AgentEvent.UserInputExpired) } ?: ""
+ *     }.interceptResponse(contentBuilder.toString())
  *     if (followUp != null) {
  *         addMessage(LlmMessage.Assistant(contentBuilder.toString()))
  *         addMessage(LlmMessage.User(followUp))

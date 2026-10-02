@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 核心 UI 字符串（英文默认）—— 抽屉 / 上下文仪表盘 / 设置 / 模型配置 / 存储 / 记忆 /
-     任务 / 权限 / 日志 / 新手引导。中文在 values-zh/strings_core.xml；语言切换经
-     LanguageManager + MainActivity attachBaseContext/recreate 生效。 -->
+<!-- Core UI strings (English default) — drawer / context dashboard / settings / model setup / storage / memory /
+     tasks / permissions / logs / onboarding. Chinese lives in values-zh/strings_core.xml; language switching goes
+     through LanguageManager + MainActivity attachBaseContext/recreate. -->
 <resources>
-    <!-- ═══ 抽屉与导航目的地（ApexRoot / ApexDrawerContent）═══ -->
+    <!-- ═══ Drawer and navigation destinations (ApexRoot / ApexDrawerContent) ═══ -->
     <string name="drawer_agent">Agent</string>
     <string name="drawer_terminal">Terminal</string>
 <!-- #197 Template Studio -->
@@ -23,7 +23,7 @@
     <string name="drawer_mem_count">%1$d items</string>
     <string name="drawer_github_not_connected">GitHub not connected</string>
 
-    <!-- ═══ 顶部上下文仪表盘（ContextMeterBar）═══ -->
+    <!-- ═══ Top context dashboard (ContextMeterBar) ═══ -->
     <string name="context_dashboard">Context Dashboard</string>
     <string name="context_used_tokens">Tokens used</string>
     <string name="context_max_tokens">Context limit</string>
@@ -36,7 +36,7 @@
     <string name="context_compress">Compress context</string>
     <string name="context_compress_hint">Auto compression is triggered by the engine once usage exceeds the threshold</string>
 
-    <!-- ═══ 设置中心（SettingsScreen）═══ -->
+    <!-- ═══ Settings center (SettingsScreen) ═══ -->
     <string name="settings_title">Settings</string>
     <string name="settings_tab_models">Models</string>
     <string name="settings_tab_interface">Interface</string>
@@ -269,7 +269,7 @@
     <string name="settings_about_update_install_failed">The installer could not be launched. The package is saved at %1$s — install it from your file manager</string>
     <string name="settings_about_update_close">Close</string>
 
-    <!-- ViewModel 用户可见消息（SettingsViewModel，经 LanguageManager 取词） -->
+    <!-- ViewModel user-visible messages (SettingsViewModel, resolved via LanguageManager) -->
     <string name="settings_error_provider_not_found">Provider not found: %1$s</string>
     <string name="settings_error_invalid_base_url">Base URL missing or invalid; cannot fetch models</string>
     <string name="settings_error_profile_not_found">Model profile not found</string>
@@ -279,7 +279,7 @@
     <string name="settings_test_success">Connected: received a %1$d-character response</string>
     <string name="settings_test_failed">Connection failed: %1$s</string>
 
-    <!-- ═══ 模型配置卡（ModelSetupCard）═══ -->
+    <!-- ═══ Model setup card (ModelSetupCard) ═══ -->
     <string name="model_card_title">Model configuration</string>
     <string name="model_card_subtitle">Profiles / providers / keys / model IDs — all in one place</string>
     <string name="model_empty_hint">No model profiles yet — tap the button below to create one (defaults to the \"Custom\" provider; you fill in the Base URL).</string>
@@ -326,7 +326,7 @@
     <string name="model_use_custom_id">Use custom ID</string>
     <string name="model_close">Close</string>
 
-    <!-- ═══ 存储与数据管理（StorageScreen）═══ -->
+    <!-- ═══ Storage and data management (StorageScreen) ═══ -->
     <string name="storage_title">Storage</string>
     <string name="storage_refresh">Refresh</string>
     <string name="storage_attachments">Attachments</string>
@@ -363,7 +363,7 @@
     <string name="storage_confirm">Confirm</string>
     <string name="storage_cancel">Cancel</string>
 
-    <!-- ═══ 记忆（MemoryScreen）═══ -->
+    <!-- ═══ Memory (MemoryScreen) ═══ -->
     <string name="memory_title">Memory</string>
     <string name="memory_search_nodes">Search nodes</string>
     <string name="memory_got_it">Got it</string>
@@ -395,7 +395,7 @@
     <string name="memory_quarantine_clear">No suspicious UI fingerprints quarantined (normal)</string>
     <string name="memory_clear">Clear</string>
 
-    <!-- ═══ 任务历史（TaskHistoryScreen）═══ -->
+    <!-- ═══ Task history (TaskHistoryScreen) ═══ -->
     <string name="tasks_title">Tasks</string>
     <string name="tasks_refresh">Refresh</string>
     <string name="tasks_empty_title">No task records yet</string>
@@ -428,7 +428,7 @@
     <string name="tasks_status_failed">Failed</string>
     <string name="tasks_status_cancelled">Cancelled</string>
 
-    <!-- ═══ 权限管理（PermissionsScreen）═══ -->
+    <!-- ═══ Permission management (PermissionsScreen) ═══ -->
     <string name="perms_title">Permissions</string>
     <string name="perms_root_desc">Highest privilege — runs all system operations (/system, /data, mount, SELinux)</string>
     <string name="perms_detect">Detect</string>
@@ -452,7 +452,7 @@
     <string name="perms_status_pending">Not authorized</string>
     <string name="perms_status_running">Running</string>
 
-    <!-- ═══ 日志查看器（LogViewerScreen）═══ -->
+    <!-- ═══ Log viewer (LogViewerScreen) ═══ -->
     <string name="log_copy">Copy</string>
     <string name="log_clear">Clear</string>
     <string name="log_export">Export</string>
@@ -474,7 +474,7 @@
     <string name="log_stack">Stack</string>
     <string name="log_export_chooser">Export logs</string>
 
-    <!-- ═══ 新手引导（OnboardingScreen）═══ -->
+    <!-- ═══ Onboarding (OnboardingScreen) ═══ -->
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
     <string name="onboarding_start">Get started</string>
@@ -562,11 +562,11 @@
     <string name="about_link_release">Release channel</string>
     <string name="about_link_issues">Report an issue</string>
     <string name="about_footer">Apex Agent · open source</string>
-    <!-- ═══ v1.4.4：用量仪表盘 / 诊断中心（抽屉目的地）═══ -->
+    <!-- ═══ v1.4.4: usage dashboard / diagnostics center (drawer destinations) ═══ -->
     <string name="drawer_usage">Usage</string>
     <string name="drawer_diagnostics">Diagnostics</string>
 
-    <!-- ═══ v1.4.4 #4：任务完成通知设置 ═══ -->
+    <!-- ═══ v1.4.4 #4: task completion notification settings ═══ -->
     <string name="settings_task_notify_title">Task completion notification</string>
     <string name="settings_task_notify_desc">Notify when a task finishes while the app is in background (silenced in foreground)</string>
 </resources>

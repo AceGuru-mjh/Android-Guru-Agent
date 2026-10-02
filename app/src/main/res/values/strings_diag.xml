@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 诊断中心字符串（英文默认）—— 应用/设备信息、崩溃记录、日志文件、一键诊断报告。
-     中文在 values-zh/strings_diag.xml；语言切换经 LanguageManager +
-     MainActivity attachBaseContext/recreate 生效。 -->
+<!-- Diagnostics center strings (English default) — app/device info, crash records, log files, one-tap diagnostic report.
+     Chinese lives in values-zh/strings_diag.xml; language switching goes through LanguageManager +
+     MainActivity attachBaseContext/recreate. -->
 <resources>
-    <!-- ═══ 页面（DiagnosticsScreen）═══ -->
+    <!-- ═══ Pages (DiagnosticsScreen) ═══ -->
     <string name="diag_title">Diagnostics</string>
     <string name="diag_subtitle">Report bundles app and device info, log files and crash records for offline troubleshooting</string>
     <string name="diag_refresh">Refresh</string>
@@ -12,13 +12,13 @@
     <string name="diag_share">Share</string>
     <string name="diag_share_chooser">Share diagnostics file</string>
 
-    <!-- ═══ 信息区标题与展开 ═══ -->
+    <!-- ═══ Info section titles and expansion ═══ -->
     <string name="diag_app_section">App info</string>
     <string name="diag_device_section">Device info</string>
     <string name="diag_expand">Expand</string>
     <string name="diag_collapse">Collapse</string>
 
-    <!-- ═══ 应用信息字段名 ═══ -->
+    <!-- ═══ App info field names ═══ -->
     <string name="diag_field_version_name">Version name</string>
     <string name="diag_field_version_code">Version code</string>
     <string name="diag_field_build_type">Build type</string>
@@ -28,7 +28,7 @@
     <string name="diag_field_target_sdk">Target SDK</string>
     <string name="diag_field_min_sdk">Minimum Android</string>
 
-    <!-- ═══ 设备信息字段名 ═══ -->
+    <!-- ═══ Device info field names ═══ -->
     <string name="diag_field_model">Device model</string>
     <string name="diag_field_android">Android version</string>
     <string name="diag_field_security_patch">Security patch</string>
@@ -39,14 +39,14 @@
     <string name="diag_field_locale_tz">Language and timezone</string>
     <string name="diag_field_cpu">CPU cores</string>
 
-    <!-- ═══ 信息值模板 ═══ -->
+    <!-- ═══ Info value templates ═══ -->
     <string name="diag_build_debug">debug</string>
     <string name="diag_build_release">release</string>
     <string name="diag_unknown">Unknown</string>
     <string name="diag_value_mem">%1$s free of %2$s (%3$d%%)</string>
     <string name="diag_value_storage">%1$s free of %2$s (%3$d%%)</string>
 
-    <!-- ═══ 崩溃记录区 ═══ -->
+    <!-- ═══ Crash records section ═══ -->
     <string name="diag_crash_section">Crash records</string>
     <string name="diag_crash_count">%1$d records</string>
     <string name="diag_crash_empty">No crash records ✅</string>
@@ -57,7 +57,7 @@
     <string name="diag_crash_clear_confirm_title">Clear all crash records?</string>
     <string name="diag_crash_clear_confirm_text">%1$d crash files will be deleted permanently</string>
 
-    <!-- ═══ 日志文件区 ═══ -->
+    <!-- ═══ Log files section ═══ -->
     <string name="diag_log_section">Log files</string>
     <string name="diag_log_count">%1$d files · %2$s</string>
     <string name="diag_log_empty">No log files yet</string>
@@ -65,7 +65,7 @@
     <string name="diag_log_clear_confirm_title">Clear log files?</string>
     <string name="diag_log_clear_confirm_text">%1$d log files (%2$s) will be deleted permanently</string>
 
-    <!-- ═══ 诊断报告 ═══ -->
+    <!-- ═══ Diagnostic report ═══ -->
     <string name="diag_report_section">Diagnostics report</string>
     <string name="diag_report_content_desc">The zip contains device.txt (app and device info), logs/ (log files) and crashes/ (crash records); share it to help troubleshoot</string>
     <string name="diag_report_generate">Generate diagnostics report</string>

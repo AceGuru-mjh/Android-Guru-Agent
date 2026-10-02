@@ -436,7 +436,12 @@ class TaskRuntimeTest {
 
         collectUntilTerminal(rt.execute(UserInput.text("会失败")))
         val failed = waitTerminal(TaskStatus.FAILED)
-        assertEquals("provider down", failed.error)
+        // #213 起引擎把原始异常映射为中文用户文案（原始 message 落日志，
+        // task.error = 中文指引 + 括号内截断摘要）——断言可定位的原始片段。
+        assertTrue(
+            "task.error 应携带原始错误摘要 provider down，实际: ${failed.error}",
+            failed.error?.contains("provider down") == true,
+        )
 
         // 重试1：RETRYING → RUNNING（LLM 仍失败 → FAILED，retryCount=1）
         val r1 = rt.retry()

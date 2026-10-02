@@ -153,7 +153,7 @@ private fun DetailContent(state: SkillDetailUiState) {
         // 4. 每个工具的详细统计
         if (state.toolStats.isNotEmpty()) {
             item { SectionTitle(stringResource(R.string.market_detail_tool_stats), Icons.Default.CheckCircle) }
-            items(state.toolStats) { row -> ToolStatRow(row) }
+            items(state.toolStats, key = { it.toolId }) { row -> ToolStatRow(row) }
         }
 
         // 5. 最近轨迹（参数脱敏）
@@ -164,7 +164,8 @@ private fun DetailContent(state: SkillDetailUiState) {
                     Icons.Default.Schedule
                 )
             }
-            items(state.traces) { span -> TraceSpanRow(span) }
+            // #245：轨迹 span 实时追加 —— callId 是稳定标识，行内展开状态不再错位。
+            items(state.traces, key = { it.callId }) { span -> TraceSpanRow(span) }
         }
     }
 }

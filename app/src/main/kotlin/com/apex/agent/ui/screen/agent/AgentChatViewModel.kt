@@ -171,6 +171,9 @@ class AgentChatViewModel @Inject constructor(
             else -> Unit // 未覆盖：跟随启动默认档位（AgentModule 快照）
         }
         (agentEngine as? ApexAgentEngine)?.let { e -> _uiState.update { it.copy(contextMaxTokens = e.maxContextTokens()) } }
+        // Issue #222：上下文窗口跟随所选模型（聊天页切换 + 设置页改动统一兜底，
+        // 逻辑在 AgentChatModelSync.kt —— God-file 预算拆分既定模式）。
+        installContextWindowSync()
         // 历史对话：会话列表初始加载 + 消息流防抖自动归档
         installChatHistoryAutoPersist()
         // ═══ Agent 角色：监听激活角色变化 → 引擎配置热更新 ═══
@@ -211,6 +214,9 @@ class AgentChatViewModel @Inject constructor(
                     }
                 }
         }
+
+        // #214/#215：问题桥超时诚实提示 + 迟交兜底（逻辑在 AgentChatQuestionHandler.kt）
+        installQuestionExpiredNotice()
     }
 
     /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */
@@ -880,10 +886,10 @@ class AgentChatViewModel @Inject constructor(
         (agentEngine as? ApexAgentEngine)?.submitPlanConfirmation(confirmed, enabledSteps, order)
     }
 
-    /** 用户回答了 Agent 的提问，恢复引擎执行。 */
+    /** 用户回答了 Agent 的提问，恢复引擎执行（#214 迟到投递回执在 AgentChatQuestionHandler 扩展内收口）。 */
     fun submitUserInput(answer: String) {
         _uiState.update { it.copy(pendingUserInput = null) }
-        (agentEngine as? ApexAgentEngine)?.submitUserInput(answer)
+        deliverUserInputOrNotice(answer)
     }
 
     /** 用户取消了 Agent 的提问，中止等待。 */
@@ -983,40 +989,10 @@ class AgentChatViewModel @Inject constructor(
 
     /** UX-3：LLM 是否已配置（判定口径 = DynamicLlmClient 的真/NoOp 边界，见 AgentChatOnboarding.kt；空会话+未配置时聊天区显示引导卡）。 */
     val llmConfigured: StateFlow<Boolean> = settingsRepository.llmConfiguredFlow(viewModelScope)
-    /**
-     * 切换当前模型：把该 Profile 设为默认 + 同步角色映射 + 引擎温度，
-     * 运行中的 LLM client 由 DynamicLlmClient 自动重建（即时生效）。
-     */
-    fun selectProfile(profileId: String) {
-        val target = settingsRepository.getProfile(profileId) ?: return
-        settingsRepository.setDefaultProfile(profileId)
-        settingsRepository.updateRoles { copy(primaryProfileId = profileId) }
-        // 引擎侧仅同步温度（temperature 是 Agent 引擎 chat 调用的入参）
-        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
-            cfg.copy(temperature = target.temperature)
-        }
-        // 修复：模型原生思考强度跟随当前模型（每 Profile 独立持久化）——
-        // 切换后同步 UI 状态，避免 chip 显示上一个模型的档位（旧实现遗漏）。
-        _uiState.update { it.copy(reasoningEffort = target.reasoningEffort) }
-    }
 
-    /**
-     * 更新当前模型的采样参数（Temperature / Top-P / Max Tokens）。
-     * 写入 Profile（持久化）后由 DynamicLlmClient 即时生效。
-     */
-    fun updateModelParams(temperature: Float, topP: Float, maxTokens: Int) {
-        val cur = settingsRepository.getProfile(currentProfileId.value ?: return) ?: return
-        settingsRepository.upsertProfile(
-            cur.copy(
-                temperature = temperature,
-                topP = topP,
-                maxOutputTokens = maxTokens
-            )
-        )
-        (agentEngine as? ApexAgentEngine)?.patchConfig { cfg ->
-            cfg.copy(temperature = temperature)
-        }
-    }
+    // ═══ "小大脑"智能菜单：模型切换 + 采样参数调节（selectProfile /
+    // updateModelParams）+ Issue #222 上下文窗口同步（installContextWindowSync）
+    // 已拆至 AgentChatModelSync.kt（God-file 预算拆分既定模式，调用点无感知）。═══
 
     /** 函数调用二级菜单候选：全部已注册工具（id + 显示名 + v2 元数据）。 */
     fun availableTools(): List<ToolRef> =

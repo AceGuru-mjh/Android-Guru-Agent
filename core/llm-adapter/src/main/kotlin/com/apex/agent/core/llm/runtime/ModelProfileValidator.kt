@@ -1,5 +1,6 @@
 package com.apex.agent.core.llm.runtime
 
+import com.apex.agent.core.llm.LlmConfig
 import com.apex.agent.core.llm.ModelCapabilities
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelRoleConfig
@@ -109,7 +110,12 @@ object ProviderConfigValidator {
             errors += "Provider baseUrl 必须是 http(s):// scheme（当前=${provider.baseUrl}）"
         }
         // 内置 Provider（openai/deepseek/...）允许无 key（用户后填）；非内置则要求至少一个 key。
-        if (!provider.isBuiltIn && provider.apiKeys.all { it.isBlank() }) {
+        // #217：本地推理端点（Ollama / LM Studio / vLLM / 内网自建服务）免鉴权——
+        // 自定义 Provider 指向本地端点时不再强制 API Key，与 LlmConfig.isValid
+        // 的豁免口径完全一致（同一判定函数，避免两处规则漂移）。
+        if (!provider.isBuiltIn && provider.apiKeys.all { it.isBlank() } &&
+            !LlmConfig.isLocalEndpoint(provider.baseUrl, provider.id)
+        ) {
             errors += "自定义 Provider 至少需要一个非空 API Key"
         }
         return Result(errors.isEmpty(), errors)

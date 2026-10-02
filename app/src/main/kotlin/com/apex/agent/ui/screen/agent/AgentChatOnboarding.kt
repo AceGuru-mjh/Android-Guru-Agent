@@ -49,13 +49,13 @@ import kotlinx.coroutines.flow.stateIn
  * LLM 是否已配置的聚合判断流。
  *
  * 判定口径与运行时完全一致：默认 Profile → 其 Provider → [LlmConfig.isValid]
- * （baseUrl / apiKey / model 均非空且 http(s) scheme）——这正是
- * DynamicLlmClient.buildDelegate 决定"真 client vs NoOp 降级"的同一条边界，
- * 引导卡只在引擎真的无法出话时出现，不会误伤已配置用户。
+ * （baseUrl / model 均非空且 http(s) scheme；云端 provider 还要求 apiKey 非空）
+ * ——这正是 DynamicLlmClient.buildDelegate 决定"真 client vs NoOp 降级"的同一
+ * 条边界，引导卡只在引擎真的无法出话时出现，不会误伤已配置用户。
  *
- * Ollama/LM Studio 等本地端点经内置 Provider（apiKeys 为空）同样判未配置：
- * 与实际行为一致（fromProfile 取 apiKeys.firstOrNull() 为空串 → isValid=false），
- * 用户在设置里为本地 Provider 填任意占位 Key 后卡片即消失。
+ * #217：Ollama / LM Studio 等本地推理端点免鉴权——baseUrl 指向本机 / 内网
+ * （或挂在内置本地 Provider ollama / lmstudio / vllm 下）时无需 API Key 即视为
+ * 已配置，引导卡不再对本地用户误报（旧实现迫使用户伪造占位 Key 卡片才消失）。
  */
 internal fun SettingsRepository.llmConfiguredFlow(scope: CoroutineScope): StateFlow<Boolean> =
     combine(profiles, providers) { _, _ -> defaultLlmConfig().isValid }

@@ -160,6 +160,73 @@ data class ProvisioningError(
     val cause: Throwable? = null
 )
 
+// ─── #235：面向用户的本地化错误文案（userMessage）───
+// 问题背景：INSUFFICIENT_STORAGE 等错误此前把 `ProvisioningError:INSUFFICIENT_STORAGE
+// -- Need 3400000000 bytes...` 裸英文内部码直接怼到用户脸上 —— 无本地化、无人类
+// 可读指引。此处补一层 code → 中文可操作文案的映射（保持 message 原文用于诊断）。
+
+/** 字节数人性化（1024 进制，两位有效数字）。 */
+private fun humanizeBytes(bytes: Long): String {
+    if (bytes < 0) return "$bytes B"
+    var v = bytes.toDouble()
+    val units = listOf("B", "KB", "MB", "GB", "TB")
+    var i = 0
+    while (v >= 1024.0 && i < units.size - 1) { v /= 1024.0; i++ }
+    return if (i == 0) "$bytes B" else String.format(java.util.Locale.US, "%.2f %s", v, units[i])
+}
+
+/**
+ * 面向用户的中文可读错误描述（#235）：
+ * 「发生了什么 + 怎么办」两句话；INSUFFICIENT_STORAGE 额外把原始
+ * "Need X bytes, only Y available" 里的裸字节数人性化为 GB/MB。
+ * 诊断细节仍看 [ProvisioningError.message]（保持英文原文）。
+ */
+val ProvisioningError.userMessage: String
+    get() {
+        val byteHint = when (code) {
+            ProvisioningErrorCode.INSUFFICIENT_STORAGE -> {
+                // message 形如 "Need 3400000000 bytes, only 123 available"
+                val need = Regex("Need (\\d+) bytes").find(message)?.groupValues?.get(1)?.toLongOrNull()
+                val avail = Regex("only (\\d+) available").find(message)?.groupValues?.get(1)?.toLongOrNull()
+                if (need != null && avail != null) {
+                    "（需要约 ${humanizeBytes(need)}，当前仅剩 ${humanizeBytes(avail)}）"
+                } else ""
+            }
+            else -> ""
+        }
+        return when (code) {
+            ProvisioningErrorCode.UNSUPPORTED_ARCHITECTURE ->
+                "当前设备的 CPU 架构不受支持，无法安装 Ubuntu 环境。"
+            ProvisioningErrorCode.NETWORK_FAILURE ->
+                "网络连接失败，无法下载 Ubuntu 环境。请检查网络后重试。"
+            ProvisioningErrorCode.DOWNLOAD_FAILED ->
+                "Ubuntu 环境下载中断。请检查网络稳定性后重试。"
+            ProvisioningErrorCode.CHECKSUM_MISMATCH ->
+                "下载的数据校验失败（可能被中断或损坏）。请重试安装。"
+            ProvisioningErrorCode.ARCHIVE_INVALID ->
+                "Ubuntu 环境压缩包无效。请重新安装。"
+            ProvisioningErrorCode.EXTRACTION_FAILED ->
+                "Ubuntu 环境解压失败$byteHint。请清理存储空间后重试。"
+            ProvisioningErrorCode.INSUFFICIENT_STORAGE ->
+                "存储空间不足$byteHint。请清理存储空间后重试。"
+            ProvisioningErrorCode.ROOTFS_INVALID ->
+                "已下载的 Ubuntu 环境数据无效。请在环境中心重新安装。"
+            ProvisioningErrorCode.ACTIVATION_FAILED ->
+                "Ubuntu 环境激活失败。请重试安装；若多次失败请重启应用后再试。"
+            ProvisioningErrorCode.ALREADY_INSTALLED ->
+                "Ubuntu 环境已安装，无需重复安装。"
+            ProvisioningErrorCode.BUSY ->
+                "另一项安装/更新正在进行中，请等待其完成后再试。"
+            ProvisioningErrorCode.CANCELLED ->
+                "安装已被取消。可随时重新发起安装。"
+            ProvisioningErrorCode.PERMISSION_FAILURE ->
+                "缺少必要权限，无法完成安装。请检查存储权限后重试。"
+            ProvisioningErrorCode.UNKNOWN ->
+                "发生未知错误。请重试；若持续失败请反馈日志。"
+        }
+    }
+
+
 // ─── Section 8/24: Observable Progress ───
 data class ProvisioningProgress(
     val state: ProvisioningState,

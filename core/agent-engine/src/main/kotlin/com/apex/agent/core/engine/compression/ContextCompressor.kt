@@ -24,6 +24,15 @@ interface ContextCompressor {
         history: MutableList<LlmMessage>,
         preserveRecent: Int = 5
     ): CompressionReport
+
+    /**
+     * Issue #222 — 运行时同步上下文窗口（模型切换时引擎 patchConfig 调用）。
+     *
+     * 分层压缩器的收敛停止阈值必须与引擎压缩门同源（config.maxContextTokens），
+     * 否则小窗口模型压缩后仍超限、大窗口模型过早丢上下文。默认 no-op ——
+     * 无窗口状态的实现（纯策略层）无需理会。
+     */
+    fun updateContextWindow(tokens: Int) {}
 }
 
 /**

@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -130,7 +131,13 @@ internal data class GlassPalette(
     /** 边缘高光底色 */
     val edgeBottom: Color,
     /** 镜面高光色 */
-    val specular: Color
+    val specular: Color,
+    /**
+     * 动态扫掠光带色（Pro Dynamics 共享时钟专用）——
+     * 高光层绘制在内容之下，多卡共享同一相位；
+     * 浅色主题用 primary 染色（纯白光带在白霜底上不可见），
+     * 深色主题保持白色高光。 */
+    val sweepColor: Color
 )
 
 /**
@@ -161,7 +168,8 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             ),
             edgeTop = Color.White.copy(alpha = style.edgeAlpha),
             edgeBottom = Color.White.copy(alpha = style.edgeAlpha * 0.22f),
-            specular = Color.White.copy(alpha = style.specularAlpha)
+            specular = Color.White.copy(alpha = style.specularAlpha),
+            sweepColor = Color.White.copy(alpha = style.specularAlpha * 2.4f + 0.12f)
         )
     } else {
         // 浅色玻璃 v2（用户反馈「白天液态玻璃做的啥也不是」）：
@@ -194,7 +202,12 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             // 下缘落影：极淡深色定界 —— 给轮廓收边，但不像旧版那样成灰框脏描边
             edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.10f),
             // 顶部镜面扫掠：更强的白色高光，在乳白底上仍可辨
-            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.05f)
+            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.05f),
+            // 浅色扫掠光带：primary 染色 —— 纯白光带在白霜底上是「白上白」
+            //（被用户实测指出「白做动画」），向主题色混合后白底上可辨且不脏；
+            // 深浅混合比例固定 0.32，只给光带「色倾向」，不刷屏
+            sweepColor = lerp(Color.White, scheme.primary, 0.32f)
+                .copy(alpha = style.specularAlpha * 2.0f + 0.16f)
         )
     }
     // 状态强调色：工具卡运行态 / 错误态等着色 —— 不用大面积高饱和，保持克制

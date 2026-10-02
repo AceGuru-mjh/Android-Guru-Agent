@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -42,6 +43,9 @@ import dev.chrisbanes.haze.hazeEffect
  *  - Material response：pressed / focused / selected / disabled 驱动
  *    激活度动画，影响高光亮度、边缘强度与按压缩放；动画短促、非循环。
  *  - Edge lighting：drawOutline 内描边渐变 —— 上强下弱的受光边缘。
+ *  - Specular sweep（可选）：外部传入共享扫掠相位（State<Float>，-0.4..1.4 归一化），
+ *    光带绘制在材质之上、内容之下 —— 多卡共享同一时钟相位一致，
+ *    且高光永不覆盖文字（原 demo 在 drawWithContent 里画在内容之上会洗白文本）。
  *  - Depth：外阴影 + 底部内阴影两级线索。
  *  - Refraction：未实现 —— 本组件不声明折射位移。
  */
@@ -57,6 +61,8 @@ fun GlassSurface(
     focused: Boolean = false,
     interactionSource: MutableInteractionSource? = null,
     scaleOnPress: Boolean = true,
+    /** 共享扫掠相位（null = 不绘制动态光带）；多卡传同一 State 即完全同步 */
+    specularSweep: State<Float>? = null,
     content: @Composable () -> Unit
 ) {
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
@@ -107,9 +113,9 @@ fun GlassSurface(
             .graphicsLayer { alpha = if (enabled) 1f else 0.55f }
             .clip(shape)
             .then(materialModifier)
-            // 边缘光 / 镜面高光 / 底部内阴影 / 激活增亮 —— 绘制在材质之上、内容之下
+            // 边缘光 / 镜面高光 / 扫掠光带 / 底部内阴影 / 激活增亮 —— 绘制在材质之上、内容之下
             .drawBehind {
-                drawGlassOverlays(shape, palette, activation, selected, accent)
+                drawGlassOverlays(shape, palette, activation, selected, accent, specularSweep)
             },
         contentAlignment = Alignment.Center
     ) {
@@ -137,7 +143,8 @@ private fun DrawScope.drawGlassOverlays(
     palette: GlassPalette,
     activation: Float,
     selected: Boolean,
-    accent: Color
+    accent: Color,
+    sweepPhase: State<Float>? = null
 ) {
     if (size.width <= 0f || size.height <= 0f) return
     val outline = shape.createOutline(
@@ -193,6 +200,29 @@ private fun DrawScope.drawGlassOverlays(
                 endY = mid + size.height * 0.08f
             )
         )
+    }
+
+    // ═══ 动态扫掠光带（可选）：材质之上、内容之下 ═══
+    // 相位 -0.4..1.4 归一化：0..1 之外时带体在卡外（keyframes 停留段）。
+    // 颜色来自 palette.sweepColor —— 浅色主题 primary 染色（白上白不可见），
+    // 深色主题白色高光。绘制在内容之下：光带扫过时文字永不被洗白。
+    if (sweepPhase != null) {
+        val bandCenter = sweepPhase.value * size.width
+        val half = size.width * 0.24f
+        if (bandCenter + half > 0f && bandCenter - half < size.width) {
+            drawOutline(
+                outline = outline,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        palette.sweepColor,
+                        Color.Transparent
+                    ),
+                    start = Offset(bandCenter - half, 0f),
+                    end = Offset(bandCenter + half, size.height)
+                )
+            )
+        }
     }
 
     // ═══ 底部内阴影：自下而上的深度渐暗 ═══

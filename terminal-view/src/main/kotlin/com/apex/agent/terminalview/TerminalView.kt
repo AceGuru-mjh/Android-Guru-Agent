@@ -3,6 +3,8 @@ package com.apex.agent.terminalview
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Rect
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -124,6 +126,26 @@ class TerminalView @JvmOverloads constructor(
     private var lastTouchY = 0f
     private var wheelAccumPx = 0f
 
+    // ─── 系统手势排除（#B-④）───
+    // Android 10+ 手势导航在屏幕左/右边缘保留了 quick-switch/返回滑区；
+    // 终端滚回历史/拖选时贴边滑动会被系统抢走。仅在本 View 触摸会话
+    // 进行中动态申请排除（DOWN 时申请、UP/CANCEL 撤销）—— 不做常驻全屏
+    // 排除（Play 对滥用 systemGestureExclusionRects 有审核红线）。
+    private val gestureExclusionRect = Rect()
+    private var gestureExclusionActive = false
+
+    private fun applyGestureExclusion(enable: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (enable == gestureExclusionActive) return
+        gestureExclusionActive = enable
+        if (enable) {
+            gestureExclusionRect.set(0, 0, width, height)
+            systemGestureExclusionRects = listOf(gestureExclusionRect)
+        } else {
+            systemGestureExclusionRects = emptyList()
+        }
+    }
+
     // ─── 无障碍 ───
     private var lastA11yAnnounceUptime = 0L
 
@@ -138,7 +160,10 @@ class TerminalView @JvmOverloads constructor(
             longPressTimeoutMs = ViewConfiguration.getLongPressTimeout().toLong(),
             doubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong(),
             tapTimeoutMs = ViewConfiguration.getTapTimeout().toLong(),
-            flingVelocityThreshold = density * 120f
+            flingVelocityThreshold = density * 120f,
+            // #B-⑥：捏合起手最小指距按密度换算（≈48dp）—— 并指/贴边误触
+            // 起手阶段的距离比率噪声直接冻结捏合输出。
+            minPinchStartDistPx = density * 48f
         )
         longPressTimeoutMs = ViewConfiguration.getLongPressTimeout().toLong()
         doubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong()
@@ -525,6 +550,11 @@ class TerminalView @JvmOverloads constructor(
         lastTouchX = event.x
         lastTouchY = event.y
         val sample = toSample(event) ?: return super.onTouchEvent(event)
+        // #B-④：触摸会话进行中标记系统手势排除区（UP/CANCEL 撤销）。
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> applyGestureExclusion(true)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> applyGestureExclusion(false)
+        }
         // T90：捏合累子手势结束复位 —— 旧行为残留 1.05..1.24 的累积量带到下一次
         // 小捏合，凭空触发 ±1sp 步进（「缩放一坨」的直接根源之一）。任何手势
         // 结束/降指（UP/CANCEL/POINTER_UP）都视为捏合会话终结。
@@ -1108,6 +1138,7 @@ class TerminalView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        applyGestureExclusion(false)
         mainHandler.removeCallbacksAndMessages(null)
         scroller.abortAnimation()
         super.onDetachedFromWindow()

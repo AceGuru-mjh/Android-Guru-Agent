@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -95,9 +96,10 @@ import kotlin.math.sin
  * 单页拆成两个独立实验室（顶部切换）：
  *  - **夜间模式**：强制深色主题 —— 近黑基底 + 霓虹光斑，验证玻璃在
  *    暗环境下的"发光材质"表现（HazeTint 提亮 + 主色浸染）；
- *  - **白天模式**：强制浅色主题 —— 白霜玻璃 + 柔光细网，且**更精致**：
- *    三段天空渐变底、20dp 发丝级细网格、三枚低饱和粉彩光斑、
- *    对角柔光带扫掠，并附带「日间精修」独有小节（强调色浸染速览）。
+ *  - **白天模式**：强制浅色主题 —— 白霜玻璃 v3：三段天空渐变压入冷灰
+ *    深色衬底、暗线+亮线的浮雕细网、明暗成对柔光带、加深 tint 光斑 ——
+ *    玻璃靠「透射与明暗差」立质感，不靠灰边硬描。
+ *    并附带「日间精修」独有小节（强调色浸染速览）。
  *
  * 两个实验室各自包裹独立 [ApexTheme]，与系统深浅色设置互不影响 ——
  * 同一设备上并排验证玻璃材质的 Light / Dark 双态表现。
@@ -198,10 +200,14 @@ private fun GlassLabContent(mode: GlassLabMode) {
             colors = listOf(scheme.surfaceContainerLowest, scheme.background)
         )
     } else {
+        // 白天 v3：底部压入冷灰深色衬底 —— 玻璃是透射材质，纯白页底上
+        // 白霜玻璃没有可透的层次（被批「像磨砂塑料片」）；底部压暗后
+        // 下半页玻璃卡有了明度参照，霜面/边缘/光带都能被读到
         Brush.verticalGradient(
             0f to Color.White,
-            0.55f to scheme.background,
-            1f to scheme.primaryContainer.copy(alpha = 0.35f)
+            0.45f to scheme.background,
+            0.80f to scheme.surfaceContainerLow.copy(alpha = 0.55f),
+            1f to scheme.primaryContainer.copy(alpha = 0.40f)
         )
     }
 
@@ -247,8 +253,8 @@ private fun LabHeader(mode: GlassLabMode) {
         "夜间实验室：近黑基底上的发光玻璃 —— HazeTint 提亮 + 主色浸染，" +
             "霓虹光斑验证实时采样。终端与页面背景本身不是玻璃，不做冒充。"
     } else {
-        "白天实验室：白基底上的乳白霜面玻璃 —— 更精致的发丝细网、三枚粉彩光斑与" +
-            "对角柔光带。边缘转向冷灰以在白底上可见，材质克制不刷屏。"
+        "白天实验室：白基底上的乳白霜面玻璃 —— 冷灰衬底 + 浮雕细网 + 明暗成对光带，" +
+            "玻璃靠透射与明暗差立质感，不靠灰边硬描。"
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -444,8 +450,10 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
  *
  * 夜间 / 白天两套配方：
  *  - 夜间：surfaceVariant→background 深渐变 + 24dp 网格（0.35 线透明度）；
- *  - 白天（更精致）：白→背景→薄荷 tint 三段天空渐变 + 20dp 发丝细网
- *    （0.22 线透明度、亚像素描边）+ 对角柔光带 —— 白底玻璃的精细光影。
+ *  - 白天（v3 精修）：白→背景→冷灰衬底→薄荷 tint 四段天空渐变
+ *    （0.80 处压入深色衬底段，白霜玻璃压过才有透射对比）+
+ *    20dp 浮雕细网（暗线 0.30 + 白色偏移亮线成对，白底上清晰可读）+
+ *    明暗成对柔光带（投影带压衬度、受光带才可读）。
  */
 @Composable
 private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
@@ -473,11 +481,14 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
                 )
             )
         } else {
-            // 白天三段天空渐变：白 → 背景灰 → 薄荷 tint，柔和而有层次
+            // 白天天空渐变 v3：白 → 背景灰 → 冷灰衬底 → 薄荷 tint。
+            // 0.80 深色衬底段是关键新增：验证区底部有「深色可透」，
+            // 白霜玻璃压上去才有明度差（原三段全浅色，玻璃毫无透射对比）
             drawRect(
                 brush = Brush.verticalGradient(
                     0f to Color.White,
-                    0.6f to scheme.background,
+                    0.55f to scheme.background,
+                    0.80f to scheme.surfaceContainerHigh.copy(alpha = 0.75f),
                     1f to scheme.primaryContainer.copy(alpha = 0.45f),
                     startY = 0f,
                     endY = size.height
@@ -486,11 +497,15 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
         }
 
         // 2. 细网格 —— 模糊真伪一照便知
-        //    夜间 24dp 常规网格；白天 20dp 发丝级细网（更细更淡更精致）
+        //    夜间 24dp 常规网格；白天 20dp 浮雕细网：暗线 + 白色偏移亮线成对。
+        //    原 0.22 alpha / 0.8px 亚像素单色细线在白底上读不出（被批「发丝
+        //    细网格读不出玻璃质感」）；改成「暗线压色 + 亮线偏移 1.2px」的
+        //    浮雕对 —— 网格清晰可辨，且像刻在玻璃下的压花而非印上去的线
         val cell = (if (mode == GlassLabMode.NIGHT) 24.dp else 20.dp).toPx()
-        val gridAlpha = if (mode == GlassLabMode.NIGHT) 0.35f else 0.22f
+        val gridAlpha = if (mode == GlassLabMode.NIGHT) 0.35f else 0.30f
         val gridColor = scheme.onSurfaceVariant.copy(alpha = gridAlpha)
-        val gridStroke = if (mode == GlassLabMode.NIGHT) 1f else 0.8f
+        val gridStroke = 1f
+        val isDay = mode == GlassLabMode.DAY
         var gx = cell
         while (gx < size.width) {
             drawLine(
@@ -499,6 +514,15 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
                 end = Offset(x = gx, y = size.height),
                 strokeWidth = gridStroke
             )
+            if (isDay) {
+                // 白天浮雕亮线：向右下偏移的白色高光线，与暗线成对
+                drawLine(
+                    color = Color.White.copy(alpha = 0.55f),
+                    start = Offset(x = gx + 1.2f, y = 0f),
+                    end = Offset(x = gx + 1.2f, y = size.height),
+                    strokeWidth = 1f
+                )
+            }
             gx += cell
         }
         var gy = cell
@@ -509,22 +533,48 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
                 end = Offset(x = size.width, y = gy),
                 strokeWidth = gridStroke
             )
+            if (isDay) {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.55f),
+                    start = Offset(x = 0f, y = gy + 1.2f),
+                    end = Offset(x = size.width, y = gy + 1.2f),
+                    strokeWidth = 1f
+                )
+            }
             gy += cell
         }
 
-        // 3. 白天专属：对角柔光带 —— 一道斜向日光扫过采样面
+        // 3. 白天专属：明暗成对柔光带 —— 一道投影压衬度 + 一道受光带。
+        //    白底上纯白光带不可见（白上白，被批「白做动画」）：
+        //    先用低 alpha onSurface 投影带压出暗部衬底，白色受光带才有
+        //    「被照亮」可读 —— 光影必须成对出现，这是白天光影的基本法
         if (mode == GlassLabMode.DAY) {
-            val sweepWidth = size.width * 0.30f
-            val sweepCenterX = size.width * 0.62f
-            rotate(
-                degrees = 16f,
-                pivot = Offset(size.width / 2f, size.height / 2f)
-            ) {
+            val pivot = Offset(size.width / 2f, size.height / 2f)
+            rotate(degrees = 16f, pivot = pivot) {
+                // 投影带：onSurface 低 alpha —— 白底上的「衬底暗部」
+                val shadeWidth = size.width * 0.16f
+                val shadeCenterX = size.width * 0.30f
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            scheme.onSurface.copy(alpha = 0f),
+                            scheme.onSurface.copy(alpha = 0.07f),
+                            scheme.onSurface.copy(alpha = 0f)
+                        ),
+                        startX = shadeCenterX - shadeWidth,
+                        endX = shadeCenterX + shadeWidth
+                    ),
+                    topLeft = Offset(shadeCenterX - shadeWidth, -size.height * 0.25f),
+                    size = Size(shadeWidth * 2f, size.height * 1.5f)
+                )
+                // 受光带：白色高光 —— 在投影衬度上才读得出，alpha 提到 0.55
+                val sweepWidth = size.width * 0.30f
+                val sweepCenterX = size.width * 0.62f
                 drawRect(
                     brush = Brush.horizontalGradient(
                         colors = listOf(
                             Color.White.copy(alpha = 0f),
-                            Color.White.copy(alpha = 0.30f),
+                            Color.White.copy(alpha = 0.55f),
                             Color.White.copy(alpha = 0f)
                         ),
                         startX = sweepCenterX - sweepWidth,
@@ -558,7 +608,7 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
  * 性能：每帧仅 2-3 个 drawCircle（静态内容已剥离至 [StaticBackdropCanvas]）。
  *
  * 夜间：双霓虹光斑（primary / tertiary，0.18）；
- * 白天：三枚低饱和粉彩光斑（primary / secondary / tertiary，0.10-0.14）+ 更慢速漂移。
+ * 白天：三枚加深 tint 光斑（向 onSurface 混 30%，径向软边 0.16-0.22）+ 更慢速漂移。
  */
 @Composable
 private fun GlowCanvas(modifier: Modifier, mode: GlassLabMode) {
@@ -614,33 +664,59 @@ private fun GlowCanvas(modifier: Modifier, mode: GlassLabMode) {
                 )
             )
         } else {
-            // 三枚粉彩光斑 —— 薄荷 / 琥珀 / 品红，低饱和漫射
+            // 三枚光斑 v3：加深 tint + 径向渐变软边 —— 原低饱和粉彩纯色圆
+            // （0.10-0.14）在白底上进退两难：调饱和显脏、调低不可见。
+            // 解法是动「明度」而不是 alpha：向 onSurface 加深 30%，
+            // 低 alpha 也能与白底拉开明度差，且径向软边更像「光斑」
+            // 而非色块，白底上干净可读
             val angleA = phaseA * 2f * PI.toFloat()
             val angleB = phaseB * 2f * PI.toFloat() + 2.1f
             val angleC = phaseC * 2f * PI.toFloat() + 4.2f
-            drawCircle(
-                color = scheme.primary.copy(alpha = 0.14f),
-                radius = 130.dp.toPx(),
-                center = Offset(
-                    x = size.width * (0.5f + 0.32f * sin(angleA)),
-                    y = size.height * (0.40f + 0.26f * cos(angleA))
-                )
+            val blobPrimary = lerp(scheme.primary, scheme.onSurface, 0.30f)
+            val blobSecondary = lerp(scheme.secondary, scheme.onSurface, 0.30f)
+            val blobTertiary = lerp(scheme.tertiary, scheme.onSurface, 0.30f)
+
+            val centerA = Offset(
+                x = size.width * (0.5f + 0.32f * sin(angleA)),
+                y = size.height * (0.40f + 0.26f * cos(angleA))
             )
+            val radiusA = 130.dp.toPx()
             drawCircle(
-                color = scheme.secondary.copy(alpha = 0.12f),
-                radius = 100.dp.toPx(),
-                center = Offset(
-                    x = size.width * (0.5f + 0.36f * cos(angleB)),
-                    y = size.height * (0.58f + 0.28f * sin(angleB))
-                )
+                brush = Brush.radialGradient(
+                    colors = listOf(blobPrimary.copy(alpha = 0.22f), Color.Transparent),
+                    center = centerA,
+                    radius = radiusA
+                ),
+                radius = radiusA,
+                center = centerA
             )
+            val centerB = Offset(
+                x = size.width * (0.5f + 0.36f * cos(angleB)),
+                y = size.height * (0.58f + 0.28f * sin(angleB))
+            )
+            val radiusB = 100.dp.toPx()
             drawCircle(
-                color = scheme.tertiary.copy(alpha = 0.10f),
-                radius = 90.dp.toPx(),
-                center = Offset(
-                    x = size.width * (0.5f + 0.30f * sin(angleC + 1.3f)),
-                    y = size.height * (0.50f + 0.32f * cos(angleC))
-                )
+                brush = Brush.radialGradient(
+                    colors = listOf(blobSecondary.copy(alpha = 0.19f), Color.Transparent),
+                    center = centerB,
+                    radius = radiusB
+                ),
+                radius = radiusB,
+                center = centerB
+            )
+            val centerC = Offset(
+                x = size.width * (0.5f + 0.30f * sin(angleC + 1.3f)),
+                y = size.height * (0.50f + 0.32f * cos(angleC))
+            )
+            val radiusC = 90.dp.toPx()
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(blobTertiary.copy(alpha = 0.16f), Color.Transparent),
+                    center = centerC,
+                    radius = radiusC
+                ),
+                radius = radiusC,
+                center = centerC
             )
         }
     }

@@ -212,7 +212,12 @@ fun CodeScreen(
         }
 
         state.error?.let { err ->
-            ErrorBar(message = err, onDismiss = viewModel::dismissError)
+            // #209：运行失败类错误（errorRetriable）提供一键重试；运行中不重复触发。
+            ErrorBar(
+                message = err,
+                onRetry = if (state.errorRetriable && !state.isRunning) viewModel::retryLastRun else null,
+                onDismiss = viewModel::dismissError
+            )
         }
 
         // ═══ #197 模式 + 思考档位选择器行（Build/Plan 双档 + 七档思考）═══
@@ -793,7 +798,11 @@ private fun ApiMissingFloatingNotice(
 // ═══ 对话框 ═══
 
 @Composable
-private fun ErrorBar(message: String, onDismiss: () -> Unit) {
+private fun ErrorBar(
+    message: String,
+    onRetry: (() -> Unit)?,
+    onDismiss: () -> Unit
+) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth()
@@ -817,6 +826,13 @@ private fun ErrorBar(message: String, onDismiss: () -> Unit) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
+            // #209：可恢复错误提供「重试」（复用错误条既有 action 按钮模式；
+            // 文案复用 chat_retry，与 Agent 屏 RetryChip 同词）。
+            if (onRetry != null) {
+                TextButton(onClick = onRetry) {
+                    Text(stringResource(R.string.chat_retry))
+                }
+            }
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.code_dismiss))
             }

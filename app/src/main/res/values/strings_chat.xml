@@ -142,8 +142,8 @@
     <string name="chat_effort_medium">Medium</string>
     <string name="chat_effort_high">High</string>
     <string name="chat_effort_max">Max</string>
-    <!-- v1.2 七级思考：新深度档描述（= ThinkingProfile.uiDescriptionEn 要点版，含执行策略差异） -->
-    <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionEn，含执行策略差异） -->
+    <!-- v1.2 seven-level thinking: new depth-tier descriptions (= condensed ThinkingProfile.uiDescriptionEn, incl. execution strategy differences) -->
+    <!-- #168 six-level thinking: tier profile descriptions (= ThinkingProfile.uiDescriptionEn, incl. execution strategy differences) -->
     <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
     <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>
     <string name="thinking_level_standard_desc">Standard 3-step Chain-of-Thought: decompose, reason, execute and observe</string>
@@ -209,7 +209,7 @@
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
-    <!-- #168 CUSTOM 模式预设 chip（顶栏当前预设名） -->
+    <!-- #168 CUSTOM mode preset chip (top bar current preset name) -->
     <string name="chat_mode_preset_cd">Custom mode preset: %1$s. Tap to edit</string>
     <string name="chat_role_selector_cd">Agent role: %1$s. Tap to switch</string>
     <string name="chat_role_builtin_cd">Built-in role</string>
@@ -226,6 +226,7 @@
     <string name="chat_history_title">Chat history (%1$d)</string>
     <string name="chat_clear_all">Clear all</string>
     <string name="chat_history_hint">Sessions auto-archive; tap to restore into the current chat with context intact</string>
+    <string name="chat_history_archived_notice">History limit reached — oldest session “%1$s” moved to the archive area (data preserved, not deleted)</string>
     <string name="chat_history_empty">No history yet\nYour first message will be archived automatically</string>
     <string name="chat_delete_session_title">Delete session</string>
     <string name="chat_delete_session_text">Delete “%1$s”?\n\nThe messages of this session will be removed. This cannot be undone.</string>
@@ -246,7 +247,7 @@
     <string name="chat_setup_title">Set up your AI brain</string>
     <string name="chat_setup_subtitle">Connect a model in 3 minutes and the agent can start thinking</string>
     <string name="chat_setup_body">No usable model endpoint yet. Add a provider and an API key to start chatting, running tools and long tasks.</string>
-    <!-- #197 模型 API 未配置浮窗（发送拦截时弹出） -->
+    <!-- #197 model API not configured banner (shown when a send is intercepted) -->
     <string name="chat_api_missing_title">Model API not configured</string>
     <string name="chat_api_missing_body">You have not configured a model API yet — messages cannot be sent. Go to Settings to add a provider and API key first.</string>
     <string name="chat_go_setup">Set up now</string>
@@ -280,6 +281,11 @@
     <string name="chat_tool_step_failed">Failed (%1$dms): %2$s</string>
     <string name="chat_aborted">⏹ Aborted</string>
 
+    <!-- ═══ #214/#215 user-input timeout honesty (engine continues as undecided) ═══ -->
+    <string name="chat_user_input_expired">⏱ No answer within 5 minutes — the question was closed and the agent continued. Ask again anytime.</string>
+    <string name="chat_user_input_late">⚠️ This question already timed out; your answer arrived too late and was not delivered. Please send it as a new message.</string>
+    <string name="chat_question_expired">⏱ Confirmation timed out (5 min) with no answer — treated as undecided: nothing was executed and you will be asked again next time.</string>
+
     <!-- ═══ SlashMenuProvider (slash menu groups) ═══ -->
     <string name="chat_slash_no_skills">No active skills</string>
     <string name="chat_slash_mcp_servers">MCP servers</string>
@@ -312,7 +318,7 @@
     <string name="chat_cd_attach_close">Close</string>
     <string name="chat_cd_attach_add">Add attachment</string>
 
-    <!-- ═══ 双级思考控制（模型原生强度 + 强制深度思考）═══ -->
+    <!-- ═══ Two-level thinking control (model native intensity + forced deep thinking) ═══ -->
     <string name="chat_cd_thinking_menu">Thinking controls</string>
     <string name="chat_thinking_chip_default">💭 Thinking</string>
     <string name="chat_thinking_chip_effort">💭 %1$s</string>
@@ -328,7 +334,7 @@
     <string name="html_preview_close">Close preview</string>
     <string name="html_preview_load_failed">Failed to load file</string>
 
-    <!-- ═══ v1.4.4 #5：会话操作补全 —— 搜索/置顶/重命名/导出导入/分享接收 ═══ -->
+    <!-- ═══ v1.4.4 #5: session actions completion — search/pin/rename/export-import/share intake ═══ -->
     <string name="chat_session_search_hint">Search title &amp; message content</string>
     <string name="chat_session_search_empty">No sessions match your search</string>
     <string name="chat_session_pinned_group">Pinned</string>

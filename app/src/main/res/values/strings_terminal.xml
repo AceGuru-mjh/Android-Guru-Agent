@@ -108,6 +108,9 @@
     <string name="term_open_link">Open link</string>
     <string name="term_copy_link">Copy link</string>
 
+    <string name="term_copy_done">Copied %1$d characters</string>
+    <string name="term_clipboard_empty">Clipboard is empty — nothing to paste</string>
+
     <!-- ═══ ViewModel notices (LanguageManager.getString) ═══ -->
     <string name="term_notice_ubuntu_unavailable">Ubuntu environment unavailable: %1$s</string>
     <string name="term_notice_create_failed">Session creation failed: %1$s</string>

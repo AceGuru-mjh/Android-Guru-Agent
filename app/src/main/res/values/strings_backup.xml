@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 备份 / 恢复区英文文案（Task 5-c：设置 + 聊天会话 + Vault 加密信封导出导入）。
-     中文在 values-zh/strings_backup.xml；语言切换经 LanguageManager +
-     MainActivity attachBaseContext/recreate 生效。 -->
+<!-- English copy for the backup / restore section (Task 5-c: settings + chat sessions + Vault encrypted envelope export/import).
+     Chinese lives in values-zh/strings_backup.xml; language switching goes through LanguageManager +
+     MainActivity attachBaseContext/recreate. -->
 <resources>
-    <!-- ═══ 区块说明卡（含什么 / 永不包含什么）═══ -->
+    <!-- ═══ Section explainer cards (what it includes / what it never includes) ═══ -->
     <string name="backup_section_title">Backup &amp; Restore</string>
     <string name="backup_section_desc">Export your setup and chat history to a JSON file, then restore it on a new device. The file is written to a location you pick.</string>
     <string name="backup_security_included">Includes: model profiles, providers, role mappings, agent settings and chat history.</string>
     <string name="backup_security_never">Never included in plain text: API keys and vault secrets. Provider API keys are stripped on export and must be re-entered after restore.</string>
     <string name="backup_vault_envelope_note">The vault can be exported only as an AES-GCM encrypted envelope locked by your passphrase.</string>
 
-    <!-- ═══ 导出区 ═══ -->
+    <!-- ═══ Export section ═══ -->
     <string name="backup_export_title">Export</string>
     <string name="backup_include_sessions">Include chat history</string>
     <string name="backup_include_sessions_desc">Recent sessions with full messages (storage keeps the latest 100)</string>
@@ -25,7 +25,7 @@
     <string name="backup_export_button">Export backup</string>
     <string name="backup_exporting">Exporting…</string>
 
-    <!-- ═══ 导入区 ═══ -->
+    <!-- ═══ Import section ═══ -->
     <string name="backup_import_title">Import</string>
     <string name="backup_import_desc">Pick a backup .json file to review its contents and choose what to restore.</string>
     <string name="backup_import_button">Choose backup file</string>
@@ -33,7 +33,7 @@
     <string name="backup_import_read_failed">Could not read the selected file</string>
     <string name="backup_import_invalid_file">Not a valid backup file</string>
 
-    <!-- ═══ 导入确认对话框（只读预览 + 恢复范围）═══ -->
+    <!-- ═══ Import confirmation dialog (read-only preview + restore scope) ═══ -->
     <string name="backup_preview_title">Restore backup</string>
     <string name="backup_preview_version_fmt">Format version: %1$d</string>
     <string name="backup_preview_created_fmt">Created: %1$s</string>
@@ -52,7 +52,7 @@
     <string name="backup_dialog_confirm">Restore</string>
     <string name="backup_dialog_cancel">Cancel</string>
 
-    <!-- ═══ 结果反馈（成功 / 失败 / 部分成功）═══ -->
+    <!-- ═══ Result feedback (success / failure / partial success) ═══ -->
     <string name="backup_export_success">Backup exported</string>
     <string name="backup_export_failed_fmt">Export failed: %1$s</string>
     <string name="backup_result_settings_ok">Settings restored</string>

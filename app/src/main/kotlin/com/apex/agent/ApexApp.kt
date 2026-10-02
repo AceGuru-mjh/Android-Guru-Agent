@@ -14,6 +14,8 @@ import com.apex.agent.platform.EnvironmentStateUpdater
 import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.dream.DreamRenderer
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
+import com.apex.agent.platform.privilege.PrivilegeDetector
+import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
 import coil.ImageLoader
@@ -84,6 +86,10 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
     /** #6 网络监测：ConnectivityManager 仲裁式状态源（离线横幅/后续重试策略共用）。 */
     @Inject
     lateinit var networkMonitor: NetworkMonitor
+
+    /** #210/#212：特权状态真源 —— Shizuku 回调里调 refreshStatus() 回灌 StateFlow。 */
+    @Inject
+    lateinit var privilegeManager: PrivilegeManager
 
     /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -276,6 +282,8 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     message = "Shizuku binder received — service is available",
                     tags = arrayOf("shizuku")
                 )
+                // #212：不再只打日志 —— binder 到达即回灌权限状态 + 失效选路缓存
+                onShizukuAvailabilityChanged()
             }
 
             // 监听Shizuku binder死亡（服务停止时触发）
@@ -288,6 +296,8 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     message = "Shizuku binder dead — service is no longer available",
                     tags = arrayOf("shizuku")
                 )
+                // #212：服务停止后 30s 缓存/旧 StateFlow 不再拖住下游选路
+                onShizukuAvailabilityChanged()
             }
 
             // 监听权限授予结果
@@ -300,6 +310,8 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     message = "Shizuku permission result: requestCode=$requestCode grantResult=$grantResult",
                     tags = arrayOf("shizuku", "permission")
                 )
+                // #212：授权弹窗关闭（无论授予/拒绝）立即重探，权限页与执行链同步
+                onShizukuAvailabilityChanged()
             }
 
             Log.i("ApexAgent", "Shizuku listeners registered")
@@ -319,6 +331,23 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                 message = "Shizuku not available on this device: ${e.message}",
                 tags = arrayOf("shizuku")
             )
+        }
+    }
+
+    /**
+     * #212：Shizuku binder 生命周期 / 授权结果变化时的统一反应。
+     * 1. PrivilegeDetector 的 30s 级别缓存立即失效 —— 终端 ShellStreamSource、
+     *    persistence、shell_execute 工具的通道选择不再按旧状态跑满 TTL；
+     * 2. DefaultPrivilegeManager.refreshStatus() 全量重探并回灌 StateFlow ——
+     *    executeShell / executeUiAction / 权限页 / 环境遥测即时感知。
+     *    DefaultPrivilegeManager 自身也注册了 binder 监听（同步直写流），
+     *    这里是双保险 + 缓存失效的 app 层入口。
+     */
+    private fun onShizukuAvailabilityChanged() {
+        PrivilegeDetector.invalidateCache()
+        appScope.launch {
+            runCatching { privilegeManager.refreshStatus() }
+                .onFailure { Log.w("ApexAgent", "refresh privilege status failed: ${it.message}") }
         }
     }
 }

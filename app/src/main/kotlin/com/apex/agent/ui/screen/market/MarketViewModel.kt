@@ -271,6 +271,10 @@ class MarketViewModel @Inject constructor(
     val hub: MarketHubController,
     // mcp.so 社区目录（MCP 页签长尾源）——同构独立状态域
     val mcpSo: MarketMcpSoController,
+    // MCP Registry 目录（官方 Registry + PulseMCP 源切换）——同构独立状态域
+    val registry: MarketRegistryController,
+    // Operit 社区插件（GitHub 聚合，MCP 形态探测安装）——同构独立状态域
+    val operit: MarketOperitController,
     // 语言切换：VM 侧消息（snackbar）按当前语言取词
     internal val languageManager: LanguageManager,
     // ── v2 认知市场：注入 cs-mem + 工具分析四件套（均为 @Singleton）──
@@ -319,6 +323,14 @@ class MarketViewModel @Inject constructor(
             .onEach { refresh() }
             .launchIn(viewModelScope)
         mcpSo.refreshMarket
+            .onEach { refresh() }
+            .launchIn(viewModelScope)
+        // Registry 目录（官方 Registry / PulseMCP）与 Operit 社区插件安装完成
+        // → 同口径刷新市场快照（已装徽标 / 已配置列表联动）。
+        registry.refreshMarket
+            .onEach { refresh() }
+            .launchIn(viewModelScope)
+        operit.refreshMarket
             .onEach { refresh() }
             .launchIn(viewModelScope)
         // P1 修复：接入安装确认门禁（市场内容不可信 → 干运行预览 → 用户目检

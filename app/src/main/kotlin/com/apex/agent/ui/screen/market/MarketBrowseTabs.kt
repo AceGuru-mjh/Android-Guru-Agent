@@ -687,6 +687,15 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
     val mcpSoState by viewModel.mcpSo.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { viewModel.mcpSo.loadFirst() }
 
+    // MCP Registry 目录（官方 Registry / PulseMCP 源切换 + 服务端搜索）
+    val registryState by viewModel.registry.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.registry.loadFirst() }
+    var showPulseCredentials by remember { mutableStateOf(false) }
+
+    // Operit 社区插件（GitHub 聚合，MCP 形态探测安装）
+    val operitState by viewModel.operit.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.operit.loadFirst() }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -741,6 +750,68 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
         }
         items(hubMcps, key = { "hub-" + it.name }) { entry ->
             HubMcpCatalogCard(entry, state, hubState, viewModel)
+        }
+        // ═══ MCP Registry 目录（官方 9000+ / PulseMCP —— 远端直装 + npm 沙箱预装）═══
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                MarketSectionTitle(stringResource(R.string.market_registry_header))
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+        item {
+            RegistrySourceToggleRow(
+                state = registryState,
+                onRetry = { viewModel.registry.retry() },
+                onSelectSource = { viewModel.registry.selectSource(it) },
+                onQueryChange = { viewModel.registry.updateQuery(it) },
+                onSearch = { viewModel.registry.search() },
+                onBackToBrowse = { viewModel.registry.backToBrowse() },
+                onOpenCredentials = { showPulseCredentials = true }
+            )
+        }
+        registryState.error?.let { error ->
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        stringResource(R.string.market_load_failed_with_reason, error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    TextButton(
+                        onClick = { viewModel.registry.retry() },
+                        enabled = !registryState.loading
+                    ) { Text(stringResource(R.string.market_action_retry)) }
+                }
+            }
+        }
+        if (registryState.loading && registryState.servers.isEmpty()) {
+            item { MarketHint(stringResource(R.string.market_registry_loading)) }
+        }
+        items(registryState.servers, key = { it.key }) { entry ->
+            RegistryServerCard(
+                entry = entry,
+                installed = state.mcps.any { it.name == entry.configName },
+                installing = registryState.installingKey == entry.key,
+                installBusy = registryState.installingKey != null,
+                onInstall = { viewModel.registry.installServer(entry) }
+            )
+        }
+        item {
+            McpSoLoadMoreRow(
+                loadingMore = registryState.loadingMore,
+                hasMore = registryState.nextCursor != null,
+                enabled = registryState.servers.isNotEmpty(),
+                onLoadMore = { viewModel.registry.loadMore() }
+            )
         }
         // ═══ mcp.so 社区目录（安装 → 配置 → 启动同一闭环，社区长尾源）═══
         item {
@@ -801,6 +872,59 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                 hasMore = mcpSoState.hasMore,
                 enabled = mcpSoState.servers.isNotEmpty(),
                 onLoadMore = { viewModel.mcpSo.loadMore() }
+            )
+        }
+        // ═══ Operit 社区插件（GitHub 聚合 —— MCP 形态探测安装 / 浏览器打开）═══
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                MarketSectionTitle(stringResource(R.string.market_registry_operit_header))
+                Spacer(modifier = Modifier.weight(1f))
+                TextButton(
+                    onClick = { viewModel.operit.loadFirst(force = true) },
+                    enabled = !operitState.loading
+                ) {
+                    Text(
+                        if (operitState.loading) stringResource(R.string.market_loading)
+                        else stringResource(R.string.market_action_refresh),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+        operitState.error?.let { error ->
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        stringResource(R.string.market_load_failed_with_reason, error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    TextButton(
+                        onClick = { viewModel.operit.loadFirst(force = true) },
+                        enabled = !operitState.loading
+                    ) { Text(stringResource(R.string.market_action_retry)) }
+                }
+            }
+        }
+        if (operitState.loading && operitState.plugins.isEmpty()) {
+            item { MarketHint(stringResource(R.string.market_registry_operit_loading)) }
+        }
+        items(operitState.plugins, key = { it.key }) { entry ->
+            OperitPluginCard(
+                entry = entry,
+                installed = state.mcps.any { it.name == entry.configName },
+                installing = operitState.installingKey == entry.key,
+                installBusy = operitState.installingKey != null,
+                onInstall = { viewModel.operit.installPlugin(entry) }
             )
         }
         // ═══ 当前工位已配置服务器（配置 / 启动 / 停止 —— 市场内完成）═══
@@ -910,6 +1034,22 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
                 viewModel.importMcpConfig(json)
                 showImportDialog = false
             }
+        )
+    }
+    // MCP Registry 目录：PulseMCP 合作凭据对话框（保存后立即切源加载）。
+    if (showPulseCredentials) {
+        PulseCredentialsDialog(
+            apiKeyDraft = registryState.pulseApiKeyDraft,
+            tenantIdDraft = registryState.pulseTenantIdDraft,
+            configured = registryState.pulseCredentialsSet,
+            onApiKeyChange = { viewModel.registry.updatePulseApiKeyDraft(it) },
+            onTenantIdChange = { viewModel.registry.updatePulseTenantIdDraft(it) },
+            onSave = {
+                showPulseCredentials = false
+                viewModel.registry.savePulseCredentials()
+            },
+            onClear = { viewModel.registry.clearPulseCredentials() },
+            onDismiss = { showPulseCredentials = false }
         )
     }
     // #205 目录条目的环境变量弹窗（密钥引导表单）。

@@ -59,6 +59,9 @@ object SkillModule {
         )
         // Issue #166：首启（及每次进程启动）幂等释放 assets/skills/ 内置优质技能集。
         // 注册表单例构造即触发，主控无需在别处再调用（接线契约见 releaseBundledSkills KDoc）。
+        // Hub v2：随包技能已全部迁官方仓库（apex-skill-hub，67 技能按需安装），
+        // assets/skills 不再打包 —— 本释放管线仍保留：热更技能重放 + pruneStaleBundled
+        // 反向清理旧 APK 释放过的内置残留（升级用户自动迁移到仓库按需安装模式）。
         releaseBundledSkills(context, registry)
         return registry
     }
@@ -66,6 +69,11 @@ object SkillModule {
     /**
      * Issue #166：把 APK assets/skills/ 下打包的内置技能 manifest 释放到
      * `<filesDir>/skills/`（SkillRegistry 的安装目录）。
+     *
+     * Hub v2（docs/hub-ecosystem.md）：随包技能已全部迁官方仓库
+     * （apex-skill-hub），assets/skills 不再打包 —— 空集是合法状态：
+     * 安装零副作用，pruneStaleBundled 空白名单会把旧 APK 释放过的内置
+     * 技能全部四清（升级用户改从市场按需安装），热更通道不受影响。
      *
      * v1.4.7 热更通道接入（docs/hot-update-pipeline.md）：
      * - **热更技能重放**：`filesDir/hot/active` 里生效中的热更技能清单

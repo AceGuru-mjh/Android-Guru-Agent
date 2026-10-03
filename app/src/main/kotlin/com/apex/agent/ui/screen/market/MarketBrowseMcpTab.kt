@@ -325,27 +325,31 @@ internal fun BrowseMcpTab(state: MarketUiState, viewModel: MarketViewModel) {
             McpHostSection()
         }
         // #205 精选目录：头部（分类 chips）+ 每条目一个 item（懒加载友好）。
-        item {
-            McpCatalogHeader(state, viewModel)
-        }
+        // Hub v2：随包目录已退役（整体迁官方 MCP 仓库）—— 无可见条目时
+        // 整段隐藏（头部 + 条目）；热更 overlay 或未来重新随包分发即自动恢复。
         // 注意：LazyListScope 作用域不是 @Composable —— 这里不能用 remember；
         // visibleCatalog 是廉价内存过滤，直接调用即可。
         val catalogEntries = viewModel.visibleCatalog(state)
-        items(
-            catalogEntries,
-            key = { "catalog-${it.id}" }
-        ) { entry ->
-            McpCatalogEntryCard(
-                entry = entry,
-                installed = viewModel.isCatalogEntryInstalled(entry),
-                onInstall = {
-                    if (entry.envSchema.isNotEmpty()) {
-                        viewModel.openCatalogEnvDialog(entry)
-                    } else {
-                        viewModel.installCatalogEntry(entry, emptyMap())
+        if (catalogEntries.isNotEmpty()) {
+            item {
+                McpCatalogHeader(state, viewModel)
+            }
+            items(
+                catalogEntries,
+                key = { "catalog-${it.id}" }
+            ) { entry ->
+                McpCatalogEntryCard(
+                    entry = entry,
+                    installed = viewModel.isCatalogEntryInstalled(entry),
+                    onInstall = {
+                        if (entry.envSchema.isNotEmpty()) {
+                            viewModel.openCatalogEnvDialog(entry)
+                        } else {
+                            viewModel.installCatalogEntry(entry, emptyMap())
+                        }
                     }
-                }
-            )
+                )
+            }
         }
         if (state.mcpCatalogError != null) {
             item {

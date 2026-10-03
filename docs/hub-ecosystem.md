@@ -1,12 +1,36 @@
 # Hub 生态：官方技能 / MCP 仓库 × 斜杠门控 × 市场配置启动闭环
 
-> 状态：已落地（v1）
+> 状态：已落地（v2，2026-10 重组）
 > 主题：内置收敛 + 仓库分发 + 使用门控——技能与 MCP 从「全量内置」演进为
-> 「少量必要内置 + 官方仓库按需安装」，市场完成 安装 → 配置 → 启动 全闭环。
+> 「官方仓库按需安装」，市场完成 安装 → 配置 → 启动 全闭环。
 > 前置：[agent-life-skills-and-memory.md](agent-life-skills-and-memory.md)（技能矩阵与渐进披露）
 > · [mcp-sandbox.md](mcp-sandbox.md)（PRoot 沙箱 MCP）
 > 参考：[opencode](https://opencode.ai/docs/skills/) 的远程技能注册表模式
 > （`index.json` 元数据索引 + 按需下载 + 缓存原子更新）。
+
+---
+
+## ⚡ v2 重组（2026-10）：内置归零，全部走仓库
+
+用户反馈「市场技能显示内置、但实际没下载，需要点击安装」+「生活相关技能删除，
+从多个仓库找新技能改名优化入仓，要分类」——v2 把「少量必要内置」也砍掉，
+APK 不再打包任何技能 / 目录资产：
+
+| 项 | v1 | v2 |
+| --- | --- | --- |
+| 随包技能（assets/skills） | 13 核心 + #206 扩到 238 | **0**（全部走仓库；升级用户由 pruneStaleBundled 空白名单四清旧内置残留） |
+| 随包 MCP 目录（assets/mcp_catalog） | 16 分类 / 42 条 | **0**（退役；加载器允许缺失，市场目录段无条目自动隐藏，热更 overlay 通道保留） |
+| apex-skill-hub | 62 生活/通用（AGENT/PRODUCTIVITY 旧词表） | **67 专业/效率**：45 生活类退役、17 保留改分类 + 50 新增（anthropics/skills 12 + obra/superpowers 8 + 宿主迁移 30，全部改名优化），14 域（SkillCategory 24 域词表） |
+| apex-mcp-hub | 8 台 | **50 台 / 15 类**：并入宿主目录 32 台 + 修复 fetch/time 指向不存在 npm 包（@kazuph/mcp-fetch / uvx mcp-server-time）+ 新增 10 台（microsoft-learn/context7-remote/amap/firecrawl/paper-search/mongodb/supabase/duckdb/neon/elasticsearch，包名与端点逐一经 registry/握手验证）；丢弃 2 台 Android 不可用的 docker 形态 |
+| 双仓 CI | 无 | `validate.yml`：索引↔正文交叉校验 / category 词表 / 2MB 红线 / 凭据扫描 + 在线冒烟（npm/PyPI 包存在性 + HTTP initialize 握手 + raw URL 可达性），MCP 仓另有每周例行巡检 |
+| guard-rails（本仓） | check_mcp_catalog.py 要求目录非空 | 目录缺失/为空 = 合法退役态（通过）；条目校验对热更 fixture / 未来重新随包分发保持生效 |
+
+App 侧改动面（本 commit）：删 `app/src/main/assets/skills/`（238 文件）与
+`app/src/main/assets/mcp_catalog/`（16 文件）；`SkillModule` 注释更新（释放管线
+保留用于热更重放 + 旧内置四清）；`MarketViewModelMcpCatalog` 去掉「目录资产缺失」
+require；`MarketBrowseMcpTab` 精选目录段空集守卫。**零 schema 变更**——
+HubSource 解析本来就 `ignoreUnknownKeys`，hub 新增的 `category`/`envSchema`/
+`homepage` 字段向前兼容。
 
 ---
 
@@ -15,7 +39,7 @@
 内置瘦身到「必要最小集」，其余技能 / MCP 服务器全部放进两个 GitHub 仓库
 （`apex-skill-hub` / `apex-mcp-hub`），市场直连安装；聊天斜杠菜单只放行
 「已安装且已启用」的技能与「已安装且正在运行」的 MCP；MCP 的配置 / 启动 /
-停止全部收敛进市场页。
+停止全部收敛进市场页。v2 起「必要最小集」也归零——**一切技能与目录皆仓库按需下载**。
 
 ## 1. 用户反馈与根因
 

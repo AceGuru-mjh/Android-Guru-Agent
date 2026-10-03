@@ -82,6 +82,11 @@ internal suspend fun MarketViewModel.finishStartupWithTools(name: String) {
  * #206 加固：跨文件重复 id 与非法条目不进入 [MarketUiState.mcpCatalog]
  * （LazyColumn 的 item key 与安装装配都假定 id 唯一合法——有问题条目
  * 只留在错误提示里，不进渲染列表）。
+ *
+ * Hub v2 迁移（docs/hub-ecosystem.md）：随包精选目录已整体迁往官方
+ * MCP 仓库（apex-mcp-hub），APK 不再打包 assets/mcp_catalog —— 本方法
+ * 允许 assets 目录缺失/为空（零条目零报错，市场精选目录段自动隐藏）；
+ * 热更 overlay 与未来重新随包分发两条连路均不受影响。
  */
 internal fun MarketViewModel.loadMcpCatalog() {
     viewModelScope.launch(Dispatchers.IO) {
@@ -107,11 +112,12 @@ internal fun MarketViewModel.loadMcpCatalog() {
                     )
                 }
             }
-            // 回退：无 overlay，或 overlay 颗粒无收（快照损坏）→ APK assets
+            // 回退：无 overlay，或 overlay 颗粒无收（快照损坏）→ APK assets。
+            // Hub v2：随包目录已退役（迁官方 MCP 仓库），assets 缺失/为空
+            // 不再视为错误 —— 零条目即零渲染，市场目录段自动隐藏。
             if (entries.isEmpty()) {
                 val names = appContext.assets.list("mcp_catalog").orEmpty()
                     .filter { it.endsWith(".json") }.sorted()
-                require(names.isNotEmpty()) { "目录资产缺失（assets/mcp_catalog）" }
                 for (file in names) {
                     val text = appContext.assets.open("mcp_catalog/$file")
                         .bufferedReader().use { it.readText() }

@@ -2,10 +2,15 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # mcp_catalog 市场目录完整性检查（guard-rails · CI: "Market Catalog Integrity"）
 #
-# 纪律依据：assets/mcp_catalog/*.json 是离线精选目录（市场核心卖点），
+# 纪律依据：assets/mcp_catalog/*.json 是离线精选目录，
 # 运行时由 McpServerCatalog.parseCategoryFile 解析 + validateEntries 校验。
 # 坏数据（字段缺失/枚举越界/id 冲突）会直接破坏市场的浏览与安装流 ——
 # 本脚本把运行时校验前移到 CI，坏目录永远到不了 APK。
+#
+# Hub v2（2026-10）：随包精选目录已整体迁往官方 MCP 仓库
+# （AceGuru-mjh/apex-mcp-hub），APK 不再打包 —— 目录缺失/为空是合法的
+# 退役态（通过）；一旦未来重新随包分发或作为热更 fixture 回归，
+# 下列完整性与 v1 相同的条目校验立即重新生效。
 #
 # 检查项（与 McpServerCatalog.validateEntries 的九条规则对齐）：
 #   1. JSON 可解析 + 顶层结构（categories → entries 数组）合法
@@ -72,15 +77,17 @@ def check_entry(entry: dict, file: str, idx: int) -> list[str]:
 
 def main() -> int:
     if not CATALOG.is_dir():
-        print(f"✗ 目录缺失：{CATALOG}")
-        return 1
+        # Hub v2：随包目录已退役（迁官方 MCP 仓库），缺失即合法
+        print("✓ mcp_catalog 已退役（Hub v2 迁官方 MCP 仓库）：目录缺失，跳过")
+        return 0
 
     problems: list[str] = []
     seen_ids: dict[str, str] = {}
     files = sorted(CATALOG.glob("*.json"))
     if not files:
-        print("✗ assets/mcp_catalog 下没有任何 JSON")
-        return 1
+        # Hub v2：空目录同为合法退役态
+        print("✓ mcp_catalog 已退役（Hub v2 迁官方 MCP 仓库）：零分类文件，跳过")
+        return 0
 
     for path in files:
         try:

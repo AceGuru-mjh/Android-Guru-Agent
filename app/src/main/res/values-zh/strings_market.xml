@@ -390,4 +390,27 @@
     <string name="market_mcpso_load_more">加载更多</string>
     <string name="market_mcpso_loading_more">加载中…</string>
     <string name="market_mcpso_fetching_config">正在从 mcp.so 拉取安装配置…</string>
+    <!-- ═══ MCP Registry 目录（官方 Registry + PulseMCP）与 Operit 社区插件 ═══ -->
+    <string name="market_registry_header">MCP Registry 目录 —— 官方 / Pulse 双源</string>
+    <string name="market_registry_source_official">官方 Registry</string>
+    <string name="market_registry_source_pulse">PulseMCP %1$s</string>
+    <string name="market_registry_pulse_credentials">凭据</string>
+    <string name="market_registry_search_hint">搜索 Registry 服务器…</string>
+    <string name="market_registry_search_action">搜索</string>
+    <string name="market_registry_back_to_browse">返回目录</string>
+    <string name="market_registry_loading">正在加载 MCP Registry 目录…</string>
+    <string name="market_registry_kind_remote">远端直装</string>
+    <string name="market_registry_kind_npm">npm · 沙箱预装</string>
+    <string name="market_registry_kind_unsupported">需手动</string>
+    <string name="market_registry_npm_installing">沙箱内真实安装 npm 包中（移动网络下载，最长约 5 分钟）…</string>
+    <string name="market_registry_pulse_credentials_title">PulseMCP 凭据</string>
+    <string name="market_registry_pulse_credentials_hint">PulseMCP 是合作制 API：请向 pulsemcp.com 申请 X-API-Key 与 X-Tenant-ID 后填入（凭据以加密形式存储在本机）。</string>
+    <string name="market_registry_credentials_clear">清除</string>
+    <string name="market_registry_credentials_show">显示密钥</string>
+    <string name="market_registry_credentials_hide">隐藏密钥</string>
+    <string name="market_action_save">保存</string>
+    <string name="market_registry_operit_header">Operit 社区插件 —— GitHub 聚合</string>
+    <string name="market_registry_operit_loading">正在加载 Operit 社区插件…</string>
+    <string name="market_registry_operit_detect_install">探测安装</string>
+    <string name="market_registry_open_repo">浏览器打开仓库</string>
 </resources>

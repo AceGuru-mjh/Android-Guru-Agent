@@ -390,4 +390,27 @@
     <string name="market_mcpso_loading_more">Loading more…</string>
     <string name="market_mcpso_fetching_config">Fetching install config from mcp.so…</string>
     <string name="market_action_done">Done</string>
+    <!-- ═══ MCP Registry directory (official Registry + PulseMCP) & Operit community plugins ═══ -->
+    <string name="market_registry_header">MCP Registry — official &amp; Pulse directories</string>
+    <string name="market_registry_source_official">Official</string>
+    <string name="market_registry_source_pulse">Pulse %1$s</string>
+    <string name="market_registry_pulse_credentials">API keys</string>
+    <string name="market_registry_search_hint">Search registry servers…</string>
+    <string name="market_registry_search_action">Search</string>
+    <string name="market_registry_back_to_browse">Back</string>
+    <string name="market_registry_loading">Loading MCP Registry directory…</string>
+    <string name="market_registry_kind_remote">Remote</string>
+    <string name="market_registry_kind_npm">npm · sandbox</string>
+    <string name="market_registry_kind_unsupported">Manual</string>
+    <string name="market_registry_npm_installing">Pre-installing npm package inside PRoot sandbox (real download, may take up to 5 min)…</string>
+    <string name="market_registry_pulse_credentials_title">PulseMCP credentials</string>
+    <string name="market_registry_pulse_credentials_hint">PulseMCP is a partner API. Request X-API-Key and X-Tenant-ID from pulsemcp.com, then paste them here (stored encrypted on device).</string>
+    <string name="market_registry_credentials_clear">Clear</string>
+    <string name="market_registry_credentials_show">Show API key</string>
+    <string name="market_registry_credentials_hide">Hide API key</string>
+    <string name="market_action_save">Save</string>
+    <string name="market_registry_operit_header">Operit community plugins — GitHub aggregated</string>
+    <string name="market_registry_operit_loading">Loading Operit community plugins…</string>
+    <string name="market_registry_operit_detect_install">Detect &amp; install</string>
+    <string name="market_registry_open_repo">Open repository in browser</string>
 </resources>

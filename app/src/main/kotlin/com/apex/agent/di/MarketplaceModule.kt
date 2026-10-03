@@ -5,13 +5,21 @@ import com.apex.agent.core.tools.marketplace.ClawHubSource
 import com.apex.agent.core.tools.marketplace.HubSource
 import com.apex.agent.core.tools.marketplace.McpSoSource
 import com.apex.agent.core.tools.marketplace.ModelScopeSource
+import com.apex.agent.core.tools.marketplace.OfficialRegistrySource
+import com.apex.agent.core.tools.marketplace.OperitPluginSource
+import com.apex.agent.core.tools.marketplace.PulseMcpSource
 import com.apex.agent.github.GithubTokenManager
+import com.apex.agent.marketplace.PulseMcpCredentialsStore
+import com.apex.agent.marketplace.ProotSandboxCommandRunner
+import com.apex.agent.platform.terminal.proot.PRootCapabilitySource
+import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
+import java.io.File
 import javax.inject.Singleton
 
 @Module
@@ -65,5 +73,74 @@ object MarketplaceModule {
     @Singleton
     fun provideMcpSoSource(httpClient: OkHttpClient): McpSoSource {
         return McpSoSource(httpClient)
+    }
+
+    /**
+     * 官方 MCP Registry 源（registry.modelcontextprotocol.io，9000+
+     * 结构化服务器元数据）：公开只读无需认证；cursor 分页 + 服务端
+     * search。安装决策树（远端直装 / npm 沙箱预装）由
+     * [com.apex.agent.marketplace.RegistryMcpInstaller] 编排。
+     */
+    @Provides
+    @Singleton
+    fun provideOfficialRegistrySource(httpClient: OkHttpClient): OfficialRegistrySource {
+        return OfficialRegistrySource(httpClient)
+    }
+
+    /**
+     * PulseMCP Sub-Registry 源（api.pulsemcp.com）：与官方 Registry 同规格，
+     * 但需 X-API-Key / X-Tenant-ID 合作凭据（凭据经加密存储注入
+     * provider —— 保存/更换后即时生效，与 ModelScope 的 token 模式同构）。
+     */
+    @Provides
+    @Singleton
+    fun providePulseMcpSource(
+        httpClient: OkHttpClient,
+        credentialsStore: PulseMcpCredentialsStore
+    ): PulseMcpSource {
+        // app 层凭据类型 → core 层凭据类型（core 不依赖 app）
+        return PulseMcpSource(httpClient) {
+            credentialsStore.credentials()?.let {
+                PulseMcpSource.PulseCredentials(apiKey = it.apiKey, tenantId = it.tenantId)
+            }
+        }
+    }
+
+    /**
+     * Operit 社区插件源（GitHub 聚合）：topic:operit-plugin 与 operit mcp
+     * 双搜索合并；安装时拉仓库 mcp.json / package.json 探测 MCP 形态。
+     * GitHub token 可选注入提配额（与 ModelScope 同构）。
+     */
+    @Provides
+    @Singleton
+    fun provideOperitPluginSource(
+        httpClient: OkHttpClient,
+        githubTokenManager: GithubTokenManager
+    ): OperitPluginSource {
+        return OperitPluginSource(httpClient, gitHubTokenProvider = { githubTokenManager.getToken() })
+    }
+
+    /**
+     * 市场沙箱命令执行器：npm install/uninstall 等一次性命令进 PRoot
+     * Ubuntu 执行（真实下载落地）。rootfsBaseDir / hostEnvironment 与
+     * McpModule / CodeModule 的接线同款约定（TerminalModule 提供）。
+     */
+    @Provides
+    @Singleton
+    fun provideProotSandboxCommandRunner(
+        @ApplicationContext context: Context,
+        hostEnvironment: PRootHostEnvironment,
+        rootfsBaseDir: File,
+        capabilitySource: PRootCapabilitySource
+    ): ProotSandboxCommandRunner {
+        return ProotSandboxCommandRunner(
+            hostEnv = hostEnvironment.hostEnv(),
+            libprootPath = hostEnvironment.prootBinary.absolutePath,
+            rootfsDir = rootfsBaseDir,
+            isRootfsReady = { File(rootfsBaseDir, "current").exists() },
+            persistentHomeDir = File(context.filesDir, "linux/home"),
+            // T92：argv 能力门（与终端会话/apt/MCP launcher 同款版本自适应）
+            capabilities = capabilitySource::invoke
+        )
     }
 }

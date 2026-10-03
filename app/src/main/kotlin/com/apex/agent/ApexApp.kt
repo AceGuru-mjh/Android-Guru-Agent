@@ -15,7 +15,9 @@ import com.apex.agent.platform.csmem.actor.MemoryWriterActor
 import com.apex.agent.platform.csmem.dream.DreamRenderer
 import com.apex.agent.platform.privilege.PrivilegeDetector
 import com.apex.agent.platform.privilege.PrivilegeManager
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuBootstrapRetryPolicy
 import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuLifecycleCoordinator
+import com.apex.agent.platform.terminal.ubuntu.lifecycle.UbuntuRetryThrottle
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
 import coil.ImageLoader
@@ -25,6 +27,8 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.drop
@@ -212,14 +216,25 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
      *
      * 网络恢复自愈（用户反馈「Ubuntu 总是显示 apt 未引导」的自动出口）：
      * 降级注记此前只有两个手动清除出口 —— 环境中心一键重试 / 下次重启的
-     * 启动自动预备；网络从断到通时没人重试，注记就一直挂着。下面监听
-     * NetworkMonitor 的离线→在线跃迁，仅在「引导未完成」态补一次 ensureReady
-     *（幂等单飞：编排在跑则共享结果，已完整 READY 秒回）。
+     * 启动自动预备；网络从断到通时没人重试，注记就一直挂着。T93 补齐第三个
+     * 出口（冷却轮询），三个出口共用 [UbuntuBootstrapRetryPolicy] 决策口径
+     * 与 [UbuntuRetryThrottle] 冷却闸门：
+     * - 出口 1 冷启动（上）；
+     * - 出口 2 [NetworkMonitor] 离线→在线跃迁 —— 「条件已变」的信号，不吃冷却；
+     * - 出口 3 冷却轮询 —— **设备全程在线的瞬时失败**（引导瞬间 proot 未就绪/
+     *   dpkg 锁/DNS 抖动）既没冷启动也没断网跃迁，前两个出口一个都不触发，
+     *   注记会一直挂到用户手动干预；每分钟只读状态，尝试间隔 ≥15 分钟。
+     * 闸门保证同一时刻只有一次重试在途（编排在跑则共享结果，已完整 READY 秒回），
+     * DISK_FULL（磁盘不足自己不会好）与 FAILED 失败现场一律不自动重试。
      *
      * 用户体验目标：安装 APK → 打开 App → 无需任何点击，Ubuntu 在后台就绪；
      * 进终端页时看到的是实时进度而非「未解包」等待用户行动的横幅。
      */
     private fun initUbuntuLifecycleRecovery() {
+        // T93：三个自动重试出口（启动 / 网络恢复跃迁 / 冷却轮询）共用一份决策
+        // 口径与冷却闸门 —— 同一时刻只有一次重试在途，轮询出口两次尝试至少间隔
+        // 15 分钟（一次 apt 镜像链失败的量级）。
+        val throttle = UbuntuRetryThrottle()
         appScope.launch {
             runCatching { ubuntuLifecycle.warmUp() }
                 .onSuccess { report ->
@@ -238,19 +253,19 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                 (phase == UbuntuLifecycleCoordinator.Phase.READY &&
                     ubuntuLifecycle.stateFlow.value.bootstrapNote != null)
             ) {
-                val r = runCatching {
-                    kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        ubuntuLifecycle.ensureReady()
+                // 占闸门：冷启动这次尝试算「冷却起点」，避免紧接着发生的网络跃迁
+                // 或轮询在几秒内重复打同一轮 apt。
+                if (throttle.begin()) {
+                    try {
+                        runUbuntuAutoRetry("startup: phase=$phase")
+                    } finally {
+                        throttle.end()
                     }
-                }.getOrNull()
-                Log.i(
-                    "ApexAgent",
-                    "Ubuntu auto-provision: ${r?.let { it::class.simpleName } ?: "failed"}"
-                )
+                }
             }
         }
 
-        // ── 网络恢复自愈（降级注记的自动清除出口）──
+        // ── 出口 2：网络恢复跃迁（条件已变的信号，不吃冷却）──
         // drop(1) 跳过订阅初值（启动链已负责首次预备），StateFlow 自带去重 ——
         // 只有真实的离线→在线跃迁才触发。collect 串行处理：一次 ensureReady
         // 未完成前的再次跃迁会被合并，天然节流。
@@ -258,25 +273,61 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
             networkMonitor.isOnline
                 .drop(1)
                 .collect { online ->
-                    if (!online) return@collect
                     val st = ubuntuLifecycle.stateFlow.value
-                    val pending = st.phase == UbuntuLifecycleCoordinator.Phase.ROOTFS_READY ||
-                        st.phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING ||
-                        (st.phase == UbuntuLifecycleCoordinator.Phase.READY &&
-                            st.bootstrapNote != null)
-                    if (!pending) return@collect
-                    val r = runCatching {
-                        kotlinx.coroutines.withContext(Dispatchers.IO) {
-                            ubuntuLifecycle.ensureReady()
-                        }
-                    }.getOrNull()
-                    Log.i(
-                        "ApexAgent",
-                        "Ubuntu auto-retry on network regain: " +
-                            "${r?.let { it::class.simpleName } ?: "failed"}"
+                    val d = throttle.decide(
+                        phase = st.phase,
+                        bootstrapNote = st.bootstrapNote,
+                        online = online,
+                        respectCooldown = false
                     )
+                    if (!d.shouldRetry || !throttle.begin()) return@collect
+                    try {
+                        runUbuntuAutoRetry("network-regain: ${d.reason}")
+                    } finally {
+                        throttle.end()
+                    }
                 }
         }
+
+        // ── 出口 3：冷却轮询（全程在线的瞬时失败兜底）──
+        // 引导瞬间 proot 未就绪 / dpkg 锁 / DNS 抖动这类失败：既没冷启动、也没
+        // 断网跃迁，前两个出口一个都不触发 —— 注记会一直挂到用户手动干预。
+        // 每分钟只读一次状态，真正的尝试受 15 分钟冷却约束。
+        appScope.launch {
+            while (isActive) {
+                delay(UbuntuBootstrapRetryPolicy.POLL_INTERVAL_MS)
+                val st = ubuntuLifecycle.stateFlow.value
+                val d = throttle.decide(
+                    phase = st.phase,
+                    bootstrapNote = st.bootstrapNote,
+                    online = networkMonitor.isOnline.value
+                )
+                if (!d.shouldRetry || !throttle.begin()) continue
+                try {
+                    runUbuntuAutoRetry("cooldown-poll: ${d.reason}")
+                } finally {
+                    throttle.end()
+                }
+            }
+        }
+    }
+
+    /**
+     * 一次自动引导重试（IO 调度 + 结构化日志）。
+     *
+     * 失败不抛：一次重试失败只是回到降级态（注记照旧）—— 自动出口永远不能把
+     * App 带崩，更不能伪造成功。
+     */
+    private suspend fun runUbuntuAutoRetry(trigger: String) {
+        val r = runCatching {
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                ubuntuLifecycle.ensureReady()
+            }
+        }.getOrNull()
+        Log.i(
+            "ApexAgent",
+            "Ubuntu auto-retry [$trigger]: ${r?.let { it::class.simpleName } ?: "failed"}"
+        )
     }
 
     /**

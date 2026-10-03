@@ -43,13 +43,23 @@ class PulseMcpSource(
 
     /**
      * 拉取目录一页（凭据缺失 → 引导性 failure，不发 401 注定失败的请求）。
+     *
+     * 凭据读取（EncryptedSharedPreferences）也在错误契约内：存储层异常
+     * 折为引导性 failure 而非上抛——控制器协程不接未捕获异常。
      */
     suspend fun listServers(
         cursor: String? = null,
         limit: Int = GenericRegistryApi.DEFAULT_PAGE_SIZE,
         search: String? = null
     ): Result<RegistryPage> {
-        val creds = credentialsProvider()
+        val creds = runCatching { credentialsProvider() }.getOrElse { e ->
+            return Result.failure(
+                Exception(
+                    "PulseMCP 凭据读取失败（${e.javaClass.simpleName}）" +
+                        "——请在凭据入口重新保存后再试"
+                )
+            )
+        }
         if (creds == null || creds.apiKey.isBlank() || creds.tenantId.isBlank()) {
             return Result.failure(Exception(noCredentialsMessage()))
         }

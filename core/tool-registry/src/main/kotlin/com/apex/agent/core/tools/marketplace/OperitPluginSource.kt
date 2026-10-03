@@ -26,13 +26,16 @@ import java.net.URLEncoder
  *
  * 数据获取（GitHub Search API，token 可选注入提配额）：
  * - **目录**：两个查询合并 —— `topic:operit-plugin`（社区规范标签）
- *   + `operit mcp`（名称/描述命中），按 star 去重排序；
+ *   + `operit mcp`（名称/描述命中），按 star 去重排序；单查询失败时
+ *   目录降级返回（[OperitDirectory.partialError] 提示可重试），双查询
+ *   全失败才整体 failure；
  * - **安装**：拉仓库根的 `mcp_config.json`（Operit 生态的 MCP 插件配置
  *   约定文件名，实测社区仓库如 operit-xhs-reader-mcp 即此形态）→
  *   `mcp.json`（通用惯例）→ `package.json` 的 mcpServers 键 →
- *   [McpConfigImport] 统一解析。未暴露标准 MCP 配置的仓库
- *   （纯 ToolPkg / 脚本插件）会得到明确报错与「浏览器打开」指引，
- *   绝不静默装空配置。
+ *   [McpConfigImport] 统一解析。默认分支解析失败时用 `HEAD` 符号
+ *   引用（raw.githubusercontent 恒解析到默认分支，master/main 通吃）。
+ *   未暴露标准 MCP 配置的仓库（纯 ToolPkg / 脚本插件）会得到明确报错
+ *   与「浏览器打开」指引，绝不静默装空配置。
  *
  * 纯 JVM（OkHttp + kotlinx.serialization），可单测；响应体 2MB 上限，
  * 任何失败 `Result.failure` 不抛异常（错误契约同其他源）。
@@ -61,20 +64,25 @@ class OperitPluginSource(
             get() = fullName.lowercase().replace(Regex("""[^a-z0-9._-]+"""), "-")
     }
 
+    /** 社区插件目录（双查询合并产物 + 部分失败降级提示）。 */
+    data class OperitDirectory(
+        val plugins: List<OperitPlugin>,
+        /** 双查询其一失败（限流/网络抖动）的降级提示；null = 两路都成功。 */
+        val partialError: String?
+    )
+
     /**
      * 拉取社区插件目录（双查询合并去重，按 star 降序，最多 [MAX_ENTRIES] 条）。
+     * 单查询失败降级返回（[OperitDirectory.partialError] 点名），双失败
+     * 才整体 failure。
      */
-    suspend fun listPlugins(): Result<List<OperitPlugin>> = withContext(Dispatchers.IO) {
+    suspend fun listPlugins(): Result<OperitDirectory> = withContext(Dispatchers.IO) {
         val topicHits = searchGitHub("topic:operit-plugin")
         val keywordHits = searchGitHub("operit mcp")
         if (topicHits == null && keywordHits == null) {
             return@withContext Result.failure(Exception(unavailableMessage()))
         }
-        val merged = (topicHits.orEmpty() + keywordHits.orEmpty())
-            .distinctBy { it.fullName }
-            .sortedByDescending { it.stars }
-            .take(MAX_ENTRIES)
-        Result.success(merged)
+        Result.success(mergeDirectory(topicHits, keywordHits))
     }
 
     /**
@@ -94,18 +102,20 @@ class OperitPluginSource(
                 Exception("仓库地址非法：${plugin.fullName}")
             )
         }
-        val branch = resolveDefaultBranch(owner, repo) ?: "main"
+        // 默认分支解析失败（匿名限流/网络）→ HEAD 符号引用（GitHub raw
+        // 恒解析到默认分支——不再硬编码 main 造成 master 仓库三连 404）
+        val branch = resolveDefaultBranch(owner, repo) ?: "HEAD"
 
         // 1) mcp_config.json：Operit 生态约定（社区 MCP 插件的标配文件名）
-        downloadText(rawUrl(owner, repo, branch, "mcp_config.json"))?.let { text ->
+        fetchRawText(rawUrl(owner, repo, branch, "mcp_config.json"))?.let { text ->
             parseMcpConfigText(text, fallbackName)?.let { return@withContext Result.success(it) }
         }
         // 2) mcp.json：标准 mcpServers 外壳，或裸服务器对象（自动包壳）
-        downloadText(rawUrl(owner, repo, branch, "mcp.json"))?.let { text ->
+        fetchRawText(rawUrl(owner, repo, branch, "mcp.json"))?.let { text ->
             parseMcpConfigText(text, fallbackName)?.let { return@withContext Result.success(it) }
         }
         // 3) package.json 的 mcpServers 键（npm 生态惯例位置）
-        downloadText(rawUrl(owner, repo, branch, "package.json"))?.let { text ->
+        fetchRawText(rawUrl(owner, repo, branch, "package.json"))?.let { text ->
             packageJsonMcpServersText(text)?.let { serversJson ->
                 parseMcpConfigText(serversJson, fallbackName)?.let {
                     return@withContext Result.success(it)
@@ -123,7 +133,7 @@ class OperitPluginSource(
 
     // ── 内部实现（网络路径）──
 
-    /** GitHub 仓库搜索；网络/解析失败返回 null（由调用方合并判定）。 */
+    /** GitHub 仓库搜索；网络/解析/非法 token 失败返回 null（由调用方合并判定）。 */
     private fun searchGitHub(query: String): List<OperitPlugin>? = runCatching {
         val request = Request.Builder()
             .url(
@@ -135,13 +145,10 @@ class OperitPluginSource(
             .header("User-Agent", USER_AGENT)
             .apply { gitHubTokenProvider()?.let { header("Authorization", "Bearer $it") } }
             .build()
-        httpClient.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
-            parseOperitSearchItems(resp.body?.string() ?: return@use null)
-        }
+        parseOperitSearchItems(fetchBodyText(request) ?: return@runCatching null)
     }.getOrNull()
 
-    /** 查仓库真实默认分支；失败返回 null（由调用方回退到 main）。 */
+    /** 查仓库真实默认分支；失败返回 null（由调用方回退 HEAD 符号引用）。 */
     private fun resolveDefaultBranch(owner: String, repo: String): String? = runCatching {
         val request = Request.Builder()
             .url("https://api.github.com/repos/$owner/$repo")
@@ -149,18 +156,16 @@ class OperitPluginSource(
             .header("User-Agent", USER_AGENT)
             .apply { gitHubTokenProvider()?.let { header("Authorization", "Bearer $it") } }
             .build()
-        httpClient.newCall(request).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
-            json.parseToJsonElement(resp.body?.string() ?: return@use null)
-                .jsonObject["default_branch"]?.jsonPrimitive?.contentOrNull
-        }
+        val body = fetchBodyText(request) ?: return@runCatching null
+        json.parseToJsonElement(body)
+            .jsonObject["default_branch"]?.jsonPrimitive?.contentOrNull
     }.getOrNull()
 
     private fun rawUrl(owner: String, repo: String, branch: String, path: String): String =
         "https://raw.githubusercontent.com/$owner/$repo/$branch/$path"
 
-    /** 文本下载（2MB 上限；失败/非 2xx 返回 null）。 */
-    private fun downloadText(url: String): String? = runCatching {
+    /** raw 文本下载（2MB 上限；失败/非 2xx 返回 null）。 */
+    private fun fetchRawText(url: String): String? = runCatching {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
@@ -175,38 +180,15 @@ class OperitPluginSource(
         }
     }.getOrNull()
 
-    /**
-     * mcp.json 文本 → [McpServerConfig]（取第一个有效条目）。
-     *
-     * 接受两种形状：标准 `{"mcpServers": {...}}` 外壳，或裸服务器对象
-     * （`{"command": "npx", ...}` —— 自动包一层 mcpServers 再走统一解析）。
-     * STDIO 条目一律 runInSandbox=true（与 mcp.so 源同口径：Android 宿主
-     * 没有 node/python 运行时）。
-     */
-    private fun parseMcpJsonText(text: String, fallbackName: String): McpServerConfig? {
-        val normalized = if (text.contains("\"mcpServers\"")) {
-            text
-        } else {
-            "{\"mcpServers\":{\"${escapeKey(fallbackName)}\":$text}}"
+    /** JSON/文本 GET（2MB 上限；失败/非 2xx 返回 null；Request 构造异常同样吞）。 */
+    private fun fetchBodyText(request: Request): String? = runCatching {
+        httpClient.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return@use null
+            val bytes = resp.body?.byteStream()?.use { stream ->
+                stream.readBytesLimited(MAX_JSON_BYTES)
+            } ?: return@use null
+            String(bytes, Charsets.UTF_8)
         }
-        val parsed = McpConfigImport.parse(normalized)
-        val first = parsed.configs.firstOrNull() ?: return null
-        val shouldSandbox = first.transport == McpTransport.STDIO
-        return first.copy(
-            name = fallbackName.ifBlank { first.name },
-            // 安装 ≠ 启动（与官方 Hub / mcp.so 口径一致）
-            enabled = false,
-            runInSandbox = if (shouldSandbox) true else first.runInSandbox
-        )
-    }
-
-    /** package.json 文本 → mcpServers 子对象文本（无该键返回 null）。 */
-    private fun extractPackageJsonMcpServers(text: String): String? = runCatching {
-        val root = json.parseToJsonElement(text).jsonObject
-        val servers = root["mcpServers"]?.let { el ->
-            runCatching { el.jsonObject }.getOrNull()
-        } ?: return null
-        "{\"mcpServers\":$servers}"
     }.getOrNull()
 
     /** 读取至多 [max] 字节；超限返回 null（与 HubSource 同款防御）。 */
@@ -241,7 +223,27 @@ class OperitPluginSource(
 
         private val json = Json { ignoreUnknownKeys = true }
 
-        // ── 纯解析（public：单测直接喋 GitHub 响应切片；无状态无副作用）──
+        // ── 纯解析与合并（public：单测直接喋真实响应切片；无状态无副作用）──
+
+        /**
+         * 双查询合并：去重 → star 降序 → 截断；单路失败给降级提示
+         * （null = 该路查询失败——GitHub 匿名限流 10 次/分下真实高频）。
+         */
+        fun mergeDirectory(
+            topicHits: List<OperitPlugin>?,
+            keywordHits: List<OperitPlugin>?
+        ): OperitDirectory {
+            val merged = (topicHits.orEmpty() + keywordHits.orEmpty())
+                .distinctBy { it.fullName }
+                .sortedByDescending { it.stars }
+                .take(MAX_ENTRIES)
+            val partialError = if (topicHits == null || keywordHits == null) {
+                "部分 GitHub 查询失败（匿名限流或网络抖动）——目录可能不完整，可点重试"
+            } else {
+                null
+            }
+            return OperitDirectory(plugins = merged, partialError = partialError)
+        }
 
         /** GitHub search 响应文本 → 插件条目列表（坏条目跳过，畸形输入返回空）。 */
         fun parseOperitSearchItems(body: String): List<OperitPlugin>? = runCatching {

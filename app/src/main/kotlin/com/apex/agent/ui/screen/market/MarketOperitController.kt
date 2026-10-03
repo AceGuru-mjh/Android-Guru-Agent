@@ -2,6 +2,7 @@ package com.apex.agent.ui.screen.market
 
 import com.apex.agent.core.tools.marketplace.OperitPluginSource
 import com.apex.agent.core.tools.mcp.McpManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,47 +60,85 @@ class MarketOperitController @Inject constructor(
         val current = _uiState.value
         if (!force && (current.loading || current.plugins.isNotEmpty())) return
         scope.launch {
-            _uiState.update { it.copy(loading = true, error = null) }
-            operitSource.listPlugins().fold(
-                onSuccess = { plugins ->
-                    _uiState.update { it.copy(plugins = plugins) }
-                },
-                onFailure = { e ->
-                    _uiState.update { it.copy(plugins = emptyList(), error = e.message) }
+            try {
+                _uiState.update { it.copy(loading = true, error = null) }
+                operitSource.listPlugins().fold(
+                    onSuccess = { directory ->
+                        // 单查询降级：列表照给，partialError 进错误横幅（可重试）
+                        _uiState.update {
+                            it.copy(plugins = directory.plugins, error = directory.partialError)
+                        }
+                    },
+                    onFailure = { e ->
+                        _uiState.update {
+                            it.copy(
+                                plugins = emptyList(),
+                                error = e.message ?: e.javaClass.simpleName
+                            )
+                        }
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 错误契约：逃逸异常折叠进 error，绝不上抛
+                _uiState.update {
+                    it.copy(plugins = emptyList(), error = e.message ?: e.javaClass.simpleName)
                 }
-            )
-            _uiState.update { it.copy(loading = false) }
+            } finally {
+                _uiState.update { it.copy(loading = false) }
+            }
         }
     }
 
     /**
      * 安装一个 Operit 社区插件（仅 MCP 形态可装）：
-     * 仓库 mcp.json / package.json 的 mcpServers → 统一解析 → 注册表
-     * （enabled=false）。行级 busy 防并发；非 MCP 形态得到明确报错。
+     * 仓库 mcp_config.json / mcp.json / package.json 的 mcpServers →
+     * 统一解析 → 注册表（enabled=false）。行级 busy 防并发；非 MCP
+     * 形态得到明确报错；同名已配置给出与 Registry 安装同口径的提示。
      */
     fun installPlugin(plugin: OperitPluginSource.OperitPlugin) {
         if (_uiState.value.installingKey != null) return
         scope.launch {
             _uiState.update { it.copy(installingKey = plugin.key) }
+            var installed = false
             try {
                 val exists = mcpManager.getConfigs().any { it.name == plugin.configName }
-                if (!exists) {
+                if (exists) {
+                    _uiState.update {
+                        it.copy(
+                            error = "同名服务器「${plugin.configName}」已配置——" +
+                                "如需重装请先在「已安装管理」中删除"
+                        )
+                    }
+                } else {
                     operitSource.fetchMcpConfig(plugin).fold(
                         onSuccess = { config ->
                             mcpManager.addServer(config).fold(
-                                onSuccess = { _refreshMarket.tryEmit(Unit) },
+                                onSuccess = { installed = true },
                                 onFailure = { e ->
-                                    _uiState.update { it.copy(error = e.message) }
+                                    _uiState.update {
+                                        it.copy(error = e.message ?: e.javaClass.simpleName)
+                                    }
                                 }
                             )
                         },
-                        onFailure = { e -> _uiState.update { it.copy(error = e.message) } }
+                        onFailure = { e ->
+                            _uiState.update {
+                                it.copy(error = e.message ?: e.javaClass.simpleName)
+                            }
+                        }
                     )
                 }
-                _refreshMarket.tryEmit(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 错误契约：逃逸异常折叠进 error，绝不上抛
+                _uiState.update { it.copy(error = e.message ?: e.javaClass.simpleName) }
             } finally {
                 _uiState.update { it.copy(installingKey = null) }
             }
+            if (installed) _refreshMarket.tryEmit(Unit)
         }
     }
 }

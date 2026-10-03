@@ -406,6 +406,8 @@
     <string name="market_registry_pulse_credentials_title">PulseMCP 凭据</string>
     <string name="market_registry_pulse_credentials_hint">PulseMCP 是合作制 API：请向 pulsemcp.com 申请 X-API-Key 与 X-Tenant-ID 后填入（凭据以加密形式存储在本机）。</string>
     <string name="market_registry_credentials_clear">清除</string>
+    <string name="market_registry_credentials_show">显示密钥</string>
+    <string name="market_registry_credentials_hide">隐藏密钥</string>
     <string name="market_action_save">保存</string>
     <string name="market_registry_operit_header">Operit 社区插件 —— GitHub 聚合</string>
     <string name="market_registry_operit_loading">正在加载 Operit 社区插件…</string>

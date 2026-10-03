@@ -2,6 +2,7 @@ package com.apex.agent.marketplace
 
 import com.apex.agent.core.tools.marketplace.RegistryServer
 import com.apex.agent.core.tools.mcp.McpManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -86,6 +87,17 @@ class RegistryMcpInstaller @Inject constructor(
                 Exception("同名服务器「${config.name}」已配置——如需重装请先在「已安装管理」中删除")
             )
         }
+        // 供应链硬化：identifier 必须是 npm 包名形态。官方源有校验，但
+        // Pulse 源是合作方提交的数据——URL / git spec / 前导 - 这类形态
+        // 会让 npm 从任意源拉取执行代码，拒绝安装并引导反馈。
+        if (!isSafeNpmIdentifier(pkg.identifier)) {
+            return Result.failure(
+                Exception(
+                    "npm 包名形态非法（${pkg.identifier}）——已拒绝自动安装，" +
+                        "请到仓库页核实后手动接入"
+                )
+            )
+        }
 
         // ① 沙箱真实 npm install -g（预下载，绕开 npx 冷启动超时）
         val install = sandboxRunner.run(
@@ -105,17 +117,30 @@ class RegistryMcpInstaller @Inject constructor(
         // ② 写配置（enabled=false：安装 ≠ 启动）
         val added = mcpManager.addServer(config)
         if (added.isFailure) {
-            // ③ 回滚：不留「沙箱里装了包但配置没落」的半残状态
-            runCatching {
-                sandboxRunner.run(
+            // ③ 回滚：不留「沙箱里装了包但配置没落」的半残状态。
+            // 回滚结果要如实报告——uninstall 超时/失败时不能谎称已卸载
+            // （误导排查方向）；runCatching 会吞 CancellationException，
+            // 用显式 catch 保取消语义诚实。
+            var rollbackConfirmed = false
+            try {
+                rollbackConfirmed = sandboxRunner.run(
                     command = listOf("npm", "uninstall", "-g", pkg.identifier),
                     timeoutMs = NPM_UNINSTALL_TIMEOUT_MS
-                )
+                ).success
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 回滚尽力而为：失败不掩盖主错误，仅在文案里如实说明
             }
             return Result.failure(
                 Exception(
-                    "配置写入失败已回滚（npm 包已从沙箱卸载）：" +
-                        (added.exceptionOrNull()?.message ?: "未知错误")
+                    "配置写入失败" +
+                        (if (rollbackConfirmed) {
+                            "（npm 包已从沙箱卸载）"
+                        } else {
+                            "（回滚未确认——如需清理可在沙箱执行：npm uninstall -g ${pkg.identifier}）"
+                        }) +
+                        "：" + (added.exceptionOrNull()?.message ?: "未知错误")
                 )
             )
         }
@@ -126,10 +151,32 @@ class RegistryMcpInstaller @Inject constructor(
                     append("；启动前需在「已安装管理 → 编辑」补齐环境变量：")
                     append(pkg.requiredEnvVarNames.joinToString("、"))
                 }
+                if (pkg.packageArguments.isNotEmpty()) {
+                    append("；该包声明了启动参数（")
+                    append(pkg.packageArguments.joinToString(" "))
+                    append("）——如启动报缺参，请到「已安装管理 → 编辑」补齐")
+                }
                 append("—— 安装 ≠ 启动，请在已配置列表中连接")
             }
         )
     }
+
+    /**
+     * npm 包名形态校验（供应链硬化）：限定 npm 允许的字符集且至多一个
+     * `/`（@scope/name），拒绝 URL（`://`）、git spec、前导 `-`/`.`、
+     * `..` 路径段与超长串。
+     */
+    private fun isSafeNpmIdentifier(id: String): Boolean =
+        id.length <= 214 &&
+            !id.startsWith("-") &&
+            !id.startsWith(".") &&
+            !id.contains("://") &&
+            !id.contains("..") &&
+            id.count { it == '/' } <= 1 &&
+            id.all { ch ->
+                ch in 'a'..'z' || ch in 'A'..'Z' || ch in '0'..'9' ||
+                    ch == '@' || ch == '/' || ch == '.' || ch == '_' || ch == '-'
+            }
 
     private fun unsupportedMessage(server: RegistryServer): String {
         val pkg = server.unsupportedPackage

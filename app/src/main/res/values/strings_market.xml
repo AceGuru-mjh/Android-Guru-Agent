@@ -406,6 +406,8 @@
     <string name="market_registry_pulse_credentials_title">PulseMCP credentials</string>
     <string name="market_registry_pulse_credentials_hint">PulseMCP is a partner API. Request X-API-Key and X-Tenant-ID from pulsemcp.com, then paste them here (stored encrypted on device).</string>
     <string name="market_registry_credentials_clear">Clear</string>
+    <string name="market_registry_credentials_show">Show API key</string>
+    <string name="market_registry_credentials_hide">Hide API key</string>
     <string name="market_action_save">Save</string>
     <string name="market_registry_operit_header">Operit community plugins — GitHub aggregated</string>
     <string name="market_registry_operit_loading">Loading Operit community plugins…</string>

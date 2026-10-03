@@ -7,17 +7,29 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -195,7 +207,9 @@ private fun installKindLabel(kind: RegistryServer.InstallKind): String = when (k
     RegistryServer.InstallKind.UNSUPPORTED -> stringResource(R.string.market_registry_kind_unsupported)
 }
 
-/** PulseMCP 凭据对话框（X-API-Key / X-Tenant-ID，保存后立即切源加载）。 */
+/** PulseMCP 凭据对话框（X-API-Key / X-Tenant-ID，保存后立即切源加载）。
+ * X-API-Key 是密钥——默认遮罩显示（投屏/旁窥防泄露），尾部图标可切换
+ * 明文校验粘贴结果。 */
 @Composable
 internal fun PulseCredentialsDialog(
     apiKeyDraft: String,
@@ -207,6 +221,7 @@ internal fun PulseCredentialsDialog(
     onClear: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var apiKeyVisible by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.market_registry_pulse_credentials_title)) },
@@ -220,7 +235,28 @@ internal fun PulseCredentialsDialog(
                     value = apiKeyDraft,
                     onValueChange = onApiKeyChange,
                     singleLine = true,
-                    label = { Text("X-API-Key") }
+                    label = { Text("X-API-Key") },
+                    visualTransformation = if (apiKeyVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                            Icon(
+                                imageVector = if (apiKeyVisible) Icons.Filled.VisibilityOff
+                                else Icons.Filled.Visibility,
+                                contentDescription = stringResource(
+                                    if (apiKeyVisible) {
+                                        R.string.market_registry_credentials_hide
+                                    } else {
+                                        R.string.market_registry_credentials_show
+                                    }
+                                ),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 )
                 OutlinedTextField(
                     value = tenantIdDraft,

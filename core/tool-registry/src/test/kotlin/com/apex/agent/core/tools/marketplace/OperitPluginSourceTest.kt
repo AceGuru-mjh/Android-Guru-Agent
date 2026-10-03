@@ -46,8 +46,9 @@ class OperitPluginSourceTest {
         assertTrue(mcp.isMcp)
         assertEquals("operit/x15907982411/playwright-mcp-for-operit", mcp.key)
         assertEquals("x15907982411-playwright-mcp-for-operit", mcp.configName)
-        // 名称含 mcp 也会被打标（第二个 topics 无 mcp 但名称有）
-        assertTrue(!items[1].isMcp || items[1].fullName.contains("mcp", true))
+        // 第二个条目 topics 与名称都无 mcp 特征 → isMcp 必须为 false
+        //（防过度打标：非 MCP 插件点安装会得到明确报错而非误装）
+        assertTrue(!items[1].isMcp)
     }
 
     @Test
@@ -160,5 +161,48 @@ class OperitPluginSourceTest {
         assertNull(OperitPluginSource.packageJsonMcpServersText("not json"))
         // mcpServers 不是对象 → 视为无有效配置
         assertNull(OperitPluginSource.packageJsonMcpServersText("""{"mcpServers": [1, 2]}"""))
+    }
+
+    // ═══ 双查询合并（mergeDirectory）═══
+
+    private fun plugin(fullName: String, stars: Int = 0) =
+        OperitPluginSource.OperitPlugin(
+            fullName = fullName,
+            description = "",
+            htmlUrl = "https://github.com/$fullName",
+            stars = stars,
+            topics = emptyList(),
+            isMcp = false
+        )
+
+    @Test
+    fun `mergeDirectory dedupes by fullName and sorts by stars descending`() {
+        val topicHits = listOf(plugin("a/hot", 50), plugin("b/overlap", 10))
+        val keywordHits = listOf(plugin("b/overlap", 10), plugin("c/mid", 30))
+        val directory = OperitPluginSource.mergeDirectory(topicHits, keywordHits)
+        assertEquals(listOf("a/hot", "c/mid", "b/overlap"), directory.plugins.map { it.fullName })
+        // 双路都成功 → 无降级提示
+        assertNull(directory.partialError)
+    }
+
+    @Test
+    fun `mergeDirectory marks partial error when only one query succeeded`() {
+        // 匿名限流 10 次/分下真实高频：一路 403、另一路正常
+        val directory = OperitPluginSource.mergeDirectory(
+            listOf(plugin("a/only", 5)),
+            null
+        )
+        assertEquals(listOf("a/only"), directory.plugins.map { it.fullName })
+        // 列表照给，但降级提示必须在（错误横幅可重试，不静默截断）
+        assertTrue(directory.partialError != null)
+    }
+
+    @Test
+    fun `mergeDirectory with both queries failed is not reachable via merge`() {
+        // 双失败由 listPlugins 整体 failure（不发 merge）；合并层对双 null
+        // 的行为定义为空目录 + 降级提示，防御式兑现
+        val directory = OperitPluginSource.mergeDirectory(null, null)
+        assertTrue(directory.plugins.isEmpty())
+        assertTrue(directory.partialError != null)
     }
 }

@@ -207,6 +207,107 @@ class GenericRegistryApiTest {
         assertEquals(listOf("GCS_BUCKET"), pkg.requiredEnvVarNames)
     }
 
+    @Test
+    fun `isRequired accepts boolean true and string true tolerantly`() {
+        val body = """
+            {"servers": [
+                {"server": {"name": "x/env-mixed",
+                  "packages": [
+                    {"registryType": "npm", "identifier": "@x/env-mixed",
+                     "transport": {"type": "stdio"},
+                     "environmentVariables": [
+                        {"name": "BOOL_TRUE", "isRequired": true},
+                        {"name": "STR_TRUE", "isRequired": "true"},
+                        {"name": "STR_FALSE", "isRequired": "false"},
+                        {"name": "BOOL_FALSE", "isRequired": false}
+                     ]}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val pkg = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0].npmPackage!!
+        assertEquals(
+            "boolean true 与字符串 'true' 都算必填；其余不算",
+            listOf("BOOL_TRUE", "STR_TRUE"),
+            pkg.requiredEnvVarNames
+        )
+    }
+
+    // ═══ 运行时参数与包体参数（runtimeArguments / packageArguments）═══
+
+    @Test
+    fun `runtimeArguments are appended to npx flags with -y deduped`() {
+        val body = """
+            {"servers": [
+                {"server": {"name": "io.github.bostadt/manpage-mcp",
+                  "title": "manpage-mcp",
+                  "packages": [
+                    {"registryType": "npm", "identifier": "manpage-mcp",
+                     "transport": {"type": "stdio"},
+                     "runtimeArguments": [
+                        {"value": "-y", "description": "skip prompt"},
+                        {"value": "--prefetch", "description": "warm cache"}
+                     ]}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val server = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0]
+        val pkg = server.npmPackage!!
+        assertEquals(listOf("-y", "--prefetch"), pkg.runtimeArguments)
+        val config = server.toMcpServerConfig()!!
+        // 内置 -y 与声明里的 -y 去重，其余旗标拼在包名前
+        assertEquals(listOf("-y", "--prefetch", "manpage-mcp"), config.args)
+    }
+
+    @Test
+    fun `packageArguments are parsed but never auto-appended to command`() {
+        val body = """
+            {"servers": [
+                {"server": {"name": "io.github.agent-infra/mcp-server-filesystem",
+                  "title": "Filesystem",
+                  "packages": [
+                    {"registryType": "npm", "identifier": "@agent-infra/mcp-server-filesystem",
+                     "transport": {"type": "stdio"},
+                     "packageArguments": [
+                        {"value": "--allowed-directories", "isRequired": true,
+                         "description": "roots"}
+                     ]}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val server = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0]
+        val pkg = server.npmPackage!!
+        assertEquals(listOf("--allowed-directories"), pkg.packageArguments)
+        // 包体参数需要用户补值，不自动拼——避免装出「启动即缺参报错」的
+        // 配置；由安装器在成功文案里点名引导到「编辑」补齐
+        val config = server.toMcpServerConfig()!!
+        assertEquals(listOf("-y", "@agent-infra/mcp-server-filesystem"), config.args)
+    }
+
+    // ═══ remotes 白名单（未知类型跳过，留给 npm 回退）═══
+
+    @Test
+    fun `unknown remote type is skipped so npm package fallback applies`() {
+        val body = """
+            {"servers": [
+                {"server": {"name": "x/mixed-shapes",
+                  "remotes": [
+                    {"type": "websocket", "url": "wss://x/ws"},
+                    {"type": "", "url": "https://x/blank-type"}
+                  ],
+                  "packages": [
+                    {"registryType": "npm", "identifier": "@x/mixed-shapes",
+                     "transport": {"type": "stdio"}}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val server = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0]
+        // 未知/缺失 type 的端点不入 remotes —— 不静默产出打不开的 HTTP 配置，
+        // installKind 回退到 npm 沙箱形态
+        assertTrue(server.remotes.isEmpty())
+        assertNull(server.bestRemote)
+        assertEquals(RegistryServer.InstallKind.NPM, server.installKind)
+    }
+
     // ═══ remotes 细节（headers 模板 / sse 映射）═══
 
     @Test

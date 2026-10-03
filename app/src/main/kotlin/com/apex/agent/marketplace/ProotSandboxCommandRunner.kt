@@ -48,12 +48,18 @@ private const val MAX_STREAM_CHARS = 524_288
  *
  * ## rootfs 就绪门禁
  * [isRootfsReady] 为 false → 引导性失败结果（不抛异常），文案指向
- * 终端页 `terminal.ubuntu.install`——与 MCP launcher / git runner 同口径。
+ * 终端页 `terminal.ubuntu.install`——与 MCP launcher / git runner 同口径；
+ * 版本标记指向的目录缺失（升级中断/文件被清）→ 「已损坏请重装」文案，
+ * 与「未安装」的安装引导分流（与 git runner 的 RootfsResolution 同款）。
  *
  * ## 输出与超时
  * stdout/stderr 各 512K 有界（首 256K + 尾 256K 滚动截断）；超时
- * destroyForcibly 返回超时语义；协程取消时杀进程后原样上抛。
- * 本类无状态，可并发调用（每次 run 独立进程）。
+ * destroyForcibly 后关闭三路流 fd（SIGKILL 下 proot 的 --kill-on-exit
+ * 清理不保证生效：关 stdin 让等输入的 guest 子进程退出，关 stdout/
+ * stderr 解开 drain 线程的阻塞 read）再等 drain 收尾；deadline 用
+ * System.nanoTime() 单调钟（5 分钟级安装不受墙钟跳变影响）。
+ * 协程取消时同样收尾后原样上抛。本类无状态，可并发调用（每次 run
+ * 独立进程）。
  */
 class ProotSandboxCommandRunner(
     /** proot 宿主 env（PRootHostEnvironment.hostEnv() 快照，G4：不含 guest 变量）。 */
@@ -99,9 +105,11 @@ class ProotSandboxCommandRunner(
             return@withContext infraResult(ROOTFS_NOT_READY_MESSAGE)
         }
         val rootfs = resolveActiveRootfs()
-            ?: return@withContext infraResult(ROOTFS_NOT_READY_MESSAGE)
+        if (rootfs.errorMessage != null) {
+            return@withContext infraResult(rootfs.errorMessage)
+        }
         ensureProotPrerequisites()?.let { return@withContext infraResult(it) }
-        val argv = buildArgv(rootfs, command)
+        val argv = buildArgv(rootfs.rootfs!!, command)
         executeBounded(argv, timeoutMs)
     }
 
@@ -109,26 +117,38 @@ class ProotSandboxCommandRunner(
     //  rootfs 解析与宿主前置（与 git runner / MCP launcher 同款）
     // ══════════════════════════════════════════════════════════════════
 
+    /** rootfs 解析结果：rootfs 与 errorMessage 互斥（与 git runner 同款）。 */
+    internal class RootfsResolution(val rootfs: File?, val errorMessage: String?)
+
     /**
      * rootfs 基目录 → 真实根目录：current 标记 → versions 子目录
-     * （RootfsInstallLayout 原子激活布局）；标记缺失但目录内有 bin/ 时
-     * 兼容直接传入 rootfs 本体；均不满足返回 null（调用方转引导文案）。
+     * （RootfsInstallLayout 原子激活布局）；标记指向的目录缺失 → 「已
+     * 损坏请重装」（与「未安装」的安装引导分流）；标记缺失但目录内有
+     * bin/ 时兼容直接传入 rootfs 本体；均不满足 → 未安装引导文案。
      */
-    internal fun resolveActiveRootfs(): File? {
+    internal fun resolveActiveRootfs(): RootfsResolution {
         val marker = File(rootfsDir, CURRENT_MARKER)
         if (marker.isFile) {
             val artifactId = runCatching { marker.readText().trim() }.getOrDefault("")
             if (artifactId.isNotEmpty()) {
                 val versionDir = File(rootfsDir, "$VERSIONS_DIR/$artifactId")
-                if (versionDir.isDirectory) return versionDir
+                if (versionDir.isDirectory) return RootfsResolution(versionDir, null)
                 AppLogger.instance.warn(
                     LogCategory.TOOL, TAG,
                     "rootfs 版本标记指向的目录缺失（${versionDir.absolutePath}）"
                 )
-                return null
+                return RootfsResolution(
+                    null,
+                    "Ubuntu rootfs 已损坏：版本标记指向的目录缺失" +
+                        "（${versionDir.absolutePath}）—— 请在终端页重装 Ubuntu（terminal.ubuntu.install）"
+                )
             }
         }
-        return rootfsDir.takeIf { File(it, "bin").isDirectory }
+        return if (File(rootfsDir, "bin").isDirectory) {
+            RootfsResolution(rootfsDir, null)
+        } else {
+            RootfsResolution(null, ROOTFS_NOT_READY_MESSAGE)
+        }
     }
 
     /** PRootHostEnvironment.prepare 的幂等子集（libproot 检查为致命项）。 */
@@ -233,11 +253,13 @@ class ProotSandboxCommandRunner(
         val stderrDrain = drainThread("proot-mkt-stderr", process.errorStream, stderrCapture)
 
         try {
-            val deadline = System.currentTimeMillis() + timeoutMs
+            // 单调钟：分钟级 npm install 不能受系统墙钟跳变（NTP 修正/时区
+            // 手改）影响出现假超时或超时不触发
+            val deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L
             var timedOut = false
             while (true) {
                 if (process.waitFor(POLL_INTERVAL_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) break
-                if (System.currentTimeMillis() >= deadline) {
+                if (System.nanoTime() - deadlineNanos >= 0) {
                     timedOut = true
                     break
                 }
@@ -245,7 +267,7 @@ class ProotSandboxCommandRunner(
                 coroutineContext.ensureActive()
             }
             if (timedOut) {
-                runCatching { process.destroyForcibly() }
+                killProcessTree(process)
                 runCatching { stdoutDrain.join(DRAIN_JOIN_MS) }
                 runCatching { stderrDrain.join(DRAIN_JOIN_MS) }
                 return SandboxCommandResult(
@@ -272,10 +294,24 @@ class ProotSandboxCommandRunner(
             }
             return result
         } catch (e: CancellationException) {
-            // 协程取消：销毁进程后原样上抛（保持取消语义诚实）
-            runCatching { process.destroyForcibly() }
+            // 协程取消：同样收尾进程树后原样上抛（保持取消语义诚实）
+            killProcessTree(process)
             throw e
         }
+    }
+
+    /**
+     * 强杀进程树并解开 drain 线程：SIGKILL 下 proot 的 --kill-on-exit
+     * 退出清理不保证生效——npm 会 spawn node 子进程，子进程持有管道 fd
+     * 时 drain 线程会永久阻塞在 read()。关 stdin 让等输入的 guest 子进程
+     * 退出，关 stdout/stderr 使阻塞 read 抛 IOException（drain 线程内
+     * runCatching 吞掉后线程即退出）。
+     */
+    private fun killProcessTree(process: Process) {
+        runCatching { process.outputStream.close() }
+        runCatching { process.inputStream.close() }
+        runCatching { process.errorStream.close() }
+        runCatching { process.destroyForcibly() }
     }
 
     /** 起一个 daemon 线程持续 drain 一根流（防管道缓冲区写满死锁）。 */

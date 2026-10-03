@@ -93,8 +93,15 @@ class GenericRegistryApi(
 
     // ── 内部实现 ──
 
-    /** JSON GET（2MB 上限；IO 异常/超时折为 null → 统一 Result.failure）。 */
-    private fun fetchJsonText(url: String): HttpReply? {
+    /**
+     * JSON GET（2MB 上限；IO 异常/超时/非法请求头值折为 null → 统一
+     * Result.failure）。
+     *
+     * Request 构造也在 try 内：OkHttp 对含换行/非 Latin-1 字符的请求头
+     * 值抛 IllegalArgumentException——凭据是用户手输，不能因非法字符
+     * 逃出错误契约（Result 之外的异常会一路崩到控制器协程）。
+     */
+    private fun fetchJsonText(url: String): HttpReply? = try {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", USER_AGENT)
@@ -105,16 +112,14 @@ class GenericRegistryApi(
                 }
             }
             .build()
-        return try {
-            httpClient.newCall(request).execute().use { resp ->
-                val body = resp.body?.byteStream()?.use { stream ->
-                    stream.readBytesLimited(MAX_JSON_BYTES)?.toString(Charsets.UTF_8)
-                }
-                HttpReply(resp.code, body)
+        httpClient.newCall(request).execute().use { resp ->
+            val body = resp.body?.byteStream()?.use { stream ->
+                stream.readBytesLimited(MAX_JSON_BYTES)?.toString(Charsets.UTF_8)
             }
-        } catch (e: Exception) {
-            null
+            HttpReply(resp.code, body)
         }
+    } catch (e: Exception) {
+        null
     }
 
     private class HttpReply(val code: Int, val body: String?)
@@ -201,6 +206,10 @@ class GenericRegistryApi(
         private fun parseRemote(obj: JsonObject): RegistryRemote? {
             val url = obj.strOrNull("url")?.takeIf { it.isNotBlank() } ?: return null
             val type = obj.strOrNull("type").orEmpty().lowercase()
+            // 白名单：只认 Generic Registry 规格定义的两种形态；未知/缺失类型
+            // 跳过该端点（留给 packages[] 回退 npm 决策，不静默产出大概率
+            // 打不开的 HTTP 配置）
+            if (type != "streamable-http" && type != "sse") return null
             val headers = obj.optArray("headers")?.mapNotNull { el ->
                 (el as? JsonObject)?.let { h ->
                     val headerName = h.strOrNull("name")?.takeIf { it.isNotBlank() }
@@ -226,8 +235,9 @@ class GenericRegistryApi(
                 val envName = envObj.strOrNull("name")?.takeIf { it.isNotBlank() }
                     ?: return@mapNotNull null
                 // 官方 schema 键为 isRequired（boolean；字符串 "true" 也宽容接受）
-                val required = (envObj.get("isRequired") as? JsonPrimitive)?.booleanOrNull
-                    ?: false
+                val required = (envObj.get("isRequired") as? JsonPrimitive)?.let { p ->
+                    p.booleanOrNull ?: (p.contentOrNull == "true")
+                } ?: false
                 if (required) envName else null
             }.orEmpty()
             return RegistryPackage(
@@ -239,7 +249,13 @@ class GenericRegistryApi(
                     ?.strOrNull("type")?.equals("stdio", ignoreCase = true) ?: true,
                 fileSha256 = obj.strOrNull("fileSha256"),
                 envVarNames = envVars,
-                requiredEnvVarNames = requiredEnvVars
+                requiredEnvVarNames = requiredEnvVars,
+                runtimeArguments = obj.optArray("runtimeArguments")?.mapNotNull { el ->
+                    (el as? JsonObject)?.strOrNull("value")?.takeIf { it.isNotBlank() }
+                }.orEmpty(),
+                packageArguments = obj.optArray("packageArguments")?.mapNotNull { el ->
+                    (el as? JsonObject)?.strOrNull("value")?.takeIf { it.isNotBlank() }
+                }.orEmpty()
             )
         }
 
@@ -281,7 +297,13 @@ data class RegistryPackage(
     /** mcpb 包完整性校验值（v1 暂不消费，保留展示）。 */
     val fileSha256: String?,
     val envVarNames: List<String>,
-    val requiredEnvVarNames: List<String>
+    val requiredEnvVarNames: List<String>,
+    /** npx 运行时旗标（`-y` / `--yes` 这类；[RegistryServer.toMcpServerConfig]
+     * 拼进包名前，与内置 -y 去重）。 */
+    val runtimeArguments: List<String>,
+    /** 包体参数（`--allowed-directories` 这类；需要用户补值，不自动拼——
+     * 由安装器在成功文案里点名，引导到「已安装管理 → 编辑」补齐）。 */
+    val packageArguments: List<String>
 )
 
 /**
@@ -334,8 +356,9 @@ data class RegistryServer(
      *
      * - REMOTE：url + 传输映射（sse → SSE，否则 HTTP），headers 原样保留
      *   模板值（占位符需用户在「编辑」里补真值）；
-     * - NPM：`npx -y {identifier}` + runInSandbox=true（Android 宿主无
-     *   node，必须路由 PRoot 沙箱；安装器先真实 npm install 预热）。
+     * - NPM：`npx -y [runtimeArguments…] {identifier}` + runInSandbox=true
+     *   （Android 宿主无 node，必须路由 PRoot 沙箱；安装器先真实 npm
+     *   install 预热）。包体参数（packageArguments）需用户补值，不自动拼。
      */
     fun toMcpServerConfig(): McpServerConfig? = when (installKind) {
         InstallKind.REMOTE -> {
@@ -354,7 +377,14 @@ data class RegistryServer(
                 name = configName,
                 transport = McpTransport.STDIO,
                 command = "npx",
-                args = listOf("-y", pkg.identifier),
+                args = buildList {
+                    add("-y")
+                    // registry 声明的 npx 运行时旗标（与内置 -y 去重）
+                    pkg.runtimeArguments.forEach { arg ->
+                        if (arg != "-y" && arg != "--yes") add(arg)
+                    }
+                    add(pkg.identifier)
+                },
                 runInSandbox = true,
                 enabled = false
             )

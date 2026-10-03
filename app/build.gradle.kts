@@ -35,13 +35,15 @@ android {
         // v1.4.2：双仓库发布架构升级 —— PR 合并即自动发版（release.yml push main 触发）。
         // CI 通过 -PapexVersionName / -PapexVersionCode 注入最终版本（版本号冲突时
         // 自动追加构建序号，如 1.4.2.1，并自动递增 versionCode）；本地构建走源码值。
-        // v1.4.5：更新体系 v2（多基底补丁单跳直达 / 应用级断点续传 / 非强制浮窗）
-        // + 玻璃白天模式根因修复（RenderNode 级圆角裁剪）。
+        // v1.4.7：热更新体系（data-only 版本零安装热载 / 签名预检 / CI 热更包 /
+        // 发布仓库应急热修通道，见 docs/hot-update-pipeline.md）。
         // v1.4.6：聊天输入 v5 —— 技能 chip 内联输入框（多选/去重/可删）/ 流式玻璃
         // 气泡（Agent+Coding 双模式）/ 顶栏与工作区栏按钮防挤压 / 函数调用文案纠偏
         // + #298 流式落盘原子性与滚动定位修复。
-        versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 21
-        versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.6"
+        // v1.4.5：更新体系 v2（多基底补丁单跳直达 / 应用级断点续传 / 非强制浮窗）
+        // + 玻璃白天模式根因修复（RenderNode 级圆角裁剪）。
+        versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 49
+        versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.7"
 
         ndk {
             // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so

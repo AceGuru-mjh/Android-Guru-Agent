@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.market
 
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.BuildConfig
 import com.apex.agent.R
 import com.apex.agent.core.tools.mcp.McpConfigValidator
 import com.apex.agent.core.tools.mcp.McpServerCatalog
@@ -8,6 +9,7 @@ import com.apex.agent.core.tools.mcp.McpStartupEvent
 import com.apex.agent.core.tools.mcp.McpStartupListener
 import com.apex.agent.core.tools.mcp.McpStartupStage
 import com.apex.agent.core.tools.mcp.McpTransport
+import com.apex.agent.update.HotContentStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -72,6 +74,11 @@ internal suspend fun MarketViewModel.finishStartupWithTools(name: String) {
  * 单文件损坏只降级跳过（错误计入 [MarketUiState.mcpCatalogError]），
  * 不拖垮其余分类。只加载一次（[init]），refresh 不重置。
  *
+ * v1.4.7 热更 overlay（docs/hot-update-pipeline.md）：存在生效中的热更
+ * 目录快照时，目录层**整体替换**为 overlay（`filesDir/hot/active/mcp_catalog`）
+ * —— 支持上游增删分类文件；overlay 全军覆没（零条目且报错）时回退
+ * APK assets。无热更内容时与旧行为逐字节一致。
+ *
  * #206 加固：跨文件重复 id 与非法条目不进入 [MarketUiState.mcpCatalog]
  * （LazyColumn 的 item key 与安装装配都假定 id 唯一合法——有问题条目
  * 只留在错误提示里，不进渲染列表）。
@@ -80,17 +87,39 @@ internal fun MarketViewModel.loadMcpCatalog() {
     viewModelScope.launch(Dispatchers.IO) {
         val entries = mutableListOf<McpServerCatalog.McpCatalogEntry>()
         val errors = mutableListOf<String>()
+        // 热更 overlay 读取（store 读取入口自带 APK 追平退役）
+        val overlayFiles = HotContentStore(
+            appContext.filesDir,
+            HotContentStore.SharedPrefs(appContext),
+            BuildConfig.VERSION_CODE
+        ).activeCatalogFiles()
         runCatching {
-            val names = appContext.assets.list("mcp_catalog").orEmpty()
-                .filter { it.endsWith(".json") }.sorted()
-            require(names.isNotEmpty()) { "目录资产缺失（assets/mcp_catalog）" }
-            for (file in names) {
-                val text = appContext.assets.open("mcp_catalog/$file")
-                    .bufferedReader().use { it.readText() }
-                McpServerCatalog.parseCategoryFile(text).fold(
-                    onSuccess = { entries += it.entries },
-                    onFailure = { errors += "${file}: ${it.message}" }
-                )
+            if (overlayFiles.isNotEmpty()) {
+                for (file in overlayFiles) {
+                    runCatching { file.readText() }.fold(
+                        onSuccess = { text ->
+                            McpServerCatalog.parseCategoryFile(text).fold(
+                                onSuccess = { entries += it.entries },
+                                onFailure = { errors += "${file.name}: ${it.message}" }
+                            )
+                        },
+                        onFailure = { errors += "${file.name}: ${it.message}" }
+                    )
+                }
+            }
+            // 回退：无 overlay，或 overlay 颗粒无收（快照损坏）→ APK assets
+            if (entries.isEmpty()) {
+                val names = appContext.assets.list("mcp_catalog").orEmpty()
+                    .filter { it.endsWith(".json") }.sorted()
+                require(names.isNotEmpty()) { "目录资产缺失（assets/mcp_catalog）" }
+                for (file in names) {
+                    val text = appContext.assets.open("mcp_catalog/$file")
+                        .bufferedReader().use { it.readText() }
+                    McpServerCatalog.parseCategoryFile(text).fold(
+                        onSuccess = { entries += it.entries },
+                        onFailure = { errors += "${file}: ${it.message}" }
+                    )
+                }
             }
         }.onFailure { errors += it.message.orEmpty() }
         val issues = McpServerCatalog.validateEntries(entries)

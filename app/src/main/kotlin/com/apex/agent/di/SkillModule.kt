@@ -1,6 +1,7 @@
 package com.apex.agent.di
 
 import android.content.Context
+import com.apex.agent.BuildConfig
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.tools.mcp.McpManager
@@ -13,6 +14,7 @@ import com.apex.agent.core.tools.connector.ConnectorRegistry
 import com.apex.agent.plugin.host.PluginManager
 import com.apex.agent.ui.component.SlashMenuProvider
 import com.apex.agent.ui.language.LanguageManager
+import com.apex.agent.update.HotContentStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -65,6 +67,14 @@ object SkillModule {
      * Issue #166：把 APK assets/skills/ 下打包的内置技能 manifest 释放到
      * `<filesDir>/skills/`（SkillRegistry 的安装目录）。
      *
+     * v1.4.7 热更通道接入（docs/hot-update-pipeline.md）：
+     * - **热更技能重放**：`filesDir/hot/active` 里生效中的热更技能清单
+     *   （数据层累积快照）追加进 installBundled 队尾 —— 版本化幂等升级，
+     *   与 assets 通道同一套语义（保持用户启停态）；
+     * - **白名单合并**：pruneStaleBundled 的清理白名单 = assets id ∪ 热更
+     *   id —— 防「热更装上的新技能」被下次启动按 assets 白名单反向清理
+     *   （assets 还是旧 APK 的快照，没有热更新增的 id）。
+     *
      * - **IO 线程**：assets 读取 + 落盘全在 [bundledReleaseScope]（Dispatchers.IO），
      *   不阻塞 DI 构造线程；
      * - **失败只记日志不阻断启动**：assets 目录缺失 / 读取异常被 runCatching 吞掉
@@ -87,16 +97,31 @@ object SkillModule {
                         stream.readBytes().toString(Charsets.UTF_8)
                     }
                 }
+                // 热更 overlay：数据层快照重放（无热更内容时为空集/空表，零影响）。
+                // store 读取入口自带「APK 追平退役」——重装新版 APK 后旧热更
+                // 内容自动让位给随包 assets。
+                val hotStore = HotContentStore(
+                    context.filesDir,
+                    HotContentStore.SharedPrefs(context),
+                    BuildConfig.VERSION_CODE
+                )
+                val hotManifests = hotStore.activeSkillManifests()
                 // Hub 生态迁移：assets 白名单（<id>.json → id）反查清理「曾经内置、
                 // 现已迁往官方仓库」的旧条目（详见 SkillRegistry.pruneStaleBundled）。
-                // 与 installBundled 操作不相交的 id 集合（离场者不在 assets、幸存者
-                // 不在清理集），先后顺序无耦合；先清后装，清理计数不被升级覆盖。
-                val bundledIds = assetNames.map { it.removeSuffix(".json") }.toSet()
+                // 白名单并入热更 id：热更新增的技能同样受「不可卸载的内置」保护，
+                // 不被旧 APK 的 assets 快照误清理。
+                val bundledIds = assetNames.map { it.removeSuffix(".json") }.toSet() +
+                    hotStore.activeSkillIds()
                 val pruned = registry.pruneStaleBundled(bundledIds)
-                val added = registry.installBundled(manifestJsons).getOrDefault(0)
+                // assets 先、热更后：同 id 时热更版本 ≥ assets（数据层累积快照），
+                // installBundled 的版本比较保证热更升级胜出
+                val added = registry.installBundled(manifestJsons + hotManifests)
+                    .getOrDefault(0)
                 AppLogger.instance.info(
                     LogCategory.PLUGIN, "SkillModule",
-                    "内置技能释放完成：assets 共 ${manifestJsons.size} 个，本次新增 $added 个" +
+                    "内置技能释放完成：assets 共 ${manifestJsons.size} 个" +
+                        (if (hotManifests.isNotEmpty()) " + 热更 ${hotManifests.size} 个" else "") +
+                        "，本次新增 $added 个" +
                         (if (pruned > 0) "，内置瘦身清理 $pruned 个（已迁官方仓库）" else "")
                 )
             }.onFailure {

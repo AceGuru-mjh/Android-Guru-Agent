@@ -64,6 +64,10 @@ jobs:
       sha8: ${{ steps.meta.outputs.sha8 }}
       publishing: ${{ steps.meta.outputs.publishing }}
       skip: ${{ steps.meta.outputs.skip }}
+      # 热更通道（v1.4.7）：上一版 commit / versionCode —— build 阶段
+      # data-only 判定的比对基准（旧清单无 commitSha 时为空 → 本次不出热更包）
+      prevSha: ${{ steps.meta.outputs.prev_sha }}
+      prevVcode: ${{ steps.meta.outputs.prev_vcode }}
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +113,14 @@ jobs:
             "https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json" \
             2>/dev/null | jq -r '.versionCode // 0' || echo 0)
           [ -n "$LAST_VCODE" ] || LAST_VCODE=0
+
+          # 上一版 commit —— 热更通道 data-only 判定基准（v1.4.7：
+          # build 阶段用 compare API 比对 PREV_SHA...HEAD 的变更集，
+          # 全部落在热载路径白名单才出热更包；旧清单无 commitSha → 空，
+          # 本次不出热更包 —— 热更通道从首个携带 commitSha 的版本起自举）
+          PREV_SHA=$(curl -sf -H "Cache-Control: no-cache" \
+            "https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json" \
+            2>/dev/null | jq -r '.commitSha // empty' || echo "")
 
           release_body() {
             gh api "repos/${RELEASE_REPO}/releases/tags/$1" --jq .body 2>/dev/null || true
@@ -169,6 +181,8 @@ jobs:
             echo "tag=$TAG"
             echo "publishing=$PUBLISHING"
             echo "skip=$SKIP"
+            echo "prev_sha=${PREV_SHA:-}"
+            echo "prev_vcode=${LAST_VCODE}"
           } >> "$GITHUB_OUTPUT"
           echo "🏷️  $TAG（versionName=$VERSION versionCode=$VCODE ← gradle $VCODE_GRADLE / 上版 $LAST_VCODE）sha8=$SHA8 publishing=$PUBLISHING skip=$SKIP"
 
@@ -323,6 +337,151 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: "Extract signing certificate digest (signature pre-flight)"
+        run: |
+          set -euo pipefail
+          # v1.4.7 客户端签名预检数据源：发布 APK 签名证书 SHA-256 指纹。
+          # App 端比对本地指纹（UpdateCenter.localSigningCertSha256）—— 不一致
+          # = 增量/全量覆盖安装必报签名冲突（debug 密钥签名时代本地构建/分叉
+          # 构建的必然场景），UI 提前劝导热更/卸载重装，不再下载几百 MB 后撞墙。
+          APK=$(ls dist/*-arm64-*.apk | head -1)
+          CERT_SHA=""
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)
+          if [ -n "$APKSIGNER" ]; then
+            CERT_SHA=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
+              | grep -ioE '[0-9a-f]{64}' | head -1 || true)
+          fi
+          if [ -z "$CERT_SHA" ]; then
+            # keytool 兜底（v1-only 签名 / build-tools 异常）：输出形如
+            # `SHA256: AB:CD:…`（冒号分隔）或 `SHA256: ABCD…`（无冒号）
+            RAW=$(keytool -printcert -jarfile "$APK" 2>/dev/null | grep -i 'SHA256:' | head -1 || true)
+            CERT_SHA=$(echo "$RAW" | grep -oE '[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}' | head -1 | tr -d ':' || true)
+            if [ -z "$CERT_SHA" ]; then
+              CERT_SHA=$(echo "$RAW" | grep -oE '[0-9A-Fa-f]{64}' | head -1 || true)
+            fi
+            CERT_SHA=$(echo "$CERT_SHA" | tr 'A-F' 'a-f')
+            [[ "$CERT_SHA" =~ ^[0-9a-f]{64}$ ]] || CERT_SHA=""
+          fi
+          mkdir -p meta
+          if [ -n "$CERT_SHA" ]; then
+            echo "$CERT_SHA" > meta/cert_sha256.txt
+            echo "✅ 签名证书指纹：${CERT_SHA:0:16}…（注入 version.json.signingCertSha256）"
+          else
+            echo "⚠️ 指纹提取失败 —— version.json 缺 signingCertSha256（客户端预检退化为旧行为）"
+          fi
+
+      - name: "Generate hot update package (data-only releases)"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          VCODE: ${{ needs.resolve.outputs.vcode }}
+          PREV_SHA: ${{ needs.resolve.outputs.prevSha }}
+          PREV_VCODE: ${{ needs.resolve.outputs.prevVcode }}
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          # ── data-only 判定（v1.4.7 热更通道，见 docs/hot-update-pipeline.md）──
+          # 比对「上一版 commit → 本版」变更集，全部落在热载路径白名单
+          # （assets/skills 与 assets/mcp_catalog 下的 .json）才出热更包；
+          # 任何白名单外变更 = 本版必须重装 APK，不出热更包（客户端走
+          # 增量/全量 + 签名预检）。PREV_SHA 为空（旧清单无 commitSha /
+          # 首版）→ 跳过，通道从首个携带 commitSha 的版本起自举。
+          if [ -z "$PREV_SHA" ] || [ -z "$PREV_VCODE" ] || [ "$PREV_VCODE" = "0" ]; then
+            echo "⏭️  上一版清单无 commitSha —— 热更通道自举起点，本次不出热更包"
+            exit 0
+          fi
+          STATUS=$(gh api "repos/${DEV_REPO}/compare/${PREV_SHA}...${GITHUB_SHA}" \
+            --jq '{truncated: .truncated, files: (.files // [] | map(.filename))}' \
+            2>/dev/null || echo '{"truncated": true, "files": []}')
+          TRUNCATED=$(echo "$STATUS" | jq -r '.truncated')
+          FILES=$(echo "$STATUS" | jq -r '.files | join("\n")')
+          if [ "$TRUNCATED" = "true" ]; then
+            echo "⚠️  compare 截断（>300 文件）—— 保守起见按含代码变更处理，不出热更包"
+            exit 0
+          fi
+          if [ -n "$FILES" ]; then
+            OFFENDING=$(echo "$FILES" | grep -vE '^app/src/main/assets/(skills|mcp_catalog)/[^/]+\.json$' || true)
+            if [ -n "$OFFENDING" ]; then
+              echo "🚫 本版含非热载路径变更 —— 必须重装 APK，不出热更包。白名单外文件（前 20）："
+              echo "$OFFENDING" | head -20 | sed 's/^/    - /'
+              exit 0
+            fi
+            echo "✅ data-only 判定通过（$(echo "$FILES" | wc -l) 个文件全部在热载白名单）"
+          else
+            echo "ℹ️  无文件变更（同 commit 重发版）—— 按 data-only 处理（幂等热更）"
+          fi
+          # ── 打包：hotmanifest.json + skills 目录 + mcp_catalog 目录 ────────
+          python3 - <<'PYEOF'
+          import hashlib, json, os, zipfile
+
+          version, vcode = os.environ["VERSION"], int(os.environ["VCODE"])
+          tag = os.environ["TAG"]
+
+          # 热通道能力地板：首个携带热更通道客户端的 versionCode（v1.4.7）。
+          # base 取地板而非上一版 —— 热更包是**累积快照**（skills + 目录全量，
+          # 自包含），对任何热通道客户端皆可安全应用；而签名冲突用户（本通道的
+          # 主要服务对象）**永远无法重装 APK**，若 base 随版本推进，他们跳过
+          # 一次发版就会被永久锁在数据通道之外。地板以下的老客户端本就不认识
+          # hot 字段（ignoreUnknownKeys），不受影响。
+          HOT_FLOOR_VCODE = 49
+
+          def sha256_bytes(data):
+              return hashlib.sha256(data).hexdigest()
+
+          entries = []
+          hot_root = "dist-hot"
+          # 包内布局与 APK 热载路径同构：skills/<id>.json + mcp_catalog/<cat>.json
+          for section in ("skills", "mcp_catalog"):
+              src = f"app/src/main/assets/{section}"
+              if not os.path.isdir(src):
+                  continue
+              for name in sorted(os.listdir(src)):
+                  if not name.endswith(".json"):
+                      continue
+                  data = open(os.path.join(src, name), "rb").read()
+                  rel = f"{section}/{name}"
+                  os.makedirs(os.path.join(hot_root, section), exist_ok=True)
+                  open(os.path.join(hot_root, rel), "wb").write(data)
+                  entries.append({"path": rel, "sha256": sha256_bytes(data)})
+
+          manifest = {
+              "schema": "apex-hot-v1",
+              "targetVersionCode": vcode,
+              "targetVersionName": version,
+              "entries": entries,
+          }
+          with open(os.path.join(hot_root, "hotmanifest.json"), "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+
+          # dist/ 只放对外产物 —— 热更包 zip 进 dist/（发布步骤 files: dist/* 自动带走）
+          zip_path = f"dist/hot_v{version}.zip"
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for root, _, files in os.walk(hot_root):
+                  for name in sorted(files):
+                      full = os.path.join(root, name)
+                      zf.write(full, os.path.relpath(full, hot_root))
+          size_kb = os.path.getsize(zip_path) // 1024
+          print(f"📦 热更包：{zip_path}（{len(entries)} 文件，{size_kb} KB）")
+
+          # meta/hot_meta.json —— version.json 注入源（base = 热通道能力地板）
+          meta = {"file": f"hot_v{version}.zip", "baseVersionCode": HOT_FLOOR_VCODE,
+                  "targetVersionCode": vcode, "targetVersionName": version}
+          with open("meta/hot_meta.json", "w", encoding="utf-8") as f:
+              json.dump(meta, f, ensure_ascii=False)
+              f.write("\n")
+          PYEOF
+          rm -rf dist-hot
+          {
+            echo ""
+            echo "### 🔥 热更包（data-only · 免安装）"
+            echo ""
+            echo "- \`hot_v${VERSION}.zip\` — $(($(stat -c%s "dist/hot_v${VERSION}.zip") / 1024)) KB"
+            echo "- 适用基底：所有支持热更通道的版本（v1.4.7+，App 内自动判定，下载后即时生效）"
+            echo "- 签名冲突用户（本地/分叉构建）可持续乘此通道追平数据层，无需重装"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: "Generate xdelta3 patches (multi-base: recent releases → this release)"
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
@@ -424,6 +583,7 @@ jobs:
           VERSION: ${{ needs.resolve.outputs.version }}
           VCODE: ${{ needs.resolve.outputs.vcode }}
           SHA8: ${{ needs.resolve.outputs.sha8 }}
+          SHA_FULL: ${{ github.sha }}
         run: |
           python3 - <<'PYEOF'
           import datetime, hashlib, json, os
@@ -477,6 +637,28 @@ jobs:
               "download": {"arm64": arm64, "universal": universal},
               "patch": patch,
           }
+
+          # ── 热更通道字段（v1.4.7，老客户端 ignoreUnknownKeys 自动忽略）──
+          # hot：data-only 版本的热更包档（App 零安装通道）；
+          # commitSha：本版 commit（下一版 data-only 判定的比对基准，通道自举）；
+          # signingCertSha256：发布 APK 签名证书指纹（客户端签名预检）。
+          if os.path.exists("meta/hot_meta.json"):
+              hm = json.load(open("meta/hot_meta.json"))
+              fname = hm["file"]
+              manifest["hot"] = {
+                  "baseVersionCode": hm["baseVersionCode"],
+                  "targetVersionCode": hm["targetVersionCode"],
+                  "targetVersionName": hm.get("targetVersionName", version),
+                  "url": f"{base}/{fname}",
+                  "sizeBytes": os.path.getsize(f"dist/{fname}"),
+                  "sha256": sha256(f"dist/{fname}"),
+              }
+          manifest["commitSha"] = os.environ.get("SHA_FULL")
+          if os.path.exists("meta/cert_sha256.txt"):
+              cert = open("meta/cert_sha256.txt").read().strip()
+              if len(cert) == 64:
+                  manifest["signingCertSha256"] = cert
+
           with open("dist/version.json", "w", encoding="utf-8") as f:
               json.dump(manifest, f, indent=2, ensure_ascii=False)
               f.write("\n")
@@ -503,6 +685,19 @@ jobs:
                   patch_lines = "\n".join(rows)
 
           def release_body(header_note):
+              # 热更段：data-only 版本展示免安装通道（否则说明本版需重装）
+              if "hot" in manifest and manifest["hot"]:
+                  h = manifest["hot"]
+                  hot_lines = "\n".join([
+                      "### 🔥 Hot update (data-only · no install needed)",
+                      "",
+                      f"- `hot_v{version}.zip` — {h['sizeBytes'] // 1024} KB（skills / MCP 目录数据层快照）",
+                      f"- 适用基底：versionCode ≥ {h['baseVersionCode']} —— App 内自动判定，下载后即时生效",
+                      f"- 与 APK 签名无关：本地构建 / 分叉构建同样可用（不受签名冲突影响）",
+                      "",
+                  ])
+              else:
+                  hot_lines = ""
               return "\n".join([
                   f"## Apex Agent {tag}",
                   "",
@@ -514,6 +709,7 @@ jobs:
                   f"| `arm64` | 现代手机（arm64-v8a，**首选**） | {mb(arm64):.0f} MB |",
                   f"| `universal` | 旧设备 / 模拟器（全 3 ABI） | {mb(universal):.0f} MB |",
                   "",
+                  hot_lines,
                   "### 🔧 增量补丁（App 内「关于 → 检查更新」可直选）",
                   patch_lines,
                   "",

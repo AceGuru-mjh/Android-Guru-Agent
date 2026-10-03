@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.SystemUpdateAlt
@@ -50,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import com.apex.agent.BuildConfig
 import com.apex.agent.R
 import com.apex.agent.update.DownloadMirror
+import com.apex.agent.update.HotAsset
+import com.apex.agent.update.HotUpdateEngine
 import com.apex.agent.update.MirrorPrefs
 import com.apex.agent.update.MirrorSpeedProbe
 import com.apex.agent.update.PatchIndex
@@ -112,6 +115,7 @@ internal fun UpdatePanel() {
     val checkStateRaw by center.checkState.collectAsStateWithLifecycle()
     val patchIndex by center.patchIndex.collectAsStateWithLifecycle()
     val patchFlow by center.patchState.collectAsStateWithLifecycle()
+    val hotFlow by center.hotState.collectAsStateWithLifecycle()
     val updateState: UpdateUiState = when (val s = checkStateRaw) {
         UpdateCenter.CheckState.Idle -> UpdateUiState.Idle
         UpdateCenter.CheckState.Checking -> UpdateUiState.Checking
@@ -299,6 +303,18 @@ internal fun UpdatePanel() {
         }
     }
 
+    // ── 发起热更新（v1.4.7：下载→校验→原子落位→技能即时注入，零安装）──
+    // 热更包体积小（MB 级）：AUTO 且已有测速则复用，否则直连 —— 与增量
+    // 补丁同策略，不为小文件现场跑一轮四节点探测
+    fun startHotFlow(hot: HotAsset, manifest: UpdateManifest) {
+        val resolved = if (selectedMirror == DownloadMirror.AUTO && speeds.isNotEmpty()) {
+            resolveAuto(speeds)
+        } else {
+            DownloadMirror.DIRECT
+        }
+        center.startHotFlow(hot, manifest, resolved)
+    }
+
     // ── 发起增量更新（中枢内全自动：链下载 → 合成 → 校验 → 就绪弹安装按钮）──
     // 应用级流水线：离开本页下载与合成继续；中断后重启只补缺失分段（断点续传）
     fun startPatchFlow(chain: PatchIndex.Chain, manifest: UpdateManifest) {
@@ -359,6 +375,17 @@ internal fun UpdatePanel() {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline
                     )
+                    // v1.4.7：数据层已热更时的标注（有效版本口径见 UpdateCenter）
+                    val appliedHotName = remember(hotFlow) {
+                        center.hotStore.appliedTargetVersionName()
+                    }
+                    if (appliedHotName != null) {
+                        Text(
+                            stringResource(R.string.about_update_hot_applied_note, appliedHotName),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
                 when (val state = updateState) {
                     is UpdateUiState.Checking -> CircularProgressIndicator(
@@ -481,10 +508,36 @@ internal fun UpdatePanel() {
                             onClick = { showMirrorDialog = true }
                         )
 
-                        // 下载动作区（优先级：增量流水线 > 全量下载进度 > 动作按钮）
+                        // ── 签名预检警告（v1.4.7）：本地签名与官方发布指纹不一致时，
+                        // 增量/全量覆盖安装必报签名冲突 —— 提前告知，别让用户
+                        // 下载几百 MB 后才在安装器撞墙（劝导热更/卸载重装）──
+                        if (center.signatureMismatch(manifest)) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer
+                                    .copy(alpha = 0.5f)
+                            ) {
+                                Text(
+                                    stringResource(R.string.about_update_signature_warning),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                )
+                            }
+                        }
+
+                        // 下载动作区（优先级：热更流水线 > 增量流水线 > 全量下载进度 > 动作按钮）
                         val active = activeDownload
                         val flow = patchFlow
+                        val activeHot = hotFlow
                         when {
+                            activeHot is HotUpdateEngine.State.Downloading ||
+                                activeHot is HotUpdateEngine.State.Verifying -> {
+                                HotFlowProgress(activeHot)
+                            }
+
                             flow is PatchUpdateEngine.State.Downloading ||
                                 flow is PatchUpdateEngine.State.Applying -> {
                                 PatchFlowProgress(flow)
@@ -518,6 +571,134 @@ internal fun UpdatePanel() {
                             }
 
                             else -> {
+                                // ── 热更通道（v1.4.7 零安装 —— 优先于一切安装路径）──
+                                // 刚生效的成功态：成果行（自动重检随后翻转 UpToDate）
+                                val appliedHot = hotFlow as? HotUpdateEngine.State.Applied
+                                if (appliedHot != null) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF4CAF50),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            stringResource(
+                                                R.string.about_update_hot_done,
+                                                appliedHot.targetVersionName,
+                                                appliedHot.entries
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                // 热更失败态：错误行 + 重试
+                                val failedHot = hotFlow as? HotUpdateEngine.State.Failed
+                                if (failedHot != null) {
+                                    Column(
+                                        Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            stringResource(
+                                                R.string.about_update_hot_failed,
+                                                hotFailLabel(failedHot.kind)
+                                            ),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        OutlinedButton(
+                                            onClick = {
+                                                center.resetHotState()
+                                                val hot = center.resolveHotUpdate(manifest)
+                                                if (hot != null) startHotFlow(hot, manifest)
+                                            }
+                                        ) {
+                                            Text(stringResource(R.string.about_update_retry))
+                                        }
+                                    }
+                                }
+                                // 热更可用：主推卡片（免安装 · 即时生效 · 无签名冲突）
+                                val hotAsset = if (appliedHot == null && failedHot == null) {
+                                    center.resolveHotUpdate(manifest)
+                                } else null
+                                if (hotAsset != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer
+                                            .copy(alpha = 0.45f)
+                                    ) {
+                                        Column(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text(
+                                                    stringResource(R.string.about_update_hot_title),
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Surface(
+                                                    shape = RoundedCornerShape(5.dp),
+                                                    color = MaterialTheme.colorScheme.primary
+                                                        .copy(alpha = 0.14f)
+                                                ) {
+                                                    Text(
+                                                        stringResource(R.string.about_update_hot_badge),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.padding(
+                                                            horizontal = 6.dp, vertical = 2.dp
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                stringResource(
+                                                    R.string.about_update_hot_hint,
+                                                    hotAsset.targetVersionName.ifBlank {
+                                                        manifest.versionName
+                                                    },
+                                                    formatMb(hotAsset.sizeBytes)
+                                                ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                            Button(
+                                                onClick = { startHotFlow(hotAsset, manifest) },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Icon(
+                                                    Icons.Outlined.Bolt,
+                                                    contentDescription = null
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    stringResource(
+                                                        R.string.about_update_hot_button,
+                                                        formatMb(hotAsset.sizeBytes)
+                                                    )
+                                                )
+                                            }
+                                            Text(
+                                                stringResource(R.string.about_update_hot_note),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.outline
+                                            )
+                                        }
+                                    }
+                                }
+
                                 // 就绪产物优先：上次已合成/已下载但未安装的包，
                                 // 一键直达安装确认框（不重复下载/合成）
                                 val ready = readyPatch
@@ -799,4 +980,14 @@ internal fun UpdatePanel() {
             startDownload()
         }
     )
+}
+
+/** 热更失败类别的本地化标签（[HotUpdateEngine.FailKind] → 用户可读文案）。 */
+@Composable
+internal fun hotFailLabel(kind: HotUpdateEngine.FailKind): String = when (kind) {
+    HotUpdateEngine.FailKind.SPACE -> stringResource(R.string.about_update_hot_fail_space)
+    HotUpdateEngine.FailKind.DOWNLOAD -> stringResource(R.string.about_update_hot_fail_download)
+    HotUpdateEngine.FailKind.VERIFY -> stringResource(R.string.about_update_hot_fail_verify)
+    HotUpdateEngine.FailKind.UNPACK -> stringResource(R.string.about_update_hot_fail_unpack)
+    HotUpdateEngine.FailKind.APPLY -> stringResource(R.string.about_update_hot_fail_apply)
 }

@@ -181,6 +181,26 @@ class UpdateChecker(
         } ?: return null
         return asset.takeIf { it.fromTag == "v$currentVersionName" }
     }
+
+    /**
+     * 判定本清单是否对本地开放热更新通道（纯策略委托，无 Android 依赖）。
+     *
+     * @param manifest 本次命中的清单
+     * @param effectiveVersionCode 本地有效版本（max(包 versionCode, 已应用热更目标)，
+     *   由 [HotContentStore.effectiveVersionCode] 提供）
+     * @param appliedTargetVersionCode 已应用热更目标（0 = 从未）
+     * @param appliedPackageSha256 已应用热更包 ZIP 指纹（null = 未记录）——
+     *   发布仓库应急重发同版本包时凭此判重（见 HotUpdatePolicy 门 2）
+     */
+    fun resolveHotUpdate(
+        manifest: UpdateManifest,
+        effectiveVersionCode: Int,
+        appliedTargetVersionCode: Int,
+        appliedPackageSha256: String? = null
+    ): HotAsset? = HotUpdatePolicy.resolve(
+        manifest.hot, manifest.versionCode, effectiveVersionCode,
+        appliedTargetVersionCode, appliedPackageSha256
+    )
 }
 
 /** 发布仓库 main 分支上版本清单的固定地址（由开发仓库 CI 自动维护）。 */
@@ -283,6 +303,13 @@ data class UpdatePatchMatrix(
 /**
  * version.json 清单模型 —— 与开发仓库 release.yml 生成的 schema 一一对应。
  * 全部可选字段 + ignoreUnknownKeys：清单演进（如新增字段）不崩老客户端。
+ *
+ * v1.4.7 新增字段（老客户端自动忽略）：
+ * - [hot]：热更包档（data-only 版本才有；[HotUpdatePolicy.resolve] 判定适用）；
+ * - [commitSha]：本版 commit（CI 判定 data-only 的比对基准，热更通道自举用）；
+ * - [signingCertSha256]：发布 APK 签名证书 SHA-256 指纹 —— 客户端签名
+ *   预检（本地指纹不一致 = 增量/全量覆盖安装必报签名冲突，提前告知
+ *   用户改走热更或卸载重装，不再下载 300MB 后才在安装器撞墙）。
  */
 @Serializable
 data class UpdateManifest(
@@ -292,5 +319,8 @@ data class UpdateManifest(
     val publishedAt: String? = null,
     val releasePage: String? = null,
     val download: UpdateDownload? = null,
-    val patch: UpdatePatchMatrix? = null
+    val patch: UpdatePatchMatrix? = null,
+    val hot: HotAsset? = null,
+    val commitSha: String? = null,
+    val signingCertSha256: String? = null
 )

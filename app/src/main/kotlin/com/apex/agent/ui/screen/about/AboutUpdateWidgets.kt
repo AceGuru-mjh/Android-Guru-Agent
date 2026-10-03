@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
 import com.apex.agent.update.DownloadMirror
+import com.apex.agent.update.HotUpdateEngine
 import com.apex.agent.update.PatchIndex
 import com.apex.agent.update.PatchUpdateEngine
 
@@ -345,3 +346,67 @@ internal fun mirrorLabel(mirror: DownloadMirror): String = when (mirror) {
 /** 字节数 → 「318.4 MB」式人类可读体积（一位小数：<1MB 不再显示成 0 MB）。 */
 internal fun formatMb(bytes: Long): String =
     String.format(java.util.Locale.US, "%.1f MB", bytes / 1024.0 / 1024.0)
+
+/**
+ * 热更流水线进度（v1.4.7 热更新体系 —— 零安装通道）：
+ * 下载段（百分比 + 字节）→ 校验段（不定进度条：ZIP 指纹 + 逐文件复核 +
+ * 原子落位）。附「离开页面不中断」提示（应用级流水线，同增量路径语义）。
+ */
+@Composable
+internal fun HotFlowProgress(flow: HotUpdateEngine.State) {
+    Column(
+        Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        when (flow) {
+            is HotUpdateEngine.State.Downloading -> {
+                LinearProgressIndicator(
+                    progress = { flow.percent / 100f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        stringResource(
+                            R.string.about_update_hot_downloading,
+                            flow.percent
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    if (flow.bytesSoFar > 0) {
+                        Text(
+                            formatMb(flow.bytesSoFar),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.about_update_patch_background_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                )
+            }
+
+            is HotUpdateEngine.State.Verifying -> {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(
+                    stringResource(R.string.about_update_hot_verifying),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Text(
+                    stringResource(R.string.about_update_patch_background_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                )
+            }
+
+            else -> Unit
+        }
+    }
+}

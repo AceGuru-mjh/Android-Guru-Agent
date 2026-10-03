@@ -285,17 +285,27 @@ class UbuntuBootstrapManager(
             // 上次已 FAILED@APT_UPDATE 意味着官方 + 全镜像都试过 —— 大陆网络下
             // 官方源的失败是确定性的，旧实现每次重试仍先白等官方源超时（单源
             // 可达 600s）才轮到实际能用的镜像，注记看起来「怎么重试都不消失」。
-            // 上次失败于本阶段 → 镜像先行（TUNA→USTC→Aliyun）、官方殿后；首次
-            // 引导仍官方先行（HTTP-first 契约 + 海外用户语义逐字节不变）。
-            val previousFailedAtAptUpdate = existing != null &&
-                existing.state == BootstrapState.FAILED.name &&
-                existing.failedStage == BootstrapState.APT_UPDATE.name
+            // 两种「官方源没跑通」的痕迹都要镜像先行：
+            //  1. state == FAILED 且 failedStage == APT_UPDATE（明确失败）；
+            //  2. state == APT_UPDATE —— stageStart 已落盘、上次尝试被整体超时
+            //     （manager 预算 900s）或进程终止打断在官方源上。漏这一种会让
+            //     每次恢复都重走 600s 官方源等待，整体预算被它吃光 → 反复
+            //     InProgress 的活锁。
+            // 首次引导仍官方先行（HTTP-first 契约 + 海外用户语义逐字节不变）。
+            val aptUpdateRetry = existing != null &&
+                (
+                    existing.state == BootstrapState.APT_UPDATE.name ||
+                        (
+                            existing.state == BootstrapState.FAILED.name &&
+                                existing.failedStage == BootstrapState.APT_UPDATE.name
+                            )
+                    )
             val rootfsDesc = rootfsDesc0
             val rootfsDir = rootfsDir0?.takeIf { it.isDirectory }
             // 尝试顺序（null = 不改写 sources，按当前/官方源直接跑 apt update）。
             val attemptOrder: List<String?> = when {
                 rootfsDir == null || rootfsDesc == null -> listOf(null)
-                previousFailedAtAptUpdate -> MIRROR_FALLBACK_ORDER + listOf(null)
+                aptUpdateRetry -> MIRROR_FALLBACK_ORDER + listOf(null)
                 else -> listOf(null) + MIRROR_FALLBACK_ORDER
             }
             var updateResult: com.apex.agent.platform.terminal.pkg.PackageOperation? = null
@@ -308,8 +318,8 @@ class UbuntuBootstrapManager(
                     if (dir == null || desc == null) continue // 防御 —— attemptOrder 已按此分支构造
                     _progress.tryEmit(BootstrapProgress.StageStarted(
                         BootstrapState.APT_UPDATE.name,
-                        if (previousFailedAtAptUpdate) {
-                            "上次引导失败于 apt update — 镜像 $mirrorId 优先重试"
+                        if (aptUpdateRetry) {
+                            "上次引导未在 apt update 走通 — 镜像 $mirrorId 优先重试"
                         } else {
                             "官方源 apt update 失败 — 切换镜像 $mirrorId 重试"
                         }

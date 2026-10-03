@@ -255,6 +255,56 @@ class UbuntuBootstrapManagerTest {
         assertEquals(BootstrapState.READY, mgr.state())
     }
 
+    @Test fun `retry after APT_UPDATE failure tries mirrors before official`() = runBlocking {
+        val (mgr, apt, provisioner) = newManager(aptSucceeds = false)
+        mgr.bootstrap()  // 官方 + 全镜像失败 → FAILED@APT_UPDATE，sources 回滚为官方
+        assertEquals(BootstrapState.FAILED, mgr.state())
+        apt.updateSucceeds = true
+        apt.installSucceeds = true
+        val retry = mgr.bootstrap()
+        assertTrue("retry should succeed, got $retry", retry is UbuntuBootstrapManager.BootstrapResult.Ready)
+        // 顺序断言（回归）：上次失败于 APT_UPDATE → 重试镜像先行 —— 首个成功
+        // 尝试是 TUNA，sources 停在 TUNA。旧实现官方先行：官方 update 立即成功
+        // → sources 保持官方（本断言失败），且大陆网络下每次重试先白等官方源
+        // 超时（单源可达 600s）才轮到能用的镜像 —— 注记看起来「怎么重试都不消失」。
+        val sourcesFile = File(
+            File(provisioner.currentRootfs!!.location!!.value),
+            "etc/apt/sources.list.d/ubuntu.sources"
+        )
+        assertTrue(
+            "mirror-first retry must leave the first mirror applied, got: ${sourcesFile.readText()}",
+            sourcesFile.readText().contains("mirrors.tuna.tsinghua.edu.cn")
+        )
+    }
+
+    @Test fun `resume after interrupted APT_UPDATE also tries mirror first`() = runBlocking {
+        val (mgr, _, provisioner) = newManager(aptSucceeds = true)
+        mgr.bootstrap()  // 建立 sources（官方）与 state 文件
+        mgr.reset()
+        // 模拟崩溃/整体超时打断：state 落盘停在 APT_UPDATE（stageStart 已写）——
+        // 前置阶段证据齐全、APT_UPDATE 证据缺失。这是「被打断」而非「明确失败」，
+        // 只认 FAILED@APT_UPDATE 的旧逻辑会在这里重走官方源 600s 等待。
+        val storeField = mgr.javaClass.getDeclaredField("stateStore")
+        storeField.isAccessible = true
+        val store = storeField.get(mgr) as BootstrapStateStore
+        store.save(
+            BootstrapStateStore.BootstrapStateRecord(
+                state = BootstrapState.APT_UPDATE.name,
+                stageEvidence = mapOf("CHECKING" to 1L, "CONFIGURING" to 2L, "NETWORK_CHECK" to 3L),
+                startedAt = 1000L
+            )
+        )
+        mgr.bootstrap()  // 续跑：官方源上次没走通 → 镜像先行
+        val sourcesFile = File(
+            File(provisioner.currentRootfs!!.location!!.value),
+            "etc/apt/sources.list.d/ubuntu.sources"
+        )
+        assertTrue(
+            "resumed APT_UPDATE must go mirror-first, got: ${sourcesFile.readText()}",
+            sourcesFile.readText().contains("mirrors.tuna.tsinghua.edu.cn")
+        )
+    }
+
     @Test fun `reconcile detects IN_PROGRESS crash state`() = runBlocking {
         val (mgr, apt, _) = newManager(aptSucceeds = true)
         // 模拟崩溃：手动写入 APT_UPDATE（进行中）状态 + 部分阶段证据

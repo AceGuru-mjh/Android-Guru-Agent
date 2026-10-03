@@ -202,7 +202,19 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
      *   rootfs，无网络消耗 —— 「用户没同意流量」的老顾虑已不存在）；
      * - phase == ROOTFS_READY → 引导增强也顺手补齐（bootstrap 失败自动降级，
      *   不阻塞可用性）；
+     * - phase == BOOTSTRAPPING → 上次进程崩溃/超时残留的 IN_PROGRESS 续跑。
+     *   旧条件漏掉它：phase 停在 BOOTSTRAPPING，环境面板只有 spinner、无人
+     *   恢复（用户看到的即「apt 一直没引导」）；
+     * - phase == READY 且 bootstrapNote != null（降级注记）→ 防御性补跑。
+     *   warmUp 派生下启动时不可达（恒派生 ROOTFS_READY），保留是为了让
+     *   「引导未完成态一律自动预备」的意图显式成立；
      * - FAILED → 不自动重试（用户在终端页/环境中心手动重试，保留失败现场）。
+     *
+     * 网络恢复自愈（用户反馈「Ubuntu 总是显示 apt 未引导」的自动出口）：
+     * 降级注记此前只有两个手动清除出口 —— 环境中心一键重试 / 下次重启的
+     * 启动自动预备；网络从断到通时没人重试，注记就一直挂着。下面监听
+     * NetworkMonitor 的离线→在线跃迁，仅在「引导未完成」态补一次 ensureReady
+     *（幂等单飞：编排在跑则共享结果，已完整 READY 秒回）。
      *
      * 用户体验目标：安装 APK → 打开 App → 无需任何点击，Ubuntu 在后台就绪；
      * 进终端页时看到的是实时进度而非「未解包」等待用户行动的横幅。
@@ -221,7 +233,10 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
             // 只会共享同一次编排）。IO 调度：ensureReady 链含文件解压与子进程探测。
             val phase = ubuntuLifecycle.stateFlow.value.phase
             if (phase == UbuntuLifecycleCoordinator.Phase.NOT_INSTALLED ||
-                phase == UbuntuLifecycleCoordinator.Phase.ROOTFS_READY
+                phase == UbuntuLifecycleCoordinator.Phase.ROOTFS_READY ||
+                phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING ||
+                (phase == UbuntuLifecycleCoordinator.Phase.READY &&
+                    ubuntuLifecycle.stateFlow.value.bootstrapNote != null)
             ) {
                 val r = runCatching {
                     kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -233,6 +248,34 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     "Ubuntu auto-provision: ${r?.let { it::class.simpleName } ?: "failed"}"
                 )
             }
+        }
+
+        // ── 网络恢复自愈（降级注记的自动清除出口）──
+        // drop(1) 跳过订阅初值（启动链已负责首次预备），StateFlow 自带去重 ——
+        // 只有真实的离线→在线跃迁才触发。collect 串行处理：一次 ensureReady
+        // 未完成前的再次跃迁会被合并，天然节流。
+        appScope.launch {
+            networkMonitor.isOnline
+                .drop(1)
+                .collect { online ->
+                    if (!online) return@collect
+                    val st = ubuntuLifecycle.stateFlow.value
+                    val pending = st.phase == UbuntuLifecycleCoordinator.Phase.ROOTFS_READY ||
+                        st.phase == UbuntuLifecycleCoordinator.Phase.BOOTSTRAPPING ||
+                        (st.phase == UbuntuLifecycleCoordinator.Phase.READY &&
+                            st.bootstrapNote != null)
+                    if (!pending) return@collect
+                    val r = runCatching {
+                        kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            ubuntuLifecycle.ensureReady()
+                        }
+                    }.getOrNull()
+                    Log.i(
+                        "ApexAgent",
+                        "Ubuntu auto-retry on network regain: " +
+                            "${r?.let { it::class.simpleName } ?: "failed"}"
+                    )
+                }
         }
     }
 

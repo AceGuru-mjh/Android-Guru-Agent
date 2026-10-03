@@ -354,6 +354,17 @@ class UbuntuLifecycleCoordinator(
         // T83 内置交付语义：rootfs 解包已就绪（离线可得），bootstrap 是需网络的
         // **增强而非门槛** —— 失败降级为 READY（bootstrapNote 携带原因），环境照常可用；
         // 网络恢复后 force=true 或 restart 后的 ensureReady 会重试引导。
+        //
+        // ★ 修复「降级重试永不自愈」（用户反馈「总是显示 apt 引导未完成」根因之一）：
+        // dnsRefreshFn 此前**只**在健康 READY 短路前调用 —— 恰恰是最需要重试的
+        // 降级路径（note != null → 完整编排）不刷新：resolv.conf 还是安装时刻/上次
+        // 网络的快照，切网（Wi-Fi→蜂窝/VPN）后重试拿着旧 DNS 跑 apt update →
+        // 官方 + 全镜像解析全败 → 再次 FAILED → 降级注记永远挂着。现在每次完整
+        // 编排（含降级重试）在 bootstrap 前对一次宿主 DNS —— 文件对比毫秒级、
+        // 失败静默（刷新失败交由 apt 的真实报错兜底，不改变降级语义）。
+        dnsRefreshFn?.let { refresh ->
+            runCatching { refresh() }
+        }
         setPhase(Phase.BOOTSTRAPPING)
         var bootstrapDegraded = false
         var bootstrapError: String? = null

@@ -165,6 +165,8 @@ class UbuntuLifecycleCoordinatorTest {
         var probeThrows: Exception? = null,
         var probeCalls: Int = 0,
         var repairCalls: Int = 0,
+        /** P1（DNS 快照刷新）：dnsRefreshFn 端口调用计数（断言降级重试也刷新）。 */
+        var dnsRefreshCalls: Int = 0,
         /** 实例属性：测试可在构造后改写（repairFn lambda 延迟读取）。 */
         var repairOutcome: UbuntuLifecycleCoordinator.RepairOutcome? = null,
         val clockValues: ArrayDeque<Long> = ArrayDeque(), // 可编程时钟
@@ -193,6 +195,7 @@ class UbuntuLifecycleCoordinatorTest {
                 if (bundledChecksumThrows) error("registry lookup failed")
                 bundledChecksum
             },
+            dnsRefreshFn = { dnsRefreshCalls++; true },
             target = testTarget,
             defaultTimeoutMs = 5_000L,
             clock = { clockValues.removeFirstOrNull() ?: System.currentTimeMillis() }
@@ -402,6 +405,36 @@ class UbuntuLifecycleCoordinatorTest {
         val ready = r as UbuntuLifecycleCoordinator.EnsureResult.Ready
         assertFalse(ready.bootstrapDegraded)
         assertEquals(null, env.coordinator.stateFlow.value.bootstrapNote)
+    }
+
+    @Test
+    fun `10e full orchestration incl degraded retry refreshes guest DNS before bootstrap`() = runBlocking {
+        val env = Env()
+        // 断言刷新发生在 bootstrap 之前：bootstrapFn 启动时读取当时的调用计数。
+        var dnsCallsAtBootstrapStart = -1
+        env.bootstrap.behavior = {
+            dnsCallsAtBootstrapStart = env.dnsRefreshCalls
+            UbuntuLifecycleCoordinator.BootstrapStageResult(
+                UbuntuLifecycleCoordinator.BootstrapOutcome.FAILED,
+                "APT_UPDATE", failedStage = "APT_UPDATE", error = "resolve failed"
+            )
+        }
+        env.coordinator.ensureReady()
+        assertEquals(1, dnsCallsAtBootstrapStart)
+        assertEquals(UbuntuLifecycleCoordinator.Phase.READY, env.coordinator.stateFlow.value.phase)
+        // ★ 降级重试（note != null → 不短路 → 完整编排）必须同样先刷 DNS ——
+        // 旧实现只在健康 READY 短路路径刷新，切网后降级重试拿着旧 DNS 跑 apt
+        // 全镜像必败 → 注记永不消失（用户反馈「总是显示 apt 引导未完成」根因）。
+        env.coordinator.ensureReady()
+        assertEquals(
+            "degraded retry must refresh guest DNS again before bootstrap",
+            2, dnsCallsAtBootstrapStart
+        )
+        assertEquals(
+            "retry with still-failing bootstrap stays degraded",
+            "resolve failed（failedStage=APT_UPDATE）",
+            env.coordinator.stateFlow.value.bootstrapNote
+        )
     }
 
     @Test

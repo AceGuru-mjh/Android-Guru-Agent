@@ -281,48 +281,71 @@ class UbuntuBootstrapManager(
             val originalSources: String? = deb822SourcesFile
                 ?.takeIf { it.isFile }
                 ?.let { runCatching { it.readText() }.getOrNull() }
-            var updateResult = aptManager.update()
+            // ★ 重试顺序翻转（用户反馈「总是显示 apt 引导未完成」的第二根因）：
+            // 上次已 FAILED@APT_UPDATE 意味着官方 + 全镜像都试过 —— 大陆网络下
+            // 官方源的失败是确定性的，旧实现每次重试仍先白等官方源超时（单源
+            // 可达 600s）才轮到实际能用的镜像，注记看起来「怎么重试都不消失」。
+            // 上次失败于本阶段 → 镜像先行（TUNA→USTC→Aliyun）、官方殿后；首次
+            // 引导仍官方先行（HTTP-first 契约 + 海外用户语义逐字节不变）。
+            val previousFailedAtAptUpdate = existing != null &&
+                existing.state == BootstrapState.FAILED.name &&
+                existing.failedStage == BootstrapState.APT_UPDATE.name
+            val rootfsDesc = rootfsDesc0
+            val rootfsDir = rootfsDir0?.takeIf { it.isDirectory }
+            // 尝试顺序（null = 不改写 sources，按当前/官方源直接跑 apt update）。
+            val attemptOrder: List<String?> = when {
+                rootfsDir == null || rootfsDesc == null -> listOf(null)
+                previousFailedAtAptUpdate -> MIRROR_FALLBACK_ORDER + listOf(null)
+                else -> listOf(null) + MIRROR_FALLBACK_ORDER
+            }
+            var updateResult: com.apex.agent.platform.terminal.pkg.PackageOperation? = null
+            var updateSucceeded = false
             var usedMirror: String? = null
-            if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
-                val rootfsDesc = provisioner.current()
-                val rootfsDir = rootfsDesc?.location?.let { File(it.value) }
-                if (rootfsDir != null && rootfsDir.isDirectory) {
-                    for (mirrorId in MIRROR_FALLBACK_ORDER) {
-                        _progress.tryEmit(BootstrapProgress.StageStarted(
-                            BootstrapState.APT_UPDATE.name,
+            for (mirrorId in attemptOrder) {
+                if (mirrorId != null) {
+                    val dir = rootfsDir
+                    val desc = rootfsDesc
+                    if (dir == null || desc == null) continue // 防御 —— attemptOrder 已按此分支构造
+                    _progress.tryEmit(BootstrapProgress.StageStarted(
+                        BootstrapState.APT_UPDATE.name,
+                        if (previousFailedAtAptUpdate) {
+                            "上次引导失败于 apt update — 镜像 $mirrorId 优先重试"
+                        } else {
                             "官方源 apt update 失败 — 切换镜像 $mirrorId 重试"
-                        ))
-                        val applied = sourcesList.apply(
-                            rootfsDir, rootfsDesc.architecture, mirrorId, force = true
-                        )
-                        if (!applied.written && applied.actions.any { it.startsWith("SourcesError") }) {
-                            continue
                         }
-                        updateResult = aptManager.update()
-                        if (updateResult.state ==
-                            com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED
-                        ) {
-                            usedMirror = mirrorId
-                            break
-                        }
-                    }
-                    // P2（镜像回滚）：全部镜像失败 → 恢复原 sources（含官方源），
-                    // 下次重试从官方源重新起步而非钉死在 aliyun。
-                    // ★ 修复：恢复的也是 deb822 ubuntu.sources（与快照同文件）。
-                    if (usedMirror == null && originalSources != null && deb822SourcesFile != null) {
-                        runCatching {
-                            deb822SourcesFile.writeText(originalSources)
-                        }
+                    ))
+                    val applied = sourcesList.apply(
+                        dir, desc.architecture, mirrorId, force = true
+                    )
+                    if (!applied.written && applied.actions.any { it.startsWith("SourcesError") }) {
+                        continue
                     }
                 }
+                val op = aptManager.update()
+                updateResult = op
+                if (op.state ==
+                    com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED
+                ) {
+                    updateSucceeded = true
+                    usedMirror = mirrorId
+                    break
+                }
             }
-            if (updateResult.state != com.apex.agent.platform.terminal.pkg.PackageOperationState.SUCCEEDED) {
+            // P2（镜像回滚）：全部失败 → 恢复原 sources（含官方源），
+            // 下次重试从官方源重新起步而非钉死在最后一个镜像。
+            // ★ 修复：恢复的也是 deb822 ubuntu.sources（与快照同文件）。
+            if (!updateSucceeded && originalSources != null && deb822SourcesFile != null) {
+                runCatching {
+                    deb822SourcesFile.writeText(originalSources)
+                }
+            }
+            if (!updateSucceeded) {
                 // ★ 失败原因可读化：旧实现把 apt stderr 首 500 字符直接塞进
                 // bootstrapNote（UI 橙字三行截断 —— 用户看到一坨日志碎片）。
                 // 优先结构化 error.message；stderr 只提取 E: 开头的错误行
                 //（apt 的 E: 行才是人话，W:/Ign: 是镜像噪音）；兜底镜像链摘要。
-                val reason = updateResult.error?.message?.take(200)
-                    ?: updateResult.result?.stderr?.lineSequence()
+                val reason = updateResult?.error?.message?.take(200)
+                    ?: updateResult?.result?.stderr?.lineSequence()
                         ?.filter { it.startsWith("E:") }
                         ?.take(3)
                         ?.joinToString("; ")

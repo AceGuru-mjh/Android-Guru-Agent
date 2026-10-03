@@ -100,3 +100,23 @@ output: { ok, sessionCount, sessions: [{id, shell, state, pid, backend, verdict?
 - 新 scheme 进 `TerminalColorSchemeDefs.ALL` 即自动进入选择器（id 唯一性有测试锁定）；
 - `terminal.diagnostics` 已加入 `TERMINAL_TOOL_RUN_POLICIES`（660s / maxRetries=0）——
   新终端工具同样要在该表登记（`TerminalToolPolicyTest` 的 mustCover 会抓漏配）。
+
+## 10. 复修轮：「apt 未引导」注记永不消失（第 6 条反馈的深层根因）
+
+第 6 条在 T87 修掉「不给出口」后仍复现（用户反馈原文：**Ubuntu 总是显示 apt 未引导**）。
+二次根因审计定位四个洞，本 PR 全部闭合：
+
+| # | 洞 | 机理 | 修复 |
+|---|----|------|------|
+| a | 降级重试不刷 DNS | `dnsRefreshFn` 只接在健康 READY 短路前 —— 最需要重试的降级路径（note ≠ null → 完整编排）拿的还是安装时刻/上次网络的 `resolv.conf` 快照；切网后每次重试全镜像解析必败 → FAILED 循环 → 注记永不消失 | `runEnsureSteps` 在 bootstrap 前统一刷一次宿主 DNS（毫秒级文件对比、失败静默，不改变降级语义）—— 回归测试 `UbuntuLifecycleCoordinatorTest.10e` |
+| b | 重试顺序官方源先行 | 上次 FAILED@APT_UPDATE 已证明官方 + 全镜像都试过；大陆网络下官方源失败是确定性的，旧实现每次重试仍先白等官方源超时（单源可达 600s）才轮到实际能用的镜像 | 上次失败于本阶段 → 镜像先行（TUNA→USTC→Aliyun）、官方殿后；首次引导仍官方先行（HTTP-first 契约 + 海外用户语义不变）—— 回归测试 `UbuntuBootstrapManagerTest.retry after APT_UPDATE failure tries mirrors before official` |
+| c | 断网恢复无人重试 | 注记只有两个手动清除出口（环境中心按钮 / 重启 App），`NetworkMonitor` 已在手边却没人听「网络回来了」 | ApexApp 监听离线→在线跃迁（drop(1) 跳过订阅初值 + StateFlow 去重），「引导未完成」态自动补一次 ensureReady（幂等单飞；FAILED 失败现场仍不自动重试，与启动策略一致） |
+| d | 启动自动预备漏态 | 条件只含 NOT_INSTALLED/ROOTFS_READY —— 崩溃残留的 BOOTSTRAPPING（bootstrap.json IN_PROGRESS）无人续跑，phase 永停「引导中」spinner（用户视角同样是「一直没引导」） | 启动条件补 BOOTSTRAPPING（续跑未完成阶段）+ 防御性覆盖降级 READY |
+
+四洞合起来解释了「总是显示」：**失败后没有任何一条路径能在网络恢复时把 bootstrap 重跑成功** ——
+a、b 让重试跑不成/跑得慢，c、d 让该重试的时机根本没人发起重试。
+
+- 验证：`UbuntuLifecycleCoordinatorTest`（10e）+ `UbuntuBootstrapManagerTest`（mirror-first 回归）
+  + 三门禁（file size / code quality / kotlin balance）+ CI 编译与全量单测；
+- 真机验收点：切网后打开环境中心 → 注记应在网络恢复后自动消失（无需点「完成初始化」）；
+  降级态点重试 → 日志应见「镜像优先重试」而非先白等官方源。

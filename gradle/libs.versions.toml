@@ -114,6 +114,9 @@ browser-core = { group = "com.apex.browser", name = "browser-core", version.ref 
 browser-engine = { group = "com.apex.browser", name = "browser-engine", version.ref = "browser-kit" }
 browser-chrome = { group = "com.apex.browser", name = "browser-chrome", version.ref = "browser-kit" }
 
+# Vico 开源图表库（Maven Central，稳定线 1.13.1）—— 任务历史/记忆统计可视化
+vico-compose = { group = "com.patrykandpatrick.vico", name = "compose", version.ref = "vico" }
+
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }

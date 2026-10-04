@@ -7,6 +7,7 @@ import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.skill.SkillActivationStore
 import com.apex.agent.core.tools.skill.SkillAutoActivator
+import com.apex.agent.core.tools.skill.SkillDirectoryWatcher
 import com.apex.agent.core.tools.skill.SkillHotReloadLogLevel
 import com.apex.agent.core.tools.skill.SkillMenuProvider
 import com.apex.agent.core.tools.skill.SkillRegistry
@@ -39,6 +40,11 @@ object SkillModule {
      */
     private val bundledReleaseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * 技能目录监听 scope（热加载触发侧，与释放管线分属两个独立单发协程）。
+     */
+    private val directoryWatchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     @Provides
     @Singleton
     fun provideSkillRegistry(@ApplicationContext context: Context): SkillRegistry {
@@ -63,7 +69,45 @@ object SkillModule {
         // assets/skills 不再打包 —— 本释放管线仍保留：热更技能重放 + pruneStaleBundled
         // 反向清理旧 APK 释放过的内置残留（升级用户自动迁移到仓库按需安装模式）。
         releaseBundledSkills(context, registry)
+        // 热加载触发侧：市场外的文件变化（热更落盘/文件同步/手动解压）经
+        // 目录监听器对账进注册表——装、卸、升级全程免重启。首轮只建基线，
+        // 与上方的释放管线并发安全（reconcileDirectory 幂等 + 注册表内部锁）。
+        startDirectoryWatcher(context, registry)
         return registry
+    }
+
+    /**
+     * 启动技能目录监听器（[SkillDirectoryWatcher]）：轮询指纹变化 →
+     * [SkillRegistry.reconcileDirectory] 对账 → changes 流 →
+     * SkillHotReloader 工具热同步 + 市场页自动刷新 + 引擎每轮重读
+     * prompt 注入（本就是热的）。
+     *
+     * 与 [releaseBundledSkills] 的时序竞态安全：协调读到释放管线的半截
+     * 文件只会 skipped + WARN，写入完成后指纹再变、下轮自愈。
+     */
+    private fun startDirectoryWatcher(context: Context, registry: SkillRegistry) {
+        runCatching {
+            SkillDirectoryWatcher(
+                registry = registry,
+                skillsDir = File(context.filesDir, "skills"),
+                scope = directoryWatchScope,
+                logger = { level, message ->
+                    when (level) {
+                        SkillHotReloadLogLevel.INFO -> AppLogger.instance.info(
+                            LogCategory.PLUGIN, "SkillDirectoryWatcher", message
+                        )
+                        SkillHotReloadLogLevel.WARN -> AppLogger.instance.warn(
+                            LogCategory.PLUGIN, "SkillDirectoryWatcher", message
+                        )
+                    }
+                }
+            ).start()
+        }.onFailure {
+            AppLogger.instance.warn(
+                LogCategory.PLUGIN, "SkillModule",
+                "技能目录监听启动失败（不阻断启动）：${it.message}"
+            )
+        }
     }
 
     /**

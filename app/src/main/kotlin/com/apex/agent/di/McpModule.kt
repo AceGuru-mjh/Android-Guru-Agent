@@ -5,6 +5,7 @@ import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.tools.mcp.McpManager
+import com.apex.agent.core.tools.mcp.McpSupervisor
 import com.apex.agent.github.GithubApiService
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.github.mcp.BuiltinGithubMcpBootstrap
@@ -37,6 +38,14 @@ import okhttp3.OkHttpClient
 @Module
 @InstallIn(SingletonComponent::class)
 object McpModule {
+
+    /**
+     * MCP 连接监督器 scope：看门狗循环 + 退避重连全在此（进程生命周期）。
+     */
+    private val supervisorScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
 
     /**
      * 知识图谱记忆存储单例：memory MCP transport 与 [ChatMemoryPipeline]
@@ -132,6 +141,19 @@ object McpModule {
         // 不再被预置逻辑刷新定义）。内置仅保留五台进程内 BUILTIN 服务器
         // （github / search / fs / memory / thinking —— 能力在二进制里，
         // 属「必要内置」）。
+        //
+        // 本地运行容错（v1.4.6）：连接监督器看护 clients 表 —— STDIO 子进程
+        // 被 OOM kill / 崩溃后自动收尸 + 指数退避重连（仅恢复「已启用且
+        // 传输死亡」的自相矛盾态，绝不劫持用户主动断开）；连接成功清零
+        // 失败计数；连续 6 次失败后放弃等用户手动处理。市场页重启入口
+        // 走 McpSupervisor.restartServer。
+        McpSupervisor(
+            manager = manager,
+            scope = supervisorScope,
+            logger = { message ->
+                AppLogger.instance.info(LogCategory.TOOL, "McpSupervisor", message)
+            }
+        ).start()
         return manager
     }
 }

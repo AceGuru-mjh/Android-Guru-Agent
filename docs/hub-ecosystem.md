@@ -20,8 +20,8 @@ APK 不再打包任何技能 / 目录资产：
 | --- | --- | --- |
 | 随包技能（assets/skills） | 13 核心 + #206 扩到 238 | **0**（全部走仓库；升级用户由 pruneStaleBundled 空白名单四清旧内置残留） |
 | 随包 MCP 目录（assets/mcp_catalog） | 16 分类 / 42 条 | **0**（退役；加载器允许缺失，市场目录段无条目自动隐藏，热更 overlay 通道保留） |
-| apex-skill-hub | 62 生活/通用（AGENT/PRODUCTIVITY 旧词表） | **67 专业/效率**：45 生活类退役、17 保留改分类 + 50 新增（anthropics/skills 12 + obra/superpowers 8 + 宿主迁移 30，全部改名优化），14 域（SkillCategory 24 域词表） |
-| apex-mcp-hub | 8 台 | **50 台 / 15 类**：并入宿主目录 32 台 + 修复 fetch/time 指向不存在 npm 包（@kazuph/mcp-fetch / uvx mcp-server-time）+ 新增 10 台（microsoft-learn/context7-remote/amap/firecrawl/paper-search/mongodb/supabase/duckdb/neon/elasticsearch，包名与端点逐一经 registry/握手验证）；丢弃 2 台 Android 不可用的 docker 形态 |
+| apex-skill-hub | 62 生活/通用（AGENT/PRODUCTIVITY 旧词表） | **117 专业/效率**（v3）：v2 时 67（45 生活类退役 + 17 保留 + 50 三源新增）→ v3 再增 50 个编码与复杂任务技能（架构与分布式 12 + 语言与代码工艺 13 + DevOps 与质量 13 + 复杂任务执行与协作 12，全部原创方法论），14 域（SkillCategory 24 域词表） |
+| apex-mcp-hub | 8 台 | **80 台 / 18 类**（v2.1）：v2 时 50 台/15 类（并入宿主目录 32 + 修复 fetch/time 坏包 + 新增 10 台实测）→ v2.1 再增 30 台编码与复杂任务向（数据库 6 + 云 2 + 可观测 2 + 文档 3 + devtools 5 + 效率/设计/通信/搜索等，npm/PyPI 包名逐一经 registry 200 实测）；新增 devtools/security/ai-ml 三类 |
 | 双仓 CI | 无 | `validate.yml`：索引↔正文交叉校验 / category 词表 / 2MB 红线 / 凭据扫描 + 在线冒烟（npm/PyPI 包存在性 + HTTP initialize 握手 + raw URL 可达性），MCP 仓另有每周例行巡检 |
 | guard-rails（本仓） | check_mcp_catalog.py 要求目录非空 | 目录缺失/为空 = 合法退役态（通过）；条目校验对热更 fixture / 未来重新随包分发保持生效 |
 

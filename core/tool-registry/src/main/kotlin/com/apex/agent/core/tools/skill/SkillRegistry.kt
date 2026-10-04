@@ -141,6 +141,18 @@ data class SkillDigest(
 )
 
 /**
+ * 目录协调报告（[SkillRegistry.reconcileDirectory] 的返回值）：
+ * 新装 / 升级 / 卸载 / 跳过的技能 id 清单（诊断与 [SkillDirectoryWatcher] 日志用）。
+ */
+data class SkillDirSyncReport(
+    val added: List<String>,
+    val updated: List<String>,
+    val removed: List<String>,
+    /** 解析失败 / id 非法 / 依赖缺失 / 重复等被单条隔离跳过的条目（文件名或 id）。 */
+    val skipped: List<String>
+)
+
+/**
  * Skill 注册表
  * 管理所有已安装的 Skill（持久化到文件系统）
  *
@@ -644,6 +656,125 @@ class SkillRegistry(
                 }
             } catch (_: Exception) { /* skip malformed */ }
         }
+    }
+
+    /**
+     * 读取指定 Skill（安装管理页 / 市场详情用）。
+     */
+    fun get(skillId: String): InstalledSkill? = synchronized(lock) { installedSkills[skillId] }
+
+    /**
+     * # 目录协调（热加载）：把磁盘上 skillsDir 目录的 JSON 清单与内存安装表对齐。
+     *
+     * [SkillDirectoryWatcher] 每次指纹变化时调用（市场外的文件变化：热更
+     * 引擎落盘、用户文件同步、adb push、ZIP 手动解压……），对齐后
+     * [notifyChanged] → SkillHotReloader 增量同步工具 + 市场页/斜杠菜单
+     * 自动刷新 + 引擎每轮重读 prompt 注入 —— **装、卸、升级全程免重启**。
+     *
+     * ## 对齐规则（registry 为真相源，绝不无脑重装）
+     *
+     * - 磁盘新文件（manifest 合法、id 未安装）→ [install] 全新安装；
+     * - 磁盘文件与已装条目同 id 且**版本更高** → 升级安装（保持用户启停
+     *   态，语义对齐 [installBundled]）；版本相同或更低 → 跳过 —— 这同时
+     *   封死了「[install] 落盘改 mtime → watcher 再触发 → 再 install」的
+     *   自激环：内容不变即无动作；
+     * - 已装非内置条目的 manifest 文件消失 → 卸载（含 `<id>/` 资源目录）；
+     * - 内置（bundled）条目文件消失 → 保留内存态（assets/热更通道下次
+     *   启动会重放释放，运行期不制造「卸了又复活」的抖动）；
+     * - 解析失败/依赖缺失 → 记入 [SkillDirSyncReport.skipped]（单条隔离，
+     *   不拖垮整批——与 installBundled 同款纪律）。
+     *
+     * ## 并发安全
+     *
+     * 决策基于快照（getInstalled + 一次目录扫描），动作复用既有
+     * [install]/[uninstall]（各自持锁）；与市场页并发操作天然幂等——
+     * 同 id 双方都装一遍结果一致。
+     *
+     * @return 本次协调报告（新增/升级/卸载/跳过的 id 清单）
+     */
+    fun reconcileDirectory(): SkillDirSyncReport {
+        val files = runCatching {
+            skillsDir.listFiles()
+                ?.filter { it.isFile && it.name.endsWith(".json") && !it.name.startsWith(".") }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+
+        // 磁盘侧：文件 → manifest（单条解析失败只进 skipped，不中断）
+        data class DiskEntry(val manifest: SkillManifest, val text: String)
+        val onDisk = LinkedHashMap<String, DiskEntry>()
+        val skipped = mutableListOf<String>()
+        for (file in files) {
+            try {
+                val text = file.readText()
+                val manifest = json.decodeFromString<SkillManifest>(text)
+                if (manifest.id.isBlank() || !validateSkillId(manifest.id)) {
+                    skipped += file.name
+                    logger.log(
+                        SkillHotReloadLogLevel.WARN,
+                        "目录协调：文件 ${file.name} 的 id 非法（'${manifest.id}'），跳过"
+                    )
+                    continue
+                }
+                onDisk[manifest.id] = DiskEntry(manifest, text)
+            } catch (e: Exception) {
+                skipped += file.name
+                logger.log(
+                    SkillHotReloadLogLevel.WARN,
+                    "目录协调：文件 ${file.name} 解析失败（可能写入中），跳过：${e.message}"
+                )
+            }
+        }
+
+        val installed = getInstalled().associateBy { it.manifest.id }
+        val added = mutableListOf<String>()
+        val updated = mutableListOf<String>()
+        val removed = mutableListOf<String>()
+
+        // 1. 磁盘有 → 新装或升级
+        for ((id, entry) in onDisk) {
+            val existing = installed[id]
+            when {
+                existing == null -> {
+                    install(entry.text).fold(
+                        onSuccess = { added += id },
+                        onFailure = { skipped += id }
+                    )
+                }
+                // 升级判定：磁盘版本严格更高才动（同版本/降级跳过，见 KDoc 自激环说明）
+                compareVersions(entry.manifest.version, existing.manifest.version) > 0 -> {
+                    val wasEnabled = existing.enabled
+                    install(entry.text).fold(
+                        onSuccess = {
+                            if (!wasEnabled) setEnabled(id, false)
+                            updated += id
+                        },
+                        onFailure = { skipped += id }
+                    )
+                }
+                else -> Unit // 版本未变：注册表已是真相，零动作
+            }
+        }
+
+        // 2. 磁盘无 → 卸载（内置条目除外，见 KDoc）
+        for (skill in installed.values) {
+            if (skill.manifest.id in onDisk) continue
+            if (skill.manifest.bundled) continue
+            if (uninstall(skill.manifest.id)) removed += skill.manifest.id
+        }
+
+        if (added.isNotEmpty() || updated.isNotEmpty() || removed.isNotEmpty()) {
+            logger.log(
+                SkillHotReloadLogLevel.INFO,
+                "技能目录热同步：新增 ${added.size}（${added.joinToString(", ").take(120)}）" +
+                    "· 升级 ${updated.size} · 卸载 ${removed.size} · 跳过 ${skipped.size}"
+            )
+        }
+        return SkillDirSyncReport(
+            added = added,
+            updated = updated,
+            removed = removed,
+            skipped = skipped
+        )
     }
 
     private fun notifyChanged() {

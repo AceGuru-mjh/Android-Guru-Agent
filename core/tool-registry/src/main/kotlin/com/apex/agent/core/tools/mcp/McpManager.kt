@@ -315,6 +315,19 @@ class McpManager(
     fun getConnectedServers(): List<String> = synchronized(lock) { clients.keys.toList() }
 
     /**
+     * 健康探针（[McpSupervisor] 看门狗用）：已连接且底层传输仍存活。
+     *
+     * - 未连接 → false；
+     * - HTTP/SSE 无状态传输 → 恒 true（探针无分辨力，也无需恢复）；
+     * - STDIO → 子进程真实存活（[McpClient.isTransportAlive]）；
+     * - BUILTIN → 进程内实现自报。
+     */
+    fun isClientHealthy(name: String): Boolean {
+        val client = synchronized(lock) { clients[name] } ?: return false
+        return runCatching { client.isTransportAlive() }.getOrDefault(false)
+    }
+
+    /**
      * 获取所有配置（快照读，线程安全）。
      */
     fun getConfigs(): List<McpServerConfig> = synchronized(lock) { configs.values.toList() }

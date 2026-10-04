@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -252,7 +253,8 @@ fun SkillChipInputField(
         // ── 全屏分层编辑按钮（常显入口）──
         IconButton(
             onClick = { isFullscreen = true },
-            modifier = Modifier.size(32.dp)
+            // UI-012：48dp 触区红线（原 32dp）
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
         ) {
             Icon(
                 Icons.Default.Fullscreen,

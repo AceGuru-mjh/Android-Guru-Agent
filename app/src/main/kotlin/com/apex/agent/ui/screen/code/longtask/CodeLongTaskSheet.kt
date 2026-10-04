@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -446,7 +447,8 @@ private fun LongTaskRecordCard(
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { confirmDelete = true }, modifier = Modifier.size(32.dp)) {
+                    // UI-012：48dp 触区红线（原 32dp）
+                    IconButton(onClick = { confirmDelete = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                         Icon(
                             Icons.Outlined.Delete,
                             contentDescription = stringResource(R.string.code_longtask_delete),

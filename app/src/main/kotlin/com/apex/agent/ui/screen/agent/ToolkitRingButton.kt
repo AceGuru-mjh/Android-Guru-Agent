@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -129,7 +130,9 @@ fun ToolkitRingButton(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(40.dp) // 对齐修复：与 Attach/Github/Send 统一 40dp（原 32dp，输入行图标行高低不齐）
+                // UI-012：48dp 触区红线（原 40dp 视觉系提升为 48 系，与
+                // Attach/Github/Send/斜杠全行统一 —— 圆环视觉随节点同步放大）
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .clip(CircleShape)
                 .border(width = 1.5.dp, color = ringColor, shape = CircleShape)
                 .clickable { menuOpen = !menuOpen }
@@ -725,7 +728,8 @@ private fun ToolkitChip(
             Text(label, style = MaterialTheme.typography.labelSmall)
             IconButton(
                 onClick = onClose,
-                modifier = Modifier.size(20.dp)
+                // UI-012：48dp 触区红线（原 20dp）
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             ) {
                 Icon(
                     Icons.Default.Close,

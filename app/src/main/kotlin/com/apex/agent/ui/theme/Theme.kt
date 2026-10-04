@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 
@@ -34,11 +35,17 @@ fun ApexTheme(
         else -> accentColorScheme(accentPalette, darkTheme)
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = ApexTypography,
-        content = content
-    )
+    // UI-016 基建：success / warning 扩展语义色随明暗注入（独立于
+    // accent 派生，dynamicColor 路径同样适用）
+    val extendedColors = if (darkTheme) ExtendedColors.Dark else ExtendedColors.Light
+
+    CompositionLocalProvider(LocalExtendedColors provides extendedColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = ApexTypography,
+            content = content
+        )
+    }
 }
 
 /** 是否在聊天气泡旁显示时间戳（由设置中心驱动，MainActivity 提供）。 */

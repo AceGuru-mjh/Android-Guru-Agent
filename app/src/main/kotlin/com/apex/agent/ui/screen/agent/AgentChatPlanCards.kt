@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.ExecutionSpec
+import com.apex.agent.ui.theme.LocalExtendedColors
 import com.apex.agent.core.engine.RiskLevel
 import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassCard
@@ -333,7 +335,8 @@ internal fun PlanConfirmationCard(
                             if (displayPos > 0) orderIds.add(displayPos - 1, orderIds.removeAt(displayPos))
                         },
                         enabled = displayPos > 0,
-                        modifier = Modifier.size(28.dp)
+                        // UI-012：48dp 触区红线（原 28dp）
+                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     ) {
                         Icon(
                             Icons.Default.KeyboardArrowUp,
@@ -346,7 +349,8 @@ internal fun PlanConfirmationCard(
                             if (displayPos < orderIds.lastIndex) orderIds.add(displayPos + 1, orderIds.removeAt(displayPos))
                         },
                         enabled = displayPos < orderIds.lastIndex,
-                        modifier = Modifier.size(28.dp)
+                        // UI-012：48dp 触区红线（原 28dp）
+                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     ) {
                         Icon(
                             Icons.Default.KeyboardArrowDown,
@@ -376,13 +380,20 @@ internal fun PlanConfirmationCard(
 
 /**
  * 风险等级 → 颜色（Spec / Plan 卡片通用）。
+ * UI-016：语义色 token 化 —— 原硬编码 22C55E/F59E0B/F97316 在浅色模式
+ * 下对比度仅 2.15-2.80:1；LOW→success、MEDIUM→warning、HIGH/CRITICAL→error
+ * （暗态视觉与原色系几乎一致，亮态达 AA；HIGH 与 CRITICAL 的区分由文案
+ * 与图标承载，不再各自硬编码一套色）。
  */
 @Composable
-internal fun riskColor(level: RiskLevel): Color = when (level) {
-    RiskLevel.LOW -> Color(0xFF22C55E)
-    RiskLevel.MEDIUM -> Color(0xFFF59E0B)
-    RiskLevel.HIGH -> Color(0xFFF97316)
-    RiskLevel.CRITICAL -> MaterialTheme.colorScheme.error
+internal fun riskColor(level: RiskLevel): Color {
+    val extended = LocalExtendedColors.current
+    return when (level) {
+        RiskLevel.LOW -> extended.success
+        RiskLevel.MEDIUM -> extended.warning
+        RiskLevel.HIGH -> MaterialTheme.colorScheme.error
+        RiskLevel.CRITICAL -> MaterialTheme.colorScheme.error
+    }
 }
 
 /**

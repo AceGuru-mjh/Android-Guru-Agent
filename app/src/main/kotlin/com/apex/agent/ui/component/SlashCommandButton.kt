@@ -92,8 +92,10 @@ fun SlashCommandButton(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
+    // UI-016：青粉硬编码渐变改 primary→tertiary token —— 暗态恰为薄荷→品红
+    // （保住霓虹渐变身份），亮态 0E7A57→B33A65 对浅底达 AA（原青 00E5FF 仅 1.44:1）
     val slashGradient = Brush.linearGradient(
-        colors = listOf(Color(0xFF00E5FF), Color(0xFFFF4081))
+        colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)
     )
     val openMenuCd = stringResource(R.string.chat_cd_slash_menu)
 
@@ -102,7 +104,9 @@ fun SlashCommandButton(
 
     Box(
         modifier = modifier
-            .size(40.dp)
+            // UI-012：48dp 触区红线（原 40dp 视觉系提升为 48 系，与
+            // Attach/Github/Send/Toolkit 全行统一；圆底视觉随节点同步放大）
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .onGloballyPositioned { coords ->
                 anchorTopInWindow = coords.positionInWindow().y
             }
@@ -229,7 +233,8 @@ private fun SlashMenuPopup(
                         )
                         IconButton(
                             onClick = onRefresh,
-                            modifier = Modifier.size(28.dp)
+                            // UI-012：48dp 触区红线（原 28dp）
+                            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,

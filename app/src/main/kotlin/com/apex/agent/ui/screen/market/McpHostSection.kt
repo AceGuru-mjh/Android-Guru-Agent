@@ -57,6 +57,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.R
 import com.apex.agent.mcphost.McpHostManager
+import com.apex.agent.ui.theme.LocalExtendedColors
 import com.apex.agent.platform.mcphost.McpHostConfig
 import com.apex.agent.platform.mcphost.HostAuditEntry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -364,7 +365,9 @@ private fun StatusLight(running: Boolean) {
         modifier = Modifier
             .size(10.dp)
             .background(
-                color = if (running) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
+                // UI-016：状态色收编 token（原硬编码 4CAF50/9E9E9E 浅色 2.2:1）
+                color = if (running) LocalExtendedColors.current.success
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = CircleShape
             )
     )

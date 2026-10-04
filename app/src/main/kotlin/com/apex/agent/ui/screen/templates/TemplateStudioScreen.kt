@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -287,7 +288,8 @@ private fun TemplateCard(
                 } else {
                     Spacer(Modifier.weight(1f))
                 }
-                IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
+                // UI-012：48dp 触区红线（原 30dp，图标 15dp 视觉不变）
+                IconButton(onClick = onEdit, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = stringResource(R.string.templates_edit),
@@ -295,7 +297,7 @@ private fun TemplateCard(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onDuplicate, modifier = Modifier.size(30.dp)) {
+                IconButton(onClick = onDuplicate, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Outlined.ContentCopy,
                         contentDescription = stringResource(R.string.templates_duplicate),
@@ -304,7 +306,7 @@ private fun TemplateCard(
                     )
                 }
                 if (!template.isBuiltIn) {
-                    IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                    IconButton(onClick = onDelete, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = stringResource(R.string.templates_delete),

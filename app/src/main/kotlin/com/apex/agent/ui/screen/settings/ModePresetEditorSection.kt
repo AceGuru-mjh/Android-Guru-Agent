@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -275,7 +276,8 @@ private fun PresetCard(
                 Spacer(Modifier.width(6.dp))
             }
             if (onEdit != null) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                // UI-012：48dp 触区红线（原 32dp）
+                IconButton(onClick = onEdit, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = stringResource(R.string.mode_presets_edit_cd),
@@ -284,7 +286,7 @@ private fun PresetCard(
                 }
             }
             if (onDuplicate != null) {
-                IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDuplicate, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Outlined.ContentCopy,
                         contentDescription = stringResource(R.string.mode_presets_duplicate_cd),
@@ -293,7 +295,7 @@ private fun PresetCard(
                 }
             }
             if (onDelete != null) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = stringResource(R.string.mode_presets_delete_cd),

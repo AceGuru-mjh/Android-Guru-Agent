@@ -1,6 +1,7 @@
 package com.apex.agent.ui.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -93,15 +94,17 @@ private fun OptimizedImageChip(attachment: Attachment, onRemove: () -> Unit) {
         }
 
         // ★ 触控区域 48dp（视觉 20dp）— WCAG 2.1 Target Size AAA
+        // UI-012 真修复：clickable 挂 48dp 外层（原挂在内层 20dp Surface 上 ——
+        // 外层 48dp 只是定位盒，真实触区仅 20dp 的假修复）
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .offset(x = 6.dp, y = (-6).dp)
-                .size(48.dp),
+                .size(48.dp)
+                .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                onClick = onRemove,
                 modifier = Modifier.size(20.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.errorContainer,
@@ -160,21 +163,19 @@ private fun OptimizedFileChip(attachment: Attachment, onRemove: () -> Unit) {
                     }
                 }
             }
-            // ★ 触控区域 48dp（视觉 24dp）
+            // ★ 触控区域 48dp（视觉 24dp）— UI-012 真修复：clickable 挂 48dp
+            // 外层（原 IconButton 被缩到 24dp，真实触区仅 24dp 的假修复）
             Box(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable(onClick = onRemove),
                 contentAlignment = Alignment.Center
             ) {
-                IconButton(
-                    onClick = onRemove,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close, null,
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Icon(
+                    Icons.Default.Close, null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

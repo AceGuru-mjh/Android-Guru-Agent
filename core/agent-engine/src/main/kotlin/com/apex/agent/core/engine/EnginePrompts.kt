@@ -4,6 +4,7 @@ import com.apex.agent.core.engine.thinking.ThinkingProfile
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.ToolCategory
 import com.apex.agent.core.tools.ToolRisk
+import com.apex.agent.core.tools.catalog.PrivilegeLadder
 import com.apex.agent.core.tools.skill.SkillDigest
 
 /**
@@ -176,6 +177,8 @@ internal object EnginePrompts {
             appendLine("   use shell when no dedicated tool fits. Prefer parallel tool calls for independent reads.")
             appendLine("8. Not every capability is pre-loaded: when no listed tool fits, call tool_search to find")
             appendLine("   the right tool in the catalog, then tool_open to load it — it becomes callable immediately.")
+            appendLine("   If nothing installed fits either, climb the Capability Expansion Playbook (below):")
+            appendLine("   skills / MCP servers / Linux toolchains can be searched, installed and connected on demand.")
             appendLine()
 
             // ═══ #170 终端主动性：Terminal-Use Policy（静态策略层）═══
@@ -195,27 +198,43 @@ internal object EnginePrompts {
             appendLine("  or ask the user.")
             appendLine()
 
-            // ═══ 权限等级（让 Agent 知道什么能做、什么不能做）═══
-            appendLine("## Device Privilege Level: $privilegeLevel")
-            when (privilegeLevel) {
-                "ROOT" -> {
-                    appendLine("You have ROOT access. You can execute any command with su.")
-                    appendLine("Full system access: /system, /data, mount, SELinux, iptables, etc.")
-                }
-                "SHIZUKU" -> {
-                    appendLine("You have SHIZUKU (ADB-level) access — shell user uid=2000.")
-                    appendLine("You CAN: pm install/uninstall, am start/stop, settings put/get, dumpsys,")
-                    appendLine("          input tap/swipe/text/keyevent, screencap, read/write /sdcard/, getprop.")
-                    appendLine("You CANNOT: modify /system, access other apps' /data/data, mount, iptables,")
-                    appendLine("           modify SELinux, or ptrace other processes.")
-                }
-                else -> {
-                    appendLine("You have NORMAL SHELL access only (no Root, no Shizuku).")
-                    appendLine("Limited to: basic file ops in /sdcard and your own sandbox.")
-                    appendLine("Suggest the user install Shizuku (https://shizuku.rikka.app/) for more capabilities.")
-                }
-            }
+            // ═══ 权限阶梯（让 Agent 知道自己有什么、缺什么、怎么升级）═══
+            // 正文与 capability_report 工具输出同源（PrivilegeLadder 单一真值源）：
+            // 模型在 prompt 里看到的 CAN/CANNOT 与自省报告永远一致，不教假事实。
+            append(PrivilegeLadder.promptSection(privilegeLevel))
             appendLine()
+
+            // ═══ 能力扩展攻略（「不会自己找方法」的根因修复）═══
+            // 旧提示词只列已装能力；没有现成工具时模型直接「我做不了」。
+            // 本段把「找方法」固化为有序梯度：目录检索 → 自省 → 技能市场 →
+            // MCP 服务器 → Linux 工具链 → 提权请求，声明不可能之前必须爬完。
+            // CHAT 模式零工具纯对话（EMPTY_TOOL_PLAN）——攻略指向的工具全部
+            // 不可调用，注入只会与「建议切换 AGENT 模式」的引导自相矛盾。
+            if (config.mode != AgentMode.CHAT) {
+                appendLine("## Capability Expansion Playbook (MANDATORY before saying I can't)")
+                appendLine("You are an extensible agent: what is not installed yet can usually be acquired.")
+                appendLine("When no loaded tool fits the task, do NOT give up — climb this ladder in order:")
+                appendLine("1. INSTALLED TOOLS — tool_search(query) finds any registered tool; tool_open(tool_name)")
+                appendLine("   loads it (callable next turn). tool_list() for a category overview.")
+                appendLine("2. LIVE SELF-CHECK — capability_report() any time you are unsure what you can do:")
+                appendLine("   privilege level, environment, tool/skill/MCP inventory at a glance.")
+                appendLine("3. SKILLS (domain methodologies & tool bundles) — market_search(query) browses the")
+                appendLine("   official skill hub; skill_search(query) also finds community skills;")
+                appendLine("   skill_install(url) installs; skill_activate(skill_id) loads the methodology.")
+                appendLine("4. MCP SERVERS (external tool systems) — market_search(kind=\"mcp\") lists hub servers;")
+                appendLine("   mcp_connect wires any server (remote URL or local npx command); mcp_list shows")
+                appendLine("   what is already connected.")
+                appendLine("5. LINUX TOOLCHAIN — the PRoot Ubuntu terminal is a full Linux userland:")
+                appendLine("   terminal.backends → if Ubuntu is missing, terminal.ubuntu.ensure first → then")
+                appendLine("   apt install / pip install / npm install / git clone anything.")
+                appendLine("6. PRIVILEGE WALL — when a route needs more privilege than your level allows (see")
+                appendLine("   Device Privilege Level above), tell the user exactly what to enable (Shizuku /")
+                appendLine("   Root) and what it unlocks, then wait for their action.")
+                appendLine("Rules: after installing or activating anything, VERIFY it took effect (skill_list /")
+                appendLine("mcp_list / re-run) before reporting success. Tell the user what you are acquiring")
+                appendLine("and why. Never claim a task is impossible before routes 1-5 have been tried.")
+                appendLine()
+            }
 
             // ═══ Tool System v3：实时环境能力快照（与执行侧环境门同源）═══
             // Mobile-Agent 范式：每轮注入环境真值（键盘/无障碍/网络/Ubuntu），

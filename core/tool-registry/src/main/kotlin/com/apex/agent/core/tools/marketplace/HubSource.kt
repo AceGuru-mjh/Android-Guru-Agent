@@ -227,6 +227,16 @@ class HubSource(
 
         // ── 纯解析（public：单测直接喋 index.json 文本；无状态无副作用）──
 
+        /**
+         * 技能条目 → manifest 下载 URL（raw.githubusercontent.com 直链）。
+         *
+         * 能力自省闭环：[com.apex.agent.core.tools.catalog.MarketSearchTool]
+         * 用它生成 skill_install({"source":"url", ...}) 的安装指令——
+         * 模型拿到的是可直接执行的完整 URL，而不是需要自行拼接的相对路径。
+         */
+        fun skillManifestUrl(entry: HubSkillEntry): String =
+            "$SKILL_HUB_RAW_BASE/${entry.file}"
+
         /** 技能目录 index.json 文本 → 条目列表（坏条目跳过，整体损坏转 failure）。 */
         fun parseSkillIndex(body: String): Result<List<HubSkillEntry>> = try {
             val root = json.parseToJsonElement(body).jsonObject

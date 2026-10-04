@@ -3,7 +3,7 @@
 
 <img src="docs/assets/banner.svg" alt="Android Guru Agent" width="900"/>
 
-<a href="#quickstart"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&amp;weight=600&amp;size=20&amp;pause=1200&amp;color=00C2D1&amp;center=true&amp;vCenter=true&amp;width=820&amp;height=64&amp;lines=An+autonomous+AI+agent+that+lives+entirely+on+your+Android+device.;109+tools+%C2%B7+6+agent+modes+%C2%B7+PRoot+Ubuntu+24.04+%C2%B7+cs-mem;No+server.+No+PC.+Bring+your+own+LLM." alt="Android Guru Agent — typing"/></a>
+<a href="#quickstart"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&amp;weight=600&amp;size=20&amp;pause=1200&amp;color=00C2D1&amp;center=true&amp;vCenter=true&amp;width=820&amp;height=64&amp;lines=An+autonomous+AI+agent+that+lives+entirely+on+your+Android+device.;111+tools+%C2%B7+6+agent+modes+%C2%B7+PRoot+Ubuntu+24.04+%C2%B7+cs-mem;No+server.+No+PC.+Bring+your+own+LLM." alt="Android Guru Agent — typing"/></a>
 
 # Android Guru Agent
 
@@ -12,7 +12,7 @@
 **An autonomous AI agent that lives entirely on your Android device.**
 
 一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、6 种执行模式、
-109 个内置工具（v3 新增超时/重试/限流/熔断/追踪/批量/组合动作八层执行硬化；P83 环境闭环补全）、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
+111 个内置工具（v3 新增超时/重试/限流/熔断/追踪/批量/组合动作八层执行硬化；P83 环境闭环补全）、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
@@ -58,7 +58,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **项目事实**
 
-<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-109-ff69b4" alt="109 Tools"/></a>
+<a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-111-ff69b4" alt="111 Tools"/></a>
 <a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
 <a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-20-8A2BE2" alt="20 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-252_files_·_4k_用例-2EA44F" alt="252 Tests"/></a>
@@ -81,7 +81,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **分享与交流**
 
-<a href="https://twitter.com/intent/tweet?text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%B7%91%E5%9C%A8%E6%89%8B%E6%9C%BA%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93%EF%BC%88109%20%E5%B7%A5%E5%85%B7%20%C2%B7%20Ubuntu%20%E7%BB%88%E7%AB%AF%20%C2%B7%20cs-mem%20%E8%AE%B0%E5%BF%86%EF%BC%89&url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent"><img src="https://img.shields.io/badge/分享-Twitter-1DA1F2?logo=x&logoColor=white" alt="Share on Twitter"/></a>
+<a href="https://twitter.com/intent/tweet?text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%B7%91%E5%9C%A8%E6%89%8B%E6%9C%BA%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93%EF%BC%88111%20%E5%B7%A5%E5%85%B7%20%C2%B7%20Ubuntu%20%E7%BB%88%E7%AB%AF%20%C2%B7%20cs-mem%20%E8%AE%B0%E5%BF%86%EF%BC%89&url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent"><img src="https://img.shields.io/badge/分享-Twitter-1DA1F2?logo=x&logoColor=white" alt="Share on Twitter"/></a>
 <a href="https://t.me/share/url?url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent&text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%AE%BE%E5%A4%87%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93"><img src="https://img.shields.io/badge/分享-Telegram-26A5E4?logo=telegram&logoColor=white" alt="Share on Telegram"/></a>
 <a href="https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent&title=Android%20Guru%20Agent%20%E2%80%94%20Autonomous%20AI%20agent%20on-device"><img src="https://img.shields.io/badge/分享-Reddit-FF4500?logo=reddit&logoColor=white" alt="Share on Reddit"/></a>
 <a href="https://github.com/AceGuru-mjh?tab=followers"><img src="https://img.shields.io/github/followers/AceGuru-mjh?label=Follow&style=flat-square&logo=github" alt="Follow"/></a>
@@ -174,7 +174,7 @@ Root → Shizuku → 沙箱 Shell 自动降级<br/>无 Root 也能执行特权�
 - [🗜️ 上下文工程（P7 三级压缩）](#context-compression)
 - [🖥️ 终端运行时（Ubuntu + PRoot）](#terminal-runtime)
 - [🌐 浏览器智能体](#browser)
-- [🔧 工具全景（109 个）](#tools)
+- [🔧 工具全景（111 个）](#tools)
 - [⚡ 权限执行链](#privilege)
 
 </td>
@@ -658,12 +658,12 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 ---
 
 <a id="tools"></a>
-## 🔧 工具全景（109 个）
+## 🔧 工具全景（111 个）
 
 <details open>
 <summary><b>📦 点击展开 / 折叠完整工具清单（按模块分组）</b></summary>
 
-**core:tool-registry —— 64 个内置工具**
+**core:tool-registry —— 66 个内置工具**
 
 | 类别 | 工具 |
 |------|------|
@@ -677,6 +677,7 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 | 🧮 实用 | `calculate` `text_transform` `get_location` `notification_read` |
 | 🧩 技能 | `skill_search` `skill_install` `skill_create` `skill_list` `skill_uninstall` |
 | 🛰️ MCP | `mcp_connect` `mcp_list` `mcp_call` |
+| 🧭 目录与自省（5） | `tool_search` `tool_open` `tool_list`（v4 渐进披露）· `capability_report`（权限阶梯/环境/技能/MCP 一键自省）· `market_search`（官方技能+MCP 市场检索，返回可执行安装指令）——详见 [docs/capability-introspection.md](docs/capability-introspection.md) |
 | 🧱 结构化 v2（15） | `regex_extract` `regex_replace` `text_diff` `json_path` `xml_extract` `csv_query` `base_convert` `unit_convert` `duration_convert` `string_distance` `random_generate` `uuid_generate` `file_hash` `datetime` `cron_next`（全部纯 JVM / 离线 / 确定性） |
 | ⚡ 执行硬化 v3（7） | `wait`（≤300s 可取消等待）· `json_transform`（jq 风格七操作管线）· `version_compare`（SemVer 排序）· `tool_batch_run`（批量首错即停 + 步间引用）· `shortcut_define` / `shortcut_list` / `shortcut_run`（组合动作：定义→热注册、清单+挖掘建议、执行）——详见 [docs/tool-system-v3.md](docs/tool-system-v3.md) |
 
@@ -1013,7 +1014,7 @@ Android-Guru-Agent/
 | Kotlin 测试源码 | 252 个文件 / 64,116 行（≈4,008 个 `@Test` 用例） |
 | C++（终端 PTY/JNI/VT 原生层） | 37 个文件 / 10,650 行 |
 | Gradle 模块 | 20 |
-| 内置工具 | 109 |
+| 内置工具 | 111 |
 | 测试代码 / 主源码比例 | ≈ 35% |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
@@ -1073,6 +1074,7 @@ Android-Guru-Agent/
 | [docs/capsule-stream.md](docs/capsule-stream.md) | **胶囊流式输出系统**：Coding 工作流时间轴 / 双通道架构 / 幂等与检查点 / 验收矩阵 |
 | [docs/dual-logic-engines.md](docs/dual-logic-engines.md) | **双思考逻辑引擎**：Coding 屏右上角「深潜/标准」切换 / DualLogicCodeEngine 门面路由 / 标准任务循环（五画像·权限三态门·task 子代理·上下文压缩·C++ 文本核）/ `/logic` 斜杠命令 / 现场隔离 |
 | [docs/agent-life-skills-and-memory.md](docs/agent-life-skills-and-memory.md) | **全能 Agent**：46 内置技能矩阵 × 渐进披露（目录+会话装备+自动装备）/ 聊天自动记忆管线（双速捕获+主动召回）/ 首轮问候极简 / 网页自动化 wait_for+页面类型推断 |
+| [docs/capability-introspection.md](docs/capability-introspection.md) | **能力自省与自主扩展**：权限阶梯知识库（prompt/工具/编排三线同源）/ capability_report 一键自省 / market_search 市场检索（返回可执行安装指令）/ Capability Expansion Playbook 六条扩展梯度 |
 
 <p align="right"><a href="#readme-top" title="返回顶部">⬆️ 返回顶部</a></p>
 

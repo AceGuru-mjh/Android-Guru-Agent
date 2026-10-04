@@ -89,7 +89,13 @@ object ToolTierPolicy {
         "skill_list", "skill_search", "connector_list",
 
         // ── catalog meta-tools (v4) ──
-        "tool_search", "tool_open", "tool_list"
+        "tool_search", "tool_open", "tool_list",
+
+        // ── capability introspection（能力自省：模型的第一反动作）──
+        // capability_report：权限/环境/工具/技能/MCP 一键自省（遇 permission
+        // denied 或「我能做 X 吗」类问题时先自省再行动，不猜不弃）；
+        // market_search：官方技能+MCP 市场检索（「没装的能力一步之遥」）。
+        "capability_report", "market_search"
     )
 
     /** Ids of the v4 catalog meta-tools themselves. */

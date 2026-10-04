@@ -3,13 +3,16 @@ package com.apex.agent.di
 import android.content.Context
 import com.apex.agent.core.tools.*
 import com.apex.agent.core.tools.builtin.*
+import com.apex.agent.core.tools.catalog.CapabilityReportTool
 import com.apex.agent.core.tools.catalog.McpToolRegistrar
+import com.apex.agent.core.tools.catalog.MarketSearchTool
 import com.apex.agent.core.tools.catalog.ToolActivationStore
 import com.apex.agent.core.tools.catalog.ToolListTool
 import com.apex.agent.core.tools.catalog.ToolOpenTool
 import com.apex.agent.core.tools.catalog.ToolSearchTool
 import com.apex.agent.core.tools.connector.ConnectorMessenger
 import com.apex.agent.core.tools.connector.ConnectorRegistry
+import com.apex.agent.core.tools.marketplace.HubSource
 import com.apex.agent.core.tools.skill.SkillRegistry
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.github.GithubApiService
@@ -542,7 +545,10 @@ object ToolModule {
         // #172 上下文回顾三件套的数据源：当前会话持久化消息（SharedPrefs 单例）。
         conversationMemory: com.apex.agent.core.engine.ConversationMemory,
         // 技能渐进披露：skill_activate 工具 + 子代理引擎工厂共享的激活存储。
-        skillActivation: com.apex.agent.core.tools.skill.SkillActivationStore
+        skillActivation: com.apex.agent.core.tools.skill.SkillActivationStore,
+        // 能力自省：官方市场源（MarketplaceModule 单例）—— market_search
+        // 工具检索技能+MCP 双 hub 目录。
+        hubSource: HubSource
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -955,6 +961,33 @@ object ToolModule {
         registry.register(SafeAgentTool(ToolSearchTool(registry)))
         registry.register(SafeAgentTool(ToolOpenTool(registry, toolActivation)))
         registry.register(SafeAgentTool(ToolListTool(registry)))
+
+        // ═══ 12b. 能力自省元工具（「agent 不懂自己能干什么」的根因修复）═══
+        // capability_report：权限阶梯（与系统提示词同源）/ 实时环境 / 工具与
+        // 技能与 MCP 库存 + 扩展梯度，一键自省——遇 permission denied 或
+        // 「我能做 X 吗」时先自省再行动，不猜不弃；
+        // market_search：官方技能+MCP 市场检索（此前 7 个市场源只服务 UI，
+        // agent 侧完全不可见）——「没装的能力一步之遥」。
+        registry.register(
+            SafeAgentTool(
+                CapabilityReportTool(
+                    registry = registry,
+                    environmentState = environmentState,
+                    privilegeLevel = { privilegeInfoProvider.currentLevel() },
+                    installedSkillCount = { skillRegistry.getInstalled().size },
+                    configuredMcpCount = { mcpManager.getConfigs().size },
+                    connectedMcpCount = { mcpManager.getConnectedServers().size }
+                )
+            )
+        )
+        registry.register(
+            SafeAgentTool(
+                MarketSearchTool(
+                    fetchSkills = { hubSource.listSkills() },
+                    fetchMcpServers = { hubSource.listMcpServers() }
+                )
+            )
+        )
 
         // ═══ 13. Skill 工具接线（此前缺口：skill_* 管理工具与已启用技能的
         // composite/script 工具从未注册进 ToolRegistry，安装后形同虚设）═══

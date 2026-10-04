@@ -25,7 +25,7 @@ import com.apex.agent.core.tools.ToolRisk
  *   旧实现 MEDIUM 一律静默放行，Agent 可无声覆写用户文件，与「三级权限链
  *   是核心卖点」的安全叙事直接冲突。弹窗文案区分风险档（「写入确认」vs「高风险
  *   确认」）；会话记忆复用同一状态机（本会话允许后不再骚扰）。
- *   纵深防御说明：opencode 式 PermissionModeGate 在 DEFAULT 模式下已对
+ *   纵深防御说明：业界标准式 PermissionModeGate 在 DEFAULT 模式下已对
  *   非只读工具弹 Ask（PermissionAwareToolGate 的 ExplicitAllow 短路保证
  *   不双弹窗）；本层兜底的是 BYPASS/ACCEPT_EDITS 之外的**其他宿主与直连
  *   风险门的执行器**（测试 / headless / 未来的批量管线）。

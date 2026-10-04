@@ -5,7 +5,7 @@
 > 「官方仓库按需安装」，市场完成 安装 → 配置 → 启动 全闭环。
 > 前置：[agent-life-skills-and-memory.md](agent-life-skills-and-memory.md)（技能矩阵与渐进披露）
 > · [mcp-sandbox.md](mcp-sandbox.md)（PRoot 沙箱 MCP）
-> 参考：[opencode](https://opencode.ai/docs/skills/) 的远程技能注册表模式
+> 参考：业界标准 CLI 编码智能体的远程技能注册表模式
 > （`index.json` 元数据索引 + 按需下载 + 缓存原子更新）。
 
 ---
@@ -121,7 +121,7 @@ requiresRootfs/vendor/tags），一次请求即完整目录。收录 8 台：
 2. **为什么 MCP 目录单文件内联而技能按需单文件**：MCP 配置几百字节/条，
    索引内联一次拉全；技能正文 1.5-2.3KB/个 × 62 ≈ 130KB，索引只放元数据，
    安装时才拉正文（省流量 + 冷启动快）。
-3. **为什么安装 ≠ 启动**（学习 opencode 的 `enabled:false` 预置语义）：
+3. **为什么安装 ≠ 启动**（学习业界标准 CLI 编码智能体的 `enabled:false` 预置语义）：
    沙箱 MCP 启动有真实成本（npx 冷启动 + rootfs 门禁）；显式启动让
    「正在运行」状态对用户可预期，斜杠门控才站得住。
 4. **为什么保留 5 台 BUILTIN**：能力在二进制里（github REST / 搜索 / 工作区

@@ -97,4 +97,17 @@ class StandardAgentsTest {
         assertEquals(null, StandardAgentKind.fromKey(null))
         assertEquals(null, StandardAgentKind.fromKey(""))
     }
+
+    @Test
+    fun `task subagent types all parse via kind catalog`() {
+        // syntheticTaskTool 的 subagent_type 取值域（explore/research/general）
+        // 必须都能经 fromKey 解析成画像——工具描述与目录的跨层契约
+        listOf("explore", "research", "general").forEach { key ->
+            assertNotNull("task subagent_type '$key' 必须能解析为画像", StandardAgentKind.fromKey(key))
+        }
+        assertEquals(
+            StandardAgentKind.GENERAL,
+            StandardAgentKind.fromKey("general")
+        )
+    }
 }

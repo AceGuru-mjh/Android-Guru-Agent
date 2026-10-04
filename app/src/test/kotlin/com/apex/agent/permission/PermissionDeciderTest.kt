@@ -21,7 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Issue #155 — opencode 式权限模式单测（纯 JVM，JUnit4 + runTest）。
+ * Issue #155 — 业界标准式权限模式单测（纯 JVM，JUnit4 + runTest）。
  *
  * 覆盖（任务书 §测试）：
  *  - 四模式决策矩阵（BYPASS / DEFAULT / ACCEPT_EDITS / PLAN）；

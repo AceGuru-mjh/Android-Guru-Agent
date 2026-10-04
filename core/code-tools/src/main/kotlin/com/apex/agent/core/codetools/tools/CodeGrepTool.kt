@@ -13,7 +13,7 @@ import java.io.File
 /**
  * # code_grep — 工作区正则搜索（ripgrep 语义的纯 JVM 实现）
  *
- * opencode 的 grep 由 `rg --json` 驱动；Android 端不假设 guest 里有 rg，这里用
+ * 业界标准 CLI 编码智能体的 grep 由 `rg --json` 驱动；Android 端不假设 guest 里有 rg，这里用
  * 纯 JVM 实现**同款输出契约**：按文件分组、`  Line N: 内容` 行、命中上限 100、
  * 截断提示"用更精确的 path/pattern"。
  *
@@ -39,6 +39,9 @@ class CodeGrepTool(
           widening the pattern.
         - Results cap at 100 matches — refine the query instead of paging.
         - To count matches, run a shell command instead; this tool is for finding.
+        - For open-ended exploration that may take multiple rounds of searching,
+          consider delegating to a sub-agent via the task tool instead of
+          searching yourself.
     """.trimIndent(),
     declaredSchema = toolSchema {
         string("pattern", required = true, description = "Regular expression (Java/Kotlin syntax)")

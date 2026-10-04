@@ -25,7 +25,7 @@ data class PermissionSnapshot(
 )
 
 /**
- * ═══ opencode 式权限门（Issue #155）═══
+ * ═══ 业界标准式权限门（Issue #155）═══
  *
  * [PermissionDecider]（纯决策）+ [UserQuestionGateway]（用户询问闭环）
  * + 会话记忆的组合，实现 ToolExecutionGate 契约：
@@ -248,7 +248,7 @@ class PermissionModeGate(
 /**
  * ═══ 权限门 × 风险门 协调组合器（Issue #155）═══
  *
- * 把 [PermissionModeGate]（opencode 式权限决策 + 询问闭环）与既有
+ * 把 [PermissionModeGate]（业界标准式权限决策 + 询问闭环）与既有
  * [ToolExecutionGate]（如 RiskAwareToolGate 风险审批门）合成为一门：
  *
  * - 显式放行（规则 / 模式承诺 / 会话记忆 / 用户刚授权）→ 直接 Allow，

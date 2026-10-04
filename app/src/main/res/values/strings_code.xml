@@ -45,7 +45,7 @@
 
     <!-- Tool permissions (v1.0 #155) -->
     <string name="code_perm_section_title">Tool permissions</string>
-    <string name="code_perm_section_subtitle">opencode-style permission mode and rules</string>
+    <string name="code_perm_section_subtitle">standard permission mode and rules</string>
     <string name="code_perm_mode_label">Permission mode</string>
     <string name="code_perm_mode_bypass">Bypass</string>
     <string name="code_perm_mode_default">Default</string>

@@ -7,6 +7,10 @@
 > ——胶囊时间轴、长任务追踪、权限问答、计划确认卡零改动两线通用。
 > 切换入口三通道：右上角选择器（Compose 下拉）/ `/logic:<mode>` 斜杠
 > 命令 / 重启自动恢复（`AgentSettings.codeThinkingLogic` 持久化）。
+>
+> **标准线 v2 全面完善**（env 块 / 行为规范 / 工具纪律 / 权限链闭环 /
+> read-before-edit 硬约束 / 模型感知窗口 / 增量压缩）见
+> [standard-mode-v2.md](standard-mode-v2.md)。
 
 ## 一、动机与定位
 
@@ -92,20 +96,27 @@ DualLogicCodeEngine（路由门面，volatile 单引用切换）
 
 `task` 合成工具仅主代理可见（子代理不能再派子代理，防递归爆炸）。
 
-### 3.3 权限三态门（`StandardPermissionEngine.kt`）
+### 3.3 权限三态门（`StandardPermissionEngine.kt`，v2 完整裁决序）
 
 每次写类/执行类工具调用先过门：
 
 ```
-DENY 规则短路 ──► 会话记忆（本轮已放行的同命令）──► 命令级通配
-（shell 首词前缀）──► 模式兜底
+DENY 规则短路 ──► PLAN 硬门（planGate）──► 会话记忆（本轮已放行的同命令）
+──► 命令级通配（shell 首词前缀）──► 工具级规则 ──► 敏感文件保护
+（.env 族/密钥/凭据 → ask）──► 模式兜底
 ```
 
 - 模式四档：BYPASS（全放）/ DEFAULT（写类 ask）/ ACCEPT_EDITS（编辑
   放行、shell ask）/ PLAN（**硬拒写**，只读循环）；
+- 设置层接线（v2）：`StandardPermissionSource` 快照源每轮任务前拉取
+  （模式 + 规则三元组，改设置即时生效）；PLAN 档另叠加引擎级硬门
+  （与设置层模式正交）；
 - `ask` → `AgentQuestion` 事件挂起 → 用户选项回传（允许一次 / 本次会话
-  总是允许 / 拒绝），拒绝即收敛该调用为权限失败结果；
-- 子代理的 ASK 折叠为 DENY（无 UI 通道，宁可保守）。
+  总是允许 / 拒绝——拒绝时的非空指示原文回传模型，可改道）；空/超时
+  （5 分钟）= 拒绝；
+- 子代理的 ASK 折叠为 DENY（无 UI 通道，宁可保守）；
+- 引擎级 read-before-edit 硬约束在权限门之前拦截（未读先编直接拒绝
+  并引导，新文件免检，详见 [standard-mode-v2.md](standard-mode-v2.md)）。
 
 ### 3.4 工具面编排（`StandardToolSurface.kt`）
 
@@ -123,12 +134,17 @@ DENY 规则短路 ──► 会话记忆（本轮已放行的同命令）──�
   （`DEFAULT_TIMEOUT_MS = 240_000L`）、产出截断 8000 字符
   （`MAX_OUTPUT_CHARS`）。
 
-### 3.6 上下文压缩（`StandardCompactor.kt`）
+### 3.6 上下文压缩（`StandardCompactor.kt`，v2 结构化模板）
 
-- 接近上限时：旧消息段 → LLM 摘述（≤800 token，`SUMMARY_MAX_TOKENS`）
-  带 `[SESSION SUMMARY — earlier context was compacted]` 头替换；
+- 接近上限时：旧消息段 → LLM 摘述（≤1000 token，`SUMMARY_MAX_TOKENS`）
+  带 `[SESSION SUMMARY — earlier context was compacted]` 头替换；摘要
+  按固定五段模板（Objective / Important Details / Work State / Next
+  Move / Relevant Files），二次压缩增量合并旧摘要，替换后尾部追加
+  继续指令（详见 [standard-mode-v2.md](standard-mode-v2.md)）；
 - LLM 摘述失败 → **滑窗降级**（滑窗摘要 + 最多 20 条摘要结果，
-  `MAX_DIGEST_RESULTS`），压缩永不成为单点故障。
+  `MAX_DIGEST_RESULTS`），压缩永不成为单点故障；
+- 压缩预算消费模型真实上下文窗口（`ModelProfile.contextWindow`，
+  DI 注入 `modelInfoProvider`），静态 128K 兜底。
 
 ### 3.7 文本核（`StandardTextKernel.kt` + `core/code-native`）
 

@@ -12,8 +12,6 @@ import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.InputType
-import com.apex.agent.core.engine.PlanStep
-import com.apex.agent.core.engine.RiskLevel
 import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.ToolCall
@@ -96,6 +94,16 @@ class StandardModeEngine(
     private val compressionThreshold: Float = 0.8f,
     /** 压缩保留最近 N 条。 */
     private val preserveRecent: Int = 8,
+    /**
+     * 权限配置源（设置层快照通道，默认 NONE = 纯模式兜底）。
+     * 每轮任务开始前拉取——设置层改权限模式/规则即时生效，无需重启。
+     */
+    private val permissionSource: StandardPermissionSource = StandardPermissionSource.NONE,
+    /**
+     * 模型信息提供者（modelId + 真实上下文窗口）：env 块注入与压缩
+     * 预算的消费源；null = 静态 [maxContextTokensConfig] 兜底。
+     */
+    private val modelInfoProvider: (() -> ModelInfo)? = null,
     /** 子代理运行标记（本实例由 task 工具派生）。 */
     internal val subAgentMode: Boolean = false
 ) : AgentEngine, CodeEngineFacade {
@@ -147,6 +155,17 @@ class StandardModeEngine(
     @Volatile
     private var usageCalibration: Float = 1.0f
 
+    /**
+     * AgentMode.PLAN 档硬门（与设置层权限模式正交）：档位切换不再改写
+     * 权限模式——「规划阶段零副作用」由 [StandardPermissionEngine.decide]
+     * 的 planGate 参数独立承诺，设置层模式是主权档位。
+     */
+    @Volatile
+    private var agentPlanGate: Boolean = false
+
+    /** read-before-edit 硬约束（本会话已读文件追踪面，见 [StandardReadGuard]）。 */
+    private val readGuard = StandardReadGuard(workspaceRootProvider = { workspaceRoot })
+
     private val runCounter = AtomicLong(0)
 
     /** 压缩器（共享 runtime；LLM 摘述 + 滑窗降级）。 */
@@ -165,6 +184,10 @@ class StandardModeEngine(
                     contextProvider = contextProvider,
                     rulesProvider = rulesProvider,
                     textKernel = textKernel,
+                    // 设置层规则下传子代理（DENY 规则对子代理同样生效；
+                    // ASK 在子代理上下文自动折叠 DENY——见权限引擎）
+                    permissionSource = permissionSource,
+                    modelInfoProvider = modelInfoProvider,
                     subAgentMode = true
                 ).apply { profile = definition }
             },
@@ -187,6 +210,7 @@ class StandardModeEngine(
         val report = RunReportBuilder()
         try {
             if (runId == 1L) repairDanglingResults()
+            refreshPermissionConfig()
 
             val userText = buildUserText(input)
             val userMessage = LlmMessage.User(userText, input.images)
@@ -260,6 +284,7 @@ class StandardModeEngine(
     ): SubAgentRunResult {
         isRunning = true
         val report = RunReportBuilder()
+        refreshPermissionConfig()
         session.append(LlmMessage.User(prompt))
         try {
             runTurns(onEvent, report)
@@ -282,6 +307,12 @@ class StandardModeEngine(
         val output: String,
         val turns: Int,
         val toolCalls: Int
+    )
+
+    /** 模型信息（env 块 + 上下文预算消费；DI 从 ModelRuntime 解析注入）。 */
+    data class ModelInfo(
+        val modelId: String?,
+        val contextWindow: Int?
     )
 
     // ═══════════════════════ 主循环 ═══════════════════════
@@ -313,13 +344,19 @@ class StandardModeEngine(
 
             // ── 装配请求 ──
             val toolPlan = StandardToolSurface.buildToolPlan(
-                profile, toolRegistry, forcedToolIds, exposeAllTools
+                profile, toolRegistry, forcedToolIds, exposeAllTools,
+                // 子代理不能再派发子代理——合成 task 工具不进子代理面
+                includeSyntheticTools = !subAgentMode
             )
             val planIds = toolPlan.map { it.name }
             val systemPrompt = buildSystemPrompt(planIds)
             val messages = buildList {
                 add(LlmMessage.System(systemPrompt))
                 addAll(session.snapshot().map { it.message })
+                // PLAN 档回合级只读提醒（请求级注入——不进会话时间线）
+                if (agentPlanGate && !subAgentMode) {
+                    add(LlmMessage.System(StandardPrompts.planModeReminder()))
+                }
             }
 
             // ── 流式请求 ──
@@ -469,42 +506,69 @@ class StandardModeEngine(
         var output: String
         var success: Boolean
 
-        // ── 权限门（规则 → 会话记忆 → 模式兜底）──
-        val decision = permissionEngine.decide(
-            toolId = registryName,
-            rawArguments = call.arguments,
-            subAgentContext = subAgentMode
-        )
-        when (decision.effect) {
-            StandardPermissionEffect.DENY -> {
-                report.permissionDenied++
-                output = StandardPrompts.permissionDeniedToolResult(registryName, decision.reason)
-                success = false
-            }
-            StandardPermissionEffect.ALLOW -> {
-                val result = runTool(callId, registryName, call.arguments, emit, report)
-                output = result.first
-                success = result.second
-            }
-            StandardPermissionEffect.ASK -> {
-                report.permissionAsks++
-                val response = askPermission(registryName, call, emit)
-                if (response == StandardPermissionResponse.DENY) {
+        // ── 未知工具拦截（含相近名修正建议——模型自纠，不占权限门）──
+        val knownTool = StandardToolSurface.isSyntheticTaskTool(registryName) ||
+            toolRegistry.getToolDefinitions().any { it.name == registryName }
+        val readGuardBlock = if (knownTool) readGuard.check(registryName, call.arguments) else null
+        if (!knownTool) {
+            output = StandardPrompts.unknownToolResult(
+                call.name,
+                StandardToolSurface.suggestToolIds(
+                    call.name, toolRegistry.getToolDefinitions().map { it.name }
+                )
+            )
+            success = false
+        } else if (readGuardBlock != null) {
+            // read-before-edit 硬约束：编辑/覆盖写必须先读过（新文件免检）
+            output = readGuardBlock
+            success = false
+        } else {
+            // ── 权限门（DENY 规则 → PLAN 硬门 → 会话记忆 → 命令级/工具级规则 → 模式兜底）──
+            val decision = permissionEngine.decide(
+                toolId = registryName,
+                rawArguments = call.arguments,
+                subAgentContext = subAgentMode,
+                planGate = agentPlanGate
+            )
+            when (decision.effect) {
+                StandardPermissionEffect.DENY -> {
                     report.permissionDenied++
-                    output = StandardPrompts.permissionDeniedToolResult(
-                        registryName, "用户拒绝了本次执行"
-                    )
+                    output = StandardPrompts.permissionDeniedToolResult(registryName, decision.reason)
                     success = false
-                } else {
-                    if (response == StandardPermissionResponse.ALLOW_SESSION) {
-                        rememberSessionAllow(registryName, call.arguments)
-                    }
+                }
+                StandardPermissionEffect.ALLOW -> {
                     val result = runTool(callId, registryName, call.arguments, emit, report)
                     output = result.first
                     success = result.second
                 }
+                StandardPermissionEffect.ASK -> {
+                    report.permissionAsks++
+                    val (response, denyFeedback) = askPermission(registryName, call, emit)
+                    if (response == StandardPermissionResponse.DENY) {
+                        report.permissionDenied++
+                        output = StandardPrompts.permissionDeniedToolResult(
+                            registryName,
+                            if (denyFeedback != null) {
+                                "用户拒绝，并给出指示：$denyFeedback（请改按指示选择更安全的路线）"
+                            } else {
+                                "用户拒绝了本次执行"
+                            }
+                        )
+                        success = false
+                    } else {
+                        if (response == StandardPermissionResponse.ALLOW_SESSION) {
+                            rememberSessionAllow(registryName, call.arguments)
+                        }
+                        val result = runTool(callId, registryName, call.arguments, emit, report)
+                        output = result.first
+                        success = result.second
+                    }
+                }
             }
         }
+
+        // ── 成功的读/写/编登记 read 状态（read-before-edit 追踪面）──
+        if (success) readGuard.record(registryName, call.arguments)
 
         val durationMs = System.currentTimeMillis() - startedAt
         if (output.length > toolOutputBudget) {
@@ -530,28 +594,37 @@ class StandardModeEngine(
      * ASK → UserInputRequired + 挂起等答案（5 分钟超时 = 拒绝）。
      *
      * 应答词表：「允许/allow/yes/y/好/ok/1/执行」= 本次；
-     * 「总是/always/全部允许/session/2」= 本会话总允许；其余（含超时空）= 拒绝。
+     * 「总是/always/全部允许/session/2」= 本会话总允许；其余非空文本 =
+     * 拒绝但携带用户指示（反馈原文回传模型，模型可改道）；空/超时 = 拒绝。
+     *
+     * @return 应答 + 拒绝时的用户指示原文（null = 无反馈）
      */
     private suspend fun askPermission(
         toolName: String,
         call: ToolCall,
         emit: suspend (AgentEvent) -> Unit
-    ): StandardPermissionResponse {
+    ): Pair<StandardPermissionResponse, String?> {
         val preview = call.arguments.take(160)
         emit(
             AgentEvent.UserInputRequired(
                 prompt = "工具 `$toolName` 请求执行（权限门：${toolName}）。\n" +
                     "参数预览：$preview\n" +
-                    "回复「允许」= 本次执行；「总是」= 本会话内该工具总允许；其他任意回复 = 拒绝。",
+                    "回复「允许」= 本次执行；「总是」= 本会话内该工具总允许；" +
+                    "其他任意回复 = 拒绝（回复内容会作为指示转达给模型）；不回复 = 拒绝。",
                 type = InputType.CONFIRMATION
             )
         )
-        val answer = awaitUserInput().trim().lowercase()
-        return when {
+        val raw = awaitUserInput()
+        val answer = raw.trim().lowercase()
+        val response = when {
             answer in ALLOW_ONCE_WORDS -> StandardPermissionResponse.ALLOW_ONCE
             answer in ALLOW_SESSION_WORDS -> StandardPermissionResponse.ALLOW_SESSION
             else -> StandardPermissionResponse.DENY
         }
+        val feedback = raw.trim().takeIf {
+            response == StandardPermissionResponse.DENY && it.isNotEmpty()
+        }
+        return response to feedback
     }
 
     /** 实际执行（task 派发 / 注册表），返回 (输出, 成功)。 */
@@ -646,7 +719,7 @@ class StandardModeEngine(
         val report = compactor.compactIfNeeded(
             messages = history,
             estimatedTokens = estimated,
-            maxContextTokens = maxContextTokensConfig,
+            maxContextTokens = effectiveContextTokens(),
             threshold = compressionThreshold,
             preserveRecent = preserveRecent
         ) ?: return
@@ -702,58 +775,18 @@ class StandardModeEngine(
             ?.map { plan.steps[it].description }
             ?: plan.steps.map { it.description }
 
-        // 切构建者画像 + 注入执行简报 + 再跑循环
+        // 切构建者画像 + 注入执行简报 + 再跑循环（档位硬门同步解除）
         profile = StandardAgentCatalog.BUILD
-        permissionEngine.updateMode(StandardPermissionMode.DEFAULT)
+        agentPlanGate = false
         val brief = StandardPrompts.planExecutionBrief(plan.goal, orderedSteps)
         session.append(LlmMessage.User(brief))
         memory?.append(LlmMessage.User(brief))
         runTurns(emit, report)
     }
 
-    /** 计划解析：Steps 段的编号/复选行 → ExecutionPlan。 */
-    internal fun parsePlan(text: String): ExecutionPlan? {
-        val lines = text.lines()
-        val goal = lines
-            .firstOrNull { it.trim().equals("### Goal", ignoreCase = true) }
-            ?.let { header ->
-                lines.dropWhile { it.trim() != header.trim() }
-                    .drop(1)
-                    .firstOrNull { it.isNotBlank() }
-            }
-        val stepsStart = lines.indexOfFirst { it.trim().equals("### Steps", ignoreCase = true) }
-        if (stepsStart < 0) return null
-        val steps = mutableListOf<PlanStep>()
-        var index = 0
-        for (i in stepsStart + 1 until lines.size) {
-            val raw = lines[i].trim()
-            if (raw.startsWith("###") || raw.startsWith("## ")) break
-            if (raw.isEmpty()) continue
-            val cleaned = raw
-                .removePrefix("- [ ]").removePrefix("- [x]")
-                .removePrefix("-").removePrefix("*")
-                .replace(Regex("^\\d+\\.\\s*"), "")
-                .trim()
-            if (cleaned.isEmpty()) continue
-            steps.add(
-                PlanStep(
-                    index = index,
-                    description = cleaned,
-                    toolName = null,
-                    estimatedArgs = null
-                )
-            )
-            index++
-        }
-        if (steps.isEmpty()) return null
-        return ExecutionPlan(
-            goal = goal ?: (session.title ?: "用户任务"),
-            steps = steps,
-            estimatedToolCalls = steps.size,
-            riskLevel = RiskLevel.MEDIUM,
-            reasoning = text.take(300)
-        )
-    }
+    /** 规划文本解析（### Goal / ### Steps 四段结构 → [ExecutionPlan]）。 */
+    private fun parsePlan(text: String): ExecutionPlan? =
+        StandardPlanParser.parse(text, session.title)
 
     /** 计划确认挂起（5 分钟超时 = 驳回）。 */
     private suspend fun awaitPlanConfirmation(): PlanAnswer {
@@ -791,6 +824,8 @@ class StandardModeEngine(
         this.workspaceName = name
         this.workspaceRoot = root
         this.activeFile = activeFile
+        // 换工作区 = 新文件域：read-before-edit 追踪面清零重新累积
+        readGuard.reset()
         memory?.bindWorkspace(workspaceId)
         val history = memory?.load() ?: emptyList()
         session.restore(history)
@@ -814,11 +849,9 @@ class StandardModeEngine(
 
     override fun updateMode(mode: AgentMode) {
         profile = StandardAgentCatalog.primaryFor(mode.name.lowercase())
-        // PLAN 画像 = 只读面 → 权限模式同步收紧（硬承诺：规划阶段零副作用）
-        permissionEngine.updateMode(
-            if (profile.kind == StandardAgentKind.PLAN) StandardPermissionMode.PLAN
-            else StandardPermissionMode.DEFAULT
-        )
+        // AgentMode.PLAN 档 = 引擎级硬门（planGate）——与设置层权限模式
+        // 正交：档位切换不再改写权限模式，设置层模式是主权档位。
+        agentPlanGate = profile.kind == StandardAgentKind.PLAN
     }
 
     override fun submitPlanConfirmation(
@@ -864,13 +897,31 @@ class StandardModeEngine(
         return (raw * usageCalibration).toInt()
     }
 
-    override fun maxContextTokens(): Int = maxContextTokensConfig
+    override fun maxContextTokens(): Int = effectiveContextTokens()
+
+    /** 生效上下文预算：模型真实窗口优先，静态配置兜底。 */
+    private fun effectiveContextTokens(): Int =
+        currentModelInfo()?.contextWindow?.takeIf { it > 0 } ?: maxContextTokensConfig
+
+    /** 当前模型信息（provider 异常 → null，env 块与预算不受影响）。 */
+    private fun currentModelInfo(): ModelInfo? =
+        runCatching { modelInfoProvider?.invoke() }.getOrNull()
+
+    /** 拉取设置层权限快照（每轮任务开始；改设置即时生效）。 */
+    private fun refreshPermissionConfig() {
+        val snapshot = runCatching { permissionSource.snapshot() }.getOrNull() ?: return
+        permissionEngine.updateMode(snapshot.mode)
+        permissionEngine.updateRules(snapshot.rules)
+        permissionEngine.updateCommandRules(snapshot.commandRules)
+    }
 
     // ═══════════════════════ 装配 ═══════════════════════
 
-    /** 系统提示词：画像身份 + 方法论 + 工具面 + 工作区 + 规则 + 附加段。 */
+    /** 系统提示词：画像身份 + 核心行为 + 方法论 + 工具面/纪律 + env + 工作区 + 规则 + 附加段。 */
     private fun buildSystemPrompt(planToolIds: List<String>): String = buildString {
         append(profilePrompt())
+        appendLine()
+        appendLine(StandardPrompts.coreConduct())
         appendLine()
         appendLine(StandardPrompts.taskMethodology())
         appendLine()
@@ -879,10 +930,27 @@ class StandardModeEngine(
                 StandardToolSurface.buildToolGuide(profile, planToolIds)
             )
         )
+        val discipline = StandardPrompts.toolDiscipline(
+            hasShell = planToolIds.any { it == "shell_execute" || it == "terminal.exec" }
+        )
+        if (discipline.isNotBlank()) {
+            appendLine()
+            appendLine(discipline)
+        }
         if (StandardToolSurface.planHasTodo(planToolIds)) {
             appendLine()
             appendLine(StandardPrompts.todoGuidance())
         }
+        appendLine()
+        appendLine(
+            StandardPrompts.environmentContext(
+                modelId = currentModelInfo()?.modelId,
+                todayText = java.time.LocalDate.now().toString(),
+                platformText = PLATFORM_TEXT,
+                workdirLabel = workspaceRoot?.path,
+                isGitRepo = workspaceRoot?.let { File(it, ".git").exists() }
+            )
+        )
         workspaceRoot?.let { root ->
             appendLine()
             appendLine(
@@ -925,7 +993,9 @@ class StandardModeEngine(
     private fun profilePrompt(): String = when (profile.kind) {
         StandardAgentKind.BUILD -> StandardPrompts.buildAgent()
         StandardAgentKind.PLAN -> StandardPrompts.planAgent()
-        StandardAgentKind.GENERAL -> StandardPrompts.generalAgent()
+        // GENERAL：主代理档 = 兑底画像；子代理档 = 全工具面通用执行者
+        StandardAgentKind.GENERAL ->
+            if (subAgentMode) StandardPrompts.generalSubAgent() else StandardPrompts.generalAgent()
         StandardAgentKind.EXPLORE -> StandardPrompts.exploreSubAgent()
         StandardAgentKind.RESEARCH -> StandardPrompts.researchSubAgent()
     }
@@ -933,6 +1003,8 @@ class StandardModeEngine(
     /** token 估算（native 核优先，纯 Kotlin 回退）。 */
     private fun tokenEstimate(text: String): Int =
         textKernel?.estimateTokens(text) ?: StandardSession.defaultTokenEstimator(text)
+
+    // ═══════════════════════ usage 校准 ═══════════════════════
 
     /** usage 校准（服务端真值 / 本地估算 → 比值，钳制 0.5..3.0）。 */
     private fun calibrate(promptTokens: Int, messages: List<LlmMessage>) {
@@ -1032,60 +1104,17 @@ class StandardModeEngine(
     }
 
     // ═══════════════════════ 内部结构 ═══════════════════════
-
-    /** 运行报告构建器（可变累计，收官快照）。 */
-    private class RunReportBuilder {
-        var turns: Int = 0
-        var toolCalls: Int = 0
-        var permissionAsks: Int = 0
-        var permissionDenied: Int = 0
-        var subAgents: Int = 0
-        var promptTokens: Int = 0
-        var completionTokens: Int = 0
-        var errorMessage: String? = null
-    }
-
-    /**
-     * 流式工具调用累加器（OpenAI 并行分片 index 键策略，与主引擎同款）：
-     * 首片携带 id+index，续片只携带 index——index 为稳定键，id 兜底。
-     */
-    private class ToolCallAccumulator(initialId: String, initialName: String) {
-        var id: String = initialId
-        var name: String = initialName
-        private val args = StringBuilder()
-
-        fun append(namePart: String?, argumentsPart: String?) {
-            if (!namePart.isNullOrBlank()) name = namePart
-            argumentsPart?.let { args.append(it) }
-        }
-
-        fun build(): ToolCall = ToolCall(id = id, name = name, arguments = args.toString())
-    }
-
-    /** 重复调用守卫（同指纹 3 次告警 / 4 次强收敛）。 */
-    private class RepeatGuard {
-        private val counts = mutableMapOf<String, Int>()
-
-        fun record(fingerprint: String) {
-            counts[fingerprint] = (counts[fingerprint] ?: 0) + 1
-        }
-
-        fun warningFor(): String? {
-            val worst = counts.entries.firstOrNull { it.value == WARN_THRESHOLD } ?: return null
-            return StandardPrompts.repetitiveCallWarning(
-                worst.value, worst.key.substringBefore("|")
-            )
-        }
-
-        fun shouldForceFinal(): Boolean =
-            counts.values.any { it >= FORCE_THRESHOLD }
-    }
+    // RunReportBuilder / ToolCallAccumulator / RepeatGuard 按职责缝拆出至
+    // StandardRunSupport.kt（单文件预算纪律）。
 
     companion object {
         private const val TAG = "StandardModeEngine"
 
         /** PRoot Ubuntu 会话中工作区统一挂载点（与 CodeAgentEngine 一致）。 */
         private const val GUEST_PATH = "/workspace"
+
+        /** env 块的平台行（与 PRoot Ubuntu 沙箱宿主一致）。 */
+        private const val PLATFORM_TEXT = "Android with a PRoot Ubuntu sandbox"
 
         private const val USER_INPUT_TIMEOUT_MS = 300_000L
         private const val PLAN_CONFIRMATION_TIMEOUT_MS = 300_000L
@@ -1094,9 +1123,6 @@ class StandardModeEngine(
             setOf("允许", "allow", "yes", "y", "好", "ok", "1", "执行")
         private val ALLOW_SESSION_WORDS =
             setOf("总是", "always", "全部允许", "session", "2")
-
-        private const val WARN_THRESHOLD = 3
-        private const val FORCE_THRESHOLD = 4
 
         /** 指纹（重复调用检测）。 */
         internal fun fingerprintOf(toolName: String, arguments: String): String =
@@ -1107,8 +1133,10 @@ class StandardModeEngine(
             val description = extractJsonString(arguments, "description") ?: return null
             val prompt = extractJsonString(arguments, "prompt") ?: return null
             val typeKey = extractJsonString(arguments, "subagent_type") ?: "explore"
+            // 子代理类型：explore / research / general（general = 全工具面通用
+            // 执行者——子代理上下文不能再派发、不能询问，写操作受权限门约束）
             val kind = StandardAgentKind.fromKey(typeKey)
-                ?.takeIf { it.role == StandardAgentRole.SUBAGENT }
+                ?.takeIf { it.role == StandardAgentRole.SUBAGENT || it == StandardAgentKind.GENERAL }
                 ?: StandardAgentKind.EXPLORE
             return StandardSubAgentRequest(
                 kind = kind,

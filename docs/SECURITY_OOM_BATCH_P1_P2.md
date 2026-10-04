@@ -38,7 +38,7 @@ write_file/edit_file MEDIUM 确认、HIGH 确认）从未被咨询。类 KDoc �
   （StandardToolSurface 把 write_file/edit_file 映射过去 —— 同一底层
   行为必须同一确认语义）。
 
-**防双弹窗（收尾）**：`StandardModeEngine` 自带 opencode 式权限门（规则 →
+**防双弹窗（收尾）**：`StandardModeEngine` 自带业界标准式权限门（规则 →
 会话记忆 → 模式兜底 → ASK 弹窗）。#230 之后若继续共用主执行器（组合门），
 同一动作会被问两次。新增 `@Named("standardEngineTools")` 执行器（ToolModule）：
 **仅环境门**（`ToolEnvironmentGate`）+ 限流/熔断/超时/重试/追踪/钩子/脱敏

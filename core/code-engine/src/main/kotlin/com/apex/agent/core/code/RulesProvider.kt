@@ -16,7 +16,7 @@ import java.io.IOException
  * 用户在仓库里放的编码规范、提交约定、架构约束对 Agent 不可见。
  *
  * 设计对标：
- *  - **opencode 的 AGENTS.md 分层**——每目录一份、从文件位置向上回溯合并、
+ *  - **业界标准编码智能体的 AGENTS.md 分层**——每目录一份、从文件位置向上回溯合并、
  *    同目录多候选文件取首个命中即止（AGENTS.md > CLAUDE.md > .cursorrules）；
  *  - **Claude Code 的 CLAUDE.md**——项目级规则文件 + 用户级全局规则双通道，
  *    全局规则由设置层持久化（AgentSettings.globalRules），项目规则由
@@ -25,7 +25,7 @@ import java.io.IOException
  * ## 语义
  *
  *  - **目录内优先级**：AGENTS.md > CLAUDE.md > .cursorrules。同目录首个
- *    命中即用，不再读该目录其他规则文件（opencode 语义——规则文件表达
+ *    命中即用，不再读该目录其他规则文件（业界标准语义——规则文件表达
  *    「本目录的规矩」，多份并存只会互相打架）；
  *  - **嵌套回溯**：从 activeFile 所在目录逐级向上到 workspaceRoot，每级
  *    至多取一个命中文件；**子目录在前**（更具体的规则优先展示给模型，
@@ -248,7 +248,7 @@ class RulesProvider {
     private companion object {
         const val TAG = "RulesProvider"
 
-        /** 目录内优先级：首个命中即止，不再读该目录其他候选（opencode 语义）。 */
+        /** 目录内优先级：首个命中即止，不再读该目录其他候选（业界标准语义）。 */
         val RULE_FILE_PRIORITY = listOf("AGENTS.md", "CLAUDE.md", ".cursorrules")
 
         /** 段落标题（与 [com.apex.agent.core.engine.EnginePrompts] 的 "## " 段风格对齐）。 */

@@ -521,7 +521,7 @@ UI 实时显示推理过程（正文与思维链严格分流，双引擎同语�
 ### 🧑‍💻 Coding 模式（Code 屏 —— 与 Agent 模式同级别的对等入口）
 
 与六种 `AgentMode`（会话行为开关）不同，**Coding 模式是一个独立的顶层工作面**：
-抽屉里的 Code 屏拥有自己的引擎实例、按工作区隔离的会话记忆、以及 opencode
+抽屉里的 Code 屏拥有自己的引擎实例、按工作区隔离的会话记忆、以及业界标准
 契约的编码工具集 —— 但与 Agent 模式**共享全部能力基础设施**（工具注册表 +
 v3 执行硬化 + v4 目录 / 技能注入 / MCP 一等工具 / 插件 / 多模型路由）。
 
@@ -552,7 +552,7 @@ v3 执行硬化 + v4 目录 / 技能注入 / MCP 一等工具 / 插件 / 多模�
 **关键设计**：
 
 - **不重写 Agent Loop** —— `CodeAgentEngine` 是 `ApexAgentEngine` 的薄包装，
-  编码行为经 `additionalSystemContext` 通道注入（BUILD 循环 + opencode 风格
+  编码行为经 `additionalSystemContext` 通道注入（BUILD 循环 + 业界标准风格
   编码行为段落），Agent 模式零影响；
 - **code_edit 的成功率就是编码循环的效率** —— 精确匹配失败后依次尝试
   行 trim / 块锚点+Levenshtein / 空白归一 / 缩进平移 / 边界 trim / replaceAll
@@ -757,7 +757,7 @@ APK 内置技能只保留 **13 个核心**（8 个 coding 强技能 + 3 个 agen
 thinking），沙箱与远端 MCP 目录迁往
 [apex-mcp-hub](https://github.com/AceGuru-mjh/apex-mcp-hub)。市场里
 「官方仓库」源直连 raw.githubusercontent.com 拉取 `index.json` 注册表
-（学习 opencode 的远程注册表模式：元数据小体积索引 + 技能正文按需单文件
+（学习业界标准 CLI 编码智能体的远程注册表模式：元数据小体积索引 + 技能正文按需单文件
 下载），一键安装，装完与本地技能同权管理。升级用户由
 `pruneStaleBundled` 白名单反向迁移自动清理旧内置残留。
 

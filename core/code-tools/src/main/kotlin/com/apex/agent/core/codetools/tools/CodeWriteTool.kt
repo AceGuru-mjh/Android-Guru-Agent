@@ -17,7 +17,7 @@ import java.io.File
 /**
  * # code_write — 全量写文件（编码会话专用）
  *
- * 与 code_edit 的分工（opencode 同款契约）：
+ * 与 code_edit 的分工（业界标准 CLI 编码智能体同款契约）：
  * - 新文件 / 整文件重写 / 改动超过一半 → code_write；
  * - 局部修改 → code_edit（省 token 且更安全）。
  *
@@ -44,8 +44,12 @@ class CodeWriteTool(
     description = """
         Write a full file (create or overwrite) in the coding workspace.
 
-        Use code_edit for targeted changes to an existing file — it is cheaper and
-        safer. Use this tool when creating new files or rewriting most of a file.
+        ALWAYS prefer editing an existing file over creating a new one — use
+        code_edit for targeted changes; it is cheaper and safer. Use this tool
+        mainly for new files or full rewrites.
+
+        NEVER proactively create documentation files (*.md, README) unless
+        the user explicitly asks.
 
         Overwriting an existing file requires overwrite=true (read it with
         code_read first to avoid destroying work).

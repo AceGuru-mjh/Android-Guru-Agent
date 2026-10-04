@@ -29,7 +29,7 @@ internal object EnginePrompts {
      * inventory, active skill injections, session context and the
      * file-operation / output-management rulebook.
      *
-     * 2026 主动执行修复：学习 opencode（"you MUST actually make the tool
+     * 2026 主动执行修复：学习业界标杆实践（"you MUST actually make the tool
      * call" / "NEVER end your turn without having truly solved the problem"）
      * 与 operit（"proactively select the most appropriate tool"）。旧版
      * "Use tools when needed" 是被动措辞——模型倾向先叙述后行动，而引擎
@@ -156,7 +156,7 @@ internal object EnginePrompts {
             appendLine()
 
             // ═══ 主动工具使用策略（根因修复：模型不主动调工具）═══
-            // opencode beast.txt: "when you say you are going to make a tool
+            // 业界标杆提示词工程实践指出："when you say you are going to make a tool
             // call, make sure you ACTUALLY make the tool call, instead of
             // ending your turn"；kimi.txt: "you MUST use the appropriate
             // tools to make actual changes — do not just describe the solution"。

@@ -306,7 +306,7 @@ object ToolModule {
     ): RiskAwareToolGate = RiskAwareToolGate(gateway, toolAuditLogger)
 
     /**
-     * v1.0 #155：opencode 式权限模式门——模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
+     * v1.0 #155：业界标准式权限模式门——模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
      * + 规则三元组经设置流实时读取（改设置即时生效，无需重启）。
      * 与 RiskAwareToolGate 的分工见 PermissionAwareToolGate KDoc：权限门先表态，
      * 显式放行/会话记忆命中跳过风险门（防双弹窗），仅默认放行才落风险门。
@@ -714,7 +714,7 @@ object ToolModule {
         registry.register(SafeAgentTool(FileEditTool(workspaceDir)))
 
         // ═══ 2b. Coding 模式工具（Code Mode 与 Agent 模式互用）═══
-        // code_read/edit/write/grep/glob/todo/check —— opencode 契约的编码工具集。
+        // code_read/edit/write/grep/glob/todo/check —— 业界标准契约的编码工具集。
         // 根目录经 CodeWorkspaceRoots 动态解析（Code 屏切换工作区即时生效），
         // 默认工作区与上方 workspaceDir 同源（linux/workspaces/default），
         // 两模式看到同一份文件。CORE 集已加入（ToolTierPolicy），两模式默认可见。
@@ -1105,7 +1105,7 @@ object ToolModule {
         hookRegistry: HookRegistry,
         secretRedactor: SecretRedactor
     ): ToolExecutor {
-        // Issue #230 收尾（防双弹窗）：StandardModeEngine 自带 opencode 式权限门
+        // Issue #230 收尾（防双弹窗）：StandardModeEngine 自带业界标准式权限门
         //（规则 → 会话记忆 → 模式兜底 → ASK 弹窗，见 executeOneToolCall）。
         // #230 起 executeStream 也会咨询执行器门控 —— 标准线若共用主执行器
         //（PermissionAwareToolGate 组合门），同一动作会被问两次。这里给

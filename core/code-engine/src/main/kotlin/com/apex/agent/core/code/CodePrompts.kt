@@ -3,7 +3,7 @@ package com.apex.agent.core.code
 /**
  * # Code Prompts — Coding 模式系统提示词
  *
- * 设计参照 opencode 的 prompt 工程（anthropic.txt / default.txt 的行为段落），
+ * 设计参照业界标准 CLI 编码智能体的 prompt 工程（anthropic.txt / default.txt 的行为段落），
  * 全部以中文书写与本项目 [com.apex.agent.core.engine.EnginePrompts] 的风格对齐。
  *
  * **注入通道**：这些段落经 [AgentConfig.additionalSystemContext]（任意模式生效
@@ -17,7 +17,7 @@ package com.apex.agent.core.code
  */
 object CodePrompts {
 
-    /** 编码会话身份与核心行为约束（opencode 行为段落的本地化裁剪）。 */
+    /** 编码会话身份与核心行为约束（业界标准行为段落的本地化裁剪）。 */
     fun codingIdentity(): String = """
         ## Coding Mode — 你是运行在 Android 设备上的编码智能体
 

@@ -3,7 +3,7 @@ package com.apex.agent.core.code.subagent
 /**
  * # Sub-Agent Prompts — 子代理系统提示词（Issue #147）
  *
- * opencode 风格 task 工具的提示词面：主代理把探索 / 调研类工作委派给
+ * 业界标准风格 task 工具的提示词面：主代理把探索 / 调研类工作委派给
  * **隔离上下文**的子代理，子代理跑完把结论作为工具结果返回，不污染主对话
  * 历史。本对象与 [com.apex.agent.core.code.CodePrompts] 定位一致 —— 只负责
  * 提示词文本，全部中文、按角色分段，经 [com.apex.agent.core.engine.AgentConfig.additionalSystemContext]

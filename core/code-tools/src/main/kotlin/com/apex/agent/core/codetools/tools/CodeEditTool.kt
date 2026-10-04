@@ -16,7 +16,7 @@ import com.apex.agent.core.tools.toolSchema
 import java.io.File
 
 /**
- * # code_edit — 精确替换式编辑（opencode edit 契约）
+ * # code_edit — 精确替换式编辑（业界标准 CLI 编码智能体 edit 契约）
  *
  * 语义：`old_string` 在文件中**唯一匹配**（或多处匹配 + `replace_all`），替换为
  * `new_string`。这是端侧编码 agent 最重要的工具 —— 它的成功率直接决定编码循环
@@ -44,9 +44,16 @@ class CodeEditTool(
     description = """
         Edit a file by replacing old_string with new_string (exact-match with smart fallbacks).
 
+        You must have read the file earlier in this session before editing it
+        (the runtime enforces this).
+
         Rules:
-        - old_string must appear in the file; include 2-3 surrounding lines when the
-          target text appears multiple times, or set replace_all=true.
+        - old_string must match the file content exactly, including whitespace
+          and indentation. If it matches multiple locations the edit fails —
+          include more surrounding context to disambiguate (or set
+          replace_all=true to replace every occurrence).
+        - A fuzzy-matching fallback may rescue near-misses (whitespace/indent
+          drift), but do not rely on it.
         - old_string must match the raw file content (code_read shows "N: " line
           prefixes — strip them before writing old_string).
         - Leave old_string empty AND point to a non-existing file to create it.

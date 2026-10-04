@@ -242,7 +242,7 @@ private fun AgentTab(
         // ═══ Agent 角色（人设层）：内置全能 + 用户自定义；激活即热切换 ═══
         AgentRolesSection(agent, onAgent)
 
-        // ═══ 工具权限（v1.0 #155）：opencode 式模式 + 规则三元组，改即生效 ═══
+        // ═══ 工具权限（v1.0 #155）：业界标准式模式 + 规则三元组，改即生效 ═══
         PermissionSettingsSection(
             mode = agent.permissionMode,
             rules = agent.permissionRules,

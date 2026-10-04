@@ -45,7 +45,7 @@
 
     <!-- 工具权限（v1.0 #155） -->
     <string name="code_perm_section_title">工具权限</string>
-    <string name="code_perm_section_subtitle">opencode 式权限模式与规则</string>
+    <string name="code_perm_section_subtitle">标准权限模式与规则</string>
     <string name="code_perm_mode_label">权限模式</string>
     <string name="code_perm_mode_bypass">全放行</string>
     <string name="code_perm_mode_default">默认</string>

@@ -9,7 +9,7 @@ package com.apex.agent.core.code.standard
  * |---|---|---|---|
  * | [BUILD] 构建者 | 主代理 | 全量（code_* / shell / git / web / skill / mcp） | 默认档：读-改-验-总结闭环 |
  * | [PLAN] 规划师 | 主代理 | 只读（read/grep/glob/git status） | PLAN 档：产出待确认计划，零副作用 |
- * | [GENERAL] 通用 | 主代理 | 全量 | BUILD/PLAN 之外的兜底（小任务/答疑式编码） |
+ * | [GENERAL] 通用 | 主代理 | 全量 | BUILD/PLAN 之外的兜底（小任务/答疑式编码）；亦可作 task 工具的子代理类型（通用执行者） |
  * | [EXPLORE] 探索 | 子代理 | 只读 | "找出所有用到 X 的地方"类委派 |
  * | [RESEARCH] 调研 | 子代理 | 联网+读 | "查一下这个库怎么用"类委派 |
  *
@@ -50,7 +50,11 @@ object StandardAgentCatalog {
         subagentMaxTurns = 8
     )
 
-    /** 通用（主代理兜底）。 */
+    /**
+     * 通用（主代理兜底）。也可作为 task 工具的子代理类型（通用执行者：
+     * 完整工具面的自包含多步任务执行，画像段见
+     * [StandardPrompts.generalSubAgent]）。
+     */
     val GENERAL: StandardAgentDefinition = StandardAgentDefinition(
         kind = StandardAgentKind.GENERAL,
         description = "通用执行：与构建者同工具面，回答式编码（答疑 / " +

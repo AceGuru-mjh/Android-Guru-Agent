@@ -8,7 +8,16 @@ import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.code.RulesProvider
 import com.apex.agent.core.code.standard.DualLogicCodeEngine
 import com.apex.agent.core.code.standard.StandardModeEngine
+import com.apex.agent.core.code.standard.StandardPermissionEffect
+import com.apex.agent.core.code.standard.StandardPermissionMode
+import com.apex.agent.core.code.standard.StandardPermissionRule
+import com.apex.agent.core.code.standard.StandardPermissionSource
 import com.apex.agent.core.code.standard.StandardTextKernel
+import com.apex.agent.core.llm.ModelRole
+import com.apex.agent.core.llm.runtime.ModelRoleRouter
+import com.apex.agent.permission.PermissionEffect
+import com.apex.agent.permission.PermissionMode
+import com.apex.agent.permission.PermissionRule
 import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.tools.CodeTodoTool
@@ -214,8 +223,10 @@ object CodeModule {
         @Named("codeStandard") standardMemory: CodeConversationMemory,
         standardTextKernel: StandardTextKernel,
         // #230 收尾：标准线专用执行器（仅环境门 —— StandardModeEngine 自带
-        // opencode 式权限门，共用主执行器的组合门会双弹窗）
-        @javax.inject.Named("standardEngineTools") standardToolExecutor: ToolExecutor
+        // 业界标准式权限门，共用主执行器的组合门会双弹窗）
+        @javax.inject.Named("standardEngineTools") standardToolExecutor: ToolExecutor,
+        // 权限设置源（设置层 → 标准线权限门的实时快照通道）
+        settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository
     ): AgentEngine {
         val codeConfig = AgentConfig(
             mode = AgentMode.BUILD,
@@ -256,6 +267,39 @@ object CodeModule {
             // 组装 Global/Project Rules 追加进 additionalSystemContext
             rulesProvider = RulesProvider()
         )
+        // 设置层权限快照源：模式 + 规则三元组实时读取（与 PermissionModeGate
+        // 的 settingsProvider 同款模式——改设置即时生效）；含空格的模式串
+        // 视为 shell 命令模式（如 "git push*"），其余为工具 id 模式。
+        val standardPermissionSource = object : StandardPermissionSource {
+            override fun snapshot(): StandardPermissionSource.Snapshot {
+                val settings = settingsRepository.agentSettings.value
+                return StandardPermissionSource.Snapshot(
+                    mode = when (settings.permissionMode) {
+                        PermissionMode.BYPASS -> StandardPermissionMode.BYPASS
+                        PermissionMode.DEFAULT -> StandardPermissionMode.DEFAULT
+                        PermissionMode.ACCEPT_EDITS -> StandardPermissionMode.ACCEPT_EDITS
+                        PermissionMode.PLAN -> StandardPermissionMode.PLAN
+                    },
+                    rules = settings.permissionRules
+                        .filter { !it.pattern.contains(' ') }
+                        .map { it.toStandard() },
+                    commandRules = settings.permissionRules
+                        .filter { it.pattern.contains(' ') }
+                        .map { it.toStandard() }
+                )
+            }
+        }
+        // 模型信息源：PRIMARY 角色解析链首选项（模型 id + 真实上下文窗口）
+        // ——标准线 env 块注入与压缩预算消费（修复恒 128K 的窗口盲区）。
+        val standardModelInfoProvider: () -> StandardModeEngine.ModelInfo = {
+            try {
+                (modelRuntime.resolve(ModelRole.PRIMARY) as? ModelRoleRouter.ResolutionResult.Success)
+                    ?.primary?.profile
+                    ?.let { StandardModeEngine.ModelInfo(modelId = it.name, contextWindow = it.contextWindow) }
+            } catch (t: Throwable) {
+                null // 解析失败 → 静态 128K 兜底，env 块省略模型行
+            }
+        }
         val standard = StandardModeEngine(
             runtime = modelRuntime,
             toolRegistry = toolRegistry,
@@ -265,8 +309,23 @@ object CodeModule {
             memory = standardMemory,
             contextProvider = codeContextProvider,
             rulesProvider = RulesProvider(),
-            textKernel = standardTextKernel
+            textKernel = standardTextKernel,
+            // 设置层权限接线（权限模式 + 规则三元组，每轮任务前拉取）
+            permissionSource = standardPermissionSource,
+            // 模型感知上下文窗口（env 块 + 压缩预算）
+            modelInfoProvider = standardModelInfoProvider
         )
         return DualLogicCodeEngine(deepDive = deepDive, standard = standard)
     }
+
+    /** 设置层规则 → 标准线规则（效应枚举一一对应）。 */
+    private fun PermissionRule.toStandard(): StandardPermissionRule =
+        StandardPermissionRule(
+            pattern = pattern,
+            effect = when (effect) {
+                PermissionEffect.ALLOW -> StandardPermissionEffect.ALLOW
+                PermissionEffect.ASK -> StandardPermissionEffect.ASK
+                PermissionEffect.DENY -> StandardPermissionEffect.DENY
+            }
+        )
 }

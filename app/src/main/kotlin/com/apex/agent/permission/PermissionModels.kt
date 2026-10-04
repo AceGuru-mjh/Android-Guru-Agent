@@ -3,7 +3,7 @@ package com.apex.agent.permission
 import kotlinx.serialization.Serializable
 
 /**
- * ═══ opencode 式权限模式（Issue #155）—— 数据模型 ═══
+ * ═══ 业界标准式权限模式（Issue #155）—— 数据模型 ═══
  *
  * 三层结构自底向上：
  *  1. 本文件（PermissionModels.kt）—— 可序列化数据模型 + 规则匹配器，
@@ -13,11 +13,11 @@ import kotlinx.serialization.Serializable
  *  3. [PermissionModeGate] —— 挂进 v3 执行管线的门（含会话记忆与
  *     用户询问闭环），由 [PermissionAwareToolGate] 与既有风险门组合。
  *
- * 语义对齐 opencode 的 permission 三元组：每条规则是「模式 → 效应」，
+ * 语义对齐业界标准 CLI 编码智能体的 permission 三元组：每条规则是「模式 → 效应」，
  * 效应只有 allow / ask / deny 三种；模式给出兜底策略，规则可越级
  * （在 DEFAULT 下显式放行非只读工具，或在任意模式下收紧到 ASK）。
  *
- * ── 权限模式（opencode 语义）──
+ * ── 权限模式（业界标准语义）──
  *
  * - [PermissionMode.BYPASS]：全放行——不做任何询问与拦截（危险，仅供信任场景）；
  * - [PermissionMode.DEFAULT]：规则 + 按需询问——只读工具默认放行（仍交后续
@@ -66,7 +66,7 @@ data class PermissionRule(
 /**
  * 规则模式匹配器（纯函数，无状态）。
  *
- * 匹配语义（对齐 opencode，刻意保持简单）：
+ * 匹配语义（对齐业界标准编码智能体，刻意保持简单）：
  *  - 模式非法（空串 / 纯空白）→ 永不匹配；
  *  - 单独一个星号字符 → 匹配一切工具（用户显式全放行的快捷方式）；
  *  - 以星号字符结尾 → 去掉末尾星号后做前缀匹配（尾缀通配），

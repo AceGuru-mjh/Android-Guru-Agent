@@ -5,20 +5,39 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * # Standard Permission Engine — 标准任务循环的工具权限门
  *
- * 每一次工具调用在执行前必须过本门：**规则 → 会话记忆 → 模式兜底** 三级
- * 裁决，输出三态效应 [StandardPermissionDecision]（ALLOW / ASK / DENY）。
+ * 每一次工具调用在执行前必须过本门：**规则 → 会话记忆 → 敏感文件保护 →
+ * 模式兜底** 多级裁决，输出三态效应 [StandardPermissionDecision]
+ * （ALLOW / ASK / DENY）——对齐业界标准权限语义。
  *
  * ## 裁决顺序（先命中先出，与既有设置层 PermissionDecider 语义对齐）
  *
  * 1. **DENY 规则**优先短路（显式拒绝永远最硬——BYPASS 模式也尊重 DENY）；
- * 2. **会话记忆**（用户在 ASK 弹窗选过"本会话总允许"的工具/命令模式）；
- * 3. **ALLOW/ASK 规则**（前缀通配匹配工具 id，[matches]）；
- * 4. **模式兜底**：
- *    - BYPASS → ALLOW（除 DENY 规则）；
+ * 2. **PLAN 档只读硬门**（引擎级：引擎在 AgentMode.PLAN 档运行时经
+ *    [decide] 的 `planGate` 参数传入 true，任何写副作用直接 DENY——
+ *    会话记忆与 ALLOW 规则均不可越级，与第 7 步 PLAN 模式兜底互为双保险）；
+ * 3. **会话记忆**（用户在 ASK 弹窗选过"本会话总允许"的工具/命令模式）；
+ * 4. **命令级规则**（shell 类工具，命令首词尾缀通配 [commandPatternMatches]）；
+ * 5. **工具级 ALLOW/ASK 规则**（前缀通配匹配工具 id，[matches]）；
+ * 6. **敏感文件保护**（业界标准 read 默认询问语义：`.env` 族/密钥文件
+ *    命中 [isSensitivePath] 即 ASK——见下节，显式放行面不受影响）；
+ * 7. **模式兜底**：
+ *    - BYPASS → ALLOW（除 DENY 规则；敏感文件保护在 BYPASS 下跳过）；
  *    - ACCEPT_EDITS → 编辑/写/git 提交类 ALLOW，其余非只读 ASK；
  *    - DEFAULT → 只读类 ALLOW，写/命令类 ASK；
  *    - PLAN → 只读类 ALLOW，**任何写副作用直接 DENY**（规则不可越级
  *      ——规划阶段零副作用是硬承诺）。
+ *
+ * ## 敏感文件保护（业界标准权限语义）
+ *
+ * 工具参数里的文件路径（[extractPath]）命中 [isSensitivePath] 时强制
+ * ASK（归因"敏感文件保护：{文件名} 可能包含密钥"），子代理上下文折叠
+ * 为 DENY。命中面：`.env` / `.env.<anything>`（`.env.example`、
+ * `.env.sample` 模板除外）、`*.pem`、`*.key`、`*.keystore`、`*.jks`、
+ * `id_rsa*`、`credentials.json`、`secrets.json`、`secrets.yaml`。
+ *
+ * 位置在规则裁决之后、模式兜底之前——**显式 ALLOW 规则/会话记忆等先行
+ * 放行面不受拦截**（用户已明示授权即放行）；DENY/ASK 规则先行命中则按
+ * 规则走。BYPASS 模式整体跳过（信任场景用户自担）。
  *
  * ## 只读面判定（[isReadOnlyTool]）
  *
@@ -102,11 +121,17 @@ class StandardPermissionEngine(
      * @param rawArguments 原始参数 JSON（命令级通配解析用）
      * @param subAgentContext 是否子代理上下文（子代理无交互通道：
      *        ASK 折叠为 DENY 并在归因里说明——子代理应避免高风险工具）
+     * @param planGate 引擎级 PLAN 档只读硬门（引擎在 AgentMode.PLAN 档
+     *        运行时传入 true）：任何非只读工具直接 DENY——优先级在 DENY
+     *        规则短路之后、会话记忆之前，与 [StandardPermissionMode.PLAN]
+     *        模式兜底互为双保险（正交：权限模式是用户信任偏好，AgentMode
+     *        档位是任务阶段硬约束）
      */
     fun decide(
         toolId: String,
         rawArguments: String,
-        subAgentContext: Boolean = false
+        subAgentContext: Boolean = false,
+        planGate: Boolean = false
     ): StandardPermissionDecision {
         // ── 1. DENY 规则短路（最高优先，BYPASS 也不越过显式拒绝）──
         rules.firstOrNull { it.effect == StandardPermissionEffect.DENY && matches(it.pattern, toolId) }
@@ -119,7 +144,16 @@ class StandardPermissionEngine(
 
         val readOnly = isReadOnlyTool(toolId)
 
-        // ── 2. PLAN 模式硬门：任何写副作用直接拒（规则不可越级）──
+        // ── 2a. 引擎级 PLAN 档只读硬门（AgentMode.PLAN 档时引擎经 planGate
+        //        传入；任何写副作用直接拒——会话记忆/ALLOW 规则不可越级）──
+        if (planGate && !readOnly) {
+            return StandardPermissionDecision(
+                StandardPermissionEffect.DENY,
+                "PLAN 档只读硬门：$toolId 有写副作用，规划阶段被硬性拒绝"
+            )
+        }
+
+        // ── 2b. PLAN 模式前置门（模式兜底的提前短路，规则不可越级）──
         if (mode == StandardPermissionMode.PLAN && !readOnly) {
             return StandardPermissionDecision(
                 StandardPermissionEffect.DENY,
@@ -134,6 +168,7 @@ class StandardPermissionEngine(
                 "会话记忆：$toolId 本会话已总允许"
             )
         }
+        // ── 4. 命令级规则（shell 类工具，命令首词尾缀通配）──
         if (isShellTool(toolId)) {
             val command = extractCommand(rawArguments)
             if (command != null) {
@@ -173,7 +208,7 @@ class StandardPermissionEngine(
             }
         }
 
-        // ── 4. 工具级 ALLOW / ASK 规则（首匹配）──
+        // ── 5. 工具级 ALLOW / ASK 规则（首匹配）──
         val hit = rules.firstOrNull { matches(it.pattern, toolId) }
         if (hit != null) {
             return when (hit.effect) {
@@ -189,7 +224,17 @@ class StandardPermissionEngine(
             }
         }
 
-        // ── 5. 模式兜底 ──
+        // ── 6. 敏感文件保护（.env 族/密钥文件 → ASK；置于规则裁决之后，
+        //        显式 ALLOW 规则/会话记忆放行面自然放行；BYPASS 跳过）──
+        if (mode != StandardPermissionMode.BYPASS) {
+            val path = extractPath(rawArguments)
+            if (path != null && isSensitivePath(path)) {
+                val fileName = sensitiveFileName(path)
+                return askDecision(subAgentContext, "敏感文件保护：$fileName 可能包含密钥")
+            }
+        }
+
+        // ── 7. 模式兜底 ──
         return when (mode) {
             StandardPermissionMode.BYPASS ->
                 StandardPermissionDecision(StandardPermissionEffect.ALLOW, "BYPASS 模式兜底 → ALLOW")
@@ -312,6 +357,77 @@ class StandardPermissionEngine(
             // 轻量提取：不引完整 JSON 解析器（code-engine 已有 kotlinx-json，
             // 但此处保持纯字符串——permission 引擎不依赖序列化库）。
             for (key in listOf("\"command\"", "\"cmd\"")) {
+                val idx = trimmed.indexOf(key)
+                if (idx < 0) continue
+                val colon = trimmed.indexOf(':', idx + key.length)
+                if (colon < 0) continue
+                var i = colon + 1
+                while (i < trimmed.length && trimmed[i].isWhitespace()) i++
+                if (i >= trimmed.length || trimmed[i] != '"') continue
+                val sb = StringBuilder()
+                i++
+                while (i < trimmed.length && trimmed[i] != '"') {
+                    if (trimmed[i] == '\\' && i + 1 < trimmed.length) {
+                        sb.append(trimmed[i + 1])
+                        i += 2
+                    } else {
+                        sb.append(trimmed[i])
+                        i++
+                    }
+                }
+                if (sb.isNotEmpty()) return sb.toString()
+            }
+            return null
+        }
+
+        /** .env 模板文件（不含真实密钥的示例文件，业界惯例可安全读取）。 */
+        private val ENV_TEMPLATE_NAMES = setOf(".env.example", ".env.sample")
+
+        /** 凭据/密钥清单类文件名（精确匹配）。 */
+        private val SENSITIVE_EXACT = setOf(
+            ".env", "credentials.json", "secrets.json", "secrets.yaml"
+        )
+
+        /** 密钥/证书类文件后缀。 */
+        private val SENSITIVE_SUFFIXES = listOf(".pem", ".key", ".keystore", ".jks")
+
+        /** 取路径的文件名段（最后一段；容忍 Windows 分隔符与尾部分隔符）。 */
+        private fun sensitiveFileName(path: String): String = path.trim()
+            .trimEnd('/', '\\')
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+
+        /**
+         * 敏感路径判定（业界标准权限语义的 read 默认询问面）：
+         * - `.env` / `.env.<anything>`（[ENV_TEMPLATE_NAMES] 模板除外）；
+         * - `*.pem` / `*.key` / `*.keystore` / `*.jks`（证书/私钥/密钥库）；
+         * - `id_rsa*`（SSH 私钥族）；
+         * - `credentials.json` / `secrets.json` / `secrets.yaml`（云凭据/
+         *   密钥清单）。
+         *
+         * 只看文件名段（路径最后一段），大小写不敏感（保守取向）。
+         */
+        fun isSensitivePath(path: String): Boolean {
+            val name = sensitiveFileName(path).lowercase()
+            if (name.isEmpty()) return false
+            if (name in ENV_TEMPLATE_NAMES) return false
+            if (name == ".env" || name.startsWith(".env.")) return true
+            if (SENSITIVE_SUFFIXES.any { name.endsWith(it) }) return true
+            if (name.startsWith("id_rsa")) return true
+            return name in SENSITIVE_EXACT
+        }
+
+        /**
+         * 从工具参数 JSON 提取文件路径（read/write/edit 类工具的
+         * "path" / "file_path" / "file" 字段；纯字符串提取不引 JSON 库，
+         * 与 [extractCommand] 同款口径——键名带引号整体搜索，`"path"`
+         * 不会误命中 `"file_path"`/`"pathExists"`；解析失败/字段缺失
+         * 返回 null——调用方跳过敏感文件裁决）。
+         */
+        fun extractPath(rawArguments: String): String? {
+            val trimmed = rawArguments.trim()
+            if (!trimmed.startsWith("{")) return null
+            for (key in listOf("\"path\"", "\"file_path\"", "\"file\"")) {
                 val idx = trimmed.indexOf(key)
                 if (idx < 0) continue
                 val colon = trimmed.indexOf(':', idx + key.length)

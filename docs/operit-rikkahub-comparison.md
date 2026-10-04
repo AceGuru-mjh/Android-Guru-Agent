@@ -362,7 +362,7 @@ GenerationLoop.generateInternal()
 - **分发**：`operit: api/chat/llmprovider/AIServiceFactory.kt`（`buildService()` 按 `ApiProviderType` 枚举 ~35 个分发：
   OPENAI/ANTHROPIC/GOOGLE 三原生 + OPENAI_GENERIC/GEMINI_GENERIC 等兼容层 + ALIYUN/BAIDU/XUNFEI/ZHIPU/
   BAICHUAN/MOONSHOT/DEEPSEEK/MISTRAL/SILICONFLOW/OPENROUTER/…/OTHER 全家桶）。
-  面向**中转站生态**：`FOUR_ROUTER`、`INFINIAI`、`IFLOW`、`OPENCODE` 这类聚合站是一等公民。
+  面向**中转站生态**：`FOUR_ROUTER`、`INFINIAI`、`IFLOW` 这类聚合站是一等公民。
 - **装饰器栈**：`createService()` 统一包 `TokenTrackingAIService`（token 账本，测试调用传 recordTokenUsage=false 跳过）
   + `RateLimitedAIService`（限流）+ `ToolPkgJsAiProviderService`（**用 JS 实现新 Provider**——ToolPkg 生态的延伸）。
 - **双通道工具调用**：默认 XML 协议（`<tool name="x"><param name="y">v</param></tool>`，`AIToolHandler` +

@@ -1,7 +1,7 @@
 # Agent 执行体系修复总览（2026-09）
 
 用户反馈的四个核心问题，本次全部根治。诊断方法：对比 operit（AAswordman/Operit）
-与 opencode（sst/opencode）两个成熟 Agent 的执行架构，逐一定位到本仓库的具体根因。
+与业界标准 CLI 编码智能体两个成熟 Agent 的执行架构，逐一定位到本仓库的具体根因。
 
 | # | 用户反馈 | 根因 | 修复 |
 |---|---|---|---|
@@ -12,11 +12,11 @@
 
 ---
 
-## 1. 主动工具调用（学习 opencode/operit）
+## 1. 主动工具调用（学习业界标杆实践/operit）
 
 ### 1.1 提示词层（`EnginePrompts.buildSystemPrompt`）
 
-opencode 的 beast.txt 写道 *"when you say you are going to make a tool call, make
+业界标杆提示词工程实践指出：*"when you say you are going to make a tool call, make
 sure you ACTUALLY make the tool call, instead of ending your turn"*；kimi.txt 写道
 *"you MUST use the appropriate tools to make actual changes — do not just describe
 the solution in text"*。operit 写道 *"Based on user needs, proactively select the
@@ -40,7 +40,7 @@ is done; use tools aggressively"。
 
 ### 1.2 已连接服务（`ConnectedServicesProvider`）
 
-学习 opencode 的 `<env>` 块与 operit 的 ACTIVE_PACKAGES 段：**把状态作为环境真值
+学习业界标准 CLI 编码智能体的 `<env>` 块与 operit 的 ACTIVE_PACKAGES 段：**把状态作为环境真值
 注入，而不是让模型猜**。
 
 - GitHub 已连接 → 注入登录名 + "github_* tools are ready, verify with
@@ -164,7 +164,7 @@ onServiceConnected → attachHost(hostBinder) → getToolsJson() → 解析
 | 修复 | 内容 |
 |---|---|
 | 连接状态注入 | Connected Services 段告知"已连接 as <login>，工具就绪" |
-| 描述双语化 | 首行英文 ≤160 字符（系统提示词只取首行），opencode 风格"一句话功能+使用时机" |
+| 描述双语化 | 首行英文 ≤160 字符（系统提示词只取首行），业界标准风格"一句话功能+使用时机" |
 | 错误可行动 | 未连接/401/403 → 引导"设置 → 连接器 → GitHub 配置 Token，连接后先调 github_get_user 验证" |
 | 新工具 | `github_list_branches`（写非默认分支前探查）、`github_search_repos`（按关键词找仓库，`/search/repositories`） |
 

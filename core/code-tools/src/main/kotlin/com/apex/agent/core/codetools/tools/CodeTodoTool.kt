@@ -14,7 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * # code_todo — 编码任务清单（opencode todowrite 契约）
+ * # code_todo — 编码任务清单（业界标准 todowrite 契约）
  *
  * 复杂编码任务（多文件重构/功能实现）的进度外化：模型把计划拆成条目，
  * 每完成一项就更新状态。价值：
@@ -32,18 +32,41 @@ class CodeTodoTool : BaseTool(
     id = "code_todo",
     name = "Code Todo",
     description = """
-        Maintain a structured task list for the current coding session.
+        Create and maintain a structured task list for the current coding session.
+        Tracks progress, organizes multi-step work, and surfaces status to the user.
 
-        When to use: any task with 3+ steps (multi-file changes, feature work,
-        refactors). Write the plan first, then keep statuses updated as you go.
+        ## When to use
+        - Any task with 3+ steps or non-trivial multi-part work
+        - The user provides multiple tasks (numbered or comma-separated)
+        - A new instruction arrives mid-task — capture it in the list so it is
+          not lost, then continue the current work
+        - Starting work on an item — mark it in_progress BEFORE beginning it
 
-        State machine rules:
-        - Exactly one item should be in_progress at a time (start it before working).
-        - Mark items completed ONLY after verifying the change (build/lint/read-back).
-        - Set cancelled (not delete) when abandoning an approach, with the reason.
-        - The call REPLACES the whole list — always send the full, current list.
+        ## When NOT to use
+        - A single trivial task
+        - A purely conversational or informational exchange
+
+        ## States
+        - pending — not started yet
+        - in_progress — currently being worked on (exactly one at a time)
+        - completed — done and verified
+        - cancelled — abandoned (keep it visible with the reason)
+
+        ## Rules
+        - Update the list in real time as you work; never batch updates.
+        - Mark an item completed ONLY after verification succeeded
+          (build/tests/read-back) — never based on intent or expectation.
+        - If blocked, keep the item in_progress and add a new item describing
+          the blocker.
+        - Keep user-provided command text verbatim in item content.
+        - Items must be concrete and actionable ("run tests for X",
+          not "work on Y").
+        - The list is fully replaced on every call — always send the complete,
+          current list.
 
         Priorities: high (blockers/core functionality) > medium > low (polish).
+
+        When in doubt, keep a todo list.
     """.trimIndent(),
     declaredSchema = toolSchema {
         // ARRAY/OBJECT 由 raw element 读入（DSL 层声明 array 供 schema 渲染）

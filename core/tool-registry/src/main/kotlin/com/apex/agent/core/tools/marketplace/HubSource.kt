@@ -15,7 +15,7 @@ import okhttp3.Request
 /**
  * ═══ 官方 Hub 仓库源（技能 + MCP 双目录）═══
  *
- * 学习 opencode 的远程注册表模式：`index.json` 只放元数据（小体积、一次拉全），
+ * 学习业界标准 CLI 编码智能体的远程注册表模式：`index.json` 只放元数据（小体积、一次拉全），
  * 技能正文按需单文件下载（raw.githubusercontent.com）；MCP 配置极小直接内联
  * 在索引里（一次请求即完整目录）。
  *

@@ -4,6 +4,7 @@ import android.content.Context
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.StreamingAgentTool
 import com.apex.agent.core.tools.ToolStreamEvent
+import com.apex.browser.core.BrowserScript
 import com.apex.browser.core.DomParser
 import com.apex.browser.engine.BrowserEngine
 import com.apex.browser.engine.BrowserTracer
@@ -25,6 +26,10 @@ import javax.inject.Inject
  * - 每个工具执行前调用 [BrowserEngine.assertAgentControl] 守卫：人工接管期间返回 SYSTEM_LOCKED。
  * - 点击/输入/选择返回动作后验证摘要（URL 变化 / 新增元素数），供 Agent 做下一步决策。
  * - 新增 [select]/[toggle]/[show]/[dialog]/[file_upload] 补齐动作空间与显式握手。
+ * - v1.1.0 高级动作空间接入（apex-browser-kit PR #3）：[pressKey]/[hover]/[drag]
+ *   键鼠补齐；[extractContent] 四模式结构化抽取；[executeJs] 原生 JS 逃生舱；
+ *   [getCookies] 登录态诊断（trace 结果脱敏）；[locate] 文本模糊重锚定（与引擎
+ *   内建模糊自愈同源，供 Agent 主动调用）。
  */
 class BrowserAgentTools @Inject constructor(
     @ApplicationContext private val appContext: Context,
@@ -158,21 +163,26 @@ class BrowserAgentTools @Inject constructor(
         }
     }
 
-    /** 读取浏览器网络请求日志（#18 fetch/xhr 监控） */
+    /** 读取浏览器网络请求日志（#18 fetch/xhr 监控；v1.1.0 支持 URL 子串过滤） */
     val networkLog = object : AgentTool {
         override val id = "browser_network_log"
         override val name = "browser_network_log"
         override val description =
-            "读取内置浏览器已发生的网络请求（fetch / XMLHttpRequest）日志，含 method / url / status。可用于判断页面数据是否加载完成，或直接获取 API 响应线索。"
+            "读取内置浏览器已发生的网络请求（fetch / XMLHttpRequest）日志，含 method / url / status。" +
+                "可用 url_contains 按 URL 子串过滤（如 api、graphql），快速定位数据接口。"
         override val parametersSchema = """{
             "type":"object",
-            "properties":{"limit":{"type":"integer","description":"返回最近 N 条，默认 50"}}
+            "properties":{
+                "limit":{"type":"integer","description":"返回最近 N 条，默认 50"},
+                "url_contains":{"type":"string","description":"可选，仅保留 URL 包含该子串的请求（忽略大小写）"}
+            }
         }"""
         override suspend fun execute(arguments: String): String {
             guard(engine)?.let { return it }
             val limit = argInt(arguments, "limit", 50)
-            val logs = engine.networkLog(limit)
-            if (logs.isEmpty()) return "(暂无网络请求记录，可能页面尚未发起 fetch/xhr)"
+            val urlContains = argStr(arguments, "url_contains")
+            val logs = engine.networkLog(limit, urlContains)
+            if (logs.isEmpty()) return "(暂无网络请求记录，可能页面尚未发起 fetch/xhr，或 url_contains 过滤后为空)"
             return logs.joinToString("\n") { e ->
                 val m = e["method"] ?: "-"; val u = e["url"] ?: "-"; val s = e["status"] ?: 0
                 "[$m] $u -> $s"
@@ -435,7 +445,7 @@ class BrowserAgentTools @Inject constructor(
             val loggedParams = sanitizeParams(delegate.id, arguments) // 入 trace 前脱敏敏感字段
             return try {
                 val result = delegate.execute(arguments)
-                tracer.record(delegate.id, loggedParams, result.take(200),
+                tracer.record(delegate.id, loggedParams, sanitizeResult(delegate.id, result),
                     System.currentTimeMillis() - start, engine.activeTab()?.url, engine.currentState.name)
                 result
             } catch (e: Throwable) {
@@ -490,6 +500,13 @@ class BrowserAgentTools @Inject constructor(
             else -> args
         }.take(200)
         }
+
+        /** 可观测性结果脱敏（v1.1.0）：browser_get_cookies 的返回值含会话凭据，
+         *  只记长度指纹不记明文，与参数脱敏同源（清单 11.8）。 */
+        private fun sanitizeResult(toolId: String, result: String): String = when (toolId) {
+            "browser_get_cookies" -> "(${result.length} 字符 Cookie，已屏蔽)"
+            else -> result.take(200)
+        }
     }
 
     /** 独立条件等待：点击/提交后的异步内容到达（SPA 刷新、搜索结果、登录跳转）。 */
@@ -537,9 +554,187 @@ class BrowserAgentTools @Inject constructor(
         }
     }
 
+    // ═════════ v1.1.0 高级动作空间（键鼠 / 抽取 / 逃生舱 / 锚定） ═════════
+
+    /** 键盘事件注入：enter 触发表单隐式提交，tab/escape/方向键导航（v1.1.0） */
+    val pressKey = object : AgentTool {
+        override val id = "browser_press_key"
+        override val name = "browser_press_key"
+        override val description =
+            "向当前聚焦元素派发键盘事件（keydown/keypress/keyup）。支持键名：enter / tab / escape / " +
+                "backspace / delete / arrowup / arrowdown / arrowleft / arrowright / pageup / pagedown / " +
+                "home / end / space，或任意单字符。enter 携带表单隐式提交语义（等效点提交按钮）。" +
+                "适合：搜索框输入后回车、表单 Tab 切换、ESC 关弹窗。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{"key":{"type":"string","description":"键名，如 enter / escape / a / 0"}},
+            "required":["key"]
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val key = argStr(arguments, "key")?.trim()?.lowercase()
+                ?: return "Error: 缺少 key 参数"
+            if (key.isEmpty()) return "Error: key 参数不能为空"
+            val st = engine.pressKey(key)
+            return st.toText()
+        }
+    }
+
+    /** 悬停：驱动下拉菜单、tooltip 与 :hover 样式（v1.1.0） */
+    val hover = object : AgentTool {
+        override val id = "browser_hover"
+        override val name = "browser_hover"
+        override val description =
+            "把鼠标悬停到指定元素（browser_snapshot 给出的 ref），触发 mouseover/mousemove 事件序列。" +
+                "用于展开悬停式下拉菜单/导航栏、显示 tooltip；悬停展开菜单后应重新 snapshot 获取新元素。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{"ref":{"type":"string","description":"目标元素的稳定引用"}},
+            "required":["ref"]
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val ref = argStr(arguments, "ref") ?: return "Error: 缺少 ref 参数"
+            val st = engine.hover(ref)
+            return st.toText() + "\n提示：若悬停展开了菜单，请重新 browser_snapshot 获取新元素。"
+        }
+    }
+
+    /** 触摸拖拽：滑块验证、排序、拖放（v1.1.0） */
+    val drag = object : AgentTool {
+        override val id = "browser_drag"
+        override val name = "browser_drag"
+        override val description =
+            "从 from_ref 元素中心拖拽到 to_ref 元素中心（触摸事件线性插值，默认 14 步）。" +
+                "用于滑块验证码、列表排序、看板卡片移动、拖放等交互。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{
+                "from_ref":{"type":"string","description":"拖拽起点元素的稳定引用"},
+                "to_ref":{"type":"string","description":"拖拽终点元素的稳定引用"},
+                "steps":{"type":"integer","description":"插值步数，默认 14（4-40）"}
+            },
+            "required":["from_ref","to_ref"]
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val from = argStr(arguments, "from_ref") ?: return "Error: 缺少 from_ref 参数"
+            val to = argStr(arguments, "to_ref") ?: return "Error: 缺少 to_ref 参数"
+            val steps = argInt(arguments, "steps", 14)
+            val st = engine.drag(from, to, steps)
+            return st.toText()
+        }
+    }
+
+    /** 结构化内容抽取：正文/表格/链接/元信息四模式（v1.1.0） */
+    val extractContent = object : AgentTool {
+        override val id = "browser_extract_content"
+        override val name = "browser_extract_content"
+        override val description =
+            "从当前页面直接抽取结构化内容并返回 JSON，无需二次 snapshot 自己拼。四模式：" +
+                "article（正文：标题/URL/字数/全文文本，适合阅读类页面）/ tables（全部表格数据，适合数据页）/ " +
+                "links（链接清单）/ meta（页面元信息）。读页面内容优先用它而非 snapshot（后者面向交互元素）。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{"mode":{"type":"string","enum":["article","tables","links","meta"],"description":"抽取模式，默认 article"}}
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val mode = when (argStr(arguments, "mode")?.lowercase()) {
+                "tables" -> BrowserScript.ExtractMode.TABLES
+                "links" -> BrowserScript.ExtractMode.LINKS
+                "meta" -> BrowserScript.ExtractMode.META
+                else -> BrowserScript.ExtractMode.ARTICLE
+            }
+            val raw = engine.extractContent(mode)
+                ?: return "(抽取失败或页面无内容——可能页面尚未加载完成)"
+            return raw.ifBlank { "(该模式下页面无可用内容)" }
+        }
+    }
+
+    /** 原生 JS 逃生舱：长尾页面逻辑的兜底手段（v1.1.0） */
+    val executeJs = object : AgentTool {
+        override val id = "browser_execute_js"
+        override val name = "browser_execute_js"
+        override val description =
+            "在当前页面执行任意 JavaScript 并返回结果的字符串形式（逃生舱）。仅当 browser_* 动作空间" +
+                "覆盖不到时使用（如自定义组件协议、滚动容器内精确滚动、读取页面全局变量）。" +
+                "脚本异常或超时返回提示。优先用语义化工具（click/input/extract_content）。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{
+                "script":{"type":"string","description":"要执行的 JS 表达式或 IIFE，返回值会被字符串化"},
+                "timeout_ms":{"type":"integer","description":"超时毫秒，默认 8000，上限 30000"}
+            },
+            "required":["script"]
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val script = argStr(arguments, "script") ?: return "Error: 缺少 script 参数"
+            if (script.length > 50_000) return "Error: script 过长（${script.length} 字符，上限 50000）"
+            val timeout = argInt(arguments, "timeout_ms", 8_000).toLong().coerceIn(1_000, 30_000)
+            val result = engine.executeJavaScript(script, timeout)
+                ?: return "(脚本执行失败——可能超时（${timeout}ms）、语法错误或抛异常；建议拆小验证)"
+            return result.ifBlank { "(执行成功，无返回值)" }
+        }
+    }
+
+    /** 读取 Cookie：登录态诊断与跨标签验证（v1.1.0；trace 结果脱敏） */
+    val getCookies = object : AgentTool {
+        override val id = "browser_get_cookies"
+        override val name = "browser_get_cookies"
+        override val description =
+            "读取指定 URL（默认当前页）的 Cookie，返回 k1=v1; k2=v2 形式。用于登录态诊断" +
+                "（如确认登录后 session cookie 是否已写入）与页面状态验证。注意：值含敏感凭据，不要原样外传。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{"url":{"type":"string","description":"目标 URL，默认当前页面"}}
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val url = argStr(arguments, "url")
+            val cookies = engine.getCookies(url)
+                ?: return "(无法读取 Cookie——无激活页面或 CookieManager 不可用)"
+            return cookies.ifBlank { "(该 URL 当前无 Cookie)" }
+        }
+    }
+
+    /** 文本模糊查找元素：ref 失配时主动重锚定（v1.1.0） */
+    val locate = object : AgentTool {
+        override val id = "browser_locate"
+        override val name = "browser_locate"
+        override val description =
+            "按可见文本模糊查找页面元素，返回 ref/tag/text 列表。当 browser_snapshot 给出的 ref 失效" +
+                "（页面局部刷新后）且重新 snapshot 也无效时，用它按按钮/链接文字重新锚定，返回的 ref 可直接用于" +
+                " browser_click 等工具。可先用更短的关键词重试。"
+        override val parametersSchema = """{
+            "type":"object",
+            "properties":{
+                "text":{"type":"string","description":"要匹配的可见文本子串（如 登录、Submit）"},
+                "tag":{"type":"string","description":"限定标签名，如 button / a，默认 * 全部"},
+                "limit":{"type":"integer","description":"最多返回几个，默认 10"}
+            },
+            "required":["text"]
+        }"""
+        override suspend fun execute(arguments: String): String {
+            guard(engine)?.let { return it }
+            val text = argStr(arguments, "text")?.trim()
+                ?: return "Error: 缺少 text 参数"
+            if (text.isEmpty()) return "Error: text 参数不能为空"
+            val tag = argStr(arguments, "tag")?.ifBlank { "*" } ?: "*"
+            val limit = argInt(arguments, "limit", 10).coerceIn(1, 30)
+            val found = engine.locateElements(text, tag, limit)
+            if (found.isEmpty()) return "(未找到可见文本包含「$text」的元素——可尝试更短的关键词或去掉 tag 限制)"
+            return found.joinToString("\n") { e ->
+                "- ${e["ref"]} <${(e["tag"] ?: "*").lowercase()}> ${e["text"] ?: ""}"
+            } + "\n提示：返回的 ref 可直接用于 browser_click / browser_input 等工具。"
+        }
+    }
+
     fun all(): List<AgentTool> = listOf(
         navigate, snapshot, click, input, select, toggle, scroll, screenshot, show,
         fileUpload, dateInput, debugDump, contextSummary, networkLog, downloadList,
-        waitFor, pageType
+        waitFor, pageType,
+        pressKey, hover, drag, extractContent, executeJs, getCookies, locate
     ).map { TracedTool(it, engine, tracer) }
 }

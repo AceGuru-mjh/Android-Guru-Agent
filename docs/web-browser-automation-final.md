@@ -152,6 +152,19 @@ Operit 的网页自动化 = 内置 `WebView` + 把渲染后 DOM 精简成「带*
 | `browser_screenshot` | — | PNG base64（视口） | 锁定期返回 `SYSTEM_LOCKED` |
 | `browser_show` | `expand?`(默认 true) | 展开/收起浮窗，进入/退出人工接管 | 触发 `enterHandoffMode`/`completeHandoff` |
 
+### 6.1 v1.1.0 高级动作空间（apex-browser-kit PR #3 落地）
+
+| 工具 | 参数 | 返回 | 用途 |
+| --- | --- | --- | --- |
+| `browser_press_key` | `key`（enter/tab/escape/方向键/单字符） | 动作后验证摘要 | 搜索回车（隐式提交）、Tab 切换、ESC 关弹窗 |
+| `browser_hover` | `ref` | 动作后验证摘要 | 悬停式下拉菜单/导航、tooltip |
+| `browser_drag` | `from_ref`, `to_ref`, `steps?` | 动作后验证摘要 | 滑块验证、列表排序、看板拖放 |
+| `browser_extract_content` | `mode?`（article/tables/links/meta） | 结构化 JSON | 读正文/表格/链接/元信息，优先于 snapshot 读内容 |
+| `browser_execute_js` | `script`, `timeout_ms?` | 结果字符串 | 原生 JS 逃生舱：长尾页面逻辑兜底 |
+| `browser_get_cookies` | `url?` | `k1=v1; k2=v2` | 登录态诊断（trace 结果自动脱敏） |
+| `browser_locate` | `text`, `tag?`, `limit?` | ref/tag/text 列表 | ref 失配时按可见文本重锚定（与引擎模糊自愈同源） |
+| `browser_network_log` | `limit?`, `url_contains?`（v1.1.0 新增过滤） | fetch/xhr 日志 | 定位数据 API，按 URL 子串快速过滤 |
+
 `browser_snapshot` 返回示例（语义哈希 ref，稳定）：
 ```
 ⊕ 页面可交互元素（共 12 个，ref 稳定）：

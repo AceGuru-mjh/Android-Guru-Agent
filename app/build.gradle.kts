@@ -3,7 +3,9 @@ import java.security.MessageDigest
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
+    // #266：Compose 编译器插件收编 catalog（原硬编码 version "2.0.21"，
+    // 升 Kotlin 时易与 catalog 的 kotlin 版本脱钩）
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
@@ -149,23 +151,23 @@ dependencies {
     // 无本地目录时走远端坐标 —— E3 GitHub Packages 发布后生效）。
     // BrowserAgentTools（browser_* 工具协议，留在 app）消费这三层：
     //   core（DomParser 剪枝）+ engine（BrowserEngine 自动化）+ chrome（Overlay 浮窗）。
-    implementation("com.apex.browser:browser-core:1.1.0")
-    implementation("com.apex.browser:browser-engine:1.1.0")
-    implementation("com.apex.browser:browser-chrome:1.1.0")
+    implementation(libs.browser.core)
+    implementation(libs.browser.engine)
+    implementation(libs.browser.chrome)
 
     // Compose
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
-    implementation("androidx.compose.foundation:foundation:1.7.6")
+    implementation(libs.compose.foundation)
     implementation(libs.compose.animation)
     implementation(libs.compose.material3)
-    implementation("androidx.compose.material:material-icons-core:1.7.8")
-    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation(libs.compose.material.icons.core)
+    implementation(libs.compose.material.icons)
     // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
     // 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
-    implementation("com.composables:icons-lucide-android:1.1.0")
+    implementation(libs.lucide.icons)
     debugImplementation(libs.compose.ui.tooling)
 
     // AndroidX
@@ -215,7 +217,7 @@ dependencies {
     // 记忆页类型分布；只引 compose 核心（主题色手动映射，不引 m2/m3 主题模块）
     implementation(libs.vico.compose)
     // 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
-    implementation("androidx.dynamicanimation:dynamicanimation:1.0.0")
+    implementation(libs.dynamicanimation)
 
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)

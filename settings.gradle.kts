@@ -9,7 +9,17 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        // NIA（android/nowinandroid）同款纪律：google() 只解析 Google 系 group，
+        // 防止其它坐标误走 google() 拉到非预期构件，同时减少无谓元数据请求。
+        // 本仓全部依赖核实过归属：androidx/com.android/com.google 走 google()，
+        // 其余全在 mavenCentral，EasyFloat 独走 JitPack 白名单。
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
         mavenCentral()
         // 仅允许 EasyFloat 所在 group 走 JitPack，避免其它依赖误查 JitPack（按需构建不稳定源）
         exclusiveContent {
@@ -21,6 +31,13 @@ dependencyResolutionManagement {
             }
         }
     }
+}
+
+// NIA 同款前置检查：JDK 不满足直接给人话报错，而不是等 AGP 在配置中期
+// 抛晦涩异常（本仓 JDK 17 起步，与 CI setup-java 对齐）。
+check(JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_17)) {
+    "Android Guru Agent requires JDK 17+ (current: ${JavaVersion.current()}). " +
+        "Set JAVA_HOME to a JDK 17+ installation. CI reference: .github/workflows (setup-java temurin 17)."
 }
 
 rootProject.name = "apex-agent"

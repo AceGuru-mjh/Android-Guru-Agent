@@ -26,6 +26,16 @@ easyfloat = "2.0.4"
 # 选型 1.4.0：字节码级验证 90 个 Compose 引用全部存在于本项目 Compose 1.7.6；
 # compileSdk 35 对齐；Kotlin 2.1.0 元数据对 2.0.21 消费端一版向前兼容。
 haze = "1.4.0"
+# Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标。
+# 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
+lucide-icons = "1.1.0"
+# 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
+dynamicanimation = "1.0.0"
+# apex-browser-kit（拆库 E1 迁移期；兄弟目录 includeBuild 时坐标被本地构建替换）
+browser-kit = "1.1.0"
+# material-icons 显式 pin：1.7.8 高于 BOM 2024.12.01 映射的 1.7.6，
+# 保持既有解析结果（Gradle 取高版本）不变 —— 升 BOM 前先复核此 pin。
+compose-material-icons = "1.7.8"
 # Vico —— 开源图表库（Maven Central，稳定线 1.13.1）：任务历史/记忆统计可视化。
 # 选型 1.13.1（稳定版，非 2.x beta）：依赖 Compose 1.5+（本项目 1.7.6 向后兼容），
 # Kotlin 1.9 编译产物对 2.0.21 消费端零影响；仅引 compose 核心（不引 m2/m3 主题模块，
@@ -42,7 +52,8 @@ compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling
 compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
 compose-animation = { group = "androidx.compose.animation", name = "animation" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
+compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "compose-material-icons" }
+compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core", version.ref = "compose-material-icons" }
 
 # AndroidX
 core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
@@ -92,8 +103,16 @@ easyfloat = { group = "com.github.princekin-f", name = "EasyFloat", version.ref 
 # Liquid Glass 底层引擎（Maven Central，dev.chrisbanes.haze）—— ui/glass 包唯一底层依赖
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 
-# Vico 开源图表库（Maven Central，稳定线 1.13.1）—— 任务历史/记忆统计可视化
-vico-compose = { group = "com.patrykandpatrick.vico", name = "compose", version.ref = "vico" }
+# Lucide 图标集（Maven Central，com.composables）—— 斜杠菜单分类图标
+lucide-icons = { group = "com.composables", name = "icons-lucide-android", version.ref = "lucide-icons" }
+
+# 物理弹力手势（androidx.dynamicanimation）
+dynamicanimation = { group = "androidx.dynamicanimation", name = "dynamicanimation", version.ref = "dynamicanimation" }
+
+# apex-browser-kit 三层（core：DomParser 剪枝 / engine：BrowserEngine 自动化 / chrome：Overlay 浮窗）
+browser-core = { group = "com.apex.browser", name = "browser-core", version.ref = "browser-kit" }
+browser-engine = { group = "com.apex.browser", name = "browser-engine", version.ref = "browser-kit" }
+browser-chrome = { group = "com.apex.browser", name = "browser-chrome", version.ref = "browser-kit" }
 
 # Room
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
@@ -116,3 +135,6 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+# Compose 编译器插件（Kotlin 同版本号发布；#266：原 app 模块硬编码 2.0.21，
+# 收编 catalog 保证与 kotlin 版本永不脱钩）
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

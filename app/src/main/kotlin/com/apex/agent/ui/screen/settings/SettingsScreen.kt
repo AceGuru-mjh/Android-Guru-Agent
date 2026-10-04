@@ -482,7 +482,7 @@ private fun ChipMultiSelect(
     Column(Modifier.fillMaxWidth()) {
         Text(label, style = MaterialTheme.typography.labelMedium)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(options) { code ->
+            items(options, key = { it }) { code ->
                 FilterChip(
                     selected = selected.contains(code),
                     onClick = { onToggle(code) },
@@ -574,7 +574,7 @@ private fun ReasoningSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) 
     SectionCard(stringResource(R.string.settings_section_reasoning), Icons.Outlined.Psychology) {
         Text("Reasoning Effort", style = MaterialTheme.typography.labelMedium)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(ReasoningEffort.values().toList()) { eff ->
+            items(ReasoningEffort.values().toList(), key = { it.name }) { eff ->
                 FilterChip(selected = p.reasoningEffort == eff,
                     onClick = { onUpdate(p.copy(reasoningEffort = eff)) },
                     label = { Text(eff.name) })
@@ -953,7 +953,7 @@ private fun AccentPaletteRow(
         Text(stringResource(R.string.settings_accent_palettes), style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(AccentPalette.entries) { palette ->
+            items(AccentPalette.entries, key = { it.name }) { palette ->
                 val swatch = accentSwatchColor(palette, dark)
                 val isSelected = palette == selected
                 Column(

@@ -165,7 +165,10 @@ private fun CodeLinesBody(file: EditorFile, filePath: String, onLineClick: (Int)
             .fillMaxWidth()
             .heightIn(max = 432.dp)
     ) {
-        itemsIndexed(file.lines, key = { index, _ -> index }) { index, line ->
+        // #264 复盘：原 key = { index, _ -> index } 与 itemsIndexed 默认位置 key
+        // 完全等价（纯冗余）——只读代码视图、整文件整体替换，位置 key 语义正确，
+        // 故删除冗余参数而非换成内容 key（换行增删时内容 key 反而全表失效）。
+        itemsIndexed(file.lines) { index, line ->
             Row(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier

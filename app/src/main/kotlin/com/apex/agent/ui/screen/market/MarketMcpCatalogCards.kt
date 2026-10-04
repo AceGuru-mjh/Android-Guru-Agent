@@ -272,8 +272,9 @@ internal fun McpCatalogEnvDialog(
                         .fillMaxWidth()
                         .heightIn(max = 320.dp)
                 ) {
-                    items(entry.envSchema.size) { index ->
-                        val envVar = entry.envSchema[index]
+                    // #264：envSchema 内 key 唯一（McpCatalogEnvVar.key），列表形式 + key
+                    // 替代下标形式 —— 条目增删时复用既有组合而非整段重建。
+                    items(entry.envSchema, key = { it.key }) { envVar ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             OutlinedTextField(
                                 value = values[envVar.key].orEmpty(),

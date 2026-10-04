@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -217,7 +218,8 @@ private fun RuleRow(
         )
         Spacer(Modifier.width(8.dp))
         EffectBadge(rule.effect)
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+        // #271：48dp 触区红线（原 32dp，UI-012 同款修复）
+        IconButton(onClick = onDelete, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
             Icon(
                 Icons.Default.Delete,
                 contentDescription = stringResource(R.string.code_perm_rule_delete),

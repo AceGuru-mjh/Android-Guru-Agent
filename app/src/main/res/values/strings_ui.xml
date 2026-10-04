@@ -30,4 +30,8 @@
     <string name="file_open_no_app">No app found that can open this file</string>
     <string name="file_open_provider_reject">File path not supported by FileProvider</string>
     <string name="file_open_no_link_app">No app found that can open this link</string>
+
+    <!-- ═══ Glass Lab 演示页（#280：硬编码中文收编）═══ -->
+    <string name="glasslab_cd_icon_button">Sample-verify icon button</string>
+    <string name="glasslab_cd_floating_button">Sample-verify floating button</string>
 </resources>

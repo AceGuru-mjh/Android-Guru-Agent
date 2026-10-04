@@ -187,11 +187,10 @@ private fun GrepDetailBody(call: StreamToolCall) {
                 .heightIn(max = 480.dp)
         ) {
             // #245：grep 命中行可能重复（同文本多行）—— key 掺入下标防撞，
-            // 换 query 重算时行状态不再错位复用。
-            itemsIndexed(hits) { index, line ->
-                key("$index-${line.take(64)}") {
-                    GrepHitRow(line)
-                }
+            // 换 query 重算时行状态不再错位复用。#264：从内部 key() 补丁提升为
+            // itemsIndexed 的 key 参数 —— item 级复用语义正确，删掉双重包裹。
+            itemsIndexed(hits, key = { index, line -> "$index-${line.take(64)}" }) { _, line ->
+                GrepHitRow(line)
             }
         }
     }

@@ -180,7 +180,9 @@ internal fun <T> MarketList(
     items: List<T>,
     emptyHint: String = "",
     header: (LazyListScope.() -> Unit)? = null,
-    key: ((T) -> Any)? = null,
+    // #264：key 必填 —— 无 key 时条目移动/增删被当作“删除+新建”整段重组；
+    // 全部 6 个调用方（MarketBrowseTabs×1 + MarketInstalledTabs×5）均已传 key。
+    key: (T) -> Any,
     itemContent: @Composable LazyItemScope.(T) -> Unit
 ) {
     if (items.isEmpty()) {
@@ -193,11 +195,7 @@ internal fun <T> MarketList(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         header?.invoke(this)
-        if (key != null) {
-            items(items, key = key, itemContent = itemContent)
-        } else {
-            items(items, itemContent = itemContent)
-        }
+        items(items, key = key, itemContent = itemContent)
     }
 }
 

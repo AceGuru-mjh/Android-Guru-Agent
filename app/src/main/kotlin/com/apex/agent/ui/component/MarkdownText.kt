@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import coil.compose.AsyncImage
+import com.apex.agent.R
 
 /**
  * 聊天气泡内联 Markdown 渲染器。
@@ -283,7 +286,8 @@ private fun VideoCard(url: String) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "播放视频",
+                            // #280：硬编码中文收编 R.string（原 "播放视频"）
+                            contentDescription = stringResource(R.string.chat_cd_play_video),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(28.dp)
                         )
@@ -298,7 +302,8 @@ private fun VideoCard(url: String) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "视频",
+                        // #280：硬编码中文收编 R.string（原 "视频"）
+                        text = stringResource(R.string.chat_media_video_label),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -311,16 +316,18 @@ private fun VideoCard(url: String) {
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                // #271：48dp 触区红线（原 36dp，UI-012 同款修复）
                 IconButton(
                     onClick = {
                         if (url.startsWith("http")) FileOpener.openUrl(context, url)
                         else FileOpener.openFile(context, url, "video/mp4")
                     },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.OpenInNew,
-                        contentDescription = "打开视频",
+                        // #280：硬编码中文收编 R.string（原 "打开视频"）
+                        contentDescription = stringResource(R.string.chat_cd_open_video),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
@@ -422,16 +429,19 @@ private fun CodeBlock(lang: String, code: String) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
+                // #271：48dp 触区红线（原 28dp，UI-012 同款修复；代码块头部行高略增）
                 IconButton(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(code))
                         copied = true
                     },
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                        contentDescription = if (copied) "已复制" else "复制代码",
+                        // #280：硬编码中文收编 R.string（原 "已复制"/"复制代码"）
+                        contentDescription = if (copied) stringResource(R.string.chat_cd_copied)
+                        else stringResource(R.string.chat_cd_copy_code),
                         modifier = Modifier.size(16.dp),
                         tint = if (copied) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant

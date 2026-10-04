@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -104,7 +105,10 @@ fun GlassIconButton(
     val resolvedTint = if (tint.alpha > 0f) tint else scheme.onSurfaceVariant
     val resolvedIconSize = if (iconSize == Dp.Unspecified) size * 0.55f else iconSize
     GlassSurface(
-        modifier = modifier.size(size),
+        // #271：48dp 触区红线（UI-012 同款语义）—— 自绘可点击组件无 M3
+        // 最小触区补偿，视觉直径低于 48 的调用整体抬到 48；icon 仍按原
+        // 比例（resolvedIconSize 由调用方 size 派生，不随触区放大）。
+        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).size(size),
         state = state,
         style = style,
         shape = CircleShape,

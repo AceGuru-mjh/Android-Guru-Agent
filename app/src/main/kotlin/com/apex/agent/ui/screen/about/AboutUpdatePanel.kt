@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import com.apex.agent.ui.theme.LocalExtendedColors
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -397,7 +398,8 @@ internal fun UpdatePanel() {
                         is UpdateCheckResult.UpToDate -> Icon(
                             Icons.Filled.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFF4CAF50),
+                            // UI-016：成功绿收编 token（原硬编码 4CAF50 浅色 2.3:1）
+                            tint = LocalExtendedColors.current.success,
                             modifier = Modifier.size(20.dp)
                         )
 
@@ -582,7 +584,8 @@ internal fun UpdatePanel() {
                                         Icon(
                                             Icons.Filled.CheckCircle,
                                             contentDescription = null,
-                                            tint = Color(0xFF4CAF50),
+                                            // UI-016：成功绿收编 token（原硬编码 4CAF50）
+                                            tint = LocalExtendedColors.current.success,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Text(

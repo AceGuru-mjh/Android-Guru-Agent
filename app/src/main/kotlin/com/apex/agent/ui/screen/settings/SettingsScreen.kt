@@ -506,7 +506,8 @@ private fun KeyValueEditor(
         map.forEach { (k, v) ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("$k : $v", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                IconButton(onClick = { onChange(map - k) }, modifier = Modifier.size(28.dp)) {
+                // UI-012：48dp 触区红线（原 28dp）
+                IconButton(onClick = { onChange(map - k) }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
                 }
             }

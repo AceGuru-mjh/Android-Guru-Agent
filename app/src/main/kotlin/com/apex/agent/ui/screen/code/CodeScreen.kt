@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -521,7 +522,8 @@ private fun WorkspaceBar(
             Spacer(Modifier.width(4.dp))
 
             // v1.2 长任务中心入口（记录/模板两页签的 ModalBottomSheet）
-            IconButton(onClick = onOpenLongTasks, modifier = Modifier.size(28.dp)) {
+            // UI-012：48dp 触区红线（原 28dp）
+            IconButton(onClick = onOpenLongTasks, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                 Icon(
                     Icons.Outlined.History,
                     contentDescription = stringResource(R.string.code_longtask_open),
@@ -530,8 +532,8 @@ private fun WorkspaceBar(
                 )
             }
 
-            // 新会话：图标按钮（对齐 Agent 屏 34/19dp 规格与 History 邻钮密度）
-            IconButton(onClick = onClearChat, modifier = Modifier.size(28.dp)) {
+            // 新会话：图标按钮（对齐 Agent 屏 History 邻钮；UI-012：48dp 触区红线，原 28dp）
+            IconButton(onClick = onClearChat, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                 Icon(
                     Icons.Default.Add,
                     contentDescription = stringResource(R.string.code_clear_chat),

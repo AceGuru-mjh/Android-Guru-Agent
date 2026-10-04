@@ -181,17 +181,18 @@ private fun RoleCard(
                 Spacer(Modifier.width(6.dp))
             }
             if (onEdit != null) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                // UI-012：48dp 触区红线（原 32dp）
+                IconButton(onClick = onEdit, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(Icons.Default.Edit, stringResource(R.string.settings_roles_edit), Modifier.size(16.dp))
                 }
             }
             if (onDuplicate != null) {
-                IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDuplicate, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(Icons.Outlined.ContentCopy, stringResource(R.string.settings_roles_duplicate), Modifier.size(16.dp))
                 }
             }
             if (onDelete != null) {
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                     Icon(
                         Icons.Default.Delete,
                         stringResource(R.string.settings_roles_delete),

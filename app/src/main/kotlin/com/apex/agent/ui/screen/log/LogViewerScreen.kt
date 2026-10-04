@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -63,6 +65,7 @@ import com.apex.agent.R
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
+import com.apex.agent.ui.theme.LocalExtendedColors
 import com.apex.agent.core.logging.LogRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -287,11 +290,11 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                 StatChip(
                     stringResource(R.string.log_errors),
                     "${stats.errorCount}",
-                    if (stats.errorCount > 0) Color(0xFFE57373) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (stats.errorCount > 0) levelColor(LogLevel.ERROR) else MaterialTheme.colorScheme.onSurfaceVariant,
                     onClick = onClickError
                 )
-                StatChip("WARN", "${stats.byLevel[LogLevel.WARN] ?: 0}", Color(0xFFFFB74D))
-                StatChip("INFO", "${stats.byLevel[LogLevel.INFO] ?: 0}", Color(0xFF81C784))
+                StatChip("WARN", "${stats.byLevel[LogLevel.WARN] ?: 0}", levelColor(LogLevel.WARN))
+                StatChip("INFO", "${stats.byLevel[LogLevel.INFO] ?: 0}", levelColor(LogLevel.INFO))
             }
             Spacer(Modifier.height(6.dp))
             // 分类计数横向滚动条
@@ -326,7 +329,7 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                         .weight(1f)
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = if (stats.usageRatio > 0.9f) Color(0xFFFFB74D) else MaterialTheme.colorScheme.primary,
+                    color = if (stats.usageRatio > 0.9f) LocalExtendedColors.current.warning else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainer
                 )
                 Text(
@@ -439,10 +442,32 @@ private fun CategoryTab(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * 日志等级色（UI-016 明暗成对）：:core 的 LogLevel.colorArgb 是终端域
+ * 单态色（暗底可用），浅色模式下 E57373/FFB74D/81C784 对 surfaceContainer
+ * 底仅 1.5-2.6:1 —— 这里按主题成对给出：暗态沿用 :core 原值，亮态换深一
+ * 档 AA 色（C62828/8A5300/15803D，均取仓内 Mint 浅色族与语法高亮既有色）。
+ * :core 不动（跨模块，不可引 Compose）；明暗判定沿 codeColorScheme 先例
+ * （background.luminance()，勿用 isSystemInDarkTheme —— 主题可被设置强制）。
+ */
+@Composable
+private fun levelColor(level: LogLevel): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when (level) {
+        LogLevel.VERBOSE -> MaterialTheme.colorScheme.onSurfaceVariant
+        LogLevel.DEBUG -> if (dark) Color(0xFF64B5F6) else Color(0xFF1E6BB8)
+        LogLevel.INFO -> if (dark) Color(0xFF81C784) else Color(0xFF15803D)
+        LogLevel.WARN -> if (dark) Color(0xFFFFB74D) else Color(0xFF8A5300)
+        LogLevel.ERROR -> if (dark) Color(0xFFE57373) else Color(0xFFC62828)
+        LogLevel.FATAL -> if (dark) Color(0xFFBA68C8) else Color(0xFF6A1B9A)
+        LogLevel.SILENT -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
+
 @Composable
 private fun LevelChip(level: LogLevel, active: Boolean, onClick: () -> Unit) {
-    val container = if (active) Color(level.colorArgb) else MaterialTheme.colorScheme.surfaceContainer
-    val content = if (active) Color.White else Color(level.colorArgb)
+    val container = if (active) levelColor(level) else MaterialTheme.colorScheme.surfaceContainer
+    val content = if (active) Color.White else levelColor(level)
     Surface(
         shape = RoundedCornerShape(8.dp),
         color = container,
@@ -485,12 +510,12 @@ private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
                     .width(3.dp)
                     .height(38.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(Color(record.level.colorArgb))
+                    .background(levelColor(record.level))
             )
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(record.level.shortTag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = Color(record.level.colorArgb))
+                    Text(record.level.shortTag, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = levelColor(record.level))
                     Text(record.category.displayName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     Text(record.source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(formatTime(record.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
@@ -525,7 +550,8 @@ private fun LogRow(record: LogRecord, onCopy: () -> Unit) {
                     modifier = Modifier.padding(start = 4.dp)
                 )
             }
-            IconButton(onClick = onCopy, modifier = Modifier.width(28.dp).height(28.dp)) {
+            // UI-012：48dp 触区红线（原 28×28；行内密排但无障碍优先）
+            IconButton(onClick = onCopy, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
                 Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.log_copy), modifier = Modifier.width(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

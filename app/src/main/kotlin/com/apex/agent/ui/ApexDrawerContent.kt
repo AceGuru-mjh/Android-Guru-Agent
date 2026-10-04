@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.BuildConfig
 import com.apex.agent.R
+import com.apex.agent.ui.theme.LocalExtendedColors
 import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.glass.GlassNavigationItem
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
@@ -342,7 +343,10 @@ private fun GithubStatusRow(
                     .size(8.dp)
                     .clip(CircleShape)
                     .background(
-                        if (isConnected) Color(0xFF4CAF50) else Color(0xFF9E9E9E)
+                        // UI-016：连接点收编 token（原硬编码 4CAF50/9E9E9E
+                        // 浅色 2.2-2.3:1）；未连接灰用 onSurfaceVariant
+                        if (isConnected) LocalExtendedColors.current.success
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
             )
             Text(

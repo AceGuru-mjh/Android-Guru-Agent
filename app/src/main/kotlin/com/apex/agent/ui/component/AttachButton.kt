@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -57,11 +58,12 @@ fun AttachButton(
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-            modifier = Modifier.size(40.dp)
+            // UI-012：48dp 触区红线（原 40dp，与输入行全列按钮统一 48 系）
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
         ) {
             IconButton(
                 onClick = { isMenuExpanded = !isMenuExpanded },
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,

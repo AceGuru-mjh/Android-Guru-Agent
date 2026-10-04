@@ -59,7 +59,10 @@ import kotlinx.coroutines.flow.stateIn
  */
 internal fun SettingsRepository.llmConfiguredFlow(scope: CoroutineScope): StateFlow<Boolean> =
     combine(profiles, providers) { _, _ -> defaultLlmConfig().isValid }
-        .stateIn(scope, SharingStarted.Eagerly, defaultLlmConfig().isValid)
+        // #277：Eagerly → WhileSubscribed(5000) —— 纯 UI 订阅消费
+        //（AgentChatScreen / CodeScreen 均 collectAsStateWithLifecycle，无 .value
+        // 命令式读点），引导卡不可见期间不占用常驻管道。
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), defaultLlmConfig().isValid)
 
 /**
  * 未配置 API 引导卡（消息列表为空 && !llmConfigured 时渲染在聊天区顶部）。

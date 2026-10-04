@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.annotation.StringRes
 import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassToolCard
+import com.apex.agent.ui.theme.LocalExtendedColors
 import com.apex.agent.ui.glass.GlassToolStatus
 import kotlinx.coroutines.delay
 
@@ -356,7 +359,8 @@ internal fun ToolCallCard(
                     val previewCd = stringResource(R.string.chat_cd_preview_html)
                     IconButton(
                         onClick = { onPreviewHtml(htmlPreviewPath) },
-                        modifier = Modifier.size(28.dp)
+                        // UI-012：48dp 触区红线（原 28dp）
+                        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Preview,
@@ -488,7 +492,8 @@ internal fun ToolCallCapsule(
     val dotColor = when {
         isError -> MaterialTheme.colorScheme.error
         isRunning -> accent
-        else -> Color(0xFF22C55E)
+        // UI-016：完成绿收编 success token（原硬编码 22C55E 浅色 2.28:1）
+        else -> LocalExtendedColors.current.success
     }
 
     Surface(
@@ -574,7 +579,11 @@ internal fun RetryChip(onRetry: () -> Unit, enabled: Boolean = true) {
         color = if (enabled) MaterialTheme.colorScheme.error
         else MaterialTheme.colorScheme.error.copy(alpha = 0.38f),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.clickable(enabled = enabled) { onRetry() }
+        // UI-012：48dp 触区红线 —— minimumInteractiveComponentSize 把
+        // clickable 节点撑到最小触摸目标（原 ~30dp 高）
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clickable(enabled = enabled) { onRetry() }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -767,7 +776,8 @@ internal fun ToolStepTimeline(
                 StepPhase.START -> accent
                 StepPhase.OUTPUT -> MaterialTheme.colorScheme.outline
                 StepPhase.PROGRESS -> MaterialTheme.colorScheme.primary
-                StepPhase.COMPLETE -> Color(0xFF22C55E)
+                // UI-016：完成绿收编 success token（原硬编码 22C55E）
+                StepPhase.COMPLETE -> LocalExtendedColors.current.success
                 StepPhase.ERROR -> MaterialTheme.colorScheme.error
             }
             Row(

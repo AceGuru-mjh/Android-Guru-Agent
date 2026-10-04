@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -101,7 +102,8 @@ fun BrainMenuButton(
         IconButton(
             onClick = { menuOpen = !menuOpen },
             modifier = Modifier
-                .size(40.dp) // 对齐修复：与 Attach/Github/Send 统一 40dp（原 36dp）
+                // UI-012：48dp 触区红线（原 40dp，与输入行全列按钮统一 48 系）
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics { contentDescription = brainDescription }
         ) {
             // #174：入口显示当前模型品牌图标（模型族 > 服务商 > 通用首字母兜底）

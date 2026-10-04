@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -70,11 +71,12 @@ fun GithubIconButton(
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
             else
                 MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.size(40.dp)
+            // UI-012：48dp 触区红线（原 40dp，与输入行全列按钮统一 48 系）
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
         ) {
             IconButton(
                 onClick = { showMenu = true },
-                modifier = Modifier.size(40.dp)
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_github_mark),

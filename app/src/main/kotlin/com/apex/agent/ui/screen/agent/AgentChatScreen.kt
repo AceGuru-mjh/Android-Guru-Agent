@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -330,7 +331,8 @@ fun AgentChatScreen(
                 // 历史对话入口：消息流自动归档，点击恢复接续上下文
                 IconButton(
                     onClick = { showHistory = true },
-                    modifier = Modifier.size(34.dp)
+                    // UI-012：48dp 触区红线（原 34dp）
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         Icons.Outlined.History,
@@ -342,7 +344,8 @@ fun AgentChatScreen(
                 // 新会话按钮
                 IconButton(
                     onClick = { viewModel.newChat() },
-                    modifier = Modifier.size(34.dp)
+                    // UI-012：48dp 触区红线（原 34dp）
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         Icons.Default.Add,
@@ -724,7 +727,8 @@ fun AgentChatScreen(
                             onClick = { viewModel.abort() },
                             interactionSource = sendInteraction,
                             modifier = Modifier
-                                .size(40.dp)
+                                // UI-012：48dp 触区红线（原 40dp；压按缩放反馈保留）
+                                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                                 .scale(sendScale)
                         ) {
                             Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.chat_cd_stop))
@@ -746,7 +750,8 @@ fun AgentChatScreen(
                             enabled = inputText.isNotBlank() || attachments.any { it.status != UploadStatus.ERROR } || pendingCommands.isNotEmpty(),
                             interactionSource = sendInteraction,
                             modifier = Modifier
-                                .size(40.dp)
+                                // UI-012：48dp 触区红线（原 40dp；压按缩放反馈保留）
+                                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                                 .scale(sendScale)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_cd_send))
@@ -887,7 +892,8 @@ private fun ApiMissingFloatingNotice(
                 }
                 androidx.compose.material3.IconButton(
                     onClick = onDismiss,
-                    modifier = Modifier.size(28.dp)
+                    // UI-012：48dp 触区红线（原 28dp）
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         Icons.Default.Close,

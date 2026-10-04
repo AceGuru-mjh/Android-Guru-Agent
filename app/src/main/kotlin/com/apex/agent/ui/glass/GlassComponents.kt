@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.apex.agent.ui.theme.LocalExtendedColors
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -303,7 +304,8 @@ fun GlassToolCard(
     val scheme = MaterialTheme.colorScheme
     val statusAccent = when (status) {
         GlassToolStatus.RUNNING -> scheme.primary
-        GlassToolStatus.COMPLETED -> Color(0xFF22C55E)
+        // UI-016：完成绿收编 success token（原硬编码 22C55E 浅色 2.28:1）
+        GlassToolStatus.COMPLETED -> LocalExtendedColors.current.success
         GlassToolStatus.FAILED -> scheme.error
         GlassToolStatus.WAITING -> scheme.secondary
     }

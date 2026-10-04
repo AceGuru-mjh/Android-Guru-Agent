@@ -12,6 +12,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -809,7 +810,8 @@ internal fun ErrorBlock(
                         clipboard.setText(AnnotatedString(message))
                         Toast.makeText(context, copiedErrorToast, Toast.LENGTH_SHORT).show()
                     },
-                    modifier = Modifier.size(28.dp)
+                    // UI-012：48dp 触区红线（原 28dp）
+                    modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentCopy,

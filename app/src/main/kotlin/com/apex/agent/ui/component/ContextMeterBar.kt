@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
+import com.apex.agent.ui.theme.LocalExtendedColors
 
 /**
  * 顶部上下文仪表盘长条。
@@ -52,10 +53,14 @@ fun ContextMeterBar(
     val ratio = (usedTokens.toFloat() / safeMax.toFloat()).coerceIn(0f, 1f)
     val percent = (ratio * 100).toInt()
 
-    // 颜色阈值：正常青 / 警告橙 / 危险粉红
+    // 颜色阈值：正常青 / 警告琥珀 / 危险品红
+    // UI-016：token 化 —— 暗态视觉与原霓虹粉/橙几乎一致（FF6B9D≈FF4D8D、
+    // FFB454≈FFB020），亮态对比度从 1.72-2.94:1 修复到 AA；亮态品红与
+    // 品牌 error 一致，不再另造硬编码
+    val extended = LocalExtendedColors.current
     val accent = when {
-        percent >= 80 -> Color(0xFFFF4D8D) // 霓虹粉
-        percent >= 60 -> Color(0xFFFFB020) // 警告橙
+        percent >= 80 -> MaterialTheme.colorScheme.error // 危险品红
+        percent >= 60 -> extended.warning // 警告琥珀
         else -> MaterialTheme.colorScheme.primary // 霓虹青
     }
 

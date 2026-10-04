@@ -291,7 +291,7 @@ object CodeModule {
         }
         // 模型信息源：PRIMARY 角色解析链首选项（模型 id + 真实上下文窗口）
         // ——标准线 env 块注入与压缩预算消费（修复恒 128K 的窗口盲区）。
-        val standardModelInfoProvider: () -> StandardModeEngine.ModelInfo = {
+        val standardModelInfoProvider: () -> StandardModeEngine.ModelInfo? = {
             try {
                 (modelRuntime.resolve(ModelRole.PRIMARY) as? ModelRoleRouter.ResolutionResult.Success)
                     ?.primary?.profile

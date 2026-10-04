@@ -101,9 +101,9 @@ class StandardModeEngine(
     private val permissionSource: StandardPermissionSource = StandardPermissionSource.NONE,
     /**
      * 模型信息提供者（modelId + 真实上下文窗口）：env 块注入与压缩
-     * 预算的消费源；null = 静态 [maxContextTokensConfig] 兜底。
+     * 预算的消费源；提供者缺省或返回 null = 静态 [maxContextTokensConfig] 兜底。
      */
-    private val modelInfoProvider: (() -> ModelInfo)? = null,
+    private val modelInfoProvider: (() -> ModelInfo?)? = null,
     /** 子代理运行标记（本实例由 task 工具派生）。 */
     internal val subAgentMode: Boolean = false
 ) : AgentEngine, CodeEngineFacade {

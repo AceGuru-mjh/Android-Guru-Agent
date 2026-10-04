@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -26,9 +27,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.apex.agent.R
 import coil.compose.AsyncImage
 
 /**
@@ -115,13 +118,14 @@ fun ImageLightbox(
             )
 
             // 关闭按钮（沉浸式 statusBarsPadding）
+            // #271：48dp 触区红线（原 40dp，UI-012 同款修复）
             IconButton(
                 onClick = onDismiss,
                 modifier = Modifier
                     .statusBarsPadding()
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
-                    .size(40.dp)
+                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     .background(
                         Color.Black.copy(alpha = 0.6f),
                         MaterialTheme.shapes.small
@@ -129,7 +133,8 @@ fun ImageLightbox(
             ) {
                 Icon(
                     Icons.Default.Close,
-                    contentDescription = "关闭",
+                    // #280：复用既有 chat_cd_close（原硬编码 "关闭"）
+                    contentDescription = stringResource(R.string.chat_cd_close),
                     tint = Color.White,
                     modifier = Modifier.size(24.dp)
                 )

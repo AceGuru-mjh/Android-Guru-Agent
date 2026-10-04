@@ -134,8 +134,8 @@ class GithubReadFileTool(private val api: GithubApiService) : AgentTool {
 class GithubWriteFileTool(private val api: GithubApiService) : AgentTool {
     override val id = "github_write_file"
     override val name = "Write GitHub File"
-    override val description = "Create or update a file in a GitHub repo with an automatic commit. ⚠️HIGH-RISK: real commit to the remote branch. 写入并 commit。"
-    override val parametersSchema = """{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"},"message":{"type":"string"},"branch":{"type":"string"}},"required":["owner","repo","path","content","message"]}"""
+    override val description = "Create or update a file in a GitHub repo with an automatic commit. ⚠️HIGH-RISK: real commit to the remote branch; PRIVATE repos additionally need confirm_private_write=true after asking the user. 写入并 commit；私有仓库需用户确认后重试。"
+    override val parametersSchema = """{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"},"message":{"type":"string"},"branch":{"type":"string"},"confirm_private_write":{"type":"boolean","description":"Set to true ONLY after the user explicitly approved writing to this PRIVATE repo"}},"required":["owner","repo","path","content","message"]}"""
     override suspend fun execute(arguments: String): String {
         val json = parseArgs(arguments) ?: return argsParseError(arguments)
         val owner = json.stringOf("owner") ?: return "Error: 需要 owner"
@@ -148,9 +148,30 @@ class GithubWriteFileTool(private val api: GithubApiService) : AgentTool {
         if (owner.isBlank()) return "Error: owner 不能为空"
         if (repo.isBlank()) return "Error: repo 不能为空"
         if (path.isBlank()) return "Error: path 不能为空"
-        // TODO（private-fork 写保护）：若启用相关 config flag，应在此处调用
-        // api.listBranches 或 getFileContent 探测 repo.private=true，并要求用户二次确认。
-        // 当前没有该 config flag，先保留默认放行行为。
+        // #273/#274：private-fork 写保护接线 —— 写前探仓库可见性（GET /repos
+        // 单次往返），私有仓库必须携带 confirm_private_write=true（且该标志
+        // 只应在向用户转述风险并获得明确同意后设置）。探针失败按 fail-closed
+        // 处理：探针与写入走同一 API 通道，探针挂了写入大概率也挂，宁可诚实
+        // 失败也不降级放行（纵深防御：RiskAwareToolGate 已把本工具纳入会话级
+        // 写入确认弹窗，这里是私有仓的第二道硬门）。
+        val confirmPrivateWrite = (json["confirm_private_write"] as? JsonPrimitive)
+            ?.let { runCatching { it.content.toBooleanStrict() }.getOrNull() } ?: false
+        try {
+            val repoInfo = api.getRepo(owner, repo)
+            if (repoInfo.private && !confirmPrivateWrite) {
+                return "Error: $owner/$repo is a PRIVATE repository. " +
+                    "Writing to private repos requires explicit user approval — " +
+                    "STOP and tell the user: 即将向私有仓库 $owner/$repo 写入文件 $path（commit: $message），" +
+                    "是否确认？ Only after the user explicitly confirms, retry this call " +
+                    "with confirm_private_write=true. Do NOT set the flag without asking."
+            }
+        } catch (e: GithubApiException) {
+            // 404 = 仓库不存在/无权限 —— 写入路径同样会 404，提前失败省一次往返；
+            // 其他错误（网络/5xx）按 fail-closed 诚实上报，不降级放行。
+            return githubError(e)
+        } catch (e: Exception) {
+            return "Error: 检查仓库可见性失败: ${e.message}"
+        }
         var existingSha: String? = null
         try {
             existingSha = api.getFileContent(owner, repo, path, branch).sha

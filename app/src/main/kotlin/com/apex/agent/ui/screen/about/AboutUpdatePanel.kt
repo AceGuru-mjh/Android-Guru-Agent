@@ -45,6 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.apex.agent.ui.theme.LocalExtendedColors
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +108,8 @@ private sealed interface UpdateUiState {
 internal fun UpdatePanel() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // #265：下载进度轮询的生命周期宿主（repeatOnLifecycle 门控）
+    val lifecycleOwner = LocalLifecycleOwner.current
     // ── v1.4.5：更新中枢接管检查与增量流水线（应用级 —— 离开本页继续跑，
     //    中断后从断点续传）。本面板只是中枢的一块仪表盘 + 全量包本地路径。──
     val center = UpdateCenter
@@ -260,14 +265,18 @@ internal fun UpdatePanel() {
     // ── 下载进度轮询（广播只管终点，进度条靠轮询 800ms 一拍）──────────────────
     LaunchedEffect(activeDownload?.id) {
         val active = activeDownload ?: return@LaunchedEffect
-        while (true) {
-            // DownloadManager.query 是主线程 binder/ContentProvider 调用
-            //（300MB 下载持续数分钟 = 数千次主线程 IPC）→ 收敛到 IO
-            val (percent, bytes) = withContext(Dispatchers.IO) { downloader.progress(active.id) }
-            downloadPercent = percent
-            downloadedBytes = bytes
-            if (activeDownload?.id != active.id) break
-            delay(800)
+        // #265：后台门控 —— 页面不可见（ON_STOP）挂起轮询，回前台（RESUMED）
+        // 补一拍立即刷新；下载终点由系统广播兜底，不依赖轮询在场，后台零消耗。
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (activeDownload?.id == active.id) {
+                // DownloadManager.query 是主线程 binder/ContentProvider 调用
+                //（300MB 下载持续数分钟 = 数千次主线程 IPC）→ 收敛到 IO
+                val (percent, bytes) = withContext(Dispatchers.IO) { downloader.progress(active.id) }
+                if (activeDownload?.id != active.id) break
+                downloadPercent = percent
+                downloadedBytes = bytes
+                delay(800)
+            }
         }
     }
 

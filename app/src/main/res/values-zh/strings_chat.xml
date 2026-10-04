@@ -371,4 +371,22 @@
     <string name="chat_session_imported">会话已导入</string>
     <string name="chat_share_received">已接收分享内容 —— 确认后再发送</string>
     <string name="chat_slash_mcp_none_running">暂无运行中的 MCP —— 请到 市场 → MCP 安装并启动</string>
+
+    <!-- ═══ MarkdownText 媒体卡 / 代码块（#280：硬编码中文收编）═══ -->
+    <string name="chat_cd_play_video">播放视频</string>
+    <string name="chat_cd_open_video">打开视频</string>
+    <string name="chat_media_video_label">视频</string>
+    <string name="chat_cd_copy_code">复制代码</string>
+
+    <!-- ═══ ViroPet 桌宠（#280：硬编码中文收编）═══ -->
+    <string name="viro_play_onclick">和 Viro 玩</string>
+    <string name="viro_cd_state_fmt">Viro 桌宠（当前状态：%1$s）</string>
+    <string name="viro_mood_idle">待机</string>
+    <string name="viro_mood_thinking">思考中</string>
+    <string name="viro_mood_tool_running">执行工具</string>
+    <string name="viro_mood_streaming">回复中</string>
+    <string name="viro_mood_waiting_user">等待输入</string>
+    <string name="viro_mood_review_plan">待确认</string>
+    <string name="viro_mood_error">出错了</string>
+    <string name="viro_mood_success">任务完成</string>
 </resources>

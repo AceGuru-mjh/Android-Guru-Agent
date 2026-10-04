@@ -70,6 +70,14 @@ class GithubApiService @Inject constructor(
         return apiCall("/repos/${encodeSegment(owner)}/${encodeSegment(repo)}/contents/${encodePath(path)}$ref")
     }
 
+    /**
+     * 仓库元数据（#273 private-fork 写保护的可见性探针入口）：
+     * GET /repos/{owner}/{repo} → [GithubRepo]（含 private 标志；
+     * Json ignoreUnknownKeys 已开，响应其余字段自动忽略）。
+     */
+    suspend fun getRepo(owner: String, repo: String): GithubRepo =
+        apiCall("/repos/${encodeSegment(owner)}/${encodeSegment(repo)}")
+
     suspend fun createOrUpdateFile(owner: String, repo: String, path: String, content: String, message: String, branch: String? = null, sha: String? = null): GithubCommitResult {
         val body = buildJsonObject {
             put("message", message)

@@ -30,4 +30,8 @@
     <string name="file_open_no_app">未找到支持打开此文件的应用</string>
     <string name="file_open_provider_reject">文件路径不被 FileProvider 支持</string>
     <string name="file_open_no_link_app">未找到可打开此链接的应用</string>
+
+    <!-- ═══ Glass Lab 演示页（#280：硬编码中文收编）═══ -->
+    <string name="glasslab_cd_icon_button">采样验证图标按钮</string>
+    <string name="glasslab_cd_floating_button">采样验证悬浮球</string>
 </resources>

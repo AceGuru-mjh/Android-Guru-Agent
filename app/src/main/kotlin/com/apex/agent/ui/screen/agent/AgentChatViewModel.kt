@@ -220,22 +220,26 @@ class AgentChatViewModel @Inject constructor(
     }
 
     /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */
+    // #277：Eagerly → WhileSubscribed(5000) —— 纯 UI 订阅消费（无 .value 命令式
+    // 读点），后台 5s 后停管道，回前台自动重订阅（LLM#84 的 ModelRoleRouter
+    // 读法禁改，此处已核实无同型读点）。
     val agentRoles: StateFlow<List<com.apex.agent.ui.screen.settings.AgentRole>> =
         settingsRepository.agentSettings
             .map { it.allRoles() }
             .stateIn(
                 viewModelScope,
-                SharingStarted.Eagerly,
+                SharingStarted.WhileSubscribed(5_000),
                 listOf(com.apex.agent.ui.screen.settings.AgentRole.ALL_ROUNDER)
             )
 
     /** 当前激活角色（UI 展示）。 */
+    // #277：同 agentRoles —— 纯 UI 订阅消费，停更窗口不影响正确性。
     val activeAgentRole: StateFlow<com.apex.agent.ui.screen.settings.AgentRole> =
         settingsRepository.agentSettings
             .map { it.activeRole() }
             .stateIn(
                 viewModelScope,
-                SharingStarted.Eagerly,
+                SharingStarted.WhileSubscribed(5_000),
                 com.apex.agent.ui.screen.settings.AgentRole.ALL_ROUNDER
             )
 

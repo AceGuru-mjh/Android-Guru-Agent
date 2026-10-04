@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassBadge
 import com.apex.agent.ui.glass.GlassButton
 import com.apex.agent.ui.glass.GlassCard
@@ -369,13 +371,15 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
             )
             GlassIconButton(
                 icon = Icons.Default.BlurOn,
-                contentDescription = "采样验证图标按钮",
+                // #280：硬编码中文收编 R.string（原 "采样验证图标按钮"）
+                contentDescription = stringResource(R.string.glasslab_cd_icon_button),
                 onClick = pressFeedback,
                 state = state
             )
             GlassFloatingButton(
                 icon = Icons.Default.PlayArrow,
-                contentDescription = "采样验证悬浮球",
+                // #280：硬编码中文收编 R.string（原 "采样验证悬浮球"）
+                contentDescription = stringResource(R.string.glasslab_cd_floating_button),
                 onClick = pressFeedback,
                 state = state,
                 accent = MaterialTheme.colorScheme.primary

@@ -216,7 +216,8 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier, tint: C
             copied = true
             android.widget.Toast.makeText(context, copiedToast, android.widget.Toast.LENGTH_SHORT).show()
         },
-        modifier = modifier.size(28.dp)
+        // #271：48dp 触区红线（原 28dp，UI-012 同款修复；一处修复四个调用点）
+        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
     ) {
         Icon(
             imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,

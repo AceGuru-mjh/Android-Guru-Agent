@@ -205,10 +205,13 @@ class RiskAwareToolGate(
          * （delete_file 已是 HIGH —— inferRisk 黑名单；此处覆盖写/编两类。）
          * Issue #230 收尾：补 coding 模式等价面（code_write/code_edit ——
          * StandardToolSurface 把 write_file/edit_file 映射过去，同一底层行为
-         * 必须同一确认语义；file_write/file_edit 是历史别名防漏。） */
+         * 必须同一确认语义；file_write/file_edit 是历史别名防漏。）
+         * #273：github_write_file 是远程真实 commit（其自身 description 已标
+         * ⚠️HIGH-RISK，但 inferRisk 按 github_ 前缀只推到 MEDIUM）—— 远程写
+         * 与本地写同一确认语义，且私有仓还有工具内第二道硬门。 */
         val FILE_MUTATING_TOOLS = setOf(
             "write_file", "edit_file", "file_write", "file_edit",
-            "code_write", "code_edit"
+            "code_write", "code_edit", "github_write_file"
         )
     }
 }

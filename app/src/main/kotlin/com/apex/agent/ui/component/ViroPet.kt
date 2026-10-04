@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
@@ -89,17 +90,20 @@ enum class ViroPetAnim(val row: Int, val frameMillis: Long) {
 /**
  * 由 Agent 聊天运行态推导的宠物情绪（AgentChatScreen 侧负责映射）。
  *
- * @param label 状态小标签文案；null 表示待机（不打扰）
+ * #280 i18n：枚举改持 @StringRes（原硬编码中文 label: String?），
+ * 组合内经 stringResource 解析 —— 状态小标签与无障碍播报同源。
+ *
+ * @param labelRes 状态小标签文案资源；null 表示待机（不打扰）
  */
-enum class ViroPetMood(val label: String?) {
+enum class ViroPetMood(val labelRes: Int?) {
     Idle(null),
-    Thinking("思考中"),
-    ToolRunning("执行工具"),
-    Streaming("回复中"),
-    WaitingUser("等待输入"),
-    ReviewPlan("待确认"),
-    Error("出错了"),
-    Success("任务完成"),
+    Thinking(R.string.viro_mood_thinking),
+    ToolRunning(R.string.viro_mood_tool_running),
+    Streaming(R.string.viro_mood_streaming),
+    WaitingUser(R.string.viro_mood_waiting_user),
+    ReviewPlan(R.string.viro_mood_review_plan),
+    Error(R.string.viro_mood_error),
+    Success(R.string.viro_mood_success),
 }
 
 /**
@@ -196,6 +200,13 @@ fun ViroPetHost(
     }
     val anim = overrideAnim ?: baseAnim
 
+    // #280：状态文案在组合内预取（semantics 块非组合上下文，不能现取）；
+    // 待机（labelRes == null）回退到“待机”仅用于无障碍播报，小标签由
+    // AnimatedVisibility 的 visible 条件保持不打扰。
+    val idleLabel = stringResource(R.string.viro_mood_idle)
+    val stateLabel = mood.labelRes?.let { stringResource(it) } ?: idleLabel
+    val petContentDescription = stringResource(R.string.viro_cd_state_fmt, stateLabel)
+
     // 点击反馈：按压微放大（与发送键的 press-scale 一致的手感）
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -220,14 +231,14 @@ fun ViroPetHost(
                 .clickable(
                     interactionSource = interaction,
                     indication = null,
-                    onClickLabel = "和 Viro 玩"
+                    onClickLabel = stringResource(R.string.viro_play_onclick)
                 ) {
                     play(
                         if (Random.nextBoolean()) ViroPetAnim.Jumping else ViroPetAnim.Waving,
                         durationMillis = 1_400
                     )
                 }
-                .semantics { contentDescription = "Viro 桌宠（当前状态：${mood.label ?: "待机"}）" }
+                .semantics { contentDescription = petContentDescription }
         ) {
             ViroPet(
                 anim = anim,
@@ -237,7 +248,7 @@ fun ViroPetHost(
 
         // 状态小标签：非待机时展开（错误态换红色调），与输入栏工具 chip 同级轻量
         AnimatedVisibility(
-            visible = mood.label != null,
+            visible = mood.labelRes != null,
             enter = expandHorizontally() + fadeIn(),
             exit = shrinkHorizontally() + fadeOut()
         ) {
@@ -251,7 +262,7 @@ fun ViroPetHost(
                 modifier = Modifier.padding(start = 8.dp, bottom = 6.dp)
             ) {
                 Text(
-                    text = mood.label ?: "",
+                    text = stateLabel,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)

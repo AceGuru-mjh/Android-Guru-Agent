@@ -371,4 +371,22 @@
     <string name="chat_session_imported">Session imported</string>
     <string name="chat_share_received">Shared content received — review before sending</string>
     <string name="chat_slash_mcp_none_running">No running MCP servers — install &amp; start them in Market → MCP</string>
+
+    <!-- ═══ MarkdownText 媒体卡 / 代码块（#280：硬编码中文收编）═══ -->
+    <string name="chat_cd_play_video">Play video</string>
+    <string name="chat_cd_open_video">Open video</string>
+    <string name="chat_media_video_label">Video</string>
+    <string name="chat_cd_copy_code">Copy code</string>
+
+    <!-- ═══ ViroPet 桌宠（#280：硬编码中文收编）═══ -->
+    <string name="viro_play_onclick">Play with Viro</string>
+    <string name="viro_cd_state_fmt">Viro desktop pet (state: %1$s)</string>
+    <string name="viro_mood_idle">Idle</string>
+    <string name="viro_mood_thinking">Thinking</string>
+    <string name="viro_mood_tool_running">Running tools</string>
+    <string name="viro_mood_streaming">Responding</string>
+    <string name="viro_mood_waiting_user">Waiting for input</string>
+    <string name="viro_mood_review_plan">Awaiting confirmation</string>
+    <string name="viro_mood_error">Error</string>
+    <string name="viro_mood_success">Task complete</string>
 </resources>

@@ -593,6 +593,200 @@ class StandardModeEngineTest {
         assertTrue(request.filterIsInstance<LlmMessage.ToolResult>().isNotEmpty())
     }
 
+    // ═══ v1.6 增强：env 块 / 档位硬门 / read-before-edit / 未知工具 / 模型窗口 ═══
+
+    @Test
+    fun `system prompt embeds env block and conduct sections`() = runTest {
+        val llm = ScriptedLlm()
+        llm.enqueue(LlmStreamChunk(content = "ok", isFinish = true))
+        val engine = StandardModeEngine(
+            runtime = SingleClientModelRuntime(llm),
+            toolRegistry = DefaultToolRegistry().apply {
+                register(FakeTool("code_read"))
+                register(FakeTool("shell_execute"))
+            },
+            toolExecutor = FakeExecutor(),
+            modelInfoProvider = { StandardModeEngine.ModelInfo(modelId = "test-model-x", contextWindow = 200_000) }
+        )
+        engine.execute("q").toList()
+        val system = llm.chatRequests.single().first() as LlmMessage.System
+        // env 块：模型 ID + 日期 + 平台
+        assertTrue(system.content.contains("You are powered by the model named test-model-x"))
+        assertTrue(system.content.contains("Today's date"))
+        assertTrue(system.content.contains("Android"))
+        // 核心行为段 + 工具纪律段
+        assertTrue(system.content.contains("## Core Conduct"))
+        assertTrue(system.content.contains("## Tool Discipline"))
+        // 模型感知窗口
+        assertEquals(200_000, engine.maxContextTokens())
+    }
+
+    @Test
+    fun `plan mode injects turn-level reminder and hard-gates writes`() = runTest {
+        val llm = ScriptedLlm()
+        // PLAN 档：写尝试（被档位硬门拒绝，无问答弹窗）→ 纯文本收官
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(ToolCall(id = "w", name = "code_write", arguments = """{"path":"x","content":"y"}"""))
+            )
+        )
+        llm.enqueue(LlmStreamChunk(content = "已按只读约束给出计划", isFinish = true))
+        val executor = FakeExecutor()
+        val engine = engine(llm, executor)
+        engine.updateMode(com.apex.agent.core.engine.AgentMode.PLAN)
+        val events = engine.execute("规划一下").toList()
+
+        // 请求级回合提醒注入（消息流末尾，不进会话）
+        val request = llm.chatRequests.first()
+        val lastMessage = request.last()
+        assertTrue(lastMessage is LlmMessage.System)
+        assertTrue((lastMessage as LlmMessage.System).content.contains("PLAN mode"))
+
+        // 写调用被档位硬门拒绝：无 UserInputRequired，直接拒因
+        assertTrue(events.none { it is AgentEvent.UserInputRequired })
+        val toolComplete = events.filterIsInstance<AgentEvent.ToolCallComplete>().single()
+        assertFalse(toolComplete.success)
+        assertTrue(toolComplete.output.contains("PLAN 档只读硬门"))
+        // 执行器从未收到写调用
+        assertTrue(executor.executed.isEmpty())
+    }
+
+    @Test
+    fun `edit without prior read is rejected then allowed after read`() = runTest {
+        val llm = ScriptedLlm()
+        // 第 1 轮：直接编辑未读文件（拒绝）；第 2 轮：读；第 3 轮：再编辑（放行）；第 4 轮：收官
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(
+                    ToolCall(id = "e1", name = "code_edit", arguments = """{"path":"src/App.kt","old_string":"a","new_string":"b"}""")
+                )
+            )
+        )
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(ToolCall(id = "r1", name = "code_read", arguments = """{"path":"src/App.kt"}"""))
+            )
+        )
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(
+                    ToolCall(id = "e2", name = "code_edit", arguments = """{"path":"src/App.kt","old_string":"a","new_string":"b"}""")
+                )
+            )
+        )
+        llm.enqueue(LlmStreamChunk(content = "编辑完成", isFinish = true))
+        val executor = FakeExecutor()
+        // 权限源接入测试：ALLOW 规则注入 code_edit（同时验证设置层规则接线）
+        val registry = DefaultToolRegistry().apply {
+            listOf("code_read", "code_edit").forEach { register(FakeTool(it)) }
+        }
+        val engine = StandardModeEngine(
+            runtime = SingleClientModelRuntime(llm),
+            toolRegistry = registry,
+            toolExecutor = executor,
+            permissionSource = object : StandardPermissionSource {
+                override fun snapshot() = StandardPermissionSource.Snapshot(
+                    rules = listOf(
+                        StandardPermissionRule("code_edit", StandardPermissionEffect.ALLOW)
+                    )
+                )
+            }
+        )
+        val events = engine.execute("改文件").toList()
+
+        val edits = events.filterIsInstance<AgentEvent.ToolCallComplete>().filter { it.toolName == "code_edit" }
+        assertEquals(2, edits.size)
+        // 未读先编：拒绝并引导先读
+        assertFalse(edits[0].success)
+        assertTrue(edits[0].output.contains("has not been read"))
+        // 读取成功登记后，编辑放行
+        assertTrue(edits[1].success)
+        // 执行器只收到放行的那次编辑
+        assertEquals(1, executor.executed.count { it.first == "code_edit" })
+        assertEquals(1, executor.executed.count { it.first == "code_read" })
+    }
+
+    @Test
+    fun `write of unresolvable new file skips read guard`() = runTest {
+        val llm = ScriptedLlm()
+        // 新文件（路径不存在）写：免检放行（新建合法），但 DEFAULT 模式会 ASK
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(ToolCall(id = "w", name = "code_write", arguments = """{"path":"brand_new_dir/Nuke.kt","content":"x"}"""))
+            )
+        )
+        llm.enqueue(LlmStreamChunk(content = "新建完成", isFinish = true))
+        val engine = engine(llm, FakeExecutor())
+
+        val collected = mutableListOf<AgentEvent>()
+        val job = async { engine.execute("q").collect { collected += it }; true }
+        while (collected.none { it is AgentEvent.UserInputRequired }) delay(10)
+        engine.submitUserInput("允许")
+        job.await()
+
+        // 走的是权限 ASK（不是 read 守卫拒绝）——新建免检
+        val toolComplete = collected.filterIsInstance<AgentEvent.ToolCallComplete>().single()
+        assertFalse(toolComplete.output.contains("has not been read"))
+    }
+
+    @Test
+    fun `unknown tool returns correction suggestions`() = runTest {
+        val llm = ScriptedLlm()
+        // 模型幻觉调用 code_reads（多打一个 s）→ 修正建议指向 code_read
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(ToolCall(id = "u1", name = "code_reads", arguments = """{"path":"x"}"""))
+            )
+        )
+        llm.enqueue(LlmStreamChunk(content = "已改用正确工具名", isFinish = true))
+        val engine = engine(llm, FakeExecutor())
+        val events = engine.execute("q").toList()
+
+        val toolComplete = events.filterIsInstance<AgentEvent.ToolCallComplete>().single()
+        assertFalse(toolComplete.success)
+        assertTrue(toolComplete.output.contains("Unknown tool"))
+        assertTrue(toolComplete.output.contains("code_read"))
+        // 第二轮请求里模型拿到修正建议（自纠闭环）
+        val toolResult = llm.chatRequests[1].filterIsInstance<LlmMessage.ToolResult>().single()
+        assertTrue(toolResult.content.contains("Did you mean"))
+    }
+
+    @Test
+    fun `permission denial carries user feedback text`() = runTest {
+        val llm = ScriptedLlm()
+        llm.enqueue(
+            LlmStreamChunk(
+                toolCalls = listOf(ToolCall(id = "w", name = "code_write", arguments = """{"path":"x","content":"y"}"""))
+            )
+        )
+        llm.enqueue(LlmStreamChunk(content = "按用户指示换方式", isFinish = true))
+        val engine = engine(llm, FakeExecutor())
+
+        val collected = mutableListOf<AgentEvent>()
+        val job = async { engine.execute("q").collect { collected += it }; true }
+        while (collected.none { it is AgentEvent.UserInputRequired }) delay(10)
+        engine.submitUserInput("别直接写，先展示你要改什么")
+        job.await()
+
+        val toolResult = llm.chatRequests[1].filterIsInstance<LlmMessage.ToolResult>().single()
+        assertTrue(toolResult.content.contains("别直接写，先展示你要改什么"))
+    }
+
+    @Test
+    fun `parseSubAgentRequest accepts general subagent type`() {
+        val request = StandardModeEngine.parseSubAgentRequest(
+            """{"description":"通用执行","prompt":"自主完成 X 模块重构","subagent_type":"general"}"""
+        )
+        assertEquals(StandardAgentKind.GENERAL, request!!.kind)
+    }
+
+    @Test
+    fun `maxContextTokens falls back to static config without provider`() {
+        val llm = ScriptedLlm()
+        val engine = engine(llm, FakeExecutor())
+        assertEquals(128_000, engine.maxContextTokens())
+    }
+
     private fun createTempDir(): java.io.File =
         kotlin.io.path.createTempDirectory("std-test").toFile()
 

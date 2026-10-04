@@ -43,7 +43,7 @@ import com.apex.agent.ui.screen.settings.SectionCard
 /**
  * ═══ 工具权限分区（设置 → Agent 页，Issue #155）═══
  *
- * opencode 式权限模式的设置面：
+ * 业界标准式权限模式的设置面：
  *  - 模式区：四选一（BYPASS / DEFAULT / ACCEPT_EDITS / PLAN），
  *    每模式一行中文说明（FilterChip 选择形态对齐设置页
  *    ReasoningSection 的既有先例）；
@@ -71,7 +71,7 @@ import com.apex.agent.ui.screen.settings.SectionCard
  * ── stringResource 键清单（主控加入 strings xml；en / zh 文案）──
  *
  * code_perm_section_title         工具权限 / Tool Permissions
- * code_perm_section_subtitle      opencode 式权限模式与规则 / opencode-style mode and rules
+ * code_perm_section_subtitle      标准权限模式与规则 / standard permission mode and rules
  * code_perm_mode_label            权限模式 / Permission mode
  * code_perm_mode_bypass           全放行 / Bypass
  * code_perm_mode_default          默认 / Default

@@ -11,7 +11,7 @@ import com.apex.agent.core.tools.toolSchema
 import java.io.File
 
 /**
- * # code_read — 编码级文件读取（opencode read 契约）
+ * # code_read — 编码级文件读取（业界标准 CLI 编码智能体 read 契约）
  *
  * 与 Agent 模式的 read_file（视口滚动）互补，本工具面向**编码会话**的读取契约：
  *
@@ -40,9 +40,18 @@ class CodeReadTool(
         raw file content exactly.
 
         - File: returns up to `limit` lines from `offset` (1-based). Default limit 800.
-          Use offset to continue reading long files.
-        - Directory: returns alphabetically sorted entries (dirs with trailing /).
+          For long files, continue reading with a larger offset instead of
+          re-reading from the start.
+        - Directory: lists entries one per line, alphabetically sorted
+          (subdirectories have a trailing /).
         - File not found: similar names in the same directory are suggested.
+
+        Usage guidance:
+        - Avoid tiny slices: if you need more context around a match, read a
+          larger window instead of many 30-line reads.
+        - When you know you'll need several files, batch multiple read calls in
+          one turn instead of sequential calls.
+        - Reading .env-style secret files may require user confirmation.
 
         Size limits: 2000 chars per line, 50KB per read. Read the file in slices
         with offset/limit instead of requesting everything at once.

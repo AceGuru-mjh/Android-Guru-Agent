@@ -3,7 +3,7 @@ package com.apex.agent.core.codetools.edit
 /**
  * # Fuzzy Replacer — 编辑工具的多级模糊回退替换链
  *
- * 借鉴 opencode（edit 工具）与 cline/gemini-cli 的 diff-apply 实践：模型给出的
+ * 借鉴业界标准编码智能体（edit 工具）与 cline/gemini-cli 的 diff-apply 实践：模型给出的
  * `oldString` 经常与文件真实内容有**微小偏差** —— 缩进漂移、空白多少、行尾
  * CRLF、`\n` 被字面转义、中间某行记错一个词。精确匹配失败就直接报错会引发
  * "重读文件 → 再试 → 又错"的循环，烧掉大量轮次。

@@ -11,7 +11,7 @@ import com.apex.agent.core.tools.builtin.BaseTool
 import com.apex.agent.core.tools.toolSchema
 
 /**
- * # code_task — 子代理任务委派工具（Issue #147，opencode 风格 task 工具）
+ * # code_task — 子代理任务委派工具（Issue #147，业界标准风格 task 工具）
  *
  * 主代理把探索 / 调研类工作委派给**隔离上下文**的子代理：
  * - 子代理由 [SubAgentRunner] 驱动，在全新引擎实例里跑完整循环，结论作为

@@ -15,6 +15,7 @@ import com.apex.agent.core.tools.ToolRegistry
  *    glob/todo/task…），[resolveRegistryId] 归一到注册表 id（code_read /
  *    code_write / code_edit / shell_execute / …）——**胶囊时间轴按
  *    注册表 id 分族渲染**，归一保证两套引擎的胶囊表现完全一致；
+ *    未知名归一失败时 [suggestToolIds] 给出相近候选，供错误文案引导；
  * 3. **合成工具**：`task`（子代理委派）不在注册表——[syntheticTaskTool]
  *    现场合成 ToolDefinition（仅主代理画像注入；子代理不可再派子代理）。
  *
@@ -73,11 +74,75 @@ object StandardToolSurface {
     // ═══════════════════════ 归一 API ═══════════════════════
 
     /**
-     * 别名归一：未知名原样返回（MCP/skill 动态 id 本来就是注册表 id；
-     * 完全未知名也放行——ToolExecutor 会给出带相近 id 建议的错误）。
+     * 名字归一（比较用）：去空白 + 小写 + 连字符/点号 → 下划线。
+     *
+     * 模型偶发输出 `Read-File` / `Bash` / `TODO` 这类大小写或分隔符漂移；
+     * 归一只影响比较，不改变原名（MCP/skill 动态 id 原样放行）。
+     */
+    private fun normalizeKey(raw: String): String =
+        raw.trim().lowercase().replace('-', '_').replace('.', '_')
+
+    /** 归一键 → 注册表 id（大小写/分隔符漂移容错层）。 */
+    private val NORMALIZED_ALIAS_TO_REGISTRY: Map<String, String> by lazy {
+        ALIAS_TO_REGISTRY.mapKeys { (key, _) -> normalizeKey(key) }
+    }
+
+    /**
+     * 别名归一（三层容错）：精确别名表 → 大小写/分隔符归一后再查 →
+     * 仍未命中原样返回（MCP/skill 动态 id 本来就是注册表 id；完全未知
+     * 名也放行——ToolExecutor 会给出带相近 id 建议的错误）。
      */
     fun resolveRegistryId(name: String): String =
-        ALIAS_TO_REGISTRY[name] ?: name
+        ALIAS_TO_REGISTRY[name]
+            ?: NORMALIZED_ALIAS_TO_REGISTRY[normalizeKey(name)]
+            ?: name
+
+    /**
+     * 给未知工具名找相近候选（前 3 个，保持 available 原序）。
+     *
+     * 比较前做宽松归一（小写 + `-`/`.` → `_` + 双方去 `code_` 前缀），
+     * 命中条件：编辑距离 ≤ 2 或前缀/包含匹配。纯函数，供
+     * [StandardPrompts.unknownToolResult] 拼修正建议。
+     */
+    fun suggestToolIds(attempted: String, available: List<String>): List<String> {
+        val target = normalizeKey(attempted).removePrefix("code_")
+        if (target.isEmpty()) return emptyList()
+        return available.filter { candidate ->
+            val normalized = normalizeKey(candidate).removePrefix("code_")
+            normalized.isNotEmpty() && (
+                levenshteinWithin(target, normalized, limit = 2) ||
+                    normalized.startsWith(target) ||
+                    normalized.contains(target) ||
+                    target.startsWith(normalized)
+                )
+        }.take(3)
+    }
+
+    /** 有界编辑距离（超过 limit 提前剪枝；短名也能安全比较）。 */
+    private fun levenshteinWithin(a: String, b: String, limit: Int): Boolean {
+        if (a.isEmpty()) return b.length <= limit
+        if (b.isEmpty()) return a.length <= limit
+        if (kotlin.math.abs(a.length - b.length) > limit) return false
+        var prev = IntArray(b.length + 1) { it }
+        var cur = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            cur[0] = i
+            var rowMin = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(
+                    prev[j] + 1,
+                    cur[j - 1] + 1,
+                    prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1
+                )
+                if (cur[j] < rowMin) rowMin = cur[j]
+            }
+            if (rowMin > limit) return false
+            val swap = prev
+            prev = cur
+            cur = swap
+        }
+        return prev[b.length] <= limit
+    }
 
     /** 是否合成 task 工具（派发子代理的唯一入口）。 */
     fun isSyntheticTaskTool(name: String): Boolean =
@@ -95,12 +160,15 @@ object StandardToolSurface {
      * @param registry 工具注册表（共享单例）
      * @param forcedToolIds v4 强制函数集（非空时只暴露选中工具 + task）
      * @param exposeAll true = 忽略画像白名单（用户显式"全量暴露"）
+     * @param includeSyntheticTools 是否注入合成 task 工具（默认取画像配置；
+     *   子代理上下文必须显式传 false——子代理不能再派子代理）
      */
     fun buildToolPlan(
         definition: StandardAgentDefinition,
         registry: ToolRegistry,
         forcedToolIds: Set<String> = emptySet(),
-        exposeAll: Boolean = false
+        exposeAll: Boolean = false,
+        includeSyntheticTools: Boolean = definition.includeSyntheticTools
     ): List<ToolDefinition> {
         val all = registry.getToolDefinitions()
         val forced = forcedToolIds.mapNotNull { id -> all.firstOrNull { it.name == id } }
@@ -125,7 +193,7 @@ object StandardToolSurface {
         )).take(MAX_TOOLS)
 
         val result = curated.toMutableList()
-        if (definition.includeSyntheticTools && forced.isEmpty()) {
+        if (includeSyntheticTools && forced.isEmpty()) {
             result.add(syntheticTaskTool())
         }
         return result
@@ -162,11 +230,18 @@ object StandardToolSurface {
         appendLine("todo→code_todo, check→code_check) — but prefer the exact names above.")
         if (planToolIds.contains(SYNTHETIC_TASK_ID)) {
             appendLine()
-            appendLine("`task` dispatches an isolated sub-agent: params description (one")
-            appendLine("line), prompt (self-contained instruction), subagent_type")
-            appendLine("(explore = read-only code investigation / research = web-grounded).")
-            appendLine("Use it for exploration & research so your own context stays lean;")
-            appendLine("never delegate the edits themselves.")
+            appendLine("`task` dispatches an isolated sub-agent. It does NOT see this")
+            appendLine("conversation — the prompt you pass must be fully self-contained")
+            appendLine("(goal, scope, expected output format, write-code-or-research-only,")
+            appendLine("how to verify). subagent_type:")
+            appendLine("- explore = read-only code investigation (returns path:line evidence)")
+            appendLine("- research = web-grounded investigation (returns sourced conclusions)")
+            appendLine("- general = full-surface autonomous executor for self-contained")
+            appendLine("  multi-step tasks")
+            appendLine("Launch independent tasks in parallel. The sub-agent's result is")
+            appendLine("invisible to the user — relay the conclusion yourself. Delegate")
+            appendLine("exploration and research to keep your context lean, but keep the")
+            appendLine("primary edit loop to yourself.")
         }
         if (definition.isReadOnly) {
             appendLine()
@@ -179,19 +254,36 @@ object StandardToolSurface {
 
     /**
      * 合成 task 工具定义（schema 与 [StandardSubAgentRequest] 对齐）。
+     *
+     * subagent_type 取值域 = explore / research / general 三种（与
+     * [StandardAgentKind.fromKey] 的解析域一致），描述对齐业界标准
+     * task 工具的用法精华：自包含 prompt / 明确写码或纯调研 /
+     * 结果仅主代理可见需自己转述。
      */
     fun syntheticTaskTool(): ToolDefinition = ToolDefinition(
         name = SYNTHETIC_TASK_ID,
         description = """
-            Dispatch an isolated sub-agent to run a self-contained task and return
-            its conclusion as this tool's result. The sub-agent has its own fresh
-            context (it does NOT see this conversation), its own tool surface and
-            a turn budget. Two types:
+            Dispatch an isolated sub-agent to run a self-contained task and
+            return its conclusion as this tool's result. The sub-agent has its
+            own fresh context — it does NOT see this conversation — its own
+            tool surface and a turn budget. Three types:
             - explore: read-only code investigation; returns path:line evidence.
             - research: web-grounded investigation; returns sourced conclusions.
-            Use for "find all usages of X", "trace module wiring", "check latest
-            docs for library Y" — anything that would flood your context with
-            intermediate tool output. Keep the final edits to yourself.
+            - general: full-surface autonomous executor for self-contained
+              multi-step tasks (can read, write, edit, and run commands).
+
+            Usage notes:
+            - Launch multiple independent tasks in parallel when they don't
+              depend on each other.
+            - The sub-agent does NOT see this conversation — the prompt must
+              be fully self-contained (goal, scope, exact expected output
+              format). State explicitly whether it should WRITE CODE or only
+              research, and how to verify its work.
+            - Its result is only visible to you — summarize it for the user
+              yourself.
+            - Delegate exploration and research to keep your context lean, but
+              keep the primary edit loop to yourself unless the task is
+              genuinely independent.
         """.trimIndent(),
         parameters = """
             {
@@ -203,12 +295,12 @@ object StandardToolSurface {
                 },
                 "prompt": {
                   "type": "string",
-                  "description": "Full self-contained instruction: goal, scope, expected output format. The sub-agent sees ONLY this."
+                  "description": "Full self-contained instruction: goal, scope, expected output format, whether to write code or research only, how to verify. The sub-agent sees ONLY this."
                 },
                 "subagent_type": {
                   "type": "string",
-                  "enum": ["explore", "research"],
-                  "description": "explore = read-only code investigation (default), research = web-grounded"
+                  "enum": ["explore", "research", "general"],
+                  "description": "explore = read-only code investigation, research = web-grounded investigation, general = full-surface autonomous executor (default: explore)"
                 }
               },
               "required": ["description", "prompt"]

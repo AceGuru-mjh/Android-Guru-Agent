@@ -1,7 +1,7 @@
 package com.apex.agent.permission
 
 /**
- * ═══ opencode 式权限模式（Issue #155）—— 决策引擎 ═══
+ * ═══ 业界标准式权限模式（Issue #155）—— 决策引擎 ═══
  *
  * 纯 Kotlin 决策核心：零 Android / 零网络 / 零 IO 依赖，
  * 输入（模式 + 规则 + 工具上下文）完全确定输出，
@@ -22,7 +22,7 @@ package com.apex.agent.permission
  *     （见 [EDIT_LIKE_PREFIXES]）AllowExplicit；其余 Ask；
  *  5. DEFAULT 模式默认 → 只读 [PermissionDecision.AllowDefault]；
  *     其余（含破坏性 / 敏感操作）一律 Ask——即「DEFAULT 下非只读
- *     一律询问，显式规则才可越级放行」的 opencode 语义。
+ *     一律询问，显式规则才可越级放行」的业界标准语义。
  */
 /**
  * 一次待决工具调用的上下文快照。

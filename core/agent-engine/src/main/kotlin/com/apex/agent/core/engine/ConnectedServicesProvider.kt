@@ -11,7 +11,7 @@ package com.apex.agent.core.engine
  * "GitHub 连接没有作用"）。未连接时更要命：模型调用后拿到"未连接"错误，
  * 既不知道引导用户去哪配置，也往往直接放弃。
  *
- * 修复策略（学习 opencode 的 env 块 + operit 的 ACTIVE_PACKAGES 段）：
+ * 修复策略（学习业界标准 CLI 编码智能体的 env 块 + operit 的 ACTIVE_PACKAGES 段）：
  * 把"服务连接状态"作为**每轮注入的环境真值**告诉模型——与
  * ToolEnvironmentState 的 fail-open 哲学一致：知道的一定说，不知道的
  * 不猜。App 层实现（AndroidConnectedServicesProvider）聚合：

@@ -17,7 +17,7 @@ import java.io.File
  * 匹配，输出相对路径列表（字母序，上限 100 + 截断提示）。与 code_grep 一样排除噪音目录。
  *
  * 参数描述显式防呆："不要传字符串 'undefined'/'null'，直接省略 path"
- * （opencode 在描述里处理的同款模型坏习惯）。
+ * （业界标准 CLI 编码智能体在描述里处理的同款模型坏习惯）。
  */
 class CodeGlobTool(
     private val roots: CodeWorkspaceRoots
@@ -31,6 +31,10 @@ class CodeGlobTool(
         Noise dirs (.git, build, node_modules, …) are excluded.
 
         Results are workspace-relative paths, alphabetically sorted, capped at 100.
+
+        For open-ended exploration that may take multiple rounds of searching,
+        consider delegating to a sub-agent via the task tool instead of searching
+        yourself.
     """.trimIndent(),
     declaredSchema = toolSchema {
         string("pattern", required = true, description = "Glob pattern, e.g. \"**/*.kt\"")

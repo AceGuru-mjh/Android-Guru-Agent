@@ -70,7 +70,7 @@ class CodeToolsTest {
             """{"path": "code.txt", "old_string": "start\ninner\nend", "new_string": "START\ninner\nEND"}"""
         )
         assertTrue(result.render(), result.render().contains("✅"))
-        // 语义与 opencode 对齐：new_string 原样写入（模糊匹配只定位，不改写替换内容）
+        // 语义与业界标准 edit 契约对齐：new_string 原样写入（模糊匹配只定位，不改写替换内容）
         assertEquals("START\ninner\nEND\n", file.readText())
     }
 

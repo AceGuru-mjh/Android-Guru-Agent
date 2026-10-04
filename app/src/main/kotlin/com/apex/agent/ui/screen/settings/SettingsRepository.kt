@@ -566,7 +566,7 @@ data class AgentSettings(
     val agentRoles: List<AgentRole> = emptyList(),
     val activeRoleId: String = AgentRole.BUILTIN_ALL_ROUNDER_ID,
 
-    // ═══ 工具权限（v1.0 #155 opencode 式权限模式）═══
+    // ═══ 工具权限（v1.0 #155 业界标准式权限模式）═══
     // 两模式共享的 ToolExecutor 门控：模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
     // + 按序首匹配规则三元组（ALLOW/ASK/DENY，pattern 支持尾缀星号通配，
     // 覆盖 mcp__ 动态 id）。决策器见 PermissionDecider，门见 PermissionModeGate。

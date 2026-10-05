@@ -180,7 +180,8 @@ fun CodeScreen(
                 isLoading = state.editorLoading,
                 errorText = state.editorError,
                 onClose = viewModel::closeEditor,
-                onLineClick = { line -> viewModel.insertAtRef("@$editorPath:$line") }
+                onLineClick = { line -> viewModel.insertAtRef("@$editorPath:$line") },
+                onDismissError = viewModel::dismissEditorError
             )
         }
 

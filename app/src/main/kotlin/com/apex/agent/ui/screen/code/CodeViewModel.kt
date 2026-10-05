@@ -838,7 +838,9 @@ class CodeViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (_uiState.value.editorFilePath == trimmed) {
-                    _uiState.update { it.copy(editorLoading = false, editorError = e.message ?: "文件加载失败") }
+                    // #209 收尾：编辑器加载失败同样走 sanitize —— 裸 message
+                    // （英文堆栈/null）不直出错误行。
+                    _uiState.update { it.copy(editorLoading = false, editorError = sanitizeErrorText(e)) }
                 }
             }
         }
@@ -847,6 +849,11 @@ class CodeViewModel @Inject constructor(
     fun closeEditor() {
         editorJob?.cancel()
         _uiState.update { it.copy(editorFilePath = null, editorFile = null, editorLoading = false, editorError = null) }
+    }
+
+    /** #209 收尾：单独清掉编辑器错误行（面板保留，不整块关闭）。 */
+    fun dismissEditorError() {
+        _uiState.update { it.copy(editorError = null) }
     }
 
     // ═══ 工作区管理 ═══

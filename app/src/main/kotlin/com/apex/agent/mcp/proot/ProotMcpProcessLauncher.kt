@@ -355,8 +355,10 @@ private class ProotProcessAdapter(private val process: Process) : McpProcessHand
     private val stderrTail = StringBuilder()
     private val stderrTee = LineTeeInputStream()
 
-    /** P3 修复：真实 pid 上报（#197 契约在沙箱链路同样兑现）。 */
-    override val pid: Long get() = process.pid()
+    // P3（pid 上报）说明：java.lang.Process.pid() 是 JDK 9+ API，Android 的
+    // compileSdk classpath 不暴露（CI :app:compileDebugKotlin 实测 Unresolved）；
+    // 反射读取又被仓库质量门禁禁止 —— 按接口契约回退 null（「无法获取时
+    // null」），宿主 JvmProcessLauncher（纯 JVM 模块）仍上报真实 pid。
 
     /** stderr 尾部快照（诊断用；最多 4KB 环形缓冲）。 */
     fun recentStderr(): String = synchronized(stderrTail) { stderrTail.toString() }

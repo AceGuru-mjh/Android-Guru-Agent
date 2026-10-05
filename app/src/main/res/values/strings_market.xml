@@ -63,12 +63,6 @@
     <string name="market_skills_search_hint">Search skills / tags / descriptions (fuzzy matching)</string>
     <string name="market_skills_suggestions">Did you mean:</string>
     <string name="market_cat_all">All</string>
-    <string name="market_cat_file">File</string>
-    <string name="market_cat_web">Network</string>
-    <string name="market_cat_browser">Browser</string>
-    <string name="market_cat_memory">Memory</string>
-    <string name="market_cat_system">System</string>
-    <string name="market_cat_utility">Utility</string>
 
     <!-- ═══ Browse · Skills · ClawHub repository ═══ -->
     <string name="market_clawhub_search_hint">Search ClawHub skills (e.g. web search / pdf)</string>
@@ -208,13 +202,7 @@
     <string name="market_github_fetch_install">Fetch &amp; install</string>
 
     <!-- ═══ Dialogs · Dependency graph ═══ -->
-    <string name="market_depgraph_title">Dependency graph</string>
-    <string name="market_depgraph_subtitle">%1$d nodes \u00B7 %2$d edges</string>
-    <string name="market_depgraph_healthy">Healthy</string>
-    <string name="market_depgraph_unhealthy">Unhealthy</string>
-    <string name="market_depgraph_cycles">\u26A0 %1$d circular dependencies detected:</string>
     <string name="market_depgraph_missing">\u26A0 %1$d missing dependencies:</string>
-    <string name="market_depgraph_topo">Topological order (dependencies first):</string>
 
     <!-- ═══ Dialogs · Manifest dry-run preview ═══ -->
     <string name="market_dryrun_confirm">Confirm install</string>

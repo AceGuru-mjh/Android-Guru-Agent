@@ -39,41 +39,11 @@
     <string name="mode_guide_human_label">人工介入点</string>
     <string name="mode_guide_prompt_label">提示词段</string>
 
-    <string name="mode_guide_build_cases">快速任务、熟练操作，追求速度省去仪式感的场合</string>
-    <string name="mode_guide_build_flow">流式 ReAct 循环：思考 → 行动 → 观察 → 循环直至完成；首个纯文本回答即收尾</string>
-    <string name="mode_guide_build_tools">完整 CORE 工具集；鼓励激进用工具——一次正确操作胜过长篇解释</string>
-    <string name="mode_guide_build_human">设计上无人工介入；高风险工具仍受权限系统门控（首次确认）</string>
-    <string name="mode_guide_build_prompt">「## Mode: BUILD」——直接行动、自主推进直到完成</string>
 
-    <string name="mode_guide_plan_cases">多步任务、高风险操作链，想在动手前审阅并调整步骤的场合</string>
-    <string name="mode_guide_plan_flow">规划（只读、无工具）→ 确认卡勾选/重排 → 拓扑锁定 → 按锁定序执行 → 只读反思</string>
-    <string name="mode_guide_plan_tools">规划期无工具（显式只读提示段）；执行期完整 CORE 集；依赖成环时回退声明顺序</string>
-    <string name="mode_guide_plan_human">计划确认卡：勾选/取消步骤、上移下移、执行或取消；锁定后计划不可变</string>
-    <string name="mode_guide_plan_prompt">「## Mode: PLAN」+ 规划期「## Planning Phase (READ-ONLY)」</string>
 
-    <string name="mode_guide_spec_cases">交付物驱动的工作：文档、重构，先说清「做成什么样才算完成」的场合</string>
-    <string name="mode_guide_spec_flow">规格（目标/需求/约束/验收标准/交付物）→ 确认 → 每个交付物独立跑构建循环 → 总结</string>
-    <string name="mode_guide_spec_tools">规格生成期无工具；执行期每步都携带完整规格上下文，范围不漂移</string>
-    <string name="mode_guide_spec_human">规格确认卡：任何工具运行前批准契约或中止</string>
-    <string name="mode_guide_spec_prompt">「## Mode: SPEC」——只输出规格 JSON，先不执行</string>
 
-    <string name="mode_guide_reflect_cases">代码生成、内容创作等质量优先于延迟的场景；轮数在 设置 → Agent 调整</string>
-    <string name="mode_guide_reflect_flow">草稿（流式）→ 评审（意见卡）→ 修正 ×N 轮（N = 反思轮数，1–3）→ 最终答案</string>
-    <string name="mode_guide_reflect_tools">与 Build 同款 CORE 工具集；评审/修正轮为纯 LLM 调用（无额外工具风险）</string>
-    <string name="mode_guide_reflect_human">轮间可阅读评审意见卡；轮数可配置，非交互式</string>
-    <string name="mode_guide_reflect_prompt">「## Mode: REFLECTION」——追求完整、正确、清晰</string>
 
-    <string name="mode_guide_assist_cases">意图模糊、多目标（应用/文件）选择、不可逆决策——猜错代价高的场合</string>
-    <string name="mode_guide_assist_flow">构建循环 + 决策点自动检测：回答文本里摆出「方案 A vs 方案 B…」时自动弹出选择菜单；你的选择作为下一条指令回填</string>
-    <string name="mode_guide_assist_tools">完整 CORE 工具集；同时要求模型主动调 ask_user_choice——检测器是它不调时的兜底</string>
-    <string name="mode_guide_assist_human">每个检出的决策点都会暂停等你选择（5 分钟超时则回退草稿收尾）</string>
-    <string name="mode_guide_assist_prompt">「## Mode: HUMAN_ASSIST」——选择实质影响结果时绝不擅自猜</string>
 
-    <string name="mode_guide_custom_cases">可复用行为：翻译官、代码评审、头脑风暴、严谨科学家——或你自己的预设</string>
-    <string name="mode_guide_custom_flow">构建循环 + 选中预设的指令注入——引擎相同，人格不同</string>
-    <string name="mode_guide_custom_tools">同 Build；预设可自带工具使用约束（如评审员先读后评）</string>
-    <string name="mode_guide_custom_human">预设管理：设置 → Agent → 自定义模式预设（内置锁定，复制后可改）</string>
-    <string name="mode_guide_custom_prompt">「## Mode: CUSTOM」+「## Custom Instructions」= 选中预设的指令</string>
 
     <!-- ═══ 思考档位速览（同弹层，数据来自 ThinkingProfile 静态表）═══ -->
     <string name="mode_guide_thinking_title">思考档位速览</string>

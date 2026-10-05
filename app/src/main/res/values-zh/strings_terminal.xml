@@ -9,12 +9,9 @@
     <string name="term_cd_env_center">环境中心</string>
     <string name="term_cd_settings">终端设置</string>
     <string name="term_new_session_title">新建终端会话</string>
-    <string name="term_new_session_ubuntu_desc">Ubuntu 会话提供完整 Linux 开发环境（apt / bash / 工具链）；rootfs 随 APK 内置（完整 Ubuntu，~300MB+ 档案），首次使用离线解包约 2~5 分钟，进度在横幅显示。</string>
     <string name="term_ubuntu_session">Ubuntu 会话</string>
     <string name="term_cd_new_session">新建会话</string>
     <string name="term_cd_close_session">关闭会话</string>
-    <string name="term_no_session">未连接会话</string>
-    <string name="term_waiting_input">⌨ 等待输入</string>
     <string name="term_retry">重试</string>
     <string name="term_env_center">环境中心</string>
     <string name="term_settings_title">终端设置</string>
@@ -92,8 +89,6 @@
     <string name="term_open_env_center_diag">打开环境中心诊断</string>
     <string name="term_no_terminal_session">当前没有终端会话</string>
     <string name="term_env_ready_hint">Ubuntu 环境已就绪 · bash / gcc / python3 / git 开箱即用</string>
-    <string name="term_busy_unpacking">Ubuntu 环境解包中 %1$d%% · 完成后可新建 Ubuntu 会话</string>
-    <string name="term_busy_bootstrap">Ubuntu 工具链初始化中…</string>
     <string name="term_session_ubuntu_desc">完整 Linux 环境 · bash / gcc / python3 / git（推荐）</string>
     <string name="term_session_android_desc">系统 toybox 环境 · 适合快查设备（无完整工具链）</string>
 

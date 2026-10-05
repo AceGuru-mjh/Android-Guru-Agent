@@ -9,12 +9,9 @@
     <string name="term_cd_env_center">Environment center</string>
     <string name="term_cd_settings">Terminal settings</string>
     <string name="term_new_session_title">New terminal session</string>
-    <string name="term_new_session_ubuntu_desc">Ubuntu sessions provide a full Linux dev environment (apt / bash / toolchains); the rootfs ships inside the APK (full Ubuntu, ~300MB+ archive). First offline unpack takes ~2–5 minutes, with progress shown in the banner.</string>
     <string name="term_ubuntu_session">Ubuntu session</string>
     <string name="term_cd_new_session">New session</string>
     <string name="term_cd_close_session">Close session</string>
-    <string name="term_no_session">No active session</string>
-    <string name="term_waiting_input">⌨ Waiting for input</string>
     <string name="term_retry">Retry</string>
     <string name="term_env_center">Environment center</string>
     <string name="term_settings_title">Terminal settings</string>
@@ -92,8 +89,6 @@
     <string name="term_open_env_center_diag">Open environment center to diagnose</string>
     <string name="term_no_terminal_session">No terminal session yet</string>
     <string name="term_env_ready_hint">Ubuntu environment ready · bash / gcc / python3 / git out of the box</string>
-    <string name="term_busy_unpacking">Unpacking Ubuntu environment %1$d%% · new Ubuntu sessions unlock when done</string>
-    <string name="term_busy_bootstrap">Initializing Ubuntu toolchain…</string>
     <string name="term_session_ubuntu_desc">Full Linux environment · bash / gcc / python3 / git (recommended)</string>
     <string name="term_session_android_desc">System toybox environment · quick device checks (no full toolchain)</string>
 

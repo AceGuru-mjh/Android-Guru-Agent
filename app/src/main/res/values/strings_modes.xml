@@ -39,41 +39,11 @@
     <string name="mode_guide_human_label">Human touchpoints</string>
     <string name="mode_guide_prompt_label">Prompt section</string>
 
-    <string name="mode_guide_build_cases">Quick tasks, familiar operations, when you want speed over ceremony</string>
-    <string name="mode_guide_build_flow">Streaming ReAct loop: think → act → observe → repeat until done; ends on the first plain-text answer</string>
-    <string name="mode_guide_build_tools">Full CORE toolset exposed; aggressive tool use encouraged — one correct action beats a long explanation</string>
-    <string name="mode_guide_build_human">None by design — high-risk tools still gated by the permission system (first-use confirm)</string>
-    <string name="mode_guide_build_prompt">\"## Mode: BUILD\" — act directly, keep working autonomously</string>
 
-    <string name="mode_guide_plan_cases">Multi-step tasks, risky chains, when you want to review and reorder steps before anything runs</string>
-    <string name="mode_guide_plan_flow">Plan (read-only, no tools) → your confirmation with per-step checkboxes &amp; reorder → topological lock → execute in locked order → read-only reflection</string>
-    <string name="mode_guide_plan_tools">None during planning (explicit read-only prompt section); full CORE set during execution; dependsOn cycles fall back to declared order</string>
-    <string name="mode_guide_plan_human">Plan confirmation card: enable/disable steps, move up/down, execute or cancel; after locking, the plan is immutable</string>
-    <string name="mode_guide_plan_prompt">\"## Mode: PLAN\" + \"## Planning Phase (READ-ONLY)\" while planning</string>
 
-    <string name="mode_guide_spec_cases">Deliverable-driven work: docs, refactors, anything where \"what counts as done\" must be agreed up front</string>
-    <string name="mode_guide_spec_flow">Spec (goal / requirements / constraints / acceptance criteria / deliverables) → your confirmation → each deliverable runs its own build loop → summary</string>
-    <string name="mode_guide_spec_tools">None during spec generation; every execution step carries the full spec as context so scope is respected</string>
-    <string name="mode_guide_spec_human">Spec confirmation card: approve the contract or abort before any tool runs</string>
-    <string name="mode_guide_spec_prompt">\"## Mode: SPEC\" — output the spec JSON only, do not execute yet</string>
 
-    <string name="mode_guide_reflect_cases">Code generation, writing, any output where quality beats latency; tune rounds in Settings → Agent</string>
-    <string name="mode_guide_reflect_flow">Draft (streamed) → review (critique card) → revise ×N rounds (N = Reflection Rounds, 1–3) → final answer</string>
-    <string name="mode_guide_reflect_tools">Same CORE toolset as Build; review/revise passes are LLM-only (no extra tool risk)</string>
-    <string name="mode_guide_reflect_human">You read the review card between passes; rounds are configurable, not interactive</string>
-    <string name="mode_guide_reflect_prompt">\"## Mode: REFLECTION\" — aim for completeness, correctness, clarity</string>
 
-    <string name="mode_guide_assist_cases">Ambiguous intents, multiple targets/apps/files, irreversible choices — whenever guessing wrong is expensive</string>
-    <string name="mode_guide_assist_flow">Build loop + automatic decision-point detection: if the answer text lays out \"option A vs option B…\" a choice menu pops automatically; your pick is fed back as the next instruction</string>
-    <string name="mode_guide_assist_tools">Full CORE toolset; the model is also instructed to call ask_user_choice proactively — detection is the safety net for when it doesn\'t</string>
-    <string name="mode_guide_assist_human">Every detected decision point pauses execution until you choose (or the 5-minute timeout falls back to the draft)</string>
-    <string name="mode_guide_assist_prompt">\"## Mode: HUMAN_ASSIST\" — never guess when the choice materially changes the result</string>
 
-    <string name="mode_guide_custom_cases">Reusable behaviors: translator, code reviewer, brainstormer, rigorous scientist — or your own presets</string>
-    <string name="mode_guide_custom_flow">Build loop with the selected preset\'s instruction appended — identical engine, different persona</string>
-    <string name="mode_guide_custom_tools">Same as Build; the preset may add tool-usage constraints of its own (e.g. reviewer reads before judging)</string>
-    <string name="mode_guide_custom_human">Preset management: Settings → Agent → Custom Mode Presets (built-ins locked, duplicate to customize)</string>
-    <string name="mode_guide_custom_prompt">\"## Mode: CUSTOM\" + \"## Custom Instructions\" = the selected preset\'s instruction</string>
 
     <!-- ═══ Thinking levels quick table (same sheet, data from ThinkingProfile) ═══ -->
     <string name="mode_guide_thinking_title">Thinking levels at a glance</string>

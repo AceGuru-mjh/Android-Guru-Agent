@@ -227,15 +227,11 @@
     <string name="settings_role_note">Role mappings are saved; real multi-client routing lands in the Agent engine later.</string>
 
     <!-- About -->
-    <string name="settings_about_title">About</string>
-    <string name="settings_about_subtitle">Version / open-source components / repository</string>
     <string name="settings_about_version">Version</string>
     <string name="settings_about_package">Package name</string>
     <string name="settings_about_build_type">Build type</string>
-    <string name="settings_about_components">Open-source components</string>
     <string name="settings_about_components_list">Jetpack Compose · Hilt (Dagger) · Room · OkHttp · kotlinx.serialization · kotlinx.coroutines · Coil · Shizuku API · WorkManager · androidx.security · Haze (Liquid Glass) · Vico (charts) · EasyFloat</string>
     <string name="settings_about_no_browser">No app found that can open links</string>
-    <string name="settings_about_view_repo">View the GitHub repository</string>
     <string name="settings_about_star">Give this project a star — thank you!</string>
     <string name="settings_about_credits">This project\'s architecture draws heavily on the open-source community (Termux, proot, Operit, etc.) — saluting all contributors.</string>
     <!-- Update check (reads version.json from the release repository) -->
@@ -258,12 +254,10 @@
     <string name="settings_about_update_ms">%1$d ms</string>
     <string name="settings_about_update_fastest">Fastest</string>
     <string name="settings_about_update_unreachable">Unreachable</string>
-    <string name="settings_about_update_downloading">Downloading… %1$d%%</string>
     <string name="settings_about_update_download_started">Download started: %1$s</string>
     <string name="settings_about_update_enqueue_failed">Could not start download (DownloadManager unavailable)</string>
     <string name="settings_about_update_verify_failed_title">Checksum failed</string>
     <string name="settings_about_update_verify_failed_body">SHA-256 mismatch on %1$s — the file is corrupted. Please retry with another mirror</string>
-    <string name="settings_about_update_patch_done_title">Patch ready</string>
     <string name="settings_about_update_patch_done_saved">Saved to: %1$s</string>
     <string name="settings_about_update_apk_done_title">APK ready</string>
     <string name="settings_about_update_apk_done_body">v%1$s downloaded and verified (%2$s). Tap \"Install now\" — Android will show its own install confirmation</string>

@@ -108,8 +108,6 @@
     <string name="chat_cd_expand">展开</string>
     <string name="chat_json_more">… 还有 %1$d 项</string>
     <string name="chat_run_stats">运行统计</string>
-    <string name="chat_stat_iterations">迭代 %1$d</string>
-    <string name="chat_stat_tool_calls">工具调用 %1$d</string>
     <string name="chat_step">步骤 %1$d</string>
 
     <!-- ═══ AgentChatToolCards ═══ -->
@@ -133,12 +131,7 @@
     <string name="chat_cd_open_link">打开链接</string>
 
     <!-- ═══ AgentChatDialogs ═══ -->
-    <string name="chat_custom_instruction_title">自定义模式指令</string>
-    <string name="chat_custom_instruction_desc">该指令会拼入 system prompt，指导 Agent 行为（如输出格式、语言、步骤约束）。</string>
-    <string name="chat_custom_instruction_hint">例如：始终用中文回答，先给结论再给细节</string>
     <string name="chat_save">保存</string>
-    <string name="chat_clear">清除</string>
-    <string name="chat_reasoning_effort_label">原生思考:</string>
     <string name="chat_effort_none">默认</string>
     <string name="chat_effort_low">低</string>
     <string name="chat_effort_medium">中</string>
@@ -146,12 +139,6 @@
     <string name="chat_effort_max">最大</string>
     <!-- v1.2 七级思考：新深度档描述（= ThinkingProfile.uiDescriptionZh 要点版，含执行策略差异） -->
     <!-- #168 六档思考：档位画像描述（= ThinkingProfile.uiDescriptionZh，含执行策略差异） -->
-    <string name="thinking_level_none_desc">直接执行，不生成推理；快进快出（迭代×0.8、更早压缩省 token）</string>
-    <string name="thinking_level_light_desc">1-2 句简短思考后立即行动，省 token 的轻量推理</string>
-    <string name="thinking_level_standard_desc">标准三步思维链：拆解任务→逐步推理→执行观察</string>
-    <string name="thinking_level_deep_desc">多路径五步推理（候选方案→评估→批评→择优）；工具失败/高风险后追加自检，迭代×1.2</string>
-    <string name="thinking_level_maximum_desc">七步思维树穷举推理 + 工具自检 + 最终自评清单（目标/副作用/遗漏），迭代×1.5</string>
-    <string name="thinking_level_auto_desc">自动：按任务复杂度（长度/多步指示/代码含量/风险词/错误史）逐轮动态选档</string>
     <string name="chat_question_title">🧩 Agent 需要你选择</string>
     <string name="chat_multi_select">可多选</string>
     <string name="chat_recommended">推荐</string>
@@ -221,12 +208,10 @@
     <string name="chat_slash_status_external">示例</string>
     <string name="chat_slash_cd_selected">已选中，再次点击移除</string>
     <!-- 输入框内技能 chip（SkillChipInputField）-->
-    <string name="chat_chip_cd_remove">移除技能 %1$s</string>
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">任务模式：%1$s，点击切换</string>
     <!-- #168 CUSTOM 模式预设 chip（顶栏当前预设名） -->
-    <string name="chat_mode_preset_cd">自定义模式预设：%1$s，点击编辑</string>
     <string name="chat_role_selector_cd">Agent 角色：%1$s，点击切换</string>
     <string name="chat_role_builtin_cd">内置角色</string>
     <string name="chat_mode_chat_desc">纯聊天——人设与聊天技能驱动</string>
@@ -308,7 +293,6 @@
     <string name="chat_slash_no_skills">暂无已启用 Skill</string>
     <string name="chat_slash_mcp_servers">MCP 服务器</string>
     <string name="chat_slash_mcp_connected">已连接 %1$d</string>
-    <string name="chat_slash_mcp_empty">未配置 MCP 服务器（市场页可添加）</string>
     <string name="chat_slash_plugins">插件</string>
     <string name="chat_slash_plugins_empty">未发现已安装的插件</string>
     <string name="chat_slash_plugins_partial">已加载插件仅验证连通 —— 工具执行桥接建设中</string>

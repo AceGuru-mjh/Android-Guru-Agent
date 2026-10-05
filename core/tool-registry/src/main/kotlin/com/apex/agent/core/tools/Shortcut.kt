@@ -345,11 +345,7 @@ class ShortcutRegistry {
         registry: ToolRegistry
     ): AgentTool = ShortcutTool(definition, executor, registry)
 
-    /** Export all definitions as a JSON array (backup / transfer). */
-    fun exportJson(): JsonArray = buildJsonArray {
-        definitions.forEach { add(it.toJson()) }
     }
-}
 
 /**
  * The compiled shortcut tool. Construct through [ShortcutRegistry.compile]

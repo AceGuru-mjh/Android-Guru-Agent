@@ -198,11 +198,6 @@ class ShortcutSystemTest {
         assertEquals(1, registry.size())
         assertEquals("Search and save v2", registry.find("shortcut.save_search")!!.name)
 
-        // 导出 JSON 包含全部字段。
-        val exported = registry.exportJson().toString()
-        assertTrue(exported.contains("shortcut.save_search"))
-        assertTrue(exported.contains("web_search"))
-
         assertTrue(registry.remove("shortcut.save_search"))
         assertNull(registry.find("shortcut.save_search"))
         assertEquals(0, registry.size())

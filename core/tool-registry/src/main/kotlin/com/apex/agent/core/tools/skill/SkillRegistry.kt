@@ -599,28 +599,7 @@ class SkillRegistry(
         }
     }
 
-    /**
-     * #206 分类计数（市场 chips 只渲染有内容的域）：scope 过滤同
-     * [getSkillDigests]；返回按 [SkillCategory.order] 排序的有序 Map，
-     * 键为 null 时代表「未分类」旧值残留。
-     */
-    fun getCategoryCounts(scope: String? = null): List<Pair<SkillCategory?, Int>> {
-        val counts = LinkedHashMap<SkillCategory?, Int>()
-        for (cat in SkillCategory.inDisplayOrder()) counts[cat] = 0
-        counts[null] = 0
-        synchronized(lock) {
-            installedSkills.values
-                .filter { it.enabled }
-                .filter { scope.isNullOrBlank() || it.manifest.scope == "all" || it.manifest.scope == scope }
-                .forEach { skill ->
-                    val cat = SkillCategory.of(skill.manifest.category)
-                    counts[cat] = (counts[cat] ?: 0) + 1
-                }
-        }
-        return counts.entries.map { it.key to it.value }.filter { it.second > 0 }
-    }
-
-    /** description 首句（首个句号/分号前），超 72 字符截断加省略号。 */
+        /** description 首句（首个句号/分号前），超 72 字符截断加省略号。 */
     private fun firstSentence(description: String): String {
         val cut = description.indexOfFirst { it == '。' || it == '；' || it == ';' }
         val sentence = if (cut > 0) description.substring(0, cut) else description

@@ -114,9 +114,4 @@ object TextRelevance {
         return scored.sortedByDescending { it.score }.take(limit.coerceAtLeast(1))
     }
 
-    /** 单文档便捷打分（与 [rank] 同口径，不裁剪）。 */
-    fun relatedness(query: String, doc: String): Double {
-        val best = rank(query, listOf(doc), limit = 1)
-        return best.firstOrNull()?.score ?: 0.0
     }
-}

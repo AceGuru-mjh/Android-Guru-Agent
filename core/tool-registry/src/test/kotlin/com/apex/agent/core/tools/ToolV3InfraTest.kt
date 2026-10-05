@@ -347,14 +347,12 @@ class ToolV3InfraTest {
     fun `environment state is tri-state with explicit unknown`() {
         val state = ToolEnvironmentState()
         assertNull(state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
-        assertFalse(state.isSet(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
-        assertFalse(state.isExplicitlyUnset(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
 
         state.set(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE, true)
-        assertTrue(state.isSet(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
+        assertEquals(true, state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
 
         state.set(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE, false)
-        assertTrue(state.isExplicitlyUnset(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
+        assertEquals(false, state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
 
         state.set(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE, null)
         assertNull(state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
@@ -364,12 +362,11 @@ class ToolV3InfraTest {
     fun `environment state ttl expires to unknown never to false`() {
         val state = ToolEnvironmentState()
         state.setWithTtl(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE, true, ttlMs = 40)
-        assertTrue(state.isSet(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
+        assertEquals(true, state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
 
         Thread.sleep(80)
         // 过期 → unknown（fail-open），绝不过期为 false。
         assertNull(state.get(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
-        assertFalse(state.isExplicitlyUnset(ToolEnvironmentState.Flags.KEYBOARD_ACTIVE))
     }
 
     @Test

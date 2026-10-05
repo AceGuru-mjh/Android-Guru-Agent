@@ -6,13 +6,11 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
-import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import kotlinx.coroutines.*
 
 /**
  * 核心无障碍服务
@@ -21,9 +19,9 @@ import kotlinx.coroutines.*
  * - 眼睛：读取UI树、感知界面变化
  * - 手：点击、滑动、输入文本、执行全局操作
  *
- * 同时充当"不死心跳"：
- * - 由system_server管理，不受后台限制
- * - 主进程被杀时可重启
+ * #241：事件订阅已收窄（见 res/xml/accessibility_config.xml —— 仅
+ * typeViewFocused，全仓唯一消费方为键盘遥测）；本类不再充当"不死心跳"
+ *（旧心跳与主进程同进程，alive 恒真，物理上不可能感知主进程被杀）。
  */
 class ApexAccessibilityService : AccessibilityService() {
 
@@ -33,9 +31,6 @@ class ApexAccessibilityService : AccessibilityService() {
             private set
 
         fun isRunning(): Boolean = instance != null
-
-        /** #236 心跳门控用：keepAlive=false 的 JSON 快速判别（与 BootReceiver 同款）。 */
-        private val KEEP_ALIVE_OFF_REGEX = Regex("\"keepAlive\"\\s*:\\s*false")
 
         // #210：服务连接/断开的进程内广播。DefaultPrivilegeManager 借此把
         // _accessibilityAvailable StateFlow 与真实生命周期同步 —— 此前状态流
@@ -66,7 +61,6 @@ class ApexAccessibilityService : AccessibilityService() {
         }
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     // v1.4.4 UX 审查：改为 COW 列表 —— 主线程 onAccessibilityEvent 迭代 vs
     // EnvironmentStateUpdater 在 Dispatchers.Default 协程里 add/remove，
     // 普通 ArrayList 极端时序可抛 ConcurrentModificationException 崩掉无障碍服务。
@@ -77,21 +71,6 @@ class ApexAccessibilityService : AccessibilityService() {
         instance = this
         // #210：先落 instance 再广播，监听方回调内读到的状态与广播语义一致。
         notifyAvailabilityChanged(true)
-
-        // 心跳：每30秒检查主进程。
-        // P2 fix（生命周期竞态）：旧实现在主线程做 binder IPC（runningAppProcesses），
-        // 且无 CoroutineExceptionHandler —— system_server 重启/binder 缓冲满时抛出
-        // DeadObjectException/RuntimeException 会逃出 launch 导致无障碍进程崩溃。
-        // 现移到 Default 调度器 + 单次失败不终止心跳循环 + 异常统一记录。
-        scope.launch(Dispatchers.Default + CoroutineExceptionHandler { _, e ->
-            android.util.Log.w("ApexA11yService", "heartbeat iteration failed", e)
-        }) {
-            while (isActive) {
-                delay(30_000)
-                runCatching { checkMainProcessAlive() }
-                    .onFailure { android.util.Log.w("ApexA11yService", "checkMainProcessAlive failed: ${it.message}") }
-            }
-        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -110,7 +89,7 @@ class ApexAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        scope.cancel()
+        // #241：心跳已删（与主进程同进程，自检物理上无效）；scope 随之移除。
         instance = null
         // #210：断开事件驱动 StateFlow 回落 false，下游选路立刻感知。
         notifyAvailabilityChanged(false)
@@ -279,6 +258,14 @@ class ApexAccessibilityService : AccessibilityService() {
 
     // ═══ 事件监听 ═══
 
+    /**
+     * 注册无障碍事件监听。
+     *
+     * #241：系统级订阅清单已收窄为 typeViewFocused（见
+     * res/xml/accessibility_config.xml，全仓唯一消费方是 EnvironmentStateUpdater
+     * 的键盘遥测）—— 新增监听方若需要其它事件类型（如窗口切换），必须同步
+     * 扩充 config 的 accessibilityEventTypes，否则对应事件永远不会到达。
+     */
     fun addEventListener(listener: (AccessibilityEvent) -> Unit) {
         eventListeners.add(listener)
     }
@@ -289,37 +276,9 @@ class ApexAccessibilityService : AccessibilityService() {
 
     // ═══ 内部方法 ═══
 
-    private fun checkMainProcessAlive() {
-        val am = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-        val alive = am.runningAppProcesses?.any { it.processName == packageName } ?: false
-        if (!alive) {
-            // #236（心跳门控）：Keep Alive 关闭时用户已明确拒绝常驻 —— 无障碍
-            // “不死心跳”不再拉起前台服务（与 BootReceiver 同款 SharedPreferences
-            // 正则快读；解析失败视为开，宁可多拉一次也不静默违背用户预期）。
-            if (!keepAliveEnabled()) return
-            try {
-                val intent = android.content.Intent().apply {
-                    setClassName(packageName, "$packageName.service.ApexCoreService")
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                } else {
-                    startService(intent)
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    /** 快读主进程 apex_settings/agent_settings_v2 的 keepAlive 布尔（缺省/损坏 → true）。
-     * 与 app 模块 BootReceiver.keepAliveEnabled 同款模式（本模块无法依赖 app 层类，
-     * 双端实现由 CI 双向注释锁定同步）。 */
-    private fun keepAliveEnabled(): Boolean {
-        val raw = runCatching {
-            getSharedPreferences("apex_settings", Context.MODE_PRIVATE)
-                .getString("agent_settings_v2", null)
-        }.getOrNull() ?: return true
-        return !KEEP_ALIVE_OFF_REGEX.containsMatchIn(raw ?: "")
-    }
+    // #241：checkMainProcessAlive / keepAliveEnabled（旧「不死心跳」的实现体）
+    // 已删除 —— 服务与主进程同进程，runningAppProcesses 自检恒为真，
+    // 每 30 秒的 binder IPC 空转既耗电又给不出任何有效信号。
 
     private fun traverseNode(
         node: AccessibilityNodeInfo,

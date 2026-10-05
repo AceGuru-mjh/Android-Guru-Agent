@@ -130,8 +130,8 @@ class ApexCoreService : LifecycleService() {
         // nativeCloseAll 兜底 → 停 pump/协程域。
         //
         // 收尾分工（防双宿主打架）：
-        //  - app **在后台**（用户划走/系统停服务/Keep Alive 心跳场景）：服务
-        //    销毁 = 运行时收尾（后台无 UI 消费者，安全）；
+        //  - app **在后台**（用户划走/系统停服务场景）：服务销毁 = 运行时收尾
+        //    （后台无 UI 消费者，安全）；
         //  - app **在前台**（用户在设置里关 Keep Alive / toggle 场景）：跳过
         //    —— MainActivity.onDestroy(isFinishing) 拥有前台收尾权，避免误杀
         //    用户正在敲字的活跃会话。

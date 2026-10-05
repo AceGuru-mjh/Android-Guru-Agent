@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  #241：事件订阅收窄。旧 typeAllMask 订阅全系统所有事件（100ms 节流的
+  binder IPC 回调），而绝大多数时间无任何监听者 —— 纯耗电。全仓审计后
+  唯一消费方是 EnvironmentStateUpdater 的键盘监听（TYPE_VIEW_FOCUSED
+  且事件源可编辑 → KEYBOARD_ACTIVE 遥测）；dumpUiTree / findNodeById /
+  getForegroundPackage / takeScreenshot 等均为按需拉取 API，不依赖事件
+  订阅。因此只订阅 typeViewFocused。新增事件消费方时必须同步扩充本
+  清单（否则 onAccessibilityEvent 永远收不到对应类型，静默失效）。
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityEventTypes="typeViewFocused"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"

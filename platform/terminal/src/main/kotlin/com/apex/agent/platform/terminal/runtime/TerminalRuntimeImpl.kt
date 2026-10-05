@@ -695,7 +695,10 @@ class TerminalRuntimeImpl(
         recoveryService?.stopAutoSave()
         // 4. native 兕底：Kotlin 侧可能因历史 bug/重建失步残留 native session
         //    （closeAll 幂等，对已关 id 无副作用）。
-        try { native.nativeCloseAll() } catch (_: Exception) {}
+        // #260：关停兜底失败留痕 —— 静默时 native 残留泄漏无从诊断
+        try { native.nativeCloseAll() } catch (e: Exception) {
+            android.util.Log.w("TerminalRuntime", "nativeCloseAll fallback failed: ${e.message}")
+        }
         // 5. 停协程域（listener/exit watcher/pump 域 —— SupervisorJob 的 cancel 是协作式）
         scope.cancel()
         pumpScope.cancel()

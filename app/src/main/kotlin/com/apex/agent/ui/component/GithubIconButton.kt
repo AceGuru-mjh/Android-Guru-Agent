@@ -172,7 +172,9 @@ fun GithubIconButton(
  * 1. onSubmit 改为 suspend + nullable username 返回值，避免 UI 假死；
  * 2. 增加 errorMessage 字段，验证失败时 inline 提示，不直接关闭弹窗；
  * 3. 调用期间禁用输入框与按钮；
- * 4. 加入格式预检（ghp_ / github_pat_ 前缀）。
+ * 4. 加入格式预检（ghp_ / github_pat_ 前缀）；
+ * 5. #229：全部文案 stringResource 化，随系统语言取词（原硬编码中文）。
+ *    错误提示经资源 id 存态（onClick/协程非 composable），展示层解析。
  *
  * `internal`（非 private）以便 [com.apex.agent.ui.screen.agent.AgentChatScreen]
  * 在 `/mcp:github` 未连接时复用同一个对话框 —— 避免在两处维护一份 Token 输入 UI。
@@ -185,7 +187,9 @@ internal fun GithubTokenDialog(
 ) {
     var token by remember { mutableStateOf("") }
     var isValidating by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    // #229：错误文案以资源 id 存态（onClick/协程是非 composable 上下文，
+    // 不能直接 stringResource），展示层再解析 —— 与导出 chooser 标题同款模式
+    var errorMessageRes by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
     AlertDialog(
@@ -201,13 +205,15 @@ internal fun GithubTokenDialog(
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp)
                 )
-                Text("输入 GitHub Personal Access Token")
+                // #229：标题随语言取词（原硬编码中文）
+                Text(stringResource(R.string.github_token_dialog_title))
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "在 GitHub → Settings → Developer settings → Personal access tokens 中创建。\n需要 repo 权限。",
+                    // #229：说明文案随语言取词（原硬编码中文，\n 换行双侧一致）
+                    stringResource(R.string.github_token_dialog_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -215,14 +221,15 @@ internal fun GithubTokenDialog(
                     value = token,
                     onValueChange = {
                         token = it
-                        errorMessage = null
+                        errorMessageRes = null
                     },
-                    label = { Text("ghp_xxxx 或 github_pat_xxx") },
+                    // #229：占位 label 随语言取词（原硬编码中文）
+                    label = { Text(stringResource(R.string.github_token_field_label)) },
                     singleLine = true,
-                    isError = errorMessage != null,
-                    supportingText = errorMessage?.let { msg ->
+                    isError = errorMessageRes != null,
+                    supportingText = errorMessageRes?.let { res ->
                         {
-                            Text(msg, color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(res), color = MaterialTheme.colorScheme.error)
                         }
                     },
                     visualTransformation = PasswordVisualTransformation(),
@@ -237,22 +244,22 @@ internal fun GithubTokenDialog(
                     val trimmedToken = token.trim()
                     if (trimmedToken.isBlank()) return@Button
 
-                    // 格式预检：避免无效 token 浪费网络请求
+                    // 格式预检：避免无效 token 浪费网络请求（#229：文案键直存态）
                     if (!isValidTokenFormat(trimmedToken)) {
-                        errorMessage = "Token 应以 ghp_ 或 github_pat_ 开头"
+                        errorMessageRes = R.string.github_token_error_format
                         return@Button
                     }
 
                     scope.launch {
                         isValidating = true
-                        errorMessage = null
+                        errorMessageRes = null
                         val username = onSubmit(trimmedToken)
                         isValidating = false
                         if (username != null) {
                             onSuccess(trimmedToken, username)
                             onDismiss()
                         } else {
-                            errorMessage = "Token 验证失败，请检查权限或网络"
+                            errorMessageRes = R.string.github_token_error_validate
                         }
                     }
                 },
@@ -266,14 +273,20 @@ internal fun GithubTokenDialog(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                Text(if (isValidating) "验证中..." else "连接")
+                // #229：验证中/连接/取消随语言取词（原硬编码中文）
+                Text(
+                    stringResource(
+                        if (isValidating) R.string.github_token_validating
+                        else R.string.github_token_connect
+                    )
+                )
             }
         },
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
                 enabled = !isValidating
-            ) { Text("取消") }
+            ) { Text(stringResource(R.string.github_token_cancel)) }
         }
     )
 }

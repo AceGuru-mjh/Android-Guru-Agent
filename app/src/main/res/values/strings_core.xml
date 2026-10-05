@@ -539,6 +539,15 @@
     <string name="github_menu_disconnect">Tap to disconnect</string>
     <string name="github_menu_connect">Connect GitHub</string>
     <string name="github_menu_token">GitHub Token (ghp_*) key access</string>
+    <!-- #229：Token 输入对话框（GithubTokenDialog，原硬编码中文收编） -->
+    <string name="github_token_dialog_title">Enter GitHub Personal Access Token</string>
+    <string name="github_token_dialog_hint">Create one under GitHub → Settings → Developer settings → Personal access tokens.\nThe repo scope is required.</string>
+    <string name="github_token_field_label">ghp_xxxx or github_pat_xxx</string>
+    <string name="github_token_error_format">Token must start with ghp_ or github_pat_</string>
+    <string name="github_token_error_validate">Token validation failed — check permissions or network</string>
+    <string name="github_token_validating">Validating…</string>
+    <string name="github_token_connect">Connect</string>
+    <string name="github_token_cancel">Cancel</string>
     <string name="common_done">Done</string>
 
     <!-- ═══ About screen (drawer bottom entry, v1.4.3+) ═══ -->

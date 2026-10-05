@@ -44,7 +44,14 @@ class CapabilityReportTool(
     /** 已配置 MCP 服务器数（-1 = 未知，整行省略）。 */
     private val configuredMcpCount: () -> Int = { -1 },
     /** 已连接 MCP 服务器数（-1 = 未知，仅省略连接数部分）。 */
-    private val connectedMcpCount: () -> Int = { -1 }
+    private val connectedMcpCount: () -> Int = { -1 },
+    /**
+     * GitHub 连接快照（v3 S3）：`"login|repo"`（repo 为 `-` = 未设置默认
+     * 仓库）/ null = 未连接。null 默认值 = GitHub 行整段省略（既有构造点
+     * 零改动，向后兼容）；core 经 lambda 拿快照，不依赖 app 层
+     * GithubTokenManager，保持纯 JVM 可测。
+     */
+    private val githubStateProvider: (() -> String?)? = null
 ) : BaseTool(
     id = "capability_report",
     name = "Capability Report",
@@ -105,6 +112,22 @@ class CapabilityReportTool(
                         "MCP servers: $mcpConfigured configured$connectedPart — mcp_list() to " +
                             "browse; market_search(kind=\"mcp\")/mcp_connect() to add more."
                     )
+                }
+                // v3 S3：GitHub 连接行（宿主未注入 provider 时整行省略——
+                // 纯 JVM 测试/既有构造点零变化）。快照解析防御式：lambda 抛
+                // 异常或格式异常折叠为 not connected（不教模型假事实）。
+                if (githubStateProvider != null) {
+                    val snapshot = runCatching { githubStateProvider() }.getOrNull()
+                    val parts = snapshot?.split('|', limit = 2)
+                    val login = parts?.getOrNull(0)?.takeIf { it.isNotBlank() }
+                    if (login != null) {
+                        val repo = parts.getOrNull(1)
+                            ?.takeUnless { it.isNullOrBlank() || it == "-" }
+                        val repoPart = if (repo != null) " (default repo: $repo)" else ""
+                        appendLine("GitHub: connected as $login$repoPart — github_* tools ready.")
+                    } else {
+                        appendLine("GitHub: not connected — github_* tools need a PAT (ask the user).")
+                    }
                 }
                 // v3 双工位作用域（事实性描述）：本工具不感知设置开关
                 // （AgentSettings.mcpScopeIsolation），只陈述引擎计划层的

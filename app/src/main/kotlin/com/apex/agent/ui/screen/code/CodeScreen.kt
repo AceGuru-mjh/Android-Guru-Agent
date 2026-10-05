@@ -376,12 +376,17 @@ fun CodeScreen(
     }
 
     // ═══ #197 GitHub 连接对话框（斜杠 /mcp:github 未连接信号）═══
+    // v3 S3：onSuccess 第三参 = 对话框归一化后的默认仓库（null = 未填/无法
+    // 识别，不改动既有值）
     if (showGithubConnectDialog) {
         GithubTokenDialog(
             onDismiss = { showGithubConnectDialog = false },
             onSubmit = { token -> viewModel.githubTokenManager.validateToken(token) },
-            onSuccess = { token, username ->
+            onSuccess = { token, username, normalizedRepo ->
                 viewModel.githubTokenManager.saveToken(token, username)
+                normalizedRepo?.let {
+                    viewModel.githubTokenManager.saveDefaultRepoCanonical(it)
+                }
                 showGithubConnectDialog = false
             }
         )

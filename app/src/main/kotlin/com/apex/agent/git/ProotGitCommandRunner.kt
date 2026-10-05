@@ -5,6 +5,7 @@ import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.git.GitCommandResult
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.github.GithubTerminalEnvInjector
 import com.apex.agent.platform.terminal.environment.LinuxEnvironmentManager
 import com.apex.agent.platform.terminal.linux.CpuArchitecture
 import com.apex.agent.platform.terminal.linux.LinuxDistribution
@@ -87,6 +88,9 @@ private const val MAX_STREAM_CHARS = 1_048_576
  *   单源）、TERM=dumb（git 无终端交互）、HOME=/root（与终端会话共享持久化
  *   home——git config --global 互通）、LANG=C.UTF-8（git 报错保持英文原文，
  *   解析 "not a git repository" 等特征串才稳定）、PWD/TMPDIR 对齐 -w；
+ *   v3 S3（G2）：[GithubTerminalEnvInjector] 在此基线上追加 GH_TOKEN /
+ *   GITHUB_TOKEN + git 凭据桥（已连接 GitHub 时；仅存活于本次进程 env，
+ *   不写盘不进 profile）；
  * - Android app 进程的任何变量不被继承。
  *
  * ## bind 语义
@@ -139,7 +143,13 @@ class ProotGitCommandRunner(
      * git 通道与终端会话/apt 同款版本自适应；默认 Termux 基线仅保既有测试
      * 夹具语义，生产 DI 注入真实源。
      */
-    private val capabilities: () -> PRootArgvCapabilities = { PRootArgvCapabilities.TERMUX_BUNDLED }
+    private val capabilities: () -> PRootArgvCapabilities = { PRootArgvCapabilities.TERMUX_BUNDLED },
+    /**
+     * v3 S3（G2）：GitHub PAT 供应器（null = 不注入，既有测试夹具零变化）。
+     * 已连接时经 [GithubTerminalEnvInjector] 把 GH_TOKEN / GITHUB_TOKEN 与
+     * git 凭据桥注入本次命令的 guest env（不写盘、不进 profile）。
+     */
+    private val gitHubTokenProvider: (() -> String?)? = null
 ) : GitCommandRunner {
 
     private val commandBuilder = PRootCommandBuilderImpl()
@@ -274,7 +284,13 @@ class ProotGitCommandRunner(
             executable = "git",
             arguments = gitArgs,
             workingDirectory = WORKSPACE_CWD,
-            environment = guestEnv(),
+            // v3 S3（G2）：git 命令凭据注入（已连接 GitHub 时；每次 run 现取
+            // token，连接/断开即时生效）
+            environment = GithubTerminalEnvInjector.inject(
+                guestEnv(),
+                (listOf("git") + gitArgs).joinToString(" "),
+                gitHubTokenProvider?.invoke()
+            ),
             binds = buildBinds(),
             fakeRoot = true,
             killOnExit = true
@@ -293,6 +309,8 @@ class ProotGitCommandRunner(
      * guest env 基线：PATH 用 LinuxEnvironmentManager.GUEST_PATH 单源；
      * TERM=dumb（管道执行无终端转义）；HOME=/root（持久化 home 与终端共享，
      * git 全局配置互通）；LANG=C.UTF-8 保持 git 报错为可解析的英文原文。
+     * v3 S3（G2）：GitHub 已连接时由 [buildCommand] 在此基线上追加凭据注入
+     * （GH_TOKEN / GITHUB_TOKEN + git→gh 凭据桥，仅存活于本次进程）。
      */
     internal fun guestEnv(): Map<String, String> = linkedMapOf(
         "PATH" to LinuxEnvironmentManager.GUEST_PATH,

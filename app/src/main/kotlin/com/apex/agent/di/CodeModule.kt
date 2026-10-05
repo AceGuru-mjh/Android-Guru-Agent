@@ -22,6 +22,7 @@ import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.git.ProotGitCommandRunner
+import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.platform.terminal.proot.PRootCapabilitySource
 import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.core.engine.AgentConfig
@@ -98,6 +99,8 @@ object CodeModule {
      * rootfs 内；工作区恒定 bind 为 guest /workspace（与终端会话同源）。
      * rootfsBaseDir / hostEnvironment / persistentHome 与 McpModule 的
      * ProotMcpProcessLauncher 接线同款约定（TerminalModule 提供）。
+     * v3 S3（G2）：注入 GitHub PAT 供应器——已连接时 git clone/push 等经
+     * 凭据桥真实可用（见 GithubTerminalEnvInjector）。
      */
     @Provides
     @Singleton
@@ -106,7 +109,8 @@ object CodeModule {
         hostEnvironment: PRootHostEnvironment,
         rootfsBaseDir: File,
         workspaceRoots: CodeWorkspaceRoots,
-        capabilitySource: PRootCapabilitySource
+        capabilitySource: PRootCapabilitySource,
+        githubTokenManager: GithubTokenManager
     ): GitCommandRunner {
         return ProotGitCommandRunner(
             hostEnv = hostEnvironment.hostEnv(),
@@ -116,7 +120,9 @@ object CodeModule {
             workspaceRoots = workspaceRoots,
             persistentHomeDir = File(context.filesDir, "linux/home"),
             // T92：argv 能力门（与终端会话/apt 同款版本自适应）
-            capabilities = capabilitySource::invoke
+            capabilities = capabilitySource::invoke,
+            // v3 S3（G2）：GitHub 凭据供应（未连接返回 null = 不注入）
+            gitHubTokenProvider = { githubTokenManager.getToken() }
         )
     }
 

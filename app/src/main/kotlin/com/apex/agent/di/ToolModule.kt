@@ -615,7 +615,9 @@ object ToolModule {
                 persistentHomeDir = File(context.filesDir, "linux/home"),
                 fallback = PrivilegedCommandSpawner(),
                 // T92：argv 能力门（与终端会话/apt 同款版本自适应）
-                capabilities = capabilitySource::invoke
+                capabilities = capabilitySource::invoke,
+                // v3 S3（G2）：git/gh 命令凭据注入（未连接返回 null = 不注入）
+                gitHubTokenProvider = { githubTokenManager.getToken() }
             )),
             approvalGate = { cmd ->
                 if (commandPermissionGate.ensureAllowed(cmd)) {
@@ -778,7 +780,9 @@ object ToolModule {
                             persistentHomeDir = File(context.filesDir, "linux/home"),
                             fallback = PrivilegedCommandSpawner(),
                             // T92：argv 能力门（探针与 terminal.exec 同款链路同款能力源）
-                            capabilities = capabilitySource::invoke
+                            capabilities = capabilitySource::invoke,
+                            // v3 S3（G2）：与 terminal.exec 同链路同凭据（探到的即真实行为）
+                            gitHubTokenProvider = { githubTokenManager.getToken() }
                         ))
                         val result = probeEngine.execute(
                             com.apex.agent.platform.terminal.exec.ExecRequest(
@@ -912,7 +916,17 @@ object ToolModule {
                     privilegeLevel = { privilegeInfoProvider.currentLevel() },
                     installedSkillCount = { skillRegistry.getInstalled().size },
                     configuredMcpCount = { mcpManager.getConfigs().size },
-                    connectedMcpCount = { mcpManager.getConnectedServers().size }
+                    connectedMcpCount = { mcpManager.getConnectedServers().size },
+                    // v3 S3：GitHub 连接快照（"login|repo"，未设置仓库 = "-"；
+                    // 未连接 = null）—— capability_report 的 GitHub 行数据源
+                    githubStateProvider = {
+                        githubTokenManager.connectionState.value.takeIf { it.isConnected }
+                            ?.let { s ->
+                                val login = s.username ?: "(unknown)"
+                                val repo = githubTokenManager.defaultRepo.value.ifBlank { "-" }
+                                "$login|$repo"
+                            }
+                    }
                 )
             )
         )

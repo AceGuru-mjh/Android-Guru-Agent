@@ -16,9 +16,11 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Tune

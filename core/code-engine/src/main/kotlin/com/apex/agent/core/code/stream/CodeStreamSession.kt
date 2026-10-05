@@ -238,6 +238,16 @@ class CodeStreamSession {
             is AgentEvent.UserInputExpired -> {
                 append(StreamEntry.StatusEntry(nextId(), "输入等待超时，已按未决继续"))
             }
+
+            // LLM 请求容错（重试/降级续跑）：过程可见性状态行，不弹错误横幅。
+            is AgentEvent.LlmRetryScheduled -> {
+                val text = if (event.delayMs > 0) {
+                    "请求失败（${event.reason}），${event.delayMs / 1000}s 后第 ${event.attempt} 次重试"
+                } else {
+                    event.reason
+                }
+                append(StreamEntry.StatusEntry(nextId(), text))
+            }
         }
     }
 

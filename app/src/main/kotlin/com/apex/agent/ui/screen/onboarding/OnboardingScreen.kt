@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.SmartToy
@@ -200,61 +202,69 @@ fun OnboardingScreen(
 
 @Composable
 private fun WelcomePage() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    // #225：内容 Column 原为 Arrangement.Center 且无 verticalScroll —— 横屏高度
+    // 不足时上下两端同时被裁且无法滚动。改为外层 Box 承托居中（内容不足视口
+    // 时保持原居中观感），Column 加 verticalScroll（内容超出视口时可滚动）。
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        // 品牌吉祥物 —— 与启动器图标同源的像素侵略者（Viro），白底圆角卡呼应自适应图标白盘
-        Surface(
-            shape = RoundedCornerShape(36.dp),
-            color = Color.White,
-            border = BorderStroke(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant
-            ),
-            modifier = Modifier.size(168.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 32.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Image(
-                    painter = painterResource(R.drawable.ic_invader_logo),
-                    contentDescription = stringResource(R.string.onboarding_mascot),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(116.dp)
-                )
+            // 品牌吉祥物 —— 与启动器图标同源的像素侵略者（Viro），白底圆角卡呼应自适应图标白盘
+            Surface(
+                shape = RoundedCornerShape(36.dp),
+                color = Color.White,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                ),
+                modifier = Modifier.size(168.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_invader_logo),
+                        contentDescription = stringResource(R.string.onboarding_mascot),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(116.dp)
+                    )
+                }
             }
+
+            Spacer(Modifier.height(40.dp))
+
+            Text(
+                text = "Apex Agent",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.onboarding_tagline),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = stringResource(R.string.onboarding_welcome_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
         }
-
-        Spacer(Modifier.height(40.dp))
-
-        Text(
-            text = "Apex Agent",
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        Text(
-            text = stringResource(R.string.onboarding_tagline),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            text = stringResource(R.string.onboarding_welcome_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
     }
 }
 
@@ -286,24 +296,30 @@ private fun CapabilitiesPage() {
         )
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    // #225：同 WelcomePage —— Box 承托居中 + Column 可滚动，横屏不裁切
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            stringResource(R.string.onboarding_what_title),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Spacer(Modifier.height(32.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 32.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                stringResource(R.string.onboarding_what_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(Modifier.height(32.dp))
 
-        capabilities.forEach { cap ->
-            CapabilityCard(cap)
-            Spacer(Modifier.height(16.dp))
+            capabilities.forEach { cap ->
+                CapabilityCard(cap)
+                Spacer(Modifier.height(16.dp))
+            }
         }
     }
 }
@@ -359,78 +375,84 @@ private fun ReadyPage(
     workspaceScope: String,
     workspaceFolderName: String
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    // #225：同 WelcomePage —— Box 承托居中 + Column 可滚动，横屏不裁切
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painterResource(R.drawable.ic_invader_logo),
-            contentDescription = null,
-            modifier = Modifier.size(72.dp)
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        Text(
-            stringResource(R.string.onboarding_final_title),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            stringResource(R.string.onboarding_ready_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(Modifier.height(32.dp))
-
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 32.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Image(
+                painter = painterResource(R.drawable.ic_invader_logo),
+                contentDescription = null,
+                modifier = Modifier.size(72.dp)
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                stringResource(R.string.onboarding_final_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.onboarding_ready_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(Modifier.height(32.dp))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    stringResource(R.string.onboarding_quickstart_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    stringResource(R.string.onboarding_quickstart_steps),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                // 工作区选择摘要（第 4 页的选择即时持久化，这里只是回显）
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = if (workspaceScope == WorkspaceScopes.FOLDER &&
-                            workspaceFolderName.isNotBlank()
-                        ) {
-                            stringResource(
-                                R.string.onboarding_ws_current_folder, workspaceFolderName
-                            )
-                        } else {
-                            stringResource(R.string.onboarding_ws_current_all)
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                        stringResource(R.string.onboarding_quickstart_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
                     )
+                    Text(
+                        stringResource(R.string.onboarding_quickstart_steps),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    // 工作区选择摘要（第 4 页的选择即时持久化，这里只是回显）
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                    ) {
+                        Text(
+                            text = if (workspaceScope == WorkspaceScopes.FOLDER &&
+                                workspaceFolderName.isNotBlank()
+                            ) {
+                                stringResource(
+                                    R.string.onboarding_ws_current_folder, workspaceFolderName
+                                )
+                            } else {
+                                stringResource(R.string.onboarding_ws_current_all)
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }

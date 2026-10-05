@@ -17,10 +17,9 @@ import java.util.concurrent.atomic.AtomicLong
  * backoff actually take? That takes per-call records.
  *
  * [ToolTraceRecorder] keeps a bounded in-memory ring of [ToolTraceSpan]s
- * (one span = one completed tool attempt, retries included) and fans
- * finished spans out to listeners (the app's diagnostics screen, a file
- * sink, tests). It is deliberately the same shape as the browser layer's
- * `BrowserTracer`: cheap to construct, capacity-bounded, append-only.
+ * (one span = one completed tool attempt, retries included) for snapshot
+ * consumers ([spans]). It is deliberately the same shape as the browser
+ * layer's `BrowserTracer`: cheap to construct, capacity-bounded, append-only.
  *
  * Span lifecycle: the executor opens a span via [begin], threads the
  * handle through attempts, and completes it exactly once with
@@ -91,13 +90,7 @@ class ToolTraceRecorder(private val capacity: Int = 200) {
             java.util.concurrent.atomic.AtomicBoolean(false)
     )
 
-    /** Listener for finished spans (diagnostics UI, file sink, tests). */
-    fun interface TraceListener {
-        fun onSpan(span: ToolTraceSpan)
-    }
-
     private val spans = ConcurrentLinkedDeque<ToolTraceSpan>()
-    private val listeners = CopyOnWriteListenerList()
     private val nextCallId = AtomicLong(1L)
 
     /**
@@ -149,12 +142,6 @@ class ToolTraceRecorder(private val capacity: Int = 200) {
         complete(handle, Outcome.DENIED, reason?.take(40))
     }
 
-    /** Register a listener for finished spans (idempotent). */
-    fun addListener(listener: TraceListener) = listeners.add(listener)
-
-    /** Unregister a listener. */
-    fun removeListener(listener: TraceListener) = listeners.remove(listener)
-
     /** Snapshot of recorded spans, newest first (deque head = newest). */
     fun spans(): List<ToolTraceSpan> = spans.toList()
 
@@ -198,7 +185,6 @@ class ToolTraceRecorder(private val capacity: Int = 200) {
         while (spans.size > capacity) {
             spans.pollLast()
         }
-        listeners.dispatch(span)
     }
 
     private fun digestArgs(arguments: String): String {
@@ -207,45 +193,5 @@ class ToolTraceRecorder(private val capacity: Int = 200) {
         val printable = trimmed.count { !it.isWhitespace() }
         return " args(${trimmed.length}ch/$printable)"
     }
-
-    /** Minimal copy-on-write listener list (append-mostly, tiny fanout). */
-    private class CopyOnWriteListenerList {
-        @Volatile
-        private var current: Array<TraceListener> = emptyArray()
-
-        fun add(listener: TraceListener) {
-            synchronized(this) {
-                if (listener !in current) current = current + listener
-            }
-        }
-
-        fun remove(listener: TraceListener) {
-            synchronized(this) {
-                current = current.filterNot { it == listener }.toTypedArray()
-            }
-        }
-
-        fun dispatch(span: ToolTraceSpan) {
-            current.forEach { it.onSpan(span) }
-        }
-    }
 }
 
-/**
- * Monotonic per-process call id source, exposed for components that want
- * stable correlation across the tracer and the usage tracker without
- * reaching into recorder internals (the batch runner marks batch steps
- * with `batch.<callId>` in its own output).
- */
-object ToolCallIds {
-    private val counter = AtomicLong(1L)
-
-    /** Next id (starts at 1; 0 is reserved as "unassigned"). */
-    fun next(): Long = counter.getAndIncrement()
-
-    /** Current value without consuming (diagnostics). */
-    fun peek(): Long = counter.get()
-
-    /** Reset (test isolation only). */
-    fun reset() = counter.set(1L)
-}

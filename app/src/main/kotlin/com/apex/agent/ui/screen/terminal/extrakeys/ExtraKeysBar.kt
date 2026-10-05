@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,7 +42,8 @@ fun ExtraKeysBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(KeybarChromeColors.bg),
+            // #244：chrome 改主题感知（旧写死 0xFF101613 深色与浅色主题冲突）
+            .background(MaterialTheme.colorScheme.surfaceVariant),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         for (row in layout) {
@@ -82,7 +83,9 @@ private fun ExtraKeyButton(
         modifier = Modifier
             .height(34.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(KeybarChromeColors.keyAccent)
+            // #244：键帽改 primaryContainer（暗态 MINT = 0C3A2C，与旧 0xFF1F3328
+            // 观感几乎一致；亮态随主题浅调，强调色区分于内置键栏的恒深 chrome）
+            .background(MaterialTheme.colorScheme.primaryContainer)
             .clickable {
                 when (key.kind) {
                     ExtraKeysConfig.MacroKind.TEXT -> onText(key.payload)
@@ -101,7 +104,8 @@ private fun ExtraKeyButton(
             key.label,
             fontSize = 12.5.sp,
             fontFamily = FontFamily.Monospace,
-            color = KeybarChromeColors.keyTextAccent
+            // #244：与键帽成对的 onPrimaryContainer（暗态 MINT = 9CF3D2 ≈ 旧 0xFFB9E8D2）
+            color = MaterialTheme.colorScheme.onPrimaryContainer
         )
     }
 }
@@ -111,9 +115,7 @@ private fun resolveTerminalKey(name: String): TerminalKey? = runCatching {
     TerminalKey.valueOf(name.uppercase().replace(' ', '_'))
 }.getOrNull()
 
-/** 扩展行 chrome（强调色区分于内置键栏 —— 一眼可辨「这是我的宏」）。 */
-private object KeybarChromeColors {
-    val bg = Color(0xFF101613)
-    val keyAccent = Color(0xFF1F3328)
-    val keyTextAccent = Color(0xFFB9E8D2)
-}
+/* #244：旧 KeybarChromeColors（bg=0xFF101613 / keyAccent=0xFF1F3328 /
+   keyTextAccent=0xFFB9E8D2 写死深色 chrome）已收编为主题槽位：
+   条带 surfaceVariant、键帽 primaryContainer、键面文字 onPrimaryContainer ——
+   深色保持既有观感，浅色随主题协调，dynamicColor / 18 套 accent 方案自动跟随。 */

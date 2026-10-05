@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
+import com.apex.agent.ui.icons.AgentRoleAvatarIcon
 import com.apex.agent.ui.screen.settings.AgentRole
 
 /**
@@ -69,7 +70,7 @@ internal fun AgentRoleSelector(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Text(text = current.emoji, style = MaterialTheme.typography.labelMedium)
+                AgentRoleAvatarIcon(role = current, size = 16.dp)
                 Text(
                     text = current.name,
                     style = MaterialTheme.typography.labelMedium,
@@ -95,7 +96,7 @@ internal fun AgentRoleSelector(
                 DropdownMenuItem(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(role.emoji, style = MaterialTheme.typography.titleSmall)
+                            AgentRoleAvatarIcon(role = role, size = 20.dp)
                             androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
                             Text(
                                 text = role.name,

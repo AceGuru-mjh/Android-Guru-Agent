@@ -41,7 +41,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.apex.agent.R
+import com.apex.agent.ui.glass.AgentBubbleGlass
 import com.apex.agent.ui.glass.GlassBadge
 import com.apex.agent.ui.glass.GlassButton
 import com.apex.agent.ui.glass.GlassCard
@@ -218,6 +221,74 @@ private fun HorizontalHairline() {
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
     )
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Cloudy 真模糊材质 —— v7 agent 回复气泡样本
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * CloudyFrost 材质 A/B 对照样本卡：左 = 旧 Frosted 渐变霜面（GlassCard），
+ * 右 = Cloudy 真模糊材质（AgentBubbleGlass，agent 回复气泡 v7 同款）。
+ * 两枚同 shape / 同文本 / 同 accent，惟材质不同 —— 验收点：白天右卡应为
+ * 「乳白底 + 柔和受光带」（非左卡的平死白），夜间右卡光带呈霓虹光雾；
+ * 文字两卡同样清晰（模糊只包裹材质层，永不触及内容）。
+ * 跟随实验室主题自动切换。
+ */
+@Composable
+internal fun CloudyFrostSection() {
+    val scheme = MaterialTheme.colorScheme
+    val bubbleShape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
+
+    SectionHeader(
+        title = stringResource(R.string.glasslab_cloudy_title),
+        hint = stringResource(R.string.glasslab_cloudy_hint)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        GlassCard(
+            modifier = Modifier.weight(1f),
+            style = GlassStyle.Card,
+            shape = bubbleShape,
+            accent = scheme.primary
+        ) {
+            CloudySpecimenBody(tag = "FROSTED·GRADIENT")
+        }
+        AgentBubbleGlass(
+            modifier = Modifier.weight(1f),
+            shape = bubbleShape,
+            accent = scheme.primary
+        ) {
+            CloudySpecimenBody(tag = "CLOUDY·TRUE-BLUR")
+        }
+    }
+    Text(
+        text = stringResource(R.string.glasslab_cloudy_note),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+/** 样本气泡内容：等宽标签 + 两行示例文本（与真实 agent 气泡同排版骨架）。 */
+@Composable
+private fun CloudySpecimenBody(tag: String) {
+    Column(modifier = Modifier.padding(12.dp)) {
+        Text(
+            text = tag,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "磨砂玻璃的质感来自光影纵深。\nThe quick brown fox jumps.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

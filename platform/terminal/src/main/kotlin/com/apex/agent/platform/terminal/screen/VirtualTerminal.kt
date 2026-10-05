@@ -62,6 +62,24 @@ interface VirtualTerminal {
     /** Reset to initial empty state (alternate screen exit / session recreate). */
     fun reset()
 
+    /**
+     * Release engine-backed native resources (T94 lifecycle close-out).
+     *
+     * Default no-op keeps fake/test implementations untouched. Real backends
+     * ([com.apex.agent.platform.terminal.screen.RealVirtualTerminal]) forward to
+     * the underlying engine's close: NativeVtCore holds a C++ Engine (screen
+     * ring + style tables, hundreds of KB native heap per session) that is
+     * destroyed ONLY here — previously no production path ever called
+     * NativeVtCore.close(), leaking one engine per closed session and keeping
+     * VtFeedTrail's live-engine count permanently above zero (every exit was
+     * misreported as a suspected native crash).
+     *
+     * Contract: called exactly once from the session teardown path, after the
+     * output pump has been stopped. Idempotent and thread-safe in real
+     * implementations; never throws (engine close failures are contained).
+     */
+    fun release() {}
+
     val cursorRow: Int
     val cursorCol: Int
     val alternateScreen: Boolean

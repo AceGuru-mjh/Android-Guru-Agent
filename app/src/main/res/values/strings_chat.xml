@@ -108,8 +108,6 @@
     <string name="chat_cd_expand">Expand</string>
     <string name="chat_json_more">… %1$d more</string>
     <string name="chat_run_stats">Run stats</string>
-    <string name="chat_stat_iterations">%1$d iterations</string>
-    <string name="chat_stat_tool_calls">%1$d tool calls</string>
     <string name="chat_step">Step %1$d</string>
 
     <!-- ═══ AgentChatToolCards ═══ -->
@@ -133,12 +131,7 @@
     <string name="chat_cd_open_link">Open link</string>
 
     <!-- ═══ AgentChatDialogs ═══ -->
-    <string name="chat_custom_instruction_title">Custom mode instruction</string>
-    <string name="chat_custom_instruction_desc">This instruction is appended to the system prompt to guide the agent (e.g. output format, language, step constraints).</string>
-    <string name="chat_custom_instruction_hint">e.g. Always answer in Chinese, conclusion first, then details</string>
     <string name="chat_save">Save</string>
-    <string name="chat_clear">Clear</string>
-    <string name="chat_reasoning_effort_label">Native reasoning:</string>
     <string name="chat_effort_none">Default</string>
     <string name="chat_effort_low">Low</string>
     <string name="chat_effort_medium">Medium</string>
@@ -146,12 +139,6 @@
     <string name="chat_effort_max">Max</string>
     <!-- v1.2 seven-level thinking: new depth-tier descriptions (= condensed ThinkingProfile.uiDescriptionEn, incl. execution strategy differences) -->
     <!-- #168 six-level thinking: tier profile descriptions (= ThinkingProfile.uiDescriptionEn, incl. execution strategy differences) -->
-    <string name="thinking_level_none_desc">Act directly, no reasoning; fast in-and-out (iterations ×0.8, earlier compression)</string>
-    <string name="thinking_level_light_desc">Think briefly in 1-2 sentences, then act; token-light reasoning</string>
-    <string name="thinking_level_standard_desc">Standard 3-step Chain-of-Thought: decompose, reason, execute and observe</string>
-    <string name="thinking_level_deep_desc">Multi-path 5-step reasoning; self-check after failed or high-risk tool calls, iterations ×1.2</string>
-    <string name="thinking_level_maximum_desc">7-step Tree-of-Thoughts + post-tool verification + final self-check (goal / side effects / omissions), iterations ×1.5</string>
-    <string name="thinking_level_auto_desc">Auto: pick the level per turn from task complexity (length / steps / code / risk / errors)</string>
     <string name="chat_question_title">🧩 The agent needs your choice</string>
     <string name="chat_multi_select">Multi-select</string>
     <string name="chat_recommended">Recommended</string>
@@ -221,12 +208,10 @@
     <string name="chat_slash_status_external">Sample</string>
     <string name="chat_slash_cd_selected">Selected. Tap again to remove</string>
     <!-- 输入框内技能 chip（SkillChipInputField）-->
-    <string name="chat_chip_cd_remove">Remove skill %1$s</string>
 
     <!-- ═══ AgentModeSelector ═══ -->
     <string name="chat_mode_selector_cd">Task mode: %1$s. Tap to switch</string>
     <!-- #168 CUSTOM mode preset chip (top bar current preset name) -->
-    <string name="chat_mode_preset_cd">Custom mode preset: %1$s. Tap to edit</string>
     <string name="chat_role_selector_cd">Agent role: %1$s. Tap to switch</string>
     <string name="chat_role_builtin_cd">Built-in role</string>
     <string name="chat_mode_chat_desc">Pure conversation — persona and chat skills</string>
@@ -308,7 +293,6 @@
     <string name="chat_slash_no_skills">No active skills</string>
     <string name="chat_slash_mcp_servers">MCP servers</string>
     <string name="chat_slash_mcp_connected">%1$d connected</string>
-    <string name="chat_slash_mcp_empty">No MCP servers configured (add in Market)</string>
     <string name="chat_slash_plugins">Plugins</string>
     <string name="chat_slash_plugins_empty">No installed plugins found</string>
     <string name="chat_slash_plugins_partial">Loaded plugins are connectivity-verified only — tool bridge in progress</string>

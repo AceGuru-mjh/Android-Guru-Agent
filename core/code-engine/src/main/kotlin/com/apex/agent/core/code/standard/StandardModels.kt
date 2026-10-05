@@ -67,38 +67,6 @@ enum class StandardAgentKind(
 }
 
 /**
- * 任务回合的执行阶段（标准循环的宏观状态机——UI 状态行与运行报告消费）。
- *
- * 一轮用户任务从 [UNDERSTANDING] 到 [DONE]；[COMPACTING] / [AWAITING_INPUT]
- * 是循环内可能出现的暂态（压缩 / 权限问答），不改变宏观进度。
- */
-enum class StandardPhase(val label: String) {
-    /** 理解任务与工作区现场。 */
-    UNDERSTANDING("理解任务"),
-
-    /** 计划中（构建 Todo / 拆步骤）。 */
-    PLANNING("规划中"),
-
-    /** 执行中（工具调用主力阶段）。 */
-    EXECUTING("执行中"),
-
-    /** 验证中（lint / 测试 / 回读）。 */
-    VERIFYING("验证中"),
-
-    /** 总结输出（最终回复）。 */
-    SUMMARIZING("总结中"),
-
-    /** 压缩暂态（上下文接近上限时摘述旧消息）。 */
-    COMPACTING("压缩中"),
-
-    /** 权限问答暂态（ask 门挂起等待用户）。 */
-    AWAITING_INPUT("等待确认"),
-
-    /** 完成。 */
-    DONE("完成")
-}
-
-/**
  * Agent 画像定义：一个「干活的虚拟人格」的全部静态配置。
  *
  * @param kind 种类键
@@ -214,50 +182,6 @@ data class StandardSessionStats(
 )
 
 /**
- * 一次运行（一轮用户任务）的收官报告。
- *
- * @param turns 消耗的回合数（LLM 请求次数）
- * @param toolCalls 工具调用次数
- * @param permissionAsks 权限询问次数
- * @param permissionDenied 权限拒绝次数
- * @param subAgents 派发的子代理次数
- * @param promptTokens / completionTokens 累计真实用量（服务端 usage 帧；
- *   缺帧时为 0——估算口径见 currentTokenCount）
- * @param durationMs 端到端耗时
- * @param aborted 是否被用户中止
- * @param errorMessage 收官错误（null = 正常完成）
- */
-data class StandardRunReport(
-    val turns: Int = 0,
-    val toolCalls: Int = 0,
-    val permissionAsks: Int = 0,
-    val permissionDenied: Int = 0,
-    val subAgents: Int = 0,
-    val promptTokens: Int = 0,
-    val completionTokens: Int = 0,
-    val durationMs: Long = 0,
-    val aborted: Boolean = false,
-    val errorMessage: String? = null
-)
-
-/**
- * 工具调用归约记录（会话内累计，循环防抖与报告用）。
- */
-data class StandardToolInvocation(
-    val callId: String,
-    val toolName: String,
-    val arguments: String,
-    val startedAt: Long,
-    var durationMs: Long = 0,
-    var success: Boolean = false,
-    var outputChars: Int = 0
-) {
-    /** 去空白参数指纹（重复调用检测：同名同参连续出现 = 循环风险）。 */
-    val fingerprint: String
-        get() = toolName + "|" + arguments.filterNot { it.isWhitespace() }
-}
-
-/**
  * 子代理派发请求（task 工具的结构化参数）。
  */
 data class StandardSubAgentRequest(
@@ -307,10 +231,3 @@ internal object StandardIds {
     fun toolCallId(prefix: String): String =
         "$prefix${counter.incrementAndGet()}"
 }
-
-/** LLM 消息便捷判定（会话统计与压缩逻辑共用）。 */
-internal val LlmMessage.isToolResultLike: Boolean
-    get() = this is LlmMessage.ToolResult
-
-internal val ToolCall.hasBlankIdentity: Boolean
-    get() = id.isBlank() && name.isBlank()

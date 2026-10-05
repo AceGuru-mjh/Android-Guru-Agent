@@ -98,9 +98,6 @@ object ToolTierPolicy {
         "capability_report", "market_search"
     )
 
-    /** Ids of the v4 catalog meta-tools themselves. */
-    val CATALOG_TOOL_IDS: Set<String> = setOf("tool_search", "tool_open", "tool_list")
-
     /** @return true when [toolId] belongs to the always-exposed CORE set. */
     fun isCore(toolId: String): Boolean = toolId in CORE_TOOL_IDS
 

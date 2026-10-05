@@ -93,20 +93,7 @@ class McpStartupTracker(
         buffers[serverName]?.toList() ?: emptyList()
     }
 
-    /** 有留存记录的服务器名（字典序）。 */
-    fun recordedServers(): List<String> = synchronized(lock) { buffers.keys.sorted() }
-
-    /** 该服务器是否至少有过一次真实 spawn（子进程形态排查用）。 */
-    fun hasSpawned(serverName: String): Boolean {
-        // 块体 + 整段持锁：表达式函数体里 synchronized(… ?: return …) 是
-        // Kotlin 语法禁区（expression body 禁 return）；且快照引用脱离锁
-        // 后迭代会有 CME 风险 —— 检查整体在 [lock] 内完成。
-        return synchronized(lock) {
-            buffers[serverName]?.any { it.stage == McpStartupStage.SPAWN } == true
-        }
-    }
-
-    /** 是否有任意记录（时间线入口的可见性判定）。 */
+            /** 是否有任意记录（时间线入口的可见性判定）。 */
     fun hasEvents(serverName: String): Boolean =
         synchronized(lock) { !buffers[serverName].isNullOrEmpty() }
 

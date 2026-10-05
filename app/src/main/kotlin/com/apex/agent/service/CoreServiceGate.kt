@@ -10,15 +10,14 @@ import androidx.core.content.ContextCompat
  *
  * 问题背景（Issue #236）：设置里的 Keep Alive 开关此前只影响 BootReceiver 的
  * 开机自启 —— 运行期关掉开关后前台服务照常跑（全仓没有一处 stopService）；
- * 拉起侧还有三股无视开关的力（MainActivity 无条件启动 / START_STICKY /
- * 无障碍心跳）。
+ * 拉起侧还有两股无视开关的力（MainActivity 无条件启动 / START_STICKY；
+ * 第三股「无障碍心跳」因与主进程同进程、自检恒真，已按 #241 删除）。
  *
  * 本对象统一承载：
  *  - [startedThisProcess]：进程存活期的服务首启标记（MainActivity 原地内联
  *    标记迁出 —— 开关关闭服务后，用户再次进入前台时可重新拉起）；
  *  - [keepAliveEnabled]：apex_settings/agent_settings_v2 的 keepAlive 布尔
- *    快读（BootReceiver / 无障碍心跳 / MainActivity.onDestroy 三方共用，
- *    单一实现点）；
+ *    快读（BootReceiver / MainActivity.onDestroy 两方共用，单一实现点）；
  *  - [apply]：开关切换的运行时接线 —— 开 = startForegroundService（前台
  *    Activity 发起不受 Android 12+ 后台 FGS 限制），关 = stopService
  *    （服务 onDestroy → TerminalRuntime 优雅收尾，见 ApexCoreService）。
@@ -41,9 +40,7 @@ object CoreServiceGate {
     }
 
     /** 快读 agent_settings_v2 JSON 的 keepAlive 布尔（缺省/损坏 → true）。
-     * 双端实现注意：platform:privilege 的 ApexAccessibilityService 因模块
-     * 依赖方向无法引用本类，保留了一份同款正则实现（KEEP_ALIVE_OFF_REGEX），
-     * 两处需同步修改。 */
+     * #241 后仅剩本处实现（platform:privilege 侧的同款正则已随无效心跳删除）。 */
     fun keepAliveEnabled(context: Context): Boolean {
         val raw = runCatching {
             context.getSharedPreferences("apex_settings", Context.MODE_PRIVATE)

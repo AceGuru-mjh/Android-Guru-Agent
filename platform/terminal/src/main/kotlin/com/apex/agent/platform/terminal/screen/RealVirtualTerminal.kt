@@ -203,4 +203,29 @@ class RealVirtualTerminal(
         val lines = s.renderedText.split('\n')
         lines.getOrElse(s.cursorRow) { "" }.trimEnd()
     }
+
+    /**
+     * T94（引擎生命周期收口）：释放底层引擎持有的 native 资源。
+     *
+     * 设备端引擎是 [com.apex.agent.vtnative.NativeVtCore]（JNI 句柄 → C++
+     * Engine，含屏幕环/样式表/链接表，单会话数百 KB native 堆）。此前
+     * close/recover/shutdown 全链路无人调 NativeVtCore.close() —— 每关一个
+     * 会话泄漏一个引擎，且 VtFeedTrail 的 live-engine 计数永不归零，每次
+     * 退出都被误报「疑似 native 崩溃」。纯 Kotlin 引擎（TerminalCore）无
+     * native 资源，release 为 no-op —— 以 AutoCloseable 探测，不引入对
+     * terminal-native 模块的硬依赖（保持本模块纯 JVM 可测）。
+     *
+     * 在 [engineLock] 内执行（串行化，与 pump/observe/resize 的并发访问
+     * 互斥）；重复调用幂等（NativeVtCore.close 自身幂等）。
+     */
+    override fun release() {
+        withEngine {
+            runCatching { (core as? AutoCloseable)?.close() }
+                .onFailure {
+                    // 引擎销毁失败不再可恢复（句柄生命周期已终结）—— 记录后吞掉，
+                    // 不让会话清理链中断（nativeCloseSession 仍在调用方序列中）。
+                    System.err.println("RealVirtualTerminal: engine close failed: ${it.message}")
+                }
+        }
+    }
 }

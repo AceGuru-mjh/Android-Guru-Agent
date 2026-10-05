@@ -2,6 +2,21 @@ package com.apex.agent.core.code.standard
 
 import com.apex.agent.core.llm.ToolDefinition
 import com.apex.agent.core.tools.ToolRegistry
+import com.apex.agent.core.tools.catalog.ToolNameSanitizer
+
+/**
+ * 标准线请求工具面计划（provider-safe）。
+ *
+ * @param definitions 发给 LLM API 的定义列表（name = provider 名，
+ *   合法 `^[a-zA-Z0-9_-]{1,64}$`；按 provider 名稳定排序，prompt-cache
+ *   友好）
+ * @param providerNameToId 模型回显名 → 注册表 id（执行路由反查表；
+ *   未命中时由调用方回退别名归一）
+ */
+data class StandardToolPlan(
+    val definitions: List<ToolDefinition>,
+    val providerNameToId: Map<String, String>
+)
 
 /**
  * # Standard Tool Surface — 标准任务循环的工具编排层
@@ -18,6 +33,16 @@ import com.apex.agent.core.tools.ToolRegistry
  *    未知名归一失败时 [suggestToolIds] 给出相近候选，供错误文案引导；
  * 3. **合成工具**：`task`（子代理委派）不在注册表——[syntheticTaskTool]
  *    现场合成 ToolDefinition（仅主代理画像注入；子代理不可再派子代理）。
+ *
+ * ## 工具名 provider 清洗（P0 修复：400 拒绝）
+ *
+ * 注册表原始 id（`terminal.*` 点号名、含中文的 `mcp__中文服务__工具`）
+ * 不能直接作 tools 数组的 function name——严格 OpenAI 兼容端点按
+ * `^[a-zA-Z0-9_-]{1,64}$` 校验，一个非法名即拒掉**整个请求**（用户
+ * 报错：Coding 模式发"你好"即 400 `Invalid 'tools[14].function.name'`）。
+ * 深潜线（EngineToolPlanner → ToolRequestBudget）早已清洗；标准线此前
+ * 漏了——[buildToolPlan] 现在对最终候选集统一过 [ToolNameSanitizer]，
+ * 返回 [StandardToolPlan]（provider 名定义 + 反查路由表）。
  *
  * ## 工具面预算
  *
@@ -154,7 +179,12 @@ object StandardToolSurface {
     // ═══════════════════════ 工具面构建 ═══════════════════════
 
     /**
-     * 为画像构建请求工具面（ToolDefinition 列表）。
+     * 为画像构建请求工具面（provider-safe 名 + 反查路由表）。
+     *
+     * 既有语义全部保留：allowlist 前缀过滤 / 编码相关优先序 / MAX_TOOLS
+     * 截断 / forced 收窄 / 合成 task 工具。差异仅在最后一步：最终候选集
+     * （含 synthetic task，其名本就合法）统一过 [ToolNameSanitizer]
+     * 清洗 → 改名 → 按 provider 名稳定排序 → 构建反查路由表。
      *
      * @param definition 画像（白名单 + 是否注入合成工具）
      * @param registry 工具注册表（共享单例）
@@ -169,7 +199,7 @@ object StandardToolSurface {
         forcedToolIds: Set<String> = emptySet(),
         exposeAll: Boolean = false,
         includeSyntheticTools: Boolean = definition.includeSyntheticTools
-    ): List<ToolDefinition> {
+    ): StandardToolPlan {
         val all = registry.getToolDefinitions()
         val forced = forcedToolIds.mapNotNull { id -> all.firstOrNull { it.name == id } }
 
@@ -196,7 +226,21 @@ object StandardToolSurface {
         if (includeSyntheticTools && forced.isEmpty()) {
             result.add(syntheticTaskTool())
         }
-        return result
+
+        // ── provider 名清洗（P0：点号/中文/超长名 → 合法 [A-Za-z0-9_-]{1,64}）──
+        // registry id 即候选 ToolDefinition.name（注册表实现保证同名）；
+        // 冲突由清洗器确定性消解（非 legacy 优先 + 长 id 优先 + 后缀）。
+        val idToProvider = ToolNameSanitizer.buildMapping(result.map { it.name })
+        val definitions = result
+            .map { def -> def.copy(name = idToProvider.getValue(def.name)) }
+            .sortedBy { it.name }
+        val providerNameToId = buildMap {
+            result.forEach { def -> put(idToProvider.getValue(def.name), def.name) }
+        }
+        return StandardToolPlan(
+            definitions = definitions,
+            providerNameToId = providerNameToId
+        )
     }
 
     /** ToolDefinition.name 与注册表 id 的对应（注册表实现保证同名）。 */

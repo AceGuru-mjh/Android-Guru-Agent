@@ -3,6 +3,8 @@
     <!-- ═══ #197 Template Studio ═══ -->
     <string name="templates_tab_agent">Agent Templates</string>
     <string name="templates_tab_coding">Coding Templates</string>
+    <string name="templates_coding_roles_title">Coding Experts</string>
+    <string name="templates_coding_roles_subtitle">Built-in language &amp; tech expert roles — tap one to activate it for the Coding screen (no restart)</string>
     <string name="templates_agent_list_title">Agent prompt templates</string>
     <string name="templates_agent_list_subtitle">Translation / summary / writing and other general tasks — injected for the Agent screen</string>
     <string name="templates_coding_list_title">Coding prompt templates</string>

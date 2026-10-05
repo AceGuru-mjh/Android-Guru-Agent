@@ -77,19 +77,6 @@ class ToolTraceRecorderTest {
     }
 
     @Test
-    fun `listeners receive every completed span and can be removed`() {
-        val recorder = ToolTraceRecorder()
-        val seen = mutableListOf<String>()
-        val listener = ToolTraceRecorder.TraceListener { span -> seen += span.toolId }
-        recorder.addListener(listener)
-        recorder.complete(recorder.begin("a", "{}"))
-        recorder.complete(recorder.begin("b", "{}"))
-        recorder.removeListener(listener)
-        recorder.complete(recorder.begin("c", "{}"))
-        assertEquals(listOf("a", "b"), seen)
-    }
-
-    @Test
     fun `args are digested not stored raw - secrets stay out of traces`() {
         val recorder = ToolTraceRecorder()
         val handle = recorder.begin("http_request", """{"token":"SECRET_VALUE_12345"}""")

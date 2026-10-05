@@ -114,11 +114,6 @@ fun String.toKnownCodeRoleOrNull(): String? =
  * （内容保住、只损失样式 —— 适合展示层兜底；需要「跳过」语义的恢复路径
  * 请用 [toKnownCodeRoleOrNull] 判空）。
  */
-fun String.toRoleOrSystem(): String =
-    toKnownCodeRoleOrNull() ?: ROLE_SYSTEM
-
 /** 已知角色集合（USER / ASSISTANT / TOOL / SYSTEM）。 */
 val KNOWN_CODE_ROLES: Set<String> = setOf("USER", "ASSISTANT", "TOOL", "SYSTEM")
 
-/** SYSTEM 角色的规范名（降级兜底用）。 */
-const val ROLE_SYSTEM = "SYSTEM"

@@ -115,13 +115,6 @@ class ToolArguments private constructor(
         throw argumentError(ToolErrorCode.INVALID_ARGUMENT, "'$name' must be a number", name)
     }
 
-    fun requireBoolean(name: String): Boolean {
-        val p = readPrimitive(name)
-            ?: throw argumentError(ToolErrorCode.MISSING_ARGUMENT, "missing required argument '$name'", name)
-        return p.booleanOrNull
-            ?: throw argumentError(ToolErrorCode.INVALID_ARGUMENT, "'$name' must be a boolean", name)
-    }
-
     fun optionalBoolean(name: String): Boolean? {
         val p = root[name] ?: return null
         if (p is JsonPrimitive && (p.booleanOrNull != null || p.content == "null")) {
@@ -134,14 +127,6 @@ class ToolArguments private constructor(
         optionalBoolean(name) ?: default
 
     // ── Composites ─────────────────────────────────────────────────────────
-
-    /** Required JSON object argument (nested structures). */
-    fun requireObject(name: String): JsonObject {
-        val element = root[name]
-            ?: throw argumentError(ToolErrorCode.MISSING_ARGUMENT, "missing required argument '$name'", name)
-        return element as? JsonObject
-            ?: throw argumentError(ToolErrorCode.INVALID_ARGUMENT, "'$name' must be an object", name)
-    }
 
     /** Required JSON array argument. */
     fun requireArray(name: String): JsonArray {
@@ -163,15 +148,8 @@ class ToolArguments private constructor(
         }
     }
 
-    /** List of strings with a default (empty list when absent). */
-    fun stringListWithDefault(name: String, default: List<String> = emptyList()): List<String> =
-        optionalStringList(name) ?: default
-
     /** Raw element access for tools with exotic needs (rare). */
     fun rawElement(name: String): kotlinx.serialization.json.JsonElement? = root[name]
-
-    /** All present argument keys — for diagnostics. */
-    fun presentKeys(): List<String> = keys.sorted()
 
     /** True when the argument is present at all (even if null). */
     fun has(name: String): Boolean = name in root

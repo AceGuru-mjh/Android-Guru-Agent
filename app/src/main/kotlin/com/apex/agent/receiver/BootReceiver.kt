@@ -52,8 +52,8 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     /** 快读 agent_settings_v2 JSON 的 keepAlive 布尔（缺省/损坏 → true）。
-     * 实现已收口到 [CoreServiceGate.keepAliveEnabled]（MainActivity.onDestroy /
-     * 无障碍心跳同源，单一实现点）。 */
+     * 实现已收口到 [CoreServiceGate.keepAliveEnabled]（MainActivity.onDestroy
+     * 同源，单一实现点）。 */
     private fun keepAliveEnabled(context: Context): Boolean =
         com.apex.agent.service.CoreServiceGate.keepAliveEnabled(context)
 }

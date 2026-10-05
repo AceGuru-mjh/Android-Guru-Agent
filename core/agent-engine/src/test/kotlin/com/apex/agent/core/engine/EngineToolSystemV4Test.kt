@@ -294,6 +294,14 @@ class EngineToolSystemV4Test {
         // and the task completed with the final text
         val complete = events.filterIsInstance<AgentEvent.ResponseComplete>().lastOrNull()
         assertEquals("recovered answer", complete?.fullText)
+
+        // #242：两级降级各发射一条用户可见提示（ThinkingChunk 通道），
+        // 用户不再只觉得 Agent「突然变笨」而不知原因。
+        val notices = events.filterIsInstance<AgentEvent.ThinkingChunk>()
+            .map { it.text }.filter { it.contains("已降级") }
+        assertEquals(2, notices.size)
+        assertTrue(notices[0].contains("精简工具"))
+        assertTrue(notices[1].contains("纯对话"))
     }
 
     @Test

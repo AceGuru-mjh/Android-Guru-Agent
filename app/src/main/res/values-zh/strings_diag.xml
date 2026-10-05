@@ -65,6 +65,12 @@
     <string name="diag_log_clear_confirm_title">清空日志文件？</string>
     <string name="diag_log_clear_confirm_text">将永久删除 %1$d 个日志文件（共 %2$s）</string>
 
+    <!-- ═══ 崩溃/日志内容查看弹窗（#228）═══ -->
+    <string name="diag_viewer_failed">读取失败</string>
+    <string name="diag_viewer_missing">文件已不存在（可能已被清理）</string>
+    <string name="diag_viewer_retry">重试</string>
+    <string name="diag_viewer_close">关闭</string>
+
     <!-- ═══ 诊断报告 ═══ -->
     <string name="diag_report_section">诊断报告</string>
     <string name="diag_report_content_desc">报告 zip 内含 device.txt（应用与设备信息）、logs/（日志文件）、crashes/（崩溃记录），分享给开发者即可协助排查</string>

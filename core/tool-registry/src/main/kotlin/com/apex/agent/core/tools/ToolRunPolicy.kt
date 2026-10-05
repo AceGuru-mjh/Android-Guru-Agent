@@ -317,9 +317,6 @@ class ToolRateLimiter {
     /** Reset all buckets. */
     fun resetAll() = buckets.clear()
 
-    /** Snapshot of remaining tokens (diagnostics only — racy read). */
-    fun remainingTokens(toolId: String): Double? = buckets[toolId]?.tokens
-
     /** Compare-and-swap style guarded update (synchronized on the bucket). */
     private fun updateBucket(
         bucket: Bucket,

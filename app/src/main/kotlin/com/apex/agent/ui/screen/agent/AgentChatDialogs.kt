@@ -52,52 +52,6 @@ import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassStyle
 import dev.chrisbanes.haze.HazeState
 
-// ═══ 自定义模式组件 ═══
-
-/**
- * 自定义模式指令编辑对话框：输入将持久化并拼入 system prompt。
- */
-@Composable
-internal fun CustomInstructionDialog(
-    initial: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit
-) {
-    var text by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.chat_custom_instruction_title)) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.chat_custom_instruction_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    placeholder = { Text(stringResource(R.string.chat_custom_instruction_hint)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 3,
-                    maxLines = 8
-                )
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.Button(onClick = { onSave(text) }) { Text(stringResource(R.string.chat_save)) }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onClear) { Text(stringResource(R.string.chat_clear)) }
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_cancel)) }
-            }
-        }
-    )
-}
-
 // ═══ 思考控制（双级 · RikkaHub 式）═══
 
 /**

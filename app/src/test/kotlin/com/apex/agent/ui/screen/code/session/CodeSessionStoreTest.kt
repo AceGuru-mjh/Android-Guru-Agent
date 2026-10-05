@@ -246,8 +246,6 @@ class CodeSessionStoreTest {
         assertNull("wizard".toKnownCodeRoleOrNull())
         assertNull("".toKnownCodeRoleOrNull())
         // 降级语义：未知值落到 SYSTEM，内容不丢
-        assertEquals("SYSTEM", "wizard".toRoleOrSystem())
-        assertEquals("TOOL", " tool ".toRoleOrSystem())
     }
 
     // ── Mappers：消息互转 ────────────────────────────────────────────

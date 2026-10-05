@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FilePresent
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
@@ -74,6 +75,7 @@ import com.apex.agent.diagnostics.LogFileSink
 import com.apex.agent.diagnostics.formatBytes
 import com.apex.agent.ui.glass.GlassButton
 import com.apex.agent.ui.glass.GlassCard
+import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -119,7 +121,9 @@ data class DiagnosticsUiState(
 @HiltViewModel
 class DiagnosticsViewModel @Inject constructor(
     private val collector: DiagnosticsCollector,
-    private val logSink: LogFileSink
+    private val logSink: LogFileSink,
+    // i18n：#228 查看器失败态文案（非 Compose 场景，LanguageManager 按当前语言取词）
+    private val lang: LanguageManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DiagnosticsUiState())
@@ -184,11 +188,31 @@ class DiagnosticsViewModel @Inject constructor(
         _uiState.update { it.copy(reportFile = null, reportFailed = false) }
     }
 
-    /** 读取崩溃文件内容（转给 UI 弹窗；调用方负责切 IO 线程）。 */
-    fun readCrash(file: File): String? = runCatching { collector.readCrash(file) }.getOrNull()
+    /**
+     * 读取崩溃文件内容（转给 UI 弹窗；调用方负责切 IO 线程）。
+     * #228：失败显式分流为 [ViewerContent.Failed]（带错误摘要）——旧 getOrNull
+     * 把 IO 异常吞成 null，与加载态无法区分，弹窗只能无限转圈。
+     * 文件缺失（底层返回 null，如列表刷新前刚被清空）同样按失败呈现。
+     */
+    fun readCrash(file: File): ViewerContent = runCatching { collector.readCrash(file) }.fold(
+        onSuccess = { text ->
+            if (text != null) ViewerContent.Loaded(text)
+            else ViewerContent.Failed(lang.getString(R.string.diag_viewer_missing))
+        },
+        onFailure = { ViewerContent.Failed(it.message ?: it.javaClass.simpleName) }
+    )
 
-    /** 读取日志文件内容（512KB 截尾保留最新；调用方负责切 IO 线程）。 */
-    fun readLog(file: File): String? = runCatching { logSink.readText(file) }.getOrNull()
+    /**
+     * 读取日志文件内容（512KB 截尾保留最新；调用方负责切 IO 线程）。
+     * #228：同 readCrash —— 成功/失败三态分流，不再 getOrNull 静默。
+     */
+    fun readLog(file: File): ViewerContent = runCatching { logSink.readText(file) }.fold(
+        onSuccess = { text ->
+            if (text != null) ViewerContent.Loaded(text)
+            else ViewerContent.Failed(lang.getString(R.string.diag_viewer_missing))
+        },
+        onFailure = { ViewerContent.Failed(it.message ?: it.javaClass.simpleName) }
+    )
 
     /** 崩溃文件时间标签：优先解析文件名内嵌时间戳，回退 lastModified。 */
     fun formatCrashTime(file: File): String = synchronized(crashTimeFormat) {
@@ -202,6 +226,19 @@ private val crashTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.get
 /** 弹窗查看目标：崩溃文件或日志文件（决定读取通道与是否提供删除操作）。 */
 private data class ViewerTarget(val file: File, val isCrash: Boolean)
 
+/**
+ * 崩溃/日志查看弹窗的内容状态（#228）。
+ *
+ * 旧实现用 String? 表达内容：null 同时承担「加载中」与「读取失败」两种语义，
+ * IO 一失败弹窗就永远停在转圈（无错误文案、无重试、无关闭引导）。sealed
+ * 三态让 UI 能区分加载/成功/失败，失败可重试（retryKey 驱动重读）。
+ */
+sealed interface ViewerContent {
+    data object Loading : ViewerContent
+    data class Loaded(val text: String) : ViewerContent
+    data class Failed(val error: String) : ViewerContent
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
@@ -211,7 +248,9 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
     var appExpanded by remember { mutableStateOf(true) }
     var deviceExpanded by remember { mutableStateOf(false) }
     var viewer by remember { mutableStateOf<ViewerTarget?>(null) }
-    var viewerContent by remember { mutableStateOf<String?>(null) }
+    var viewerContent by remember { mutableStateOf<ViewerContent?>(null) }
+    // #228：查看器重试驱动 —— 变更 key 触发下方 LaunchedEffect 重新读取
+    var viewerRetryKey by remember { mutableStateOf(0) }
     var pendingDeleteCrash by remember { mutableStateOf<File?>(null) }
     var showClearCrashes by remember { mutableStateOf(false) }
     var showClearLogs by remember { mutableStateOf(false) }
@@ -227,11 +266,14 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
     LaunchedEffect(state.reportFile) { if (state.reportFile != null) showReportDialog = true }
     LaunchedEffect(state.reportFailed) { if (state.reportFailed) showReportFailed = true }
     // 弹窗内容加载：IO 线程读取，主线程仅渲染
-    LaunchedEffect(viewer) {
+    // #228：读取以 (viewer, retryKey) 驱动 —— 重试改 key 即重读；先置 Loading
+    // 再读，失败显式置 Failed（旧实现 null 混流是无限转圈的根因）。
+    LaunchedEffect(viewer, viewerRetryKey) {
         val target = viewer
         if (target == null) {
             viewerContent = null
         } else {
+            viewerContent = ViewerContent.Loading
             viewerContent = withContext(Dispatchers.IO) {
                 if (target.isCrash) viewModel.readCrash(target.file) else viewModel.readLog(target.file)
             }
@@ -427,23 +469,69 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.height(8.dp))
-                    val content = viewerContent
-                    if (content == null) {
-                        Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    when (val content = viewerContent) {
+                        is ViewerContent.Loaded -> {
+                            val lines = remember(content) { content.text.lines() }
+                            // 等宽 12sp 逐行渲染：512KB 上限内 LazyColumn 按需组合，滚动流畅
+                            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                                items(lines.size, key = { it }) { idx ->
+                                    Text(
+                                        lines[idx],
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
                         }
-                    } else {
-                        val lines = remember(content) { content.lines() }
-                        // 等宽 12sp 逐行渲染：512KB 上限内 LazyColumn 按需组合，滚动流畅
-                        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                            items(lines.size, key = { it }) { idx ->
-                                Text(
-                                    lines[idx],
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurface
+                        // #228：IO 失败 —— 错误图标 + 「读取失败」+ 错误摘要 + 重试/关闭引导
+                        is ViewerContent.Failed -> {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Outlined.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(32.dp)
                                 )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    stringResource(R.string.diag_viewer_failed),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    content.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { viewerRetryKey++ }) {
+                                        Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(stringResource(R.string.diag_viewer_retry))
+                                    }
+                                    TextButton(onClick = { viewer = null }) {
+                                        Text(stringResource(R.string.diag_viewer_close))
+                                    }
+                                }
+                            }
+                        }
+                        // null（弹窗刚开、effect 尚未回填）与 Loading 同渲染：居中转圈
+                        else -> {
+                            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                             }
                         }
                     }

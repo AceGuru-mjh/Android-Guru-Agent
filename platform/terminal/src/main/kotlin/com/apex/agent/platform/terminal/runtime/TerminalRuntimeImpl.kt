@@ -107,8 +107,16 @@ class TerminalRuntimeImpl(
     private val enableShellMarkers: Boolean = false
 ) : TerminalRuntime {
 
+    /**
+     * T94：autoSave 专用 IO 域 —— 定时器每 2s 对每个会话做 FileOutputStream+
+     * fsync 落盘，跑在注入的 Default 域上会占用 CPU 池（违背
+     * SessionManagerImpl「阻塞循环绝不能占 CPU 池」的自家纪律，2 核设备有感）。
+     * 独立于 [scope]（shutdown 先停定时器再停主域，顺序见 [shutdown]）。
+     */
+    private val recoveryScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val recoveryService: RuntimeRecoveryService? = persistenceStore?.let {
-        RuntimeRecoveryService(it, this, scope)
+        RuntimeRecoveryService(it, this, recoveryScope)
     }
 
     /** T81 §15：shutdown 幂等门（首次进入后 create/reject 新请求）。 */
@@ -719,9 +727,13 @@ class TerminalRuntimeImpl(
         // 3. 停止全部超时定时器 + autoSave
         timeoutController.cancelAll()
         recoveryService?.stopAutoSave()
+        // T94：autoSave 域一并收敛（stopAutoSave 只 cancel 定时 job，域本身
+        // 不再复用 —— shutdown 后 runtime 不可重建）。
+        recoveryScope.cancel()
         // 4. native 兕底：Kotlin 侧可能因历史 bug/重建失步残留 native session
         //    （closeAll 幂等，对已关 id 无副作用）。
         // #260：关停兜底失败留痕 —— 静默时 native 残留泄漏无从诊断
+        //（VtFeedTrail 只记录 feed 序列，不覆盖 close 失败）。
         try { native.nativeCloseAll() } catch (e: Exception) {
             android.util.Log.w("TerminalRuntime", "nativeCloseAll fallback failed: ${e.message}")
         }

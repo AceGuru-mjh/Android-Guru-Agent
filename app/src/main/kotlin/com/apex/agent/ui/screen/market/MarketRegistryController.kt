@@ -3,7 +3,6 @@ package com.apex.agent.ui.screen.market
 import com.apex.agent.core.tools.marketplace.OfficialRegistrySource
 import com.apex.agent.core.tools.marketplace.PulseMcpSource
 import com.apex.agent.core.tools.marketplace.RegistryServer
-import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.marketplace.PulseMcpCredentialsStore
 import com.apex.agent.marketplace.RegistryMcpInstaller
 import kotlinx.coroutines.CancellationException
@@ -46,7 +45,6 @@ class MarketRegistryController @Inject constructor(
     private val officialSource: OfficialRegistrySource,
     private val pulseSource: PulseMcpSource,
     private val installer: RegistryMcpInstaller,
-    private val mcpManager: McpManager,
     private val pulseCredentials: PulseMcpCredentialsStore
 ) {
     /** Registry 目录的源切换（官方 / PulseMCP）。 */

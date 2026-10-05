@@ -25,6 +25,8 @@ package com.apex.agent.vtnative
 // ═══════════════════════════════════════════════════════════════════════════
 
 import com.apex.agent.terminalemulator.CursorStyle
+import com.apex.agent.terminalemulator.FocusReporting
+import com.apex.agent.terminalemulator.MouseReportingState
 import com.apex.agent.terminalemulator.ScreenMutation.MutationType
 import com.apex.agent.terminalemulator.MouseTrackingMode
 import com.apex.agent.terminalemulator.MouseWireEncoding
@@ -203,6 +205,28 @@ class NativeVtCore(
         val nSb = flat[p++]
         val scrollback = ArrayList<List<RenderCell>>(nSb)
         repeat(nSb) { scrollback.add(decodeRow()) }
+        // T94（快照字段对齐）：收集屏内实际出现的 OSC 8 链接 id（悬空 id 不进表
+        // —— 与 Kotlin 引擎 RenderRowMapper.buildLinkTable 语义一致），经一次
+        // nativeLinks 调用映射为 id→URI。此前快照从不填 linkTable/
+        // mouseMode/focusMode/applicationKeypad —— 设备端（native 引擎为默认）
+        // 触摸鼠标报告、滚轮进 vim、焦点上报、OSC 8 点击全部静默失效（下游
+        // TerminalView/TerminalViewModel 只读快照字段，不读 mode 镜像访问器）。
+        val linkIds = HashSet<Int>()
+        for (row in visible) for (cell in row) if (cell.link != 0) linkIds.add(cell.link)
+        for (row in scrollback) for (cell in row) if (cell.link != 0) linkIds.add(cell.link)
+        val linkTable: Map<Int, String> = if (linkIds.isEmpty()) {
+            emptyMap()
+        } else {
+            val uris = nativeLinks(handle)
+            val out = HashMap<Int, String>(linkIds.size)
+            if (uris != null) {
+                for (id in linkIds) {
+                    val idx = id - 1  // cells carry 1-based table indices (0 = none)
+                    if (idx in uris.indices) out[id] = uris[idx]
+                }
+            }
+            out
+        }
         return TerminalRenderSnapshot(
             rows = flat[0],
             cols = flat[1],
@@ -223,7 +247,16 @@ class NativeVtCore(
             scrollback = scrollback,
             scrollbackTotal = flat[10],
             scrollbackBase = u64(flat[12], flat[13]),
-            bellSeq = u64(flat[14], flat[15])
+            bellSeq = u64(flat[14], flat[15]),
+            // T94：mode 镜像 → 快照（header 24-29 已解码，此前构造时丢弃）。
+            mouseMode = MouseReportingState(
+                tracking = lastMouseMode,
+                encoding = lastMouseEncoding,
+                altScroll = lastAltScroll
+            ),
+            focusMode = FocusReporting(enabled = lastFocusReport),
+            applicationKeypad = lastApplicationKeypad,
+            linkTable = linkTable
         )
     }
 

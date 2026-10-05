@@ -55,13 +55,6 @@ interface ToolRegistry {
     }
 
     /**
-     * 按 [ToolMetadata.category] 查询（类别内按 id 排序，稳定输出）。
-     * 元数据由 [AgentTool.metadata] 提供——v1 工具自动走 id 推断。
-     */
-    fun toolsByCategory(category: ToolCategory): List<AgentTool> =
-        getAllTools().filter { it.metadata.category == category }.sortedBy { it.id }
-
-    /**
      * 工具清单按类别分组（仅含有工具的类别，按 [ToolCategory.order] 排序）。
      * Prompt 构建（分组工具清单）与函数菜单（分组 UI）共用此快照。
      */
@@ -73,64 +66,12 @@ interface ToolRegistry {
     }
 
     /**
-     * 模糊搜索工具：id / 名称 / 描述 / 元数据标签中命中 [query]（大小写
-     * 不敏感），按简单相关性（id 前缀 > id 包含 > 名称包含 > 标签/描述包含）
-     * 排序。空 query 返回空列表。
-     */
-    fun searchTools(query: String): List<AgentTool> {
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) return emptyList()
-        data class Ranked(val rank: Int, val id: String, val tool: AgentTool)
-
-        return getAllTools()
-            .mapNotNull { tool ->
-                val id = tool.id.lowercase()
-                val name = tool.name.lowercase()
-                val meta = tool.metadata
-                val rank = when {
-                    id.startsWith(q) -> 0
-                    id.contains(q) -> 1
-                    name.contains(q) -> 2
-                    meta.tags.any { it.contains(q) } -> 3
-                    tool.description.lowercase().contains(q) -> 4
-                    else -> return@mapNotNull null
-                }
-                Ranked(rank, tool.id, tool)
-            }
-            .sortedWith(compareBy<Ranked> { it.rank }.thenBy { it.id })
-            .map { it.tool }
-    }
-
-    /**
      * 查询单个工具的元数据（未注册返回 null——区别于推断默认值，
      * 用于“这个 id 存在吗”的判断场景）。
      */
     fun metadataOf(toolId: String): ToolMetadata? =
         getTool(toolId)?.metadata
 
-    /**
-     * 注册表变更监听：DI 构建完成后，运行期热注册（MCP server 连接、
-     * 技能安装）可通知 UI / prompt 缓存失效。监听器在注册表内部锁内
-     * 调用，必须快速返回且不得再调用注册表写方法。
-     */
-    fun addRegistrationListener(listener: ToolRegistrationListener) {}
-    fun removeRegistrationListener(listener: ToolRegistrationListener) {}
-}
-
-/** 注册表变更事件（[ToolRegistry.addRegistrationListener] 回调载荷）。 */
-sealed interface ToolRegistrationEvent {
-    data class Registered(
-        val toolId: String,
-        val replaced: Boolean,
-        val metadata: ToolMetadata
-    ) : ToolRegistrationEvent
-
-    data class Unregistered(val toolId: String) : ToolRegistrationEvent
-}
-
-/** see [ToolRegistry.addRegistrationListener]。 */
-fun interface ToolRegistrationListener {
-    fun onToolRegistrationEvent(event: ToolRegistrationEvent)
 }
 
 /**
@@ -232,7 +173,6 @@ private object InferredToolMetadata {
  */
 class DefaultToolRegistry : ToolRegistry {
     private val tools = mutableMapOf<String, AgentTool>()
-    private val listeners = mutableListOf<ToolRegistrationListener>()
     private var version = 0L
 
     override fun register(tool: AgentTool) {
@@ -247,12 +187,6 @@ class DefaultToolRegistry : ToolRegistry {
             }
             tools[tool.id] = tool
             version++
-            val event = ToolRegistrationEvent.Registered(
-                toolId = tool.id,
-                replaced = existing != null,
-                metadata = tool.metadata
-            )
-            listeners.toList().forEach { it.onToolRegistrationEvent(event) }
             return existing
         }
     }
@@ -261,8 +195,6 @@ class DefaultToolRegistry : ToolRegistry {
         synchronized(this) {
             if (tools.remove(toolId) != null) {
                 version++
-                val event = ToolRegistrationEvent.Unregistered(toolId)
-                listeners.toList().forEach { it.onToolRegistrationEvent(event) }
             }
         }
     }
@@ -285,14 +217,6 @@ class DefaultToolRegistry : ToolRegistry {
 
     override val registryVersion: Long
         get() = synchronized(this) { version }
-
-    override fun addRegistrationListener(listener: ToolRegistrationListener) {
-        synchronized(this) { listeners += listener }
-    }
-
-    override fun removeRegistrationListener(listener: ToolRegistrationListener) {
-        synchronized(this) { listeners -= listener }
-    }
 
     // O(1) 直接读 map 大小，避免 getAllTools() 复制整个 values 列表。
     override val toolCount: Int

@@ -42,4 +42,11 @@ class SecretRedactingExecutor(
                 is ToolStreamEvent.Progress -> event
             }
         }
+
+    /**
+     * 任务级熔断复位透传（P1 修复配套）：装饰器不吞内层语义 —— 引擎经
+     * 本包装调用 resetBreakers 时必须到达内层 EnhancedToolExecutor，
+     * 否则默认 no-op 让「新任务清零熔断」在 app 生产链路失效。
+     */
+    override suspend fun resetBreakers() = delegate.resetBreakers()
 }

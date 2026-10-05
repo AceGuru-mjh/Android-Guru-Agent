@@ -435,6 +435,9 @@ class ApexAgentEngine(
         toolDegradationLevel = 0
         // 长任务韧性：新任务重置重试/换路预算（与降级复位同位）。
         resilience.resetForTask()
+        // P1 修复（跨任务熔断污染）：新任务清零熔断计数 —— 上一任务的
+        // 连续探索失败不应把冷却期（15s→120s 指数加宽）带进新任务开局。
+        runCatching { toolExecutor.resetBreakers() }
         // 循环检测：新任务清空检测窗口与恢复预算（与编排器 reset 语义一致）。
         loopDetector.reset()
         loopRecovery.reset()
@@ -899,8 +902,24 @@ class ApexAgentEngine(
                 // 限流/超时/网络断连/5xx 不再直接终结任务 —— 指数退避后重试同一轮
                 //（iteration-- 与循环头 iteration++ 抵消，不消耗迭代配额）；预算
                 // 用尽或非瞬时错误（鉴权/请求体/配置）才抛出，交给旧错误链路。
+                // P2 修复（重试风暴 + 重复输出）：Retry 分支补「本轮尚无任何
+                // 输出」前置 —— 旧实现对已流出半截回答的轮次也会整轮重放，UI
+                // 上前半截残留、新轮从头再流（话说一半重说一遍）；同时四层
+                // 重试叠加（OkHttp×fallback×引擎×KeyPool）对持续 429 的
+                // provider 最多放大 ~60 个请求。已有部分输出时按旧语义抛出，
+                // 由外层按「部分结果 + 失败说明」诚实收尾。
+                val hasPartialOutput = contentBuilder.isNotEmpty() ||
+                    reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty()
                 when (val retryDecision = resilience.onLlmFailure(e)) {
                     is EngineResilienceGuard.LlmRetryDecision.Retry -> {
+                        if (hasPartialOutput) {
+                            AppLogger.instance.warn(
+                                LogCategory.LLM, "ApexAgentEngine",
+                                "LLM 瞬时失败但本轮已有部分输出 — 不重放整轮（防重复拼接），" +
+                                    "按旧语义上抛由外层收尾: ${e.message}"
+                            )
+                            throw e
+                        }
                         AppLogger.instance.warn(
                             LogCategory.LLM, "ApexAgentEngine",
                             "LLM 瞬时失败（${e::class.simpleName}），退避 ${retryDecision.delayMs}ms " +

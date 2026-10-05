@@ -66,3 +66,29 @@ val TERMINAL_TOOL_RUN_POLICIES: Map<String, ToolRunPolicy> = mapOf(
     //   （默认 60s 恰好撞 mutating 预算线）。给足等待自身上限 + 余量。
     "terminal.wait" to ToolRunPolicy(timeoutMs = 660_000L, maxRetries = 0)
 )
+
+/**
+ * ═══ P2 修复（开放世界工具族超时错配）：前缀策略表 ═══
+ *
+ * 背景：browser_*（15 个）/ mcp_call / mcp__server__tool（动态一等工具）/
+ * connector_send_message 按注解推断为 mutating() —— 60s 硬超时 + 0 重试：
+ * - 慢网页操作 / 慢 MCP 服务端 > 60s 即被执行器 withTimeout 强杀，而强杀
+ *   可能留下半执行的副作用（点击已发生、消息已发出），模型看到超时
+ *   重试 → 二次副作用；
+ * - mcp__ 动态 id 无法逐个列进静态覆盖表 → DefaultToolRunPolicyResolver
+ *   新增前缀族覆盖（最长前缀胜出）。
+ *
+ * 原则：对非幂等工具宁可放大超时也不要早杀（宁可慢也不重复执行副作用）。
+ */
+val OPEN_WORLD_PREFIX_TOOL_RUN_POLICIES: Map<String, ToolRunPolicy> = mapOf(
+    // MCP 动态一等工具（mcp__server__tool）：走远端/沙箱进程，慢服务器常见；
+    // 不重试（非幂等风险由具体工具自查），只放宽超时。
+    "mcp__" to ToolRunPolicy(timeoutMs = 200_000L, maxRetries = 0),
+    // 浏览器自动化族：页面加载/滚动/下载都是秒级~十秒级网络操作。
+    "browser_" to ToolRunPolicy(timeoutMs = 120_000L, maxRetries = 1, baseRetryDelayMs = 1_000L),
+    // MCP 元工具 mcp_call：远端 JSON-RPC / 沙箱 npx 冷启动（180s 握手放宽口径）。
+    "mcp_call" to ToolRunPolicy(timeoutMs = 200_000L, maxRetries = 0),
+    // 连接器消息发送（Telegram/邮件等第三方网关）：网络慢常见；不盲重试
+    // （消息重复发送比超时更糟）。
+    "connector_" to ToolRunPolicy(timeoutMs = 120_000L, maxRetries = 0)
+)

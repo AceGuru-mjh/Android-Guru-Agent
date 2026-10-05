@@ -186,11 +186,18 @@ class ToolV3ExecutorTest {
 
     // ═══ 熔断 ═══════════════════════════════════════════════════════
 
+    /**
+     * P1 修复（熔断误开）后的新契约：熔断器只统计**基础设施失败**
+     *（超时 / IO / 崩溃签名，见 EnhancedToolExecutor.isInfraFailure）。
+     * 测试夹具用 IO 签名消息（SafeAgentTool 的 IOException 折叠串同源）
+     * 驱动开闸。
+     */
     @Test
-    fun `breaker opens after repeated failures and short-circuits with guidance`() = runTest {
+    fun `breaker opens after repeated infra failures and short-circuits with guidance`() = runTest {
         val tool = ScriptedTool(
             "broken_tool",
-            listOf("Error: execution failed: dead backend")
+            // IO 崩溃签名（SafeAgentTool 的 IOException 折叠串同源）
+            listOf("Error: execution failed: I/O error in 'broken_tool': dead backend")
         )
         val breaker = ToolCircuitBreaker(failureThreshold = 2, openCooldownMs = 60_000)
         val executor = executor(
@@ -199,7 +206,7 @@ class ToolV3ExecutorTest {
             breaker = breaker
         )
 
-        // 两次失败 → 熔断打开。
+        // 两次基础设施失败 → 熔断打开。
         assertTrue(executor.execute("broken_tool", "{}").startsWith("Error"))
         assertTrue(executor.execute("broken_tool", "{}").startsWith("Error"))
         assertEquals(ToolCircuitBreaker.State.OPEN, breaker.stateFor("broken_tool"))
@@ -212,12 +219,39 @@ class ToolV3ExecutorTest {
         assertEquals("short-circuit must not reach the tool", 2, tool.calls.get())
     }
 
+    /**
+     * P1 修复（熔断误开）核心回归锁：域层失败（文件不存在 / grep exit=1
+     * 等正常探索结果）**不开**熔断 —— 旧实现连续探索 5 个不存在的路径就把
+     * read_file 熔断 OPEN，后续 15-120s 内全部 fast-deny。
+     */
+    @Test
+    fun `domain failures never open the breaker`() = runTest {
+        val tool = ScriptedTool(
+            "explorer",
+            listOf("Error: File not found: /a/missing/path")
+        )
+        val breaker = ToolCircuitBreaker(failureThreshold = 2, openCooldownMs = 60_000)
+        val executor = executor(
+            tool,
+            policyResolver = StaticPolicyResolver(ToolRunPolicy(timeoutMs = 0)),
+            breaker = breaker
+        )
+
+        // 连续多次域失败 → 熔断保持闭合（工具可继续被调用于其它路径）。
+        repeat(5) {
+            assertTrue(executor.execute("explorer", "{}").startsWith("Error"))
+        }
+        assertEquals(ToolCircuitBreaker.State.CLOSED, breaker.stateFor("explorer"))
+        assertEquals("域失败仍应触达工具", 5, tool.calls.get())
+    }
+
     @Test
     fun `a successful call closes an open breaker through the probe`() = runTest {
-        // 低冷却窗口：失败一次开闸，冷却过后探测成功 → 闸闭合。
+        // 低冷却窗口：一次 IO 失败开闸，冷却过后探测成功 → 闸闭合。
         val fastBreaker = ToolCircuitBreaker(failureThreshold = 1, openCooldownMs = 1)
         val executor = executor(
-            ScriptedTool("recovering", listOf("Error: execution failed: flake", "OK")),
+            // IO 崩溃签名（P1 新契约：域失败不开闸，见上方测试）
+            ScriptedTool("recovering", listOf("Error: execution failed: I/O error in 'recovering': flake", "OK")),
             policyResolver = StaticPolicyResolver(ToolRunPolicy(timeoutMs = 0)),
             breaker = fastBreaker
         )
@@ -227,6 +261,29 @@ class ToolV3ExecutorTest {
         Thread.sleep(5) // 冷却 1ms 已过 → HALF_OPEN 探测。
         assertEquals("OK", executor.execute("recovering", "{}"))
         assertEquals(ToolCircuitBreaker.State.CLOSED, fastBreaker.stateFor("recovering"))
+    }
+
+    /** P1 修复：任务级熔断复位 —— resetBreakers 清零计数与开闸状态。 */
+    @Test
+    fun `resetBreakers clears open state and failure counts`() = runTest {
+        val tool = ScriptedTool(
+            "flaky_backend",
+            listOf("Error: execution failed: I/O error in 'flaky_backend': down")
+        )
+        val breaker = ToolCircuitBreaker(failureThreshold = 2, openCooldownMs = 60_000)
+        val executor = executor(
+            tool,
+            policyResolver = StaticPolicyResolver(ToolRunPolicy(timeoutMs = 0)),
+            breaker = breaker
+        )
+        assertTrue(executor.execute("flaky_backend", "{}").startsWith("Error"))
+        assertTrue(executor.execute("flaky_backend", "{}").startsWith("Error"))
+        assertEquals(ToolCircuitBreaker.State.OPEN, breaker.stateFor("flaky_backend"))
+
+        // 新任务开始：复位后工具立即可调（不再 fast-deny）。
+        executor.resetBreakers()
+        assertEquals(ToolCircuitBreaker.State.CLOSED, breaker.stateFor("flaky_backend"))
+        assertTrue(executor.execute("flaky_backend", "{}").startsWith("Error"))
     }
 
     // ═══ 限流 ═══════════════════════════════════════════════════════

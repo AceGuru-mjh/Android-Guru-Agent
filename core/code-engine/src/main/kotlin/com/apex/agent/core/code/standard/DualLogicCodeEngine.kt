@@ -115,6 +115,12 @@ class DualLogicCodeEngine(
         standard.updateSessionExtras(extras)
     }
 
+    /** v6 专家模板人设（双线同步——切线后人设不丢）。 */
+    override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) {
+        deepDive.updateRolePersona(roleDefinition, rolePrompt)
+        standard.updateRolePersona(roleDefinition, rolePrompt)
+    }
+
     override fun updateForcedTools(forcedToolIds: Set<String>, exposeAll: Boolean) {
         deepDive.updateForcedTools(forcedToolIds, exposeAll)
         standard.updateForcedTools(forcedToolIds, exposeAll)

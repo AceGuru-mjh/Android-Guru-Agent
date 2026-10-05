@@ -61,6 +61,14 @@ interface CodeEngineFacade : AgentEngine {
     /** 「小圆环」会话上下文附加段（coding 工位独占）。 */
     fun updateSessionExtras(extras: String?)
 
+    /**
+     * v6 Coding 专家模板人设通道：roleDefinition（专家定义段）+ rolePrompt
+     * （用户自定义提示词，可空）。深潜线经 delegate.patchConfig 落到
+     * AgentConfig 人设字段；标准线注入系统提示词专家段。空串 = 清除
+     * （回落引擎默认画像）。
+     */
+    fun updateRolePersona(roleDefinition: String, rolePrompt: String?)
+
     /** v4 强制函数调用（forcedToolIds 非空 = 只暴露选中工具且 required）。 */
     fun updateForcedTools(forcedToolIds: Set<String>, exposeAll: Boolean)
 

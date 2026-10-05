@@ -46,6 +46,7 @@ class DualLogicCodeEngineTest {
             calls += "plan:$confirmed"
         }
         override fun updateSessionExtras(extras: String?) { calls += "extras" }
+        override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) { calls += "persona" }
         override fun updateForcedTools(forcedToolIds: Set<String>, exposeAll: Boolean) {
             calls += "forced"
         }

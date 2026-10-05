@@ -164,6 +164,72 @@ class KnowledgeGraphStoreTest {
         assertEquals(listOf("r3"), graph.relations.map { it.relationType })
     }
 
+    // ═══ 观察删除（#219 记忆页逐条删除 / 一键清空）═══
+
+    @Test
+    fun `delete observations removes exactly the matched entries`() {
+        val store = newStore()
+        store.createEntities(listOf(
+            GraphEntity("用户画像", "chat_memory_profile", listOf("我叫张三", "我在学 Kotlin"))
+        ))
+
+        assertEquals(1, store.deleteObservations("用户画像", listOf("我叫张三")))
+        assertEquals(
+            listOf("我在学 Kotlin"),
+            store.readGraph().entities.single().observations
+        )
+        // 重复删除同一条：幂等返回 0，不误伤其余观察
+        assertEquals(0, store.deleteObservations("用户画像", listOf("我叫张三")))
+    }
+
+    @Test
+    fun `delete observations on unknown entity is a no-op`() {
+        val store = newStore()
+        store.createEntities(listOf(GraphEntity("a", "x", listOf("o1"))))
+
+        // 与 add 的报错语义刻意不同：删除幂等（基调 delete+recreate 替换竞态下不抛错）
+        assertEquals(0, store.deleteObservations("ghost", listOf("o1")))
+        assertEquals(listOf("o1"), store.readGraph().entities.single().observations)
+    }
+
+    @Test
+    fun `deleting all observations empties the entity but keeps the shell`() {
+        val store = newStore()
+        store.createEntities(listOf(
+            GraphEntity("用户近况", "chat_memory_state", listOf("近期情绪基调:偏低落"))
+        ))
+
+        assertEquals(1, store.deleteObservations("用户近况", listOf("近期情绪基调:偏低落")))
+
+        val entity = store.readGraph().entities.single()
+        // 壳保留 —— 管线后续 addObservations 不会因实体缺失而断写
+        assertEquals("用户近况", entity.name)
+        assertTrue(entity.observations.isEmpty())
+    }
+
+    @Test
+    fun `delete observations persists across store recreation`() {
+        val dir = tmp.newFolder()
+        val first = KnowledgeGraphStore(dir)
+        first.createEntities(listOf(
+            GraphEntity("用户画像", "chat_memory_profile", listOf("obs-1", "obs-2")),
+            GraphEntity("other", "topic", listOf("keep-me"))
+        ))
+        assertEquals(1, first.deleteObservations("用户画像", listOf("obs-1")))
+
+        val second = KnowledgeGraphStore(dir)
+        val graph = second.readGraph()
+        assertEquals(
+            listOf("obs-2"),
+            graph.entities.single { it.name == "用户画像" }.observations
+        )
+        // 无关实体不受影响
+        assertEquals(
+            listOf("keep-me"),
+            graph.entities.single { it.name == "other" }.observations
+        )
+    }
+
     // ═══ 持久化 ═══
 
     @Test

@@ -387,15 +387,18 @@ class ChatMemoryPipeline @Inject constructor(
     }
 
     private companion object {
+        // #219：三类固定实体的命名契约上移 ChatMemorySchema（记忆页「聊天记忆」
+        // 分区与本管线共用同一份常量，编译期防字符串漂移）；此处保留短名引用，
+        // 管线逻辑零变化。
         /** 画像实体名（与 memory MCP 图共用命名空间，用户可见可管理）。 */
-        const val PROFILE_ENTITY = "用户画像"
-        const val PROFILE_TYPE = "chat_memory_profile"
+        const val PROFILE_ENTITY = ChatMemorySchema.PROFILE_ENTITY
+        const val PROFILE_TYPE = ChatMemorySchema.PROFILE_TYPE
 
         /** R2：「用户近况」（情绪基调，单条替换）与「用户里程碑」（日期事件）。 */
-        const val STATE_ENTITY = "用户近况"
-        const val STATE_TYPE = "chat_memory_state"
-        const val MILESTONE_ENTITY = "用户里程碑"
-        const val MILESTONE_TYPE = "chat_memory_milestone"
+        const val STATE_ENTITY = ChatMemorySchema.STATE_ENTITY
+        const val STATE_TYPE = ChatMemorySchema.STATE_TYPE
+        const val MILESTONE_ENTITY = ChatMemorySchema.MILESTONE_ENTITY
+        const val MILESTONE_TYPE = ChatMemorySchema.MILESTONE_TYPE
 
         /** 自我披露标记词（句级匹配，含其一且含「我」即整句入库）。 */
         val SELF_DISCLOSURE_MARKERS = listOf(

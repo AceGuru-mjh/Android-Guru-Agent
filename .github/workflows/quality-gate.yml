@@ -2,13 +2,22 @@ name: Quality Gate
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Structural quality gates that complement ci.yml:
-#   • file-size budget  — blocks God-files (SRP enforcement, 1200/1600 lines)
-#   • anti-pattern gate — blocks `javaClass.getMethod` reflective dispatch &
+#   • file-size budget   — blocks God-files (SRP enforcement, 1200/1600 lines)
+#   • anti-pattern gate  — blocks `javaClass.getMethod` reflective dispatch &
 #                          `printStackTrace()` in main sources
-#   • audit report      — empty catch blocks + TODO/FIXME census (job summary)
+#   • workflow YAML gate — blocks unparseable / structurally broken workflows
+#   • script self-check  — runs the commit-message range regression suite
+#   • audit report       — empty catch blocks + TODO/FIXME census (job summary)
 #
 # Runs fast (<30s, no compilation) on every push & PR, and manually via
 # workflow_dispatch. Findings land in the run's Job Summary page.
+#
+# ── 为什么 workflow 自检住在这里，而不在 guard-rails.yml ─────────────────────
+# 2026-10-05 事故（docs/ci/guard-rails-commit-range-incident.md）：guard-rails.yml
+# 的一行注释丢了行首缩进 → YAML 截断 → GitHub **静默禁用整个 workflow**，四联
+# 守护栏整体停摆且无人察觉。GitHub 拒绝的是「整个文件」，所以把自检 job 放进
+# guard-rails.yml 自己是不成立的：被检文件一坏，门禁跟着一起消失。本 job 与
+# guard-rails.yml 是两个独立文件，触发条件一致 —— 隔离才有意义。
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -61,6 +70,23 @@ jobs:
             echo "- Total Kotlin lines: **$TOTAL_LINES**"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Main: $MAIN files / Test: $TEST files / $TOTAL_LINES total lines"
+
+  workflow-yaml:
+    name: Workflow YAML Gate + Script Self-Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 独立文件承载（见文件头注释）：guard-rails.yml 自身损坏时，本 job 仍能运行。
+      - name: Workflow YAML gate (strict parse + structure)
+        run: python3 scripts/check_workflow_yaml.py
+
+      # 提交规范的范围解析逻辑曾只存在于 YAML 的 shell 块里，无法单测；现在下沉
+      # 到脚本并有回归用例，这里跑一遍防止语义回退。
+      - name: Commit-message range regression suite
+        run: python3 scripts/test_check_commit_messages.py
 
   workflow-metadata:
     name: Run Metadata

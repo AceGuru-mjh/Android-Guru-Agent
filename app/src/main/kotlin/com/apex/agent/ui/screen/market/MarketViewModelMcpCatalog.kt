@@ -195,8 +195,19 @@ fun MarketViewModel.closeCatalogEnvDialog() {
  * #206 加固：busy 锁防双击并发重入（旧行为两连点会各自 addServer 互相
  * 覆盖）；序号后缀改为递增扫描（时间戳取模可能撞车）；装配包裹
  * runCatching（非法目录条目不再炸协程）。
+ *
+ * P1 修复（双击锁失效）：旧实现入口的 mcpConnecting 检查后、置位前存在
+ * 窗口 —— 标志是在 addMcpServer 内部（addServer 成功后）才置位的，
+ * 两个连点协程都能通过检查窗口，两次 addServer 同名互相覆盖（#206 修了
+ * 但没修住）。真正的锁在 [addMcpServer] 入口**同步**置位（任何挂起点
+ * 之前）—— 本函数的预检阶段在协程内重复执行无害（只读），真正要保护的
+ * 「addServer 落盘 + connect」阶段由 addMcpServer 的同步入口锁看住。
  */
 fun MarketViewModel.installCatalogEntry(entry: McpServerCatalog.McpCatalogEntry, envValues: Map<String, String>) {
+    // P1 修复（入口同步锁）：协程 launch 后首行执行前，重组间隙的第二次
+    // 点击会在 addMcpServer 的同步入口被拦下。此处不重复置位 —— 两处
+    // 置位会在 finally 复位时互相打架。
+    if (_uiState.value.mcpConnecting != null) return
     viewModelScope.launch {
         _uiState.update { it.copy(catalogEnvEntry = null) }
         val missing = McpServerCatalog.missingRequiredEnv(entry, envValues)

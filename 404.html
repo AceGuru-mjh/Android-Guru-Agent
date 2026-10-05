@@ -18,6 +18,7 @@
   --font-mono: "IBM Plex Mono", "SF Mono", monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: clip; } /* 与主站同款安全网 */
 body {
   font-family: var(--font-body); background: var(--paper); color: var(--ink);
   font-size: 17px; line-height: 1.75; min-height: 100vh;
@@ -27,6 +28,7 @@ body {
 a { color: var(--pine); text-decoration: none; }
 a:hover { color: var(--pine-deep); text-decoration: underline; text-underline-offset: 3px; }
 .card { max-width: 640px; padding: 48px 40px; }
+@media (max-width: 560px) { .card { padding: 32px 22px; } }
 h1 {
   font-family: var(--font-display); font-weight: 520;
   font-size: clamp(34px, 6vw, 52px); line-height: 1.16;
@@ -77,7 +79,8 @@ h1 {
       <div><span class="prompt">$</span> GET <span class="dim">/not/found</span></div>
       <div class="err">✗ 404 Not Found —— 该资源不在本机</div>
       <div class="dim">提示：可用导航直达首页 / 仓库 / Wiki</div>
-      <div class="ok">✓ 连接保持 · 返回首页继续</div>
+      <div class="ok">彩蛋：首页藏了一台能敲的终端 —— 回去按 T</div>
+      <div><span class="prompt">$</span> <span class="dim">exit 404</span></div>
     </div>
   </div>
   <div class="actions">

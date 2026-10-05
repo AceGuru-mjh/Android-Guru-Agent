@@ -71,6 +71,10 @@
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* 横向安全网：clip 不创建滚动容器、不破坏 sticky；老内核不识别则整行忽略，无副作用。
+   根因修复在各组件处（顶栏 wrap / 表格卡片化），这里只兑底。 */
+html, body { max-width: 100%; overflow-x: clip; }
+img { max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -108,7 +112,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 }
 .topbar-inner {
   display: flex; align-items: center; justify-content: space-between;
-  height: 64px;
+  flex-wrap: wrap; row-gap: 4px;
+  min-height: 64px;
+  padding: 8px 0;
 }
 .wordmark {
   font-family: var(--font-display);
@@ -125,10 +131,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   transition: background 0.15s;
 }
 .navlinks .nav-cta:hover { background: var(--pine-deep); color: #F3F7EE; text-decoration: none; }
-@media (max-width: 760px) {
+/* 断点 760 → 860：给系统字体放大（国内手机常见「特大字」）留出余量 */
+@media (max-width: 860px) {
     /* 修复：导航不再消失 —— 紧凑保留 Wiki/发布 + CTA。
-       「源码」链接与 wordmark 点击目标相同（主仓库），窄屏隐藏属语义无损去重。 */
-    .navlinks { gap: 2px; }
+       「源码」链接与 wordmark 点击目标相同（主仓库），窄屏隐藏属语义无损去重。
+       topbar-inner 已允许 wrap：字体再大也换行成两行，而不是横向溢出。 */
+    .navlinks { gap: 2px; flex-wrap: wrap; justify-content: flex-end; }
     .navlinks a { min-height: 40px; }
     .navlinks a:not(.nav-cta):not(.nav-src) { display: inline-flex; align-items: center; }
     .navlinks .nav-src { display: none; }
@@ -316,6 +324,14 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
        选择器用 .hero h1 —— 与基础规则同优先级（0,1,1）且源码更晚，稳定生效。 */
     .hero h1 { font-size: 33px; line-height: 1.22; }
     .lede { font-size: 15.5px; }
+    /* 窄屏密度：边距收窄，长文本换行更从容，大字体下更不易碰壁 */
+    .wrap { padding: 0 18px; }
+    .section { padding: 64px 0; }
+    .band { padding: 56px 0; }
+    .hero { padding: 40px 0 64px; }
+    .terminal { font-size: 12px; padding: 12px 14px 16px; }
+    .phone-status { padding: 10px 14px 6px; }
+    .install-links a { white-space: normal; }
   }
 .mode {
   background: var(--paper);
@@ -370,9 +386,18 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 .compare .yes { color: var(--pine); font-weight: 600; }
 .compare .no { color: var(--ink-faint); }
 .compare tbody tr:last-child th, .compare tbody tr:last-child td { border-bottom: none; }
+@media (min-width: 721px) and (max-width: 860px) {
+  /* 修复：4 列表格在窄平板/大字体下表格布局引擎可把 width:100% 推宽 ——
+     fixed 布局锁定总宽，长表头改允许换行 */
+  .compare { table-layout: fixed; }
+  .compare tbody th { white-space: normal; }
+}
 @media (max-width: 720px) {
-    /* 修复：4 列表格在窄屏不可读 → 卡片式堆叠（每维度一张卡） */
-    .compare { font-size: 14px; border: none; }
+    /* 修复：4 列表格在窄屏不可读 → 卡片式堆叠（每维度一张卡）。
+       根因修复：table/tbody 必须一并 display:block，否则匿名表格行包裹
+       会按 min-content 把整张表撑出屏幕（大字体下实测 427px）。 */
+    .compare { display: block; font-size: 14px; border: none; }
+    .compare tbody { display: block; }
     .compare thead { display: none; }
     .compare tr {
       display: block;
@@ -390,6 +415,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
       margin-bottom: 8px;
       font-size: 15px;
       text-align: left;
+      white-space: normal; /* 覆盖 tbody th 的 nowrap，大字体不撑卡 */
     }
     .compare td {
       display: block;
@@ -467,12 +493,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 .faq summary::-webkit-details-marker { display: none; }
 .faq summary::after {
   content: "+";
-  position: absolute; right: 8px; top: 20px;
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   font-family: var(--font-mono); font-size: 22px; font-weight: 400;
   color: var(--pine);
   transition: transform 0.15s;
 }
-.faq details[open] summary::after { transform: rotate(45deg); }
+.faq details[open] summary::after { transform: translateY(-50%) rotate(45deg); }
 .faq .faq-body {
   padding: 0 44px 26px 0;
   color: var(--ink-soft); font-size: 16px;
@@ -562,6 +588,242 @@ footer {
 .totop.show { opacity: 1; visibility: visible; transform: translateY(0); }
 .totop:hover { border-color: var(--pine); color: var(--pine-deep); }
 @media (prefers-reduced-motion: reduce) { .totop { transition: none; } }
+
+/* ══════════════════════════════════════════════════════════
+   PRETEXT —— 藏在官网里的可玩终端（借口即游乐场）
+   入口：点手机道具 / 按 T / 页脚 pretext / #pretext / 上上下下左右左右BA
+   ══════════════════════════════════════════════════════════ */
+
+/* 手机道具：从「图」升级为「可玩入口」 */
+.phone { position: relative; cursor: pointer; }
+.phone:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 4px;
+}
+.phone-chip {
+  position: absolute; top: 16px; right: 16px; z-index: 3;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em;
+  color: var(--term-green);
+  background: rgba(15, 20, 16, 0.78);
+  border: 1px solid rgba(140, 215, 160, 0.42);
+  border-radius: 999px;
+  padding: 4px 11px;
+  pointer-events: none;
+  animation: px-chip-pulse 2.6s ease-in-out infinite;
+}
+@keyframes px-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@media (max-width: 560px) { .phone-chip { font-size: 10px; padding: 3px 9px; } }
+
+/* 英雄区提示行 */
+.pretext-hint {
+  margin-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px; line-height: 2;
+  color: var(--ink-faint);
+}
+.pretext-hint kbd {
+  font-family: var(--font-mono); font-size: 11.5px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(23, 27, 22, 0.28);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.px-open-link {
+  background: none; border: none; padding: 0;
+  font: inherit; font-family: inherit;
+  color: var(--pine); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.px-open-link:hover { color: var(--pine-deep); }
+
+/* 终端弹窗本体 */
+.px-dialog {
+  border: none; outline: none; padding: 0;
+  background: transparent;
+  width: min(720px, calc(100% - 28px));
+  height: min(620px, calc(100% - 28px));
+  max-height: none; max-width: none;
+  overflow: visible;
+}
+.px-dialog::backdrop {
+  background: rgba(13, 17, 13, 0.62);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+@media (max-width: 560px) {
+  .px-dialog {
+    width: 100%; height: 100%;
+    width: 100dvw; height: 100dvh;
+  }
+}
+.px-window {
+  --px-bg: var(--term-bg);
+  --px-edge: var(--term-edge);
+  --px-fg: var(--term-text);
+  --px-dim: var(--term-dim);
+  display: flex; flex-direction: column;
+  height: 100%;
+  background: var(--px-bg);
+  border: 1px solid var(--px-edge);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -24px rgba(10, 14, 10, 0.65);
+  font-family: var(--font-mono);
+}
+.px-window.px-light {
+  --px-bg: #F2F5EE;
+  --px-edge: rgba(23, 27, 22, 0.22);
+  --px-fg: #171B16;
+  --px-dim: #5A635A;
+}
+@media (max-width: 560px) { .px-window { border-radius: 0; border: none; } }
+
+/* 窗口栏 */
+.px-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 16px;
+  background: rgba(19, 24, 17, 0.92);
+  border-bottom: 1px solid var(--px-edge);
+  flex-shrink: 0;
+}
+.px-window.px-light .px-bar { background: rgba(224, 230, 218, 0.95); }
+.px-bar .dot { width: 11px; height: 11px; border-radius: 50%; background: #2A332B; flex-shrink: 0; }
+.px-bar .dot:first-child { background: #3E4A3E; }
+.px-bar .title {
+  margin-left: 8px;
+  color: var(--px-dim);
+  font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.px-bar .px-esc-hint {
+  margin-left: auto; color: var(--px-dim);
+  font-size: 11.5px; letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.px-bar .px-esc-hint kbd {
+  border: 1px solid var(--px-edge);
+  border-radius: 4px; padding: 0 5px; font-size: 10.5px;
+}
+.px-close {
+  margin-left: 10px; flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--px-edge); border-radius: 7px;
+  color: var(--px-dim); font-family: var(--font-mono); font-size: 13px;
+  cursor: pointer;
+}
+.px-close:hover { color: var(--px-fg); border-color: var(--px-dim); }
+
+/* 输出屏 */
+.px-screen {
+  position: relative;
+  flex: 1; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 16px 18px 10px;
+  color: var(--px-fg);
+  font-size: 13.5px; line-height: 1.72;
+  -webkit-overflow-scrolling: touch;
+  cursor: text;
+}
+.px-ln { white-space: pre-wrap; word-break: break-word; min-height: 1em; }
+.px-ln.gap { min-height: 0.7em; }
+.px-ln.dim { color: var(--px-dim); }
+.px-ln.ok { color: var(--term-green); }
+.px-ln.err { color: var(--term-red); }
+.px-ln.amber { color: var(--term-amber); }
+.px-ln.think { opacity: 0.9; }
+.px-window.px-light .px-ln.ok { color: var(--pine); }
+.px-window.px-light .px-ln.err { color: #B4543E; }
+.px-window.px-light .px-ln.amber { color: #9A6E1B; }
+.px-screen a { color: var(--term-amber); text-underline-offset: 3px; }
+.px-window.px-light .px-screen a { color: var(--pine-deep); }
+.px-caret {
+  display: inline-block; width: 7px; height: 14px;
+  background: var(--term-green); vertical-align: -2px;
+  animation: px-blink 1.1s steps(1) infinite;
+}
+.px-window.px-light .px-caret { background: var(--pine); }
+@keyframes px-blink { 50% { opacity: 0; } }
+
+/* 输入行 */
+.px-in-row {
+  display: flex; align-items: baseline; gap: 9px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--px-edge);
+  flex-shrink: 0;
+}
+.px-prompt { color: var(--term-amber); font-size: 13.5px; white-space: nowrap; }
+.px-window.px-light .px-prompt { color: var(--pine-deep); }
+#pxIn {
+  flex: 1; min-width: 0;
+  background: transparent; border: none; outline: none;
+  color: var(--term-green);
+  caret-color: var(--term-green);
+  font-family: var(--font-mono);
+  font-size: 16px; /* ≥16px：防 iOS 聚焦自动放大页面 */
+  line-height: 1.5;
+}
+.px-window.px-light #pxIn { color: var(--ink); caret-color: var(--pine); }
+#pxIn::placeholder { color: var(--px-dim); opacity: 0.6; }
+
+/* 触屏工具栏（Tab/↑/↓ 在手机上没实体键） */
+.px-toolbar {
+  display: none;
+  gap: 7px; flex-wrap: wrap;
+  padding: 9px 12px calc(9px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--px-edge);
+  flex-shrink: 0;
+}
+@media (pointer: coarse), (max-width: 560px) { .px-toolbar { display: flex; } }
+.px-tb-btn {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--px-dim);
+  background: none;
+  border: 1px solid var(--px-edge); border-radius: 7px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.px-tb-btn:hover { color: var(--px-fg); border-color: var(--px-dim); }
+
+/* 成就通知 */
+.px-toasts {
+  position: fixed; top: 78px; right: 18px; z-index: 80;
+  display: flex; flex-direction: column; gap: 8px;
+  pointer-events: none;
+}
+@media (max-width: 560px) {
+  .px-toasts { left: 14px; right: 14px; top: auto; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+}
+.px-toast {
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--term-green);
+  background: rgba(15, 20, 16, 0.94);
+  border: 1px solid rgba(140, 215, 160, 0.45);
+  border-radius: 10px;
+  padding: 10px 14px;
+  max-width: 320px;
+  box-shadow: 0 12px 28px -12px rgba(10, 14, 10, 0.6);
+  animation: px-toast-in 0.28s ease-out;
+}
+@media (max-width: 560px) { .px-toast { max-width: none; } }
+.px-toast b { font-weight: 600; }
+@keyframes px-toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.px-toast.px-toast-out { opacity: 0; transform: translateY(6px); transition: opacity 0.3s, transform 0.3s; }
+
+/* matrix 数字雨画布 */
+#pxMatrix {
+  position: absolute; inset: 0; z-index: 2;
+  width: 100%; height: 100%;
+  background: var(--px-bg);
+}
 </style>
 </head>
 <body>
@@ -594,13 +856,20 @@ footer {
           你选模型，它干活，数据不出设备。
         </p>
         <p class="standline">无需服务器，无需 PC，模型自己带（OpenAI 兼容接口）。</p>
+        <p class="pretext-hint">
+          这个官网藏了一台能敲的终端 —— 按 <kbd>T</kbd>、或
+          <button class="px-open-link" type="button">点开 PRETEXT</button>。
+        </p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest" target="_blank" rel="noopener">下载 APK</a>
           <a class="btn btn-secondary" href="https://github.com/AceGuru-mjh/Android-Guru-Agent" target="_blank" rel="noopener">查看源码</a>
         </div>
       </div>
 
-      <div class="phone" role="img" aria-label="手机屏幕上的终端会话：智能体整理相册，中途遇到网络限流后自动重试并完成任务">
+      <div class="phone" id="phoneProp" role="button" tabindex="0"
+           aria-label="手机终端演示道具 —— 点击打开 PRETEXT 可交互终端彩蛋"
+           title="点它：打开 PRETEXT 交互终端">
+        <span class="phone-chip" aria-hidden="true">▸ 这台真的能敲</span>
         <div class="phone-screen">
           <div class="phone-status" aria-hidden="true">
             <span>21:36</span><span class="glyphs">▮▮▯ ⏻</span>
@@ -911,11 +1180,42 @@ footer {
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki" target="_blank" rel="noopener">Wiki</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases" target="_blank" rel="noopener">发布</a>
       <a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/issues" target="_blank" rel="noopener">议题</a>
+      <a href="#pretext" id="pxFootLink" title="每个产品页都需要一个借口">pretext</a>
     </nav>
   </div>
 </footer>
 
 <button class="totop" id="totop" aria-label="回到顶部">↑</button>
+
+<!-- ═══ PRETEXT：藏在官网里的可玩终端 ═══ -->
+<div class="px-toasts" id="pxToasts" aria-live="polite"></div>
+<dialog class="px-dialog" id="pretextDialog" aria-label="PRETEXT 交互终端彩蛋">
+  <div class="px-window" id="pxWindow">
+    <div class="px-bar">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="title">pretext — guru@pocket:~</span>
+      <span class="px-esc-hint" aria-hidden="true"><kbd>ESC</kbd> 离开</span>
+      <button class="px-close" id="pxClose" type="button" aria-label="关闭终端">✕</button>
+    </div>
+    <div class="px-screen" id="pxScreen">
+      <div id="pxOut" aria-live="polite"></div>
+    </div>
+    <div class="px-in-row">
+      <label class="px-prompt" for="pxIn" aria-hidden="true">guru@pocket:~$</label>
+      <input id="pxIn" type="text" autocomplete="off" autocapitalize="off"
+             spellcheck="false" enterkeyhint="go" placeholder="help"
+             aria-label="PRETEXT 终端输入框，输入 help 查看可玩命令">
+    </div>
+    <div class="px-toolbar" aria-label="终端快捷键工具栏">
+      <button class="px-tb-btn" type="button" data-px-act="tab">Tab 补全</button>
+      <button class="px-tb-btn" type="button" data-px-act="up" aria-label="上一条历史">↑</button>
+      <button class="px-tb-btn" type="button" data-px-act="down" aria-label="下一条历史">↓</button>
+      <button class="px-tb-btn" type="button" data-px-act="ach">成就</button>
+      <button class="px-tb-btn" type="button" data-px-act="clear">清屏</button>
+      <button class="px-tb-btn" type="button" data-px-act="exit">关闭</button>
+    </div>
+  </div>
+</dialog>
 
 <script>
 (function () {
@@ -952,6 +1252,604 @@ footer {
       window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
     });
   }
+})();
+</script>
+
+<!-- ═══ PRETEXT 引擎：命令系统 · 成就系统 · 彩蛋 ═══ -->
+<script>
+(function () {
+  "use strict";
+  var dlg = document.getElementById("pretextDialog");
+  if (!dlg || typeof dlg.showModal !== "function") return; /* 老内核静默降级 */
+
+  var out = document.getElementById("pxOut");
+  var screenEl = document.getElementById("pxScreen");
+  var input = document.getElementById("pxIn");
+  var winEl = document.getElementById("pxWindow");
+  var toasts = document.getElementById("pxToasts");
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var openedAt = Date.now();
+
+  /* ── 存储 ── */
+  var LS_ACH = "aga.px.ach", LS_HIST = "aga.px.hist", LS_THEME = "aga.px.theme";
+  function lsLoad(k, d) { try { var v = JSON.parse(localStorage.getItem(k)); return v === null || v === undefined ? d : v; } catch (e) { return d; } }
+  function lsSave(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  var achState = lsLoad(LS_ACH, {});
+  var hist = lsLoad(LS_HIST, []);
+  var histIdx = hist.length;
+  var unknownCount = 0;
+
+  /* ── 成就 ── */
+  var ACH = {
+    hello:     { n: "初次见面",    d: "打开 PRETEXT 终端" },
+    studious:  { n: "好学",        d: "运行 help" },
+    lost:      { n: "迷路也是路",  d: "连敲 3 条不存在的命令" },
+    redpill:   { n: "红色药丸",    d: "???" },
+    hollywood: { n: "好莱坞黑客",  d: "???" },
+    caffeine:  { n: "418 我是茶壶", d: "???" },
+    rooter:    { n: "Root 之心",   d: "???" },
+    danger:    { n: "危险人物",    d: "???" },
+    archivist: { n: "档案管理员",  d: "???" },
+    konami:    { n: "上上下下",    d: "你以为没人会试的秘技" },
+    graduate:  { n: "Guru 毕业证", d: "集齐前 10 枚成就" }
+  };
+  function toast(html) {
+    var t = document.createElement("div");
+    t.className = "px-toast";
+    t.innerHTML = html;
+    toasts.appendChild(t);
+    setTimeout(function () { t.classList.add("px-toast-out"); }, 3600);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 4000);
+  }
+  function unlock(id) {
+    if (achState[id]) return;
+    achState[id] = Date.now();
+    lsSave(LS_ACH, achState);
+    toast("✓ 成就解锁 · <b>" + ACH[id].n + "</b>");
+    var need = ["hello","studious","lost","redpill","hollywood","caffeine","rooter","danger","archivist","konami"];
+    if (id !== "graduate" && need.every(function (k) { return achState[k]; })) {
+      setTimeout(function () {
+        if (!achState.graduate) {
+          achState.graduate = Date.now(); lsSave(LS_ACH, achState);
+          toast("✓ 成就解锁 · <b>Guru 毕业证</b> —— 全部集齐，欢迎毕业。");
+          print("amber", "");
+          print("amber", "◎ GURU 毕业证已颁发 —— 你把这个网页玩穿了。");
+          print("dim", "下一步：把真的那台装进手机 → download");
+        }
+      }, 900);
+    }
+  }
+
+  /* ── 输出 ── */
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function link(href, text) { return '<a href="' + href + '" target="_blank" rel="noopener">' + esc(text || href) + "</a>"; }
+  function scrollEnd() { screenEl.scrollTop = screenEl.scrollHeight; }
+  function print(cls, html) {
+    var d = document.createElement("div");
+    d.className = "px-ln" + (cls ? " " + cls : "") + (html === "" ? " gap" : "");
+    d.innerHTML = html === "" ? "" : html;
+    out.appendChild(d);
+    scrollEnd();
+    return d;
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, reduced ? 0 : ms); }); }
+  async function typeLine(cls, text) {
+    var d = print(cls, "");
+    if (reduced) { d.innerHTML = esc(text); return; }
+    var i = 0, buf = "";
+    var step = function () {
+      if (i >= text.length) return Promise.resolve();
+      buf += text[i++];
+      d.innerHTML = esc(buf);
+      scrollEnd();
+      return wait(11).then(step);
+    };
+    await step();
+  }
+  function echoCmd(raw) {
+    var d = print("", '<span style="color:var(--term-amber)">$</span> ' + esc(raw));
+    return d;
+  }
+
+  /* ── 内容池 ── */
+  var DL = "https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest";
+  var WIKI = "https://github.com/AceGuru-mjh/Android-Guru-Agent/wiki";
+  var REPO = "https://github.com/AceGuru-mjh/Android-Guru-Agent";
+  var FACTS = [
+    "targetSdk 钉死 28：Android 10 禁止从私有目录执行二进制，而 Ubuntu rootfs 依赖这条路径。Termux 是同一个原因。",
+    "252 个测试文件、约 4,008 个 @Test —— CI 红了就不合入，没有例外。",
+    "VT100 模拟器纯 Kotlin 零依赖；37 个 C++ 文件只负责 PTY 与原生加速层。",
+    "三个 ABI（arm64-v8a / armeabi-v7a / x86_64）全覆盖，Android 8.0 起步。",
+    "20 个 Gradle 模块，核心模块纯 JVM —— 不起模拟器也能直接单测。",
+    "802 个 Kotlin 文件、约 18 万行主源码，纯手写，没有生成代码。",
+    "API Key 只存设备私有目录的加密存储；无埋点、无统计、无云端账号。",
+    "cs-mem 会把重复操作蒸馏成 FSM 宏：第二次干同样的事，0-token 旁路回放。",
+    "逆向 MCP Host 让 PC 上的 Cline / Claude 把你的手机当一台 MCP Server 调用。",
+    "工具系统 v3 的八层执行硬化：超时 / 重试 / 限流 / 熔断 / 追踪 / 批量 / 组合动作 / 环境闭环。"
+  ];
+  var GURU = [
+    "「会动手的智能体，不该住在云端的机房里。」",
+    "「遇错自愈不是不报错，是报完错自己想办法。」",
+    "「数据不出设备，是尊严问题。」",
+    "「好的长任务引擎像好的实习生：你敢把整件事交给它。」",
+    "「109 个工具，每个都会在 README 里被一句带过。」",
+    "「终端是最好的 UI —— 除非你需要给投资人演示。」",
+    "「我们没做云端，不是不会，是不想替你保管秘密。」",
+    "「肌肉记忆比提示词便宜。token 也是钱。」"
+  ];
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function uptimeMin() { return Math.max(1, Math.round((Date.now() - openedAt) / 60000)); }
+
+  function motd(typed) {
+    if (typed && !reduced) {
+      typeLine("amber", "PRETEXT v1.0 —— 每个产品页都需要一个借口（pretext）。").then(function () {
+        return typeLine("", "这一台的借口是：终端。");
+      }).then(function () {
+        print("", "");
+        print("dim", "输入 help 查看命令 · Tab 补全 · ↑↓ 翻历史 · Esc 离开");
+        print("dim", "纯前端演出，不联网、不上传 —— 和产品一个脾气。");
+        print("", "");
+      });
+    } else {
+      print("amber", "PRETEXT v1.0 —— 每个产品页都需要一个借口（pretext）。");
+      print("", "这一台的借口是：终端。");
+      print("", "");
+      print("dim", "输入 help 查看命令 · Tab 补全 · ↑↓ 翻历史 · Esc 离开");
+      print("dim", "纯前端演出，不联网、不上传 —— 和产品一个脾气。");
+      print("", "");
+    }
+  }
+  /* ── 命令注册表 ── */
+  var CMDS = {};
+  function cmd(name, desc, run, opts) { CMDS[name] = { name: name, d: desc, run: run, hidden: !!(opts && opts.hidden) }; }
+
+  cmd("help", "查看命令", function () {
+    unlock("studious");
+    print("amber", "常用");
+    print("", "  about      这个项目是什么");
+    print("", "  neofetch   设备信息卡（ASCII）");
+    print("", "  tools      109 个内置工具一览");
+    print("", "  modes      六种执行模式");
+    print("", "  fact       随机一条工程冷知识");
+    print("", "  guru       导师今天说");
+    print("amber", "导航");
+    print("", "  download   去拿 APK（真实链接）");
+    print("", "  wiki       去看文档（真实链接）");
+    print("amber", "终端件");
+    print("", "  ach        成就墙");
+    print("", "  theme      纸面 / 暗色切换");
+    print("", "  history    命令历史");
+    print("", "  clear      清屏（Ctrl+L 也行）");
+    print("", "  exit       离开（Esc 也行）");
+    print("dim", "提示：help 只列了一半 —— 终端嘛，总要留点 ls 才能发现的东西。");
+  });
+
+  cmd("about", "这个项目是什么", function () {
+    print("", "Android Guru Agent —— 装进口袋的自主智能体");
+    print("", "──────────────────────────────");
+    print("", "一台真正的 PRoot Ubuntu 24.04 终端 · 109 个可执行工具");
+    print("", "遇错自愈的长任务引擎 · 双向 MCP 生态 · 仿生认知记忆");
+    print("ok",   "无需服务器，数据不出设备。");
+    print("dim", "（你正在敲的这个网页终端，是它的营销部门。）");
+  });
+
+  cmd("neofetch", "设备信息卡", function () {
+    print("", [
+      "     .--.         guru@pocket",
+      "    |o_o |        ─────────────────",
+      "    |:_/ |        OS      Android Guru Agent v1.4.4",
+      "   //   \\ \\       Host    你的浏览器（就是现在这个）",
+      "  (|     | )      Kernel  纯前端 · 零依赖 · 无构建",
+      " /'\\_   _/`\\      Shell   pretext 1.0",
+      " \\___)=(___/      Uptime  " + uptimeMin() + " 分钟",
+      "                  Tools   109（本终端谦虚地只带 " + Object.keys(CMDS).length + " 个）",
+      "                  Memory  localStorage"
+    ].join("\n"));
+  });
+
+  cmd("tools", "109 个内置工具一览", function (args) {
+    if (args && args.join(" ").indexOf("--all") >= 0) {
+      print("dim", "真正的全量清单在 Wiki —— " + link(WIKI + "/Tool-System", "Tool System v4 →"));
+      return;
+    }
+    print("", "109 个内置工具，按域能力分组（节选）：");
+    print("ok", "  文件      read / write / edit / glob / grep / guard");
+    print("ok", "  终端      exec · stream · pulse · checkpoint");
+    print("ok", "  浏览器    open · click · type · scroll · extract");
+    print("ok", "  系统      ui-automate · intents · clipboard · vault");
+    print("ok", "  记忆      cs-mem recall · distill · replay");
+    print("ok", "  市场      market install / connect / list");
+    print("dim", "完整清单在 app 内 —— tools --all 会把你重定向去 Wiki。");
+  });
+
+  cmd("modes", "六种执行模式", function () {
+    print("amber", "BUILD      默认干活档 —— 工具全开");
+    print("amber", "CHAT       纯对话档 —— 只要嘴，不要手");
+    print("amber", "AGENT      自主执行档 —— 从头到尾搞定这件事");
+    print("amber", "PLAN       先计划后执行 —— 高风险操作先看方案");
+    print("amber", "SPEC       规格驱动档 —— 照着需求文档做");
+    print("amber", "REFLECTION 复盘档 —— 干完了，想想哪里能更好");
+    print("dim", "六个模式，同一个 ReAct 主循环。不是六个产品，是一种内核的六种姿势。");
+  });
+
+  cmd("download", "去拿 APK", function () {
+    print("", "APK 在独立发布仓库（GitHub Releases）：");
+    print("ok", "  " + link(DL, "→ 去下载最新 APK"));
+    print("dim", "alpha 阶段 · Android 8.0+ · arm64-v8a / armeabi-v7a / x86_64");
+    try { window.open(DL, "_blank", "noopener"); } catch (e) {}
+  });
+
+  cmd("wiki", "去看文档", function () {
+    print("", "官方 Wiki，58 页：");
+    print("ok", "  " + link(WIKI + "/Quick-Start", "五分钟上手 →") + " · " + link(WIKI + "/FAQ", "FAQ →"));
+    try { window.open(WIKI, "_blank", "noopener"); } catch (e) {}
+  });
+
+  cmd("fact", "随机一条工程冷知识", function () {
+    print("amber", "fact #" + (Math.floor(Math.random() * FACTS.length) + 1));
+    print("", pick(FACTS));
+  });
+
+  cmd("guru", "导师今天说", function () {
+    print("amber", pick(GURU));
+  });
+
+  cmd("ach", "成就墙", function () {
+    var ids = Object.keys(ACH);
+    var got = ids.filter(function (k) { return achState[k]; }).length;
+    print("amber", "成就墙 · " + got + " / " + ids.length);
+    ids.forEach(function (k) {
+      var a = ACH[k];
+      if (achState[k]) print("ok", "  [✓] " + a.n + " —— " + a.d);
+      else print("dim", "  [ ] " + a.n + " —— " + a.d);
+    });
+    print("dim", "毕业条件：集齐前 10 枚 → Guru 毕业证。");
+  });
+
+  cmd("theme", "纸面 / 暗色切换", function () {
+    var light = winEl.classList.toggle("px-light");
+    lsSave(LS_THEME, light);
+    print("ok", light ? "已切换：纸面主题（青灰纸 × 墨字）" : "已切换：暗色主题（终端原味）");
+  });
+
+  cmd("history", "命令历史", function () {
+    if (!hist.length) { print("dim", "历史是空的 —— 你还没敲过任何东西。"); return; }
+    hist.slice(-20).forEach(function (h, i) { print("", "  " + (hist.length - Math.min(hist.length, 20) + i + 1) + "  " + esc(h)); });
+  });
+
+  cmd("clear", "清屏", function () { out.innerHTML = ""; });
+  cmd("exit", "离开终端", function () { dlg.close(); });
+
+  /* 隐藏命令（help 不列） */
+  cmd("ls", "列出虚拟文件", function () {
+    print("ok", "about.md    tools.txt    modes.txt    secret/");
+  }, { hidden: true });
+
+  cmd("cat", "读文件", function (args) {
+    var f = (args[0] || "").replace(/\/+$/, "");
+    if (f === "about.md") { print("dim", "此文件是个借口（pretext）……内容见 about 命令。"); }
+    else if (f === "tools.txt") { print("dim", "真正的工具清单有 109 行，这里只有 1 行借口：用 tools 命令。"); }
+    else if (f === "modes.txt") { CMDS.modes.run([]); }
+    else if (f === "secret/README" || f === "secret/README.md" || f === "secret" || f === "README") {
+      print("amber", "你找到了。");
+      print("", "这个目录里没有别的了 —— 真正的彩蛋都在 app 里：");
+      print("ok", "109 个工具、六种模式、和一台真的 Ubuntu。");
+      print("dim", "成就「档案管理员」已解锁。");
+      unlock("archivist");
+    }
+    else { print("err", "cat: " + esc(args[0] || "") + ": 没有那个文件 —— 试试 ls"); }
+  }, { hidden: true });
+
+  cmd("matrix", "???", function () {
+    return matrixRain().then(function () { unlock("redpill"); });
+  }, { hidden: true });
+
+  cmd("hack", "???", function () {
+    return hackDump().then(function () { unlock("hollywood"); });
+  }, { hidden: true });
+
+  cmd("coffee", "???", function () {
+    print("", [
+      "      ( (",
+      "       ) )",
+      "    ._______.",
+      "    |       |]",
+      "    \\       /",
+      "     `-----'"
+    ].join("\n"));
+    print("err", "HTTP 418 —— 我是一把茶壶。");
+    print("dim", "本项目拒绝在此终端煮咖啡：PRoot 沙箱里连水都没有。");
+    unlock("caffeine");
+  }, { hidden: true });
+
+  cmd("sudo", "???", function (args) {
+    var rest = args.join(" ");
+    if (rest.indexOf("rm -rf") >= 0) {
+      print("err", "想得美。这个网页连 / 都没有。");
+      print("dim", "（但在真机上，Root 权限链确实归你管。）");
+      unlock("danger");
+      return;
+    }
+    print("dim", "你已经是 Root 了（在这个网页里）。");
+    print("dim", "真机上是三级权限链：Root → Shizuku → 沙箱 shell。");
+    unlock("rooter");
+  }, { hidden: true });
+
+  cmd("rm", "???", function (args) {
+    if (args.join(" ").indexOf("-rf") >= 0) {
+      print("err", "危险人物认证失败：此处无文件系统可破坏。");
+      print("dim", "（成就照发。）");
+      unlock("danger");
+    } else { print("err", "rm: 这里没有文件可删 —— ls 看看？"); }
+  }, { hidden: true });
+
+  cmd("whoami", "???", function () { print("", "visitor —— 但每个 visitor 都有成为 guru 的潜质。"); }, { hidden: true });
+  cmd("pwd", "???", function () { print("", "/home/guru/pocket"); }, { hidden: true });
+  cmd("date", "???", function () {
+    print("", new Date().toLocaleString("zh-CN", { hour12: false }));
+    print("dim", "（无服务器架构的好处：我的时间就是你的时间。）");
+  }, { hidden: true });
+  cmd("uptime", "???", function () {
+    print("", "up " + uptimeMin() + " 分钟 · 1 个用户（你）· 负载：轻，纯前端");
+  }, { hidden: true });
+  cmd("echo", "???", function (args) { print("", esc(args.join(" ")) || ""); }, { hidden: true });
+  cmd("man", "???", function (args) {
+    var t = args[0] ? args[0] : "help";
+    print("dim", "man " + esc(t) + " —— 本终端的手册只有一页：help。");
+    print("dim", "真正的手册有 58 页，在 Wiki。");
+  }, { hidden: true });
+  cmd("vim", "???", function () {
+    print("err", "这里没有 vim。逃 :q 也逃不出去 —— 按 Esc。");
+  }, { hidden: true });
+  cmd("reboot", "???", function () {
+    print("amber", "Broadcast message from guru@pocket:");
+    print("err", "The system is going down for reboot NOW!");
+    return wait(900).then(function () {
+      out.innerHTML = "";
+      return wait(700);
+    }).then(function () {
+      print("dim", "rebooting pretext…");
+      return wait(900);
+    }).then(function () {
+      out.innerHTML = "";
+      motd();
+    });
+  }, { hidden: true });
+
+  /* ── 特效：数字雨 ── */
+  function matrixRain() {
+    return new Promise(function (resolve) {
+      fxGuard = Infinity;
+      print("dim", "Entering the Matrix…（任意键退出）");
+      var cv = document.createElement("canvas");
+      cv.id = "pxMatrix";
+      screenEl.appendChild(cv);
+      var ctx = cv.getContext("2d");
+      var W, H, cols, drops, chars = "アイウエオカキクケコサシスセソ0123456789ABCDEF";
+      function size() {
+        var r = screenEl.getBoundingClientRect();
+        var dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
+        cv.width = W * dpr; cv.height = H * dpr;
+        cv.style.width = W + "px"; cv.style.height = H + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        cols = Math.floor(W / 14);
+        drops = new Array(cols).fill(0).map(function () { return Math.floor(Math.random() * -50); });
+      }
+      size();
+      var raf, stopped = false;
+      function draw() {
+        if (stopped) return;
+        ctx.fillStyle = "rgba(15, 20, 16, 0.14)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.font = "13px " + getComputedStyle(document.body).getPropertyValue("--font-mono");
+        for (var i = 0; i < cols; i++) {
+          var ch = chars[Math.floor(Math.random() * chars.length)];
+          ctx.fillStyle = Math.random() > 0.975 ? "#E4EBDF" : "#8CD7A0";
+          ctx.fillText(ch, i * 14, drops[i] * 15);
+          if (drops[i] * 15 > H && Math.random() > 0.975) drops[i] = 0;
+          drops[i]++;
+        }
+        raf = requestAnimationFrame(draw);
+      }
+      function stop() {
+        if (stopped) return;
+        stopped = true;
+        fxGuard = Date.now() + 350;
+        cancelAnimationFrame(raf);
+        document.removeEventListener("keydown", stop, true);
+        if (cv.parentNode) cv.parentNode.removeChild(cv);
+        print("ok", "✓ 醒了。欢迎回到现实。");
+        resolve();
+      }
+      document.addEventListener("keydown", stop, true);
+      cv.addEventListener("click", stop);
+      setTimeout(stop, reduced ? 1200 : 7000);
+      if (!reduced) raf = requestAnimationFrame(draw); else setTimeout(stop, 0);
+    });
+  }
+
+  /* ── 特效：好莱坞黑客 ── */
+  function hackDump() {
+    return new Promise(function (resolve) {
+      fxGuard = Infinity;
+      print("amber", "HACKERTYPER 模式：随便敲，看起来很忙。");
+      print("dim", "（任意键结束演出）");
+      var code = [
+        "fun main() {",
+        "    val agent = GuruAgent.Builder()",
+        "        .mode(Mode.AGENT)",
+        "        .memory(CsMem())",
+        "        .tools(109)",
+        "        .build()",
+        "    agent.run(\"把这台手机变成机房\")",
+        "    // ▓▓░ SERVER ACCESS GRANTED ░▓▓",
+        "    while (task.alive) {",
+        "        task.retry(on = RateLimit | Timeout | Dropout)",
+        "        context.compact()",
+        "    }",
+        "    println(\"BUILD SUCCESSFUL in 41s\")",
+        "}",
+        "0x7f9a3c: PWNED (kidding. it's a web page.)"
+      ];
+      var idx = 0, pos = 0, cur = null;
+      var timer = setInterval(function () {
+        if (idx >= code.length) { finish(); return; }
+        if (!cur) { cur = print("", ""); }
+        pos += 3;
+        cur.textContent = code[idx].slice(0, pos);
+        scrollEnd();
+        if (pos >= code[idx].length) { cur = null; pos = 0; idx++; }
+      }, reduced ? 1 : 34);
+      function finish() {
+        clearInterval(timer);
+        fxGuard = Date.now() + 350;
+        document.removeEventListener("keydown", finish, true);
+        screenEl.removeEventListener("click", finish);
+        print("ok", "✓ 入侵完成。（并没有。这里是网页。）");
+        resolve();
+      }
+      document.addEventListener("keydown", finish, true);
+      screenEl.addEventListener("click", finish);
+      setTimeout(finish, reduced ? 400 : 9000);
+    });
+  }
+
+  /* ── 执行引擎 ── */
+  var queue = Promise.resolve();
+  function exec(raw) {
+    raw = String(raw || "").trim();
+    echoCmd(raw);
+    if (!raw) return;
+    hist.push(raw); if (hist.length > 100) hist = hist.slice(-100);
+    lsSave(LS_HIST, hist);
+    histIdx = hist.length;
+    var parts = raw.split(/\s+/);
+    var name = parts[0].toLowerCase();
+    var args = parts.slice(1);
+    queue = queue.then(function () {
+      var c = CMDS[name];
+      if (!c) {
+        var cands = Object.keys(CMDS).filter(function (k) { return k.indexOf(name) === 0; });
+        if (cands.length === 1) c = CMDS[cands[0]];
+        else if (cands.length > 1) { print("dim", "歧义命令：" + cands.join(" / ")); return; }
+      }
+      if (!c) {
+        unknownCount++;
+        print("err", "zsh: command not found: " + esc(name));
+        print("dim", "试试 help —— 或者，迷路 3 次也算一种成就。");
+        if (unknownCount >= 3) unlock("lost");
+        return;
+      }
+      var r = c.run(args);
+      if (r && typeof r.then === "function") return r;
+    });
+  }
+
+  /* Tab 补全 / 历史 / Ctrl+L */
+  function complete() {
+    var v = input.value.trim().toLowerCase();
+    var names = Object.keys(CMDS).sort();
+    var cands = v ? names.filter(function (n) { return n.indexOf(v) === 0; }) : [];
+    if (cands.length === 1) { input.value = cands[0] + " "; }
+    else if (cands.length > 1) { echoCmd(input.value + " (Tab)"); print("dim", cands.join("  ")); }
+    else if (!v) { echoCmd("(Tab)"); print("dim", names.join("  ")); }
+  }
+  function histNav(dir) {
+    if (!hist.length) return;
+    histIdx = Math.max(0, Math.min(hist.length, histIdx + dir));
+    input.value = histIdx === hist.length ? "" : hist[histIdx];
+  }
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { var v = input.value; input.value = ""; exec(v); }
+    else if (e.key === "Tab") { e.preventDefault(); complete(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); histNav(-1); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); histNav(1); }
+    else if (e.key === "l" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); out.innerHTML = ""; }
+  });
+  screenEl.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest("a")) return;
+    input.focus();
+  });
+
+  /* 工具栏（触屏） */
+  document.querySelector(".px-toolbar").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-px-act]");
+    if (!b) return;
+    var act = b.getAttribute("data-px-act");
+    if (act === "tab") { complete(); input.focus(); }
+    else if (act === "up") { histNav(-1); input.focus(); }
+    else if (act === "down") { histNav(1); input.focus(); }
+    else if (act === "ach") { exec("ach"); }
+    else if (act === "clear") { out.innerHTML = ""; input.focus(); }
+    else if (act === "exit") { dlg.close(); }
+  });
+  document.getElementById("pxClose").addEventListener("click", function () { dlg.close(); });
+
+  /* ── 开 / 关 ── */
+  var everOpened = false;
+  /* 特效运行期（matrix/hack）Esc 只停特效不关窗：
+     cancel 在 keydown 默认动作阶段触发，stop() 已同步置空 guard 会失效，
+     故用「运行中=∞ + 停止后 350ms 宽限」双窗口。 */
+  var fxGuard = 0;
+  dlg.addEventListener("cancel", function (e) {
+    if (Date.now() < fxGuard) e.preventDefault();
+  });
+  function open() {
+    if (location.hash !== "#pretext") { try { history.replaceState(null, "", "#pretext"); } catch (e) {} }
+    if (!dlg.open) dlg.showModal();
+    setTimeout(function () { input.focus(); }, 60);
+    if (!everOpened) {
+      everOpened = true;
+      out.innerHTML = "";
+      motd(true);
+      unlock("hello");
+    }
+  }
+  dlg.addEventListener("close", function () {
+    if (location.hash === "#pretext") { try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
+  });
+
+  /* ── 入口接线 ── */
+  var phone = document.getElementById("phoneProp");
+  if (phone) {
+    phone.addEventListener("click", open);
+    phone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".px-open-link"), function (b) {
+    b.addEventListener("click", open);
+  });
+  var foot = document.getElementById("pxFootLink");
+  if (foot) foot.addEventListener("click", function (e) { e.preventDefault(); open(); });
+
+  window.addEventListener("keydown", function (e) {
+    if (dlg.open) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var a = document.activeElement;
+    if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return;
+    var k = (e.key || "").toLowerCase();
+    if (k === "t" || e.key === "`") { e.preventDefault(); open(); }
+  });
+
+  /* Konami：↑↑↓↓←→←→BA */
+  var KONAMI = ["arrowup","arrowup","arrowdown","arrowdown","arrowleft","arrowright","arrowleft","arrowright","b","a"];
+  var kIdx = 0;
+  window.addEventListener("keydown", function (e) {
+    var a = document.activeElement;
+    if (a === input || (a && a.tagName === "INPUT")) { kIdx = 0; return; }
+    var k = (e.key || "").toLowerCase();
+    if (k === KONAMI[kIdx]) { kIdx++; if (kIdx === KONAMI.length) { kIdx = 0; unlock("konami"); open(); } }
+    else { kIdx = (k === KONAMI[0]) ? 1 : 0; }
+  });
+
+  /* 主题恢复 + hash 直达 */
+  if (lsLoad(LS_THEME, false)) winEl.classList.add("px-light");
+  if (location.hash === "#pretext") setTimeout(open, 350);
+  window.addEventListener("hashchange", function () {
+    if (location.hash === "#pretext" && !dlg.open) open();
+  });
 })();
 </script>
 </body>

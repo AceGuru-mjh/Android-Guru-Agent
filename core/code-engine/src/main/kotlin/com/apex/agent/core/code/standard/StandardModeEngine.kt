@@ -339,9 +339,8 @@ class StandardModeEngine(
         var planText: String? = null
         val repeatGuard = RepeatGuard()
 
-        // P1 修复（标准线韧性）：每次运行新建守卫（任务级重试预算不跨运行
-        // 泄漏）—— 复用 Agent 屏同款 EngineResilienceGuard（限流/超时/断连
-        // 退避重试，上限 5 次），与 ApexAgentEngine 行为对齐。
+        // P1 修复（标准线韧性）：每次运行新建守卫（预算不跨运行泄漏），
+        // 复用 Agent 屏同款 EngineResilienceGuard（限流/超时/断连退避重试）。
         val llmResilience = EngineResilienceGuard()
 
         while (isRunning && turn < maxTurns) {
@@ -374,12 +373,9 @@ class StandardModeEngine(
             val reasoningBuilder = StringBuilder()
             val toolCallsAccumulator = LinkedHashMap<String, ToolCallAccumulator>()
 
-            // P1 修复（标准线韧性）：Coding 屏此前对 LLM 瞬时错误零重试 ——
-            // SSE 中途断流（弱网/网关抖动）且本轮尚无输出时直接把异常上抛，
-            // 整轮任务报错死亡，与 Agent 屏（EngineResilienceGuard 退避重试
-            // 5 次）行为不一致 ——「Coding 屏失败率高」的直接根因。
-            // 现在零输出轮次复用引擎同款韧性守卫做退避重试；已有部分
-            // 输出时保持旧行为（追加失败说明后诚实收尾，防重复拼接）。
+            // P1 修复（标准线韧性）：零输出轮次的瞬时错误退避重试（旧实现
+            // 直接上抛，Coding 屏一次网络抖动杀整轮）；已有部分输出时保持
+            // 旧行为（追加失败说明后诚实收尾，防重复拼接）。
             while (true) {
                 try {
                     runtime.chatStream(
@@ -420,37 +416,26 @@ class StandardModeEngine(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // 传输层异常：本轮无任何输出且为瞬时错误 → 退避重试；
-                    // 已有部分输出或非瞬时错误 → 旧行为（上抛 / 追加失败说明收尾）。
+                    // 零输出且为瞬时错误 → 退避重试；否则旧行为（上抛/收尾）。
                     val hasPartialOutput = contentBuilder.isNotEmpty() ||
                         reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty()
                     val retryDecision = llmResilience.onLlmFailure(e)
-                    if (hasPartialOutput ||
-                        retryDecision !is EngineResilienceGuard.LlmRetryDecision.Retry
-                    ) {
+                    if (hasPartialOutput || retryDecision !is EngineResilienceGuard.LlmRetryDecision.Retry) {
                         if (hasPartialOutput) {
                             contentBuilder.append("\n\n[请求中断：${e.message}]")
                             break
                         }
                         throw e
                     }
-                    AppLogger.instance.warn(
-                        LogCategory.LLM, "StandardModeEngine",
-                        "LLM 瞬时失败（${e::class.simpleName}），退避 ${retryDecision.delayMs}ms 后" +
-                            "重试（${retryDecision.attempt}/${llmResilience.policy.maxLlmRetries}）: ${e.message}"
-                    )
-                    emit(
-                        AgentEvent.ThinkingChunk(
-                            "[engine] 模型暂时不可用（${e::class.simpleName ?: "error"}）— " +
-                                "${retryDecision.delayMs / 1000.0}s 后自动重试 " +
-                                "（${retryDecision.attempt}/${llmResilience.policy.maxLlmRetries}）\n"
-                        )
-                    )
+                    val retryNote = "LLM 瞬时失败（${e::class.simpleName}），退避 ${retryDecision.delayMs}ms 后" +
+                        "重试（${retryDecision.attempt}/${llmResilience.policy.maxLlmRetries}）: ${e.message}"
+                    AppLogger.instance.warn(LogCategory.LLM, "StandardModeEngine", retryNote)
+                    emit(AgentEvent.ThinkingChunk(
+                        "[engine] 模型暂时不可用（${e::class.simpleName ?: "error"}）— ${retryDecision.delayMs / 1000.0}s 后自动重试\n"
+                    ))
                     kotlinx.coroutines.delay(retryDecision.delayMs)
-                    // 重试前清空（本轮必为零输出状态，防御性清空防累积）
                     contentBuilder.setLength(0)
-                    reasoningBuilder.setLength(0)
-                    toolCallsAccumulator.clear()
+                    reasoningBuilder.setLength(0); toolCallsAccumulator.clear()
                 }
             }
 

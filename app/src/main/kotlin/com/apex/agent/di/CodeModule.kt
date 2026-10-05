@@ -226,7 +226,10 @@ object CodeModule {
         // 业界标准式权限门，共用主执行器的组合门会双弹窗）
         @javax.inject.Named("standardEngineTools") standardToolExecutor: ToolExecutor,
         // 权限设置源（设置层 → 标准线权限门的实时快照通道）
-        settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository
+        settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
+        // v3 GOAL 模式：目标验收协调器（与 Agent 屏共享单例；深潜线引擎挂
+        // 每轮验收钩子，见 ApexAgentEngine.goalCoordinator）
+        goalCoordinator: com.apex.agent.core.engine.goal.GoalModeCoordinator
     ): AgentEngine {
         val codeConfig = AgentConfig(
             mode = AgentMode.BUILD,
@@ -259,7 +262,9 @@ object CodeModule {
                 // Issue #165：coding 引擎同样接入生命周期钩子（会话/回合/压缩事件）
                 hookRunner = hookRunner,
                 // 技能激活共享（见参数 KDoc）：目录 + 已装备方法论注入。
-                skillActivation = skillActivation
+                skillActivation = skillActivation,
+                // v3 GOAL 模式：每轮收尾快速模型验收（无目标时零行为差异）
+                goalCoordinator = goalCoordinator
             ),
             codeMemory = codeMemory,
             contextProvider = codeContextProvider,

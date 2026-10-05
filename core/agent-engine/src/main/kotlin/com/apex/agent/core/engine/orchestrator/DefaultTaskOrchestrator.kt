@@ -323,8 +323,12 @@ class DefaultTaskOrchestrator(
                 runBuildLoop(input, cfg)
             // #197 Agent 屏双模式：委托给被包装的引擎（ReAct 循环内处理
             // CHAT 零工具 / AGENT 剔除编码工具的工具计划）。
+            // v3：LOOP / GOAL 同款委托——调度（Loop）与验收（Goal）状态
+            // 在引擎外部（VM 协调器 / GoalModeCoordinator），编排器只透传。
             AgentMode.CHAT,
             AgentMode.AGENT,
+            AgentMode.LOOP,
+            AgentMode.GOAL,
             AgentMode.PLAN,
             AgentMode.SPEC,
             AgentMode.REFLECTION,

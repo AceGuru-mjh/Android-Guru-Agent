@@ -164,13 +164,20 @@ enum class ToolRisk(val label: String) {
  *   destructive / idempotent / openWorld / sensitive). Defaults to
  *   [ToolAnnotations.infer] over id + risk so every existing tool gets
  *   hints without code changes; explicit declaration wins.
+ * @param scope v3 workspace scope ("agent" | "coding" | "all", default
+ *   "all"): which screen this tool is visible on. Sourced from the SAME
+ *   field the market tiers use (McpServerConfig.scope / skill manifest
+ *   scope) at registration time; consumed by EngineToolPlanner to enforce
+ *   mode-level isolation. "all" = both workspaces (every built-in tool
+ *   default — zero behavior change for the existing 111 tools).
  */
 data class ToolMetadata(
     val id: String,
     val category: ToolCategory,
     val risk: ToolRisk,
     val tags: List<String> = emptyList(),
-    val annotations: ToolAnnotations = ToolAnnotations.infer(id, risk)
+    val annotations: ToolAnnotations = ToolAnnotations.infer(id, risk),
+    val scope: String = "all"
 ) {
     /** True when this tool's risk level requires gated approval. */
     val isHighRisk: Boolean get() = risk == ToolRisk.HIGH
@@ -193,7 +200,11 @@ data class ToolMetadata(
         private var category: ToolCategory? = null
         private var risk: ToolRisk? = null
         private var annotations: ToolAnnotations? = null
+        private var scope: String = "all"
         private val tags = mutableListOf<String>()
+
+        /** Set the workspace scope ("agent" | "coding" | "all"). */
+        fun scope(scope: String) = apply { this.scope = scope }
 
         /** Set the category; inferred from the id if never called. */
         fun category(category: ToolCategory) = apply { this.category = category }
@@ -229,7 +240,8 @@ data class ToolMetadata(
                 category = resolvedCategory,
                 risk = resolvedRisk,
                 tags = tags,
-                annotations = annotations ?: ToolAnnotations.infer(id, resolvedRisk)
+                annotations = annotations ?: ToolAnnotations.infer(id, resolvedRisk),
+                scope = scope
             )
         }
     }

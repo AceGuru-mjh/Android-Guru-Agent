@@ -45,12 +45,14 @@ import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.R
 
 /**
- * #197 Agent 屏可选模式（双工位拆分后仅此两个）。
+ * #197 Agent 屏可选模式（双工位拆分后；v3 新增 LOOP 循环/定时工位模式）。
  */
-val AGENT_SCREEN_MODES: List<AgentMode> = listOf(AgentMode.CHAT, AgentMode.AGENT)
+val AGENT_SCREEN_MODES: List<AgentMode> =
+    listOf(AgentMode.CHAT, AgentMode.AGENT, AgentMode.LOOP)
 
-/** Coding 屏可选模式（#197：plan/build 从 Agent 屏迁入编码工位）。 */
-val CODING_SCREEN_MODES: List<AgentMode> = listOf(AgentMode.BUILD, AgentMode.PLAN)
+/** Coding 屏可选模式（#197：plan/build 从 Agent 屏迁入；v3 新增 GOAL 目标驱动）。 */
+val CODING_SCREEN_MODES: List<AgentMode> =
+    listOf(AgentMode.BUILD, AgentMode.PLAN, AgentMode.GOAL)
 
 /**
  * ═══ 任务模式选择器（顶部模式栏 v3）═══
@@ -201,6 +203,8 @@ internal fun agentModeIcon(mode: AgentMode): ImageVector = when (mode) {
     AgentMode.AGENT -> Icons.Default.SmartToy
     AgentMode.BUILD -> Icons.Default.Build
     AgentMode.PLAN -> Icons.AutoMirrored.Filled.ListAlt
+    AgentMode.GOAL -> Icons.Default.Flag
+    AgentMode.LOOP -> Icons.Default.Replay
     AgentMode.SPEC -> Icons.Default.Description
     AgentMode.REFLECTION -> Icons.Default.Psychology
     AgentMode.HUMAN_ASSIST -> Icons.Default.SupportAgent
@@ -216,6 +220,8 @@ internal fun agentModeDescription(mode: AgentMode): String = when (mode) {
     AgentMode.AGENT -> stringResource(R.string.chat_mode_agent_desc)
     AgentMode.BUILD -> stringResource(R.string.chat_mode_build_desc)
     AgentMode.PLAN -> stringResource(R.string.chat_mode_plan_desc)
+    AgentMode.GOAL -> stringResource(R.string.chat_mode_goal_desc)
+    AgentMode.LOOP -> stringResource(R.string.chat_mode_loop_desc)
     AgentMode.SPEC -> stringResource(R.string.chat_mode_spec_desc)
     AgentMode.REFLECTION -> stringResource(R.string.chat_mode_reflect_desc)
     AgentMode.HUMAN_ASSIST -> stringResource(R.string.chat_mode_assist_desc)

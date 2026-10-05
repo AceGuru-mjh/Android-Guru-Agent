@@ -7,6 +7,7 @@ import androidx.security.crypto.MasterKey
 import com.apex.agent.core.engine.modes.ModePreset
 import com.apex.agent.core.engine.modes.migrateLegacyCustomInstruction
 import com.apex.agent.core.engine.modes.selectedModePreset
+import com.apex.agent.core.code.subagent.SubAgentSettings
 import com.apex.agent.core.llm.*
 import com.apex.agent.permission.PermissionMode
 import com.apex.agent.permission.PermissionRule
@@ -580,4 +581,42 @@ data class AgentSettings(
     // 项目规则（AGENTS.md/CLAUDE.md/.cursorrules）不持久化，由 RulesProvider
     // 每轮从工作区即时发现。默认空串 = 无规则，向后兼容零迁移。
     val globalRules: String = "",
+
+    // ═══ v3 子代理全面完善（预算/自定义类型可配置）═══
+    // 此前全部硬编码（3 并发/300s/15 轮/8K），零可配置。接线：ToolModule
+    // 构造 SubAgentRunner 时注入快照 provider；标准线 StandardSubAgentDispatcher
+    // 同款消费。自定义类型由 code_task 的 custom 类型 + custom_name 按名解析。
+    val subagent: SubAgentSettings = SubAgentSettings(),
+
+    // ═══ v3 GOAL 目标模式 ═══
+    // goalMaxRounds：新目标的默认验收轮次上限（创建对话框预填）。
+    // goalVerifierEnabled：快速模型验收开关（关闭后信任主模型自评，省 token）。
+    // goalAutoResume：会话恢复时若有未完成目标自动提示续跑（仅提示不自动执行）。
+    val goalMaxRounds: Int = 8,
+    val goalVerifierEnabled: Boolean = true,
+    val goalAutoResume: Boolean = true,
+
+    // ═══ v3 LOOP 循环与 Cron 模式 ═══
+    // loopDefaultIntervalMs：新循环默认间隔（创建对话框预填）。
+    // loopMaxRunsDefault：新循环默认最大执行次数。
+    // loopNotifyOnRun：App 在后台时循环触发/完成发系统通知（前台静音）。
+    // loopCatchUpMissed：会话重新打开时补跑错过的到期轮（一次性提醒除外）。
+    val loopDefaultIntervalMs: Long = 300_000L,
+    val loopMaxRunsDefault: Int = 10,
+    val loopNotifyOnRun: Boolean = true,
+    val loopCatchUpMissed: Boolean = false,
+
+    // ═══ v3 Coding 工位增强 ═══
+    // codingToolSurface：Coding 屏工具面——"full"（默认，CORE+激活全量）|
+    // "core"（仅 code_/git/github/terminal 核心编码工具，降噪聚焦）。
+    // codingReadGuard：标准线 read-before-edit 硬约束开关（默认开；关闭后
+    // 旧工作流免读直改，风险自担）。
+    // codingAutoRules：AGENTS.md/CLAUDE.md/.cursorrules 自动发现注入开关
+    // （关闭后仅全局规则生效，项目规则被忽略）。
+    // mcpScopeIsolation：MCP/技能复合工具按市场分级（agent/coding）在引擎
+    // 侧隔离的开关（默认开；关闭后回到 v2 的全局可见行为）。
+    val codingToolSurface: String = "full",
+    val codingReadGuard: Boolean = true,
+    val codingAutoRules: Boolean = true,
+    val mcpScopeIsolation: Boolean = true,
 )

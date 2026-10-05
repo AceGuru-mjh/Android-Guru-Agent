@@ -150,6 +150,8 @@
     <string name="settings_mode_build">Build · think and act</string>
     <string name="settings_mode_chat">Chat (legacy)</string>
     <string name="settings_mode_plan">Plan · plan first, then execute</string>
+    <string name="settings_mode_goal">Goal · verifiable objective loop</string>
+    <string name="settings_mode_loop">Loop · scheduled re-runs</string>
     <string name="settings_mode_spec">Spec · confirm the spec, then execute</string>
     <string name="settings_mode_reflect">Reflect · review and improve</string>
     <string name="settings_mode_assist">Assist · human decides</string>

@@ -696,6 +696,8 @@ fun AgentChatScreen(
                                 AgentMode.HUMAN_ASSIST -> stringResource(R.string.chat_hint_human_assist)
                                 AgentMode.CUSTOM -> stringResource(R.string.chat_hint_custom)
                                 AgentMode.BUILD -> stringResource(R.string.chat_hint_build)
+                                AgentMode.GOAL -> stringResource(R.string.chat_hint_goal)
+                                AgentMode.LOOP -> stringResource(R.string.chat_hint_loop)
                             }
                         )
                         // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击挂 chip）═══

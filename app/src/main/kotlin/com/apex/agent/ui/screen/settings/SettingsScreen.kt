@@ -800,6 +800,8 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
                 "build" to stringResource(R.string.settings_mode_build),
                 "chat" to stringResource(R.string.settings_mode_chat),
                 "plan" to stringResource(R.string.settings_mode_plan),
+                "goal" to stringResource(R.string.settings_mode_goal),
+                "loop" to stringResource(R.string.settings_mode_loop),
                 "spec" to stringResource(R.string.settings_mode_spec),
                 "reflect" to stringResource(R.string.settings_mode_reflect),
                 "assist" to stringResource(R.string.settings_mode_assist),
@@ -826,9 +828,9 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
             description = stringResource(R.string.settings_max_iterations_desc), min = 1, max = 200) {
             onUpdate(agent.copy(maxIterations = it))
         }
-        // #236：Keep Alive 真接线 —— 关 = 立即停服务（此前是假开关；收口 CoreServiceGate）。
+        // #236：Keep Alive 真接线（关=立即停服务）。
         SwitchRow("Keep Alive", agent.keepAlive) { on -> com.apex.agent.service.CoreServiceGate.apply(ctx, on); onUpdate(agent.copy(keepAlive = on)) }
-        // v1.4.4 #4：任务完成通知（✅已接线——EventApplier Complete 钩子；前台静音）
+        // v1.4.4 #4：任务完成通知（EventApplier Complete 钩子；前台静音）。
         SwitchRow(stringResource(R.string.settings_task_notify_title), agent.taskCompletionNotify,
             description = stringResource(R.string.settings_task_notify_desc)) {
             onUpdate(agent.copy(taskCompletionNotify = it))

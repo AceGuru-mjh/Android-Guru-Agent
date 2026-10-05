@@ -6,6 +6,8 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.compression.CompressionReport
 import com.apex.agent.core.engine.compression.TokenEstimator
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
+import com.apex.agent.core.engine.goal.GoalDecision
+import com.apex.agent.core.engine.goal.GoalModeCoordinator
 import com.apex.agent.core.engine.orchestrator.LoopDetector
 import com.apex.agent.core.engine.orchestrator.RecoveryPlanner
 import com.apex.agent.core.engine.task.DanglingToolCallRepair
@@ -139,7 +141,14 @@ class ApexAgentEngine(
      * 连续失败换路提示。默认启用（长任务需求）；测试可注入
      * EngineResilienceGuard(EngineResiliencePolicy.DISABLED) 回退旧「遇错即停」行为。
      */
-    internal val resilience: EngineResilienceGuard = EngineResilienceGuard()
+    internal val resilience: EngineResilienceGuard = EngineResilienceGuard(),
+    /**
+     * v3 GOAL 模式协调器：非空且 [AgentConfig.mode] == GOAL 时，每轮纯文本
+     * 收尾前调 [GoalModeCoordinator.onAgentTurn] 快速模型验收——未达标注入
+     * 差距说明续跑，达标/轮次耗尽照常收尾（同 HUMAN_ASSIST/REFLECTION 的
+     * 「模式特化拦截」惯例）。null = 无目标，GOAL 模式退化为 BUILD 行为。
+     */
+    private val goalCoordinator: GoalModeCoordinator? = null
 ) : AgentEngine, ConfirmationSink {
 
     /** #165 插桩句柄（null 安全派生；开号时快照当前模式名）。 */
@@ -510,7 +519,8 @@ class ApexAgentEngine(
                 // #197 Agent 屏双模式：CHAT（零工具纯对话）与 AGENT（全能非编程）
                 // 都跑 ReAct 主循环——差异在工具计划（EngineToolPlanner：CHAT=空、
                 // AGENT=剔除编码工具）与提示词模式段（EnginePrompts），复用同一执行器。
-                AgentMode.CHAT, AgentMode.AGENT -> {
+                // v3 LOOP（Agent 工位周期任务）同款复用：调度在 VM 层，引擎只跑单次。
+                AgentMode.CHAT, AgentMode.AGENT, AgentMode.LOOP -> {
                     val iter = executeBuildLoop { event ->
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
@@ -540,10 +550,11 @@ class ApexAgentEngine(
                     }
                     totalIterations = maxOf(totalIterations, specIterations)
                 }
-                // REFLECTION / HUMAN_ASSIST / CUSTOM 共享 ReAct 主循环：
+                // REFLECTION / HUMAN_ASSIST / CUSTOM / GOAL（v3）共享 ReAct 主循环：
                 // 行为差异全部由 buildSystemPrompt 注入的 Mode 段落驱动；
-                // REFLECTION 另在最终纯文本轮次触发"生成→评审→修正"循环。
-                AgentMode.REFLECTION, AgentMode.HUMAN_ASSIST, AgentMode.CUSTOM -> {
+                // REFLECTION 另在最终纯文本轮次触发"生成→评审→修正"循环；
+                // GOAL 在最终纯文本轮次触发快速模型验收（见 executeBuildLoop 内钩子）。
+                AgentMode.REFLECTION, AgentMode.HUMAN_ASSIST, AgentMode.CUSTOM, AgentMode.GOAL -> {
                     val iter = executeBuildLoop { event ->
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
                         if (event is AgentEvent.IterationStart) totalIterations =
@@ -558,11 +569,9 @@ class ApexAgentEngine(
             // #165：Stop——本回合正常完成（错误/中止不触发）。
             sessionHooks?.onTurnCompleted()
         } catch (e: TimeoutCancellationException) {
-            // P2-4 修复：TimeoutCancellationException 是 CancellationException 的子类，
-            // 必须先于父类 catch，否则 Plan/Spec 确认超时被误报为 Aborted（超时分支死代码）。
-            // 二轮审计 A-3：TCE 也可能来自外层 withTimeout（任务级/工具级取消穿透）——
-            // 协程已不活跃时必须重抛（保持取消语义），仅在自身活跃（本层确认超时）时
-            // 才折叠为 Error 事件，避免吞掉外层超时取消并误报。
+            // P2-4/A-3：TCE 是 CancellationException 子类，必须先于父类 catch；
+            // 协程已不活跃（外层超时穿透）必须重抛，仅自身活跃（本层确认超时）
+            // 才折叠为 Error 事件，避免吞掉外层取消并误报。
             if (!currentCoroutineContext().isActive) {
                 AppLogger.instance.warn(LogCategory.ENGINE, "ApexAgentEngine", "外层超时取消穿透引擎，重抛 TCE")
                 throw e
@@ -587,14 +596,9 @@ class ApexAgentEngine(
             taskHadFailure = true
             emit(AgentEvent.Error(LlmErrorText.userMessage(e), recoverable = !fatal))
         } catch (e: Exception) {
-            // #213：同上——原始 message 落日志，用户气泡给中文指引（未识别错误
-            // 由 LlmErrorText 兜底：中文文案 + 截断的原始摘要）。
-            // ═══ recoverable 修复：未识别异常不再一律终结任务 ═══
-            // 旧实现 recoverable=false → UI 不渲染重试入口，任务直接死局；
-            // 逃逸到顶层的异常往往是一次性抖动（瞬时 IO/NPE 边角），用户
-            // 至少应能手动重试恢复（与“最大迭代超限”分支同款语义）。
-            // 自动重试交给流级 EngineResilienceGuard（白名单 + 预算内），
-            // 顶层只兜底“别把用户锁死”。
+            // #213：原始 message 落日志，用户气泡给中文指引（LlmErrorText 兜底）。
+            // recoverable=true：未识别异常往往是一次性抖动，用户应能手动重试恢复
+            //（与「最大迭代超限」分支同款）；自动重试交给 EngineResilienceGuard。
             AppLogger.instance.error(LogCategory.ENGINE, "ApexAgentEngine", "运行异常: ${e.message}", e)
             taskHadFailure = true
             emit(AgentEvent.Error(LlmErrorText.userMessage(e), recoverable = true))
@@ -611,10 +615,8 @@ class ApexAgentEngine(
                     "memoryObserver.onTaskFinish threw: ${e.message}"
                 )
             }
-            // ═══ 聊天记忆自动沉淀：本轮（用户原文 + 最终助手回复）交观察者 ═══
-            // 从本轮起点之后取「最后一条有正文的 Assistant」——多轮工具循环里
-            // 中间轮次的叙述性文本不是最终答案；失败/中止（无助手回复）跳过。
-            // 异常兜底同 onTaskFinish：绝不因记忆沉淀阻断 Complete 事件。
+            // 聊天记忆自动沉淀：取本轮起点后最后一条有正文的 Assistant 交观察者
+            //（中间轮叙述不是最终答案；异常兜底，不阻断 Complete）。
             try {
                 val finalAssistantText = if (turnHistoryStart >= 0) {
                     conversationHistory.drop(turnHistoryStart)
@@ -875,14 +877,9 @@ class ApexAgentEngine(
                 throw e
             } catch (e: Exception) {
                 // ═══ Tool System v4：工具请求降级重试 ═══
-                // 根因：部分 Provider/网关对带 tools 的请求直接 400（函数名非法/
-                // schema 关键字不支持/tool_choice 形态不支持），旧实现直接把异常
-                // 抛给 UI —— 表象即“直接发送对话就报错，必须手动圈选函数才能发”。
-                // 现在：仅在本轮**尚未输出任何内容**且降级等级未到 2 时，逐级降级
-                // （1=纯 CORE 无强制；2=无工具纯对话）重试同一轮，保证发送永远
-                // 有响应；已流式输出过的轮次不重试（避免内容重复拼接）。
-                // 同时覆盖 ModelRequestRejected（生产多模型路径）与裸
-                // LlmException.Http（SingleClientModelRuntime/测试路径）。
+                // Provider 拒带 tools 请求（400/13/schema/tool_choice）时逐级降级
+                //（1=纯 CORE；2=无工具）重试同一轮；仅本轮尚未输出任何内容时
+                //（防内容重复拼接）。覆盖 ModelRequestRejected 与裸 Http 两路径。
                 if (contentBuilder.isEmpty() && reasoningBuilder.isEmpty() &&
                     toolCallsAccumulator.isEmpty() && toolDegradationLevel < 2 &&
                     plan.tools.isNotEmpty() && EngineToolPlanner.isToolsRelatedRejection(e)
@@ -896,9 +893,8 @@ class ApexAgentEngine(
                     continue
                 }
                 // ═══ 长任务韧性：LLM 瞬时错误退避重试 ═══
-                // 限流/超时/网络断连/5xx 不再直接终结任务 —— 指数退避后重试同一轮
-                //（iteration-- 与循环头 iteration++ 抵消，不消耗迭代配额）；预算
-                // 用尽或非瞬时错误（鉴权/请求体/配置）才抛出，交给旧错误链路。
+                // 限流/超时/断连/5xx 退避后重试同一轮（不消耗迭代配额）；预算用尽
+                // 或非瞬时错误才抛出交旧错误链路。
                 when (val retryDecision = resilience.onLlmFailure(e)) {
                     is EngineResilienceGuard.LlmRetryDecision.Retry -> {
                         AppLogger.instance.warn(
@@ -921,12 +917,9 @@ class ApexAgentEngine(
                 }
             }
 
-            // ═══ P1 修复（降级自动恢复）：本轮 LLM 交互成功完成 → 降级等级归零 ═══
-            // 旧状态机只在下一次 execute()（新任务）复位 —— 任务内一次误判
-            //（400/413 与工具无关的报错也曾触发）就永久降级：第一次纯 CORE，
-            // 第二次直接无工具 —— 模型"突然只用嘴回答"，余下轮次全部废掉。
-            // 现在每轮成功即恢复：孤立的失败不再有跨轮记忆；真正的工具拒绝
-            // 会在下一轮再次触发降级重试（每轮独立计数，语义不变）。
+            // ═══ P1 修复（降级自动恢复）：本轮 LLM 交互成功 → 降级等级归零。
+            // 旧状态机只在下一次 execute() 复位，任务内一次误判就永久降级；
+            // 现在每轮成功即恢复，孤立失败无跨轮记忆。
             if (toolDegradationLevel > 0) {
                 AppLogger.instance.debug(
                     LogCategory.ENGINE, "ApexAgentEngine",
@@ -956,23 +949,14 @@ class ApexAgentEngine(
                 }
 
                 contentBuilder.isNotEmpty() -> {
-                    // ═══ #168 HUMAN_ASSIST 模式：决策点检测（真实执行差异）═══
-                    // 提示词只“要求”模型调 ask_user_choice，但模型常直接写出
-                    // 「方案A…方案B…你选哪个？」的对比文本而不调工具——旧引擎
-                    // 在纯文本轮直接 ResponseComplete，人工介入落空。现在对响应
-                    // 文本做后置检测：
-                    // - 检出决策点 → 发 UserInputRequired(CHOICE) 挂起等待用户
-                    //   选择 → 用户答复匹配回选项（label→key→序号）→ 以
-                    //   「用户选择：…——请按该选择继续」回填 User 消息 → continue
-                    //   下一轮按人工决策继续（不走 ResponseComplete：任务未定案）；
-                    // - 无决策点 / 用户超时或取消（空答复）→ 返回 null，照常收尾
-                    //   （安全降级：绝不因拦截失败而丢掉已生成的回复）。
-                    // 检测规则（编号方案/疑问选择/显式请求降级）见
-                    // assist/DecisionPointDetector.kt；流程见 assist/HumanAssistFlow.kt。
+                    // ═══ #168 HUMAN_ASSIST 模式：决策点后置检测 ═══
+                    // 模型常不调 ask_user_choice 直接写出对比文本——对响应文本做后置
+                    // 检测：检出决策点 → 挂起等待用户选择 → 回填 User 消息 continue；
+                    // 无决策点/超时取消 → null 照常收尾（安全降级不丢回复）。
+                    // 规则见 assist/DecisionPointDetector.kt；流程见 assist/HumanAssistFlow.kt。
                     if (config.mode == AgentMode.HUMAN_ASSIST) {
-                        // #214 决策点等待超时 → 发 UserInputExpired 让 UI 关闭
-                        // 挂起的 CHOICE 对话框；null 折叠为空串，保持
-                        // HumanAssistFlow 既有「安全降级：草稿照常收尾」语义。
+                        // #214：等待超时发 UserInputExpired 关闭挂起对话框；空答复
+                        // 折叠为空串保持「草稿照常收尾」语义。
                         val followUp = HumanAssistFlow(emit) {
                             awaitUserInput { emit(AgentEvent.UserInputExpired) } ?: ""
                         }.interceptResponse(contentBuilder.toString())
@@ -1019,6 +1003,25 @@ class ApexAgentEngine(
                             LlmMessage.System(com.apex.agent.core.engine.assist.PromiseDetector.NUDGE_MESSAGE)
                         )
                         continue
+                    }
+
+                    // ═══ v3 GOAL 模式：每轮自然收尾 → 快速模型验收 ═══
+                    // 验收未达标 → 注入差距说明（System）继续跑；达标/轮次耗尽/
+                    // 无活动目标 → 照常收尾（绝不丢已生成的回复）。验收逻辑全在
+                    // GoalModeCoordinator（薄包装纪律：引擎只留接线）。
+                    if (config.mode == AgentMode.GOAL && goalCoordinator != null) {
+                        val decision = goalCoordinator.onAgentTurn(contentBuilder.toString())
+                        when (decision) {
+                            is GoalDecision.Continue -> {
+                                addMessage(LlmMessage.Assistant(contentBuilder.toString()))
+                                addMessage(LlmMessage.System(decision.continuationNote))
+                                emit(AgentEvent.ThinkingChunk(decision.userNotice))
+                                continue
+                            }
+                            is GoalDecision.Stop ->
+                                emit(AgentEvent.ThinkingChunk(decision.userNotice))
+                            null -> { /* 无活动目标：照常收尾 */ }
+                        }
                     }
 
                     addMessage(LlmMessage.Assistant(contentBuilder.toString()))

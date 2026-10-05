@@ -3,10 +3,14 @@ package com.apex.agent.core.llm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -116,20 +120,31 @@ class SuspendHttpRetryTest {
 
     @Test
     fun `intermediate retryable response is closed`() = runTest {
-        var abandoned: Response? = null
+        // Buffer.close() 是 no-op（close 后仍可读），无法用「读抛异常」断言 ——
+        // 用记录式 body 直接验证「放弃的响应被 close」契约
+        var abandonedClosed = false
         var second = false
         val result = SuspendHttpRetry.execute(config(retryCount = 2)) {
             if (!second) {
                 second = true
-                response(503).also { abandoned = it }
+                Response.Builder()
+                    .request(Request.Builder().url("http://localhost/test").build())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(503)
+                    .message("test")
+                    .body(object : ResponseBody() {
+                        override fun contentType() = "application/json".toMediaTypeOrNull()
+                        override fun contentLength() = 2L
+                        override fun source() = okio.Buffer()
+                        override fun close() { abandonedClosed = true }
+                    })
+                    .build()
             } else {
                 response(200)
             }
         }
         assertEquals(200, result.code)
-        // 中间放弃的响应已 close：body 读取抛 IllegalStateException("closed")
-        val reread = runCatching { abandoned?.body?.string() }
-        assertTrue("abandoned response must be closed", reread.isFailure)
+        assertTrue("abandoned response must be closed", abandonedClosed)
         result.close()
     }
 

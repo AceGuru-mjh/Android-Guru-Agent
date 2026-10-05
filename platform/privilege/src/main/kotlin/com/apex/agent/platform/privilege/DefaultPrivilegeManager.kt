@@ -167,14 +167,16 @@ class DefaultPrivilegeManager @Inject constructor(
         }
 
     /**
-     * Shizuku 通道执行（T92 / #255 审计收敛）。
+     * Shizuku 通道执行（#211 引导链接线 / T92 #255 审计收敛）。
      *
      * 旧实现是 "Shizuku execution not yet implemented" 占位 stub —— 而真实
      * 的 Shizuku 执行能力早已在 [ShizukuCommandExecutor]（IShizukuService
      * .newProcess AIDL，uid=2000）落地，主链路（PrivilegeDetector /
      * PrivilegedCommandSpawner）用的也是它。任何误入本方法的调用者都会拿到
-     * 假失败，与「权限链真实可用」的审计结论矛盾 —— 现改为直接委托同一
-     * 真实执行器，行为与主链路完全一致（超时强杀、诚实报错、绝不降级伪装）。
+     * 假失败：无 Root 用户走完「装 Shizuku → 配对 → 授权」漫长引导后，
+     * 提权命令仍以 stub 错误收场（#211 的用户影响）。现直接委托同一真实
+     * 执行器，行为与主链路完全一致（超时强杀、诚实报错、绝不降级伪装）；
+     * 失败也返回执行器的结构化真实错误（JVM 契约锁见 ShizukuWiringContractTest）。
      */
     private suspend fun executeViaShizuku(command: String, timeoutMs: Long): ShellResult {
         // 委托 ShizukuCommandExecutor（IShizukuService.newProcess AIDL，uid=2000
@@ -316,10 +318,14 @@ class DefaultPrivilegeManager @Inject constructor(
         return UiResult(result.success, result.output)
     }
 
+    /**
+     * #211：Shizuku 档 UI 动作。旧 stub 恒返回 UiResult(false, "Not implemented")
+     * —— 无 Root 用户完成 Shizuku 安装/配对/授权后，UI 动作仍全部假失败。
+     * ShizukuCommandExecutor 无原生 UI 注入 API，但 uid=2000 的 shell 可执行
+     * `input tap/swipe/text`（等价 adb shell input）——与 Root 档共用命令
+     * 映射，经 [executeViaShizuku] 的 AIDL 通道下发，授权后的 UI 动作真实生效。
+     */
     private suspend fun executeViaShizukuInput(action: UiAction): UiResult {
-        // ShizukuCommandExecutor 无原生 UI 注入 API，但 uid=2000 的 shell
-        // 可执行 `input tap/swipe/text`（等价 adb shell input）——与 Root 档
-        // 共用命令映射，经 [executeViaShizuku] 的 AIDL 通道下发。
         val command = inputCommandFor(action)
             ?: return UiResult(false, "ClickNode requires accessibility")
         val result = executeViaShizuku(command, 5000)

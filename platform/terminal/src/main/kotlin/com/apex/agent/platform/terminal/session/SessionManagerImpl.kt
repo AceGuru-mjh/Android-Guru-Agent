@@ -386,6 +386,20 @@ class SessionManagerImpl(
     /** Get the assembled deps for a session (used by Runtime/JobManager). */
     fun assembly(id: Long): SessionAssembly? = assemblies[id]
 
+    /**
+     * #223：把会话 id 计数器抬到 [floor]（crash 恢复后由 Runtime 调用）——
+     * 新建会话 id 不与恢复的持久化会话撞车。撞车时活跃视图会顶掉同 id 的
+     * 恢复视图（「已中断」条目凭空消失），且持久化记录被新会话的 autoSave
+     * 覆盖。CAS 循环保证与并发 create() 竞争下计数器只增不减。
+     */
+    fun ensureIdFloor(floor: Long) {
+        while (true) {
+            val cur = idCounter.get()
+            if (cur >= floor) return
+            if (idCounter.compareAndSet(cur, floor)) return
+        }
+    }
+
     /** PR #56: Get LIVE session state (from stateFlows, not stale assembly). */
     fun sessionState(id: Long): SessionState? = stateFlows[id]?.value
 

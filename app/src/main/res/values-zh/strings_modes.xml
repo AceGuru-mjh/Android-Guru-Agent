@@ -97,4 +97,14 @@
     <string name="mode_guide_agent_tools">通用 CORE 工具集；code_*/git/github 已移除——编程请求引导去 Coding 模式</string>
     <string name="mode_guide_agent_human">歧义时 ask_user；无强制函数调用 UI（那是 Coding 屏的）</string>
     <string name="mode_guide_agent_prompt">Mode: AGENT 段——全能非编程智能体，代码请求引导去 Coding</string>
+    <string name="mode_guide_loop_cases">周期检查：轮询状态页、盯文件夹、定期清理、一次性提醒</string>
+    <string name="mode_guide_loop_flow">LoopScheduler 按计划（间隔/Cron/单次）触发提示词，每次触发即一轮完整执行</string>
+    <string name="mode_guide_loop_tools">与 AGENT 同工具面；重复执行须幂等（先查状态再动手）</string>
+    <string name="mode_guide_loop_human">由你配置循环（提示词/计划/最大次数），随时可停；每轮自动记录到会话</string>
+    <string name="mode_guide_loop_prompt">Mode: LOOP 段——周期重跑、单轮状态简报、幂等纪律</string>
+    <string name="mode_guide_goal_cases">可验证的使命：所有测试通过、构建成功、页面 300ms 内返回 200</string>
+    <string name="mode_guide_goal_flow">与 BUILD 同工作循环；每轮自然收尾由快速模型对照验收条件核查，未达标自动注入差距续跑</string>
+    <string name="mode_guide_goal_tools">编码工位全量工具面（Build 级）；验收要证据（命令/输出）不要自述</string>
+    <string name="mode_guide_goal_human">由你设定目标 + 可验证条件 + 轮次上限；随时停止/续跑；验收结论实时进入思考面板</string>
+    <string name="mode_guide_goal_prompt">Mode: GOAL 段——可验证目标、证据化完成报告、不提前收工</string>
 </resources>

@@ -3,6 +3,7 @@ package com.apex.agent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -70,7 +71,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // ★ 修复（终端页「输入框挡住命令」的 API<30 档）：edge-to-edge（
+        //   LAYOUT_FULLSCREEN|LAYOUT_HIDE_NAVIGATION）在 API 30 以下会令
+        //   windowSoftInputMode=adjustResize **失效**，且 WindowInsets.ime() 恒报 0
+        //   —— 键盘弹出时窗口不 resize、Compose 层也拿不到 IME 高度，键盘直接物理
+        //   盖住终端底部与扩展键条。API 30+ 的 ime insets 逐帧动画通道不受影响，
+        //   照常启用；API<30 回退经典 decor-fits 路径（窗口随键盘 resize，所有页面
+        //   的底部输入区自动避让），ApexRoot 侧同步对该 API 档传零 contentWindowInsets
+        //   （装饰层已物理避让系统栏，Compose 侧不再叠加边距避免双份）。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            enableEdgeToEdge()
+        }
         // P1-3（6-c）：ApexCoreService 此前仅 BootReceiver（BOOT/MY_PACKAGE_REPLACED）拉起，
         // 全新安装直到重启前核心前台服务从未运行——BrowserOverlay/CyberNeonBall 的
         // WAITING_HUMAN 接管浮窗永远不注册。在前台 Activity 创建时幂等启动（服务已在跑

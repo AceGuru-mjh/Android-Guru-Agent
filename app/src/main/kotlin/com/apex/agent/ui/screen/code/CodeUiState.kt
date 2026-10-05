@@ -6,6 +6,7 @@ import com.apex.agent.core.code.stream.CodeStreamSnapshot
 import com.apex.agent.core.code.thinking.CodeThinkingEvolutionTracker
 import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.codetools.tools.CodeTodoTool
+import com.apex.agent.core.engine.goal.GoalRuntimeState
 import com.apex.agent.platform.code.ws.CodeWorkspace
 import com.apex.agent.ui.screen.code.editor.EditorFile
 
@@ -82,7 +83,16 @@ data class CodeUiState(
 
     // ── 输入栏草稿（v1.0 #154）──
     // 提升到 VM 层：编辑器面板行点击 / @file:line 插入需要程序化写入输入框。
-    val inputDraft: String = ""
+    val inputDraft: String = "",
+
+    // ── v3 GOAL 目标模式（状态卡 + 设定弹层）──
+    // goalState：协调器全局快照（目标存在即显示状态卡——无论 ACTIVE/
+    // ACHIEVED/STOPPED、切走模式也显示，用户可随时停止/重启）；
+    // showGoalSetup/goalSetupDraft：设定弹层开关 + 打开时的输入框草稿
+    //（预填目标陈述，并作为目标的首条提示重放）。
+    val goalState: GoalRuntimeState? = null,
+    val showGoalSetup: Boolean = false,
+    val goalSetupDraft: String = ""
 )
 
 /**

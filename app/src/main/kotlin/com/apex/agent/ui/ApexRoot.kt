@@ -1,5 +1,6 @@
 package com.apex.agent.ui
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,11 +50,8 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.Saver
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -131,47 +129,26 @@ sealed class DrawerDestination(
     data object About : DrawerDestination("about", R.string.drawer_about, Icons.Outlined.Info)
 }
 
-/**
- * P2-5（6-c）：[DrawerDestination] 的 rememberSaveable Saver——DrawerDestination
- * 是 sealed class（非 enum，无 name/entries），以 route 字符串往返映射；
- * 未知 route 兜底回 Agent。
- */
-private val DestinationSaver = Saver<DrawerDestination, String>(
-    save = { it.route },
-    restore = { route ->
-        when (route) {
-            DrawerDestination.Code.route -> DrawerDestination.Code
-            DrawerDestination.Templates.route -> DrawerDestination.Templates
-            DrawerDestination.Terminal.route -> DrawerDestination.Terminal
-            // "skill" route 保留兜底：老用户重建时若停留在原 Skill 页，落到市场
-            "skill" -> DrawerDestination.Market
-            DrawerDestination.Market.route -> DrawerDestination.Market
-            DrawerDestination.Memory.route -> DrawerDestination.Memory
-            DrawerDestination.Tasks.route -> DrawerDestination.Tasks
-            DrawerDestination.Storage.route -> DrawerDestination.Storage
-            DrawerDestination.Permissions.route -> DrawerDestination.Permissions
-            DrawerDestination.Vault.route -> DrawerDestination.Vault
-            DrawerDestination.Log.route -> DrawerDestination.Log
-            DrawerDestination.Settings.route -> DrawerDestination.Settings
-            DrawerDestination.GlassLab.route -> DrawerDestination.GlassLab
-            DrawerDestination.Usage.route -> DrawerDestination.Usage
-            DrawerDestination.Diagnostics.route -> DrawerDestination.Diagnostics
-            DrawerDestination.About.route -> DrawerDestination.About
-            else -> DrawerDestination.Agent
-        }
-    }
-)
+// #224：导航状态与 route 映射已抽至 NavigationBackStack.kt（含
+// rememberSaveable Saver 与 destinationFromRoute 容错映射）——
+// 单值 currentDestination 无法表达「来源页」，返回栈需要 current +
+// history 两份持久化状态，独立成文件保持 ApexRoot 精简。
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApexRoot() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    // P2-5（6-c）：原 remember → 旋转/进程重建丢失当前页面（navigation-compose
-    // 依赖声明了却从未使用）。改 rememberSaveable（route 经 Saver 往返）。
-    var currentDestination by rememberSaveable(stateSaver = DestinationSaver) {
-        mutableStateOf(DrawerDestination.Agent)
-    }
+    // #224：真实导航返回栈 —— current + history 一并 rememberSaveable
+    // （route 列表经 Saver 往返，旋转/进程重建不丢）。取代 P2-5 的单值
+    // currentDestination：单值无法表达「来源页」，返回被硬编码回 Agent。
+    // 语义：抽屉一级导航 = 替换（清栈）；应用内前进（去配置/看更新）= 压栈；
+    // 返回 = 弹栈，栈空兜底回 Agent。详见 NavigationBackStack.kt。
+    val navStack = rememberNavigationBackStack()
+    val currentDestination = navStack.current
+    // #224（症状②）：按 route 隔离各目的地 rememberSaveable 状态 ——
+    // 切页时旧屏不再随 when 分支整体离开组合而丢失滚动位置/展开态。
+    val destinationStateHolder = rememberSaveableStateHolder()
 
     // 上下文仪表盘数据源（单例作用域 VM，全局共享）
     val agentVm: AgentChatViewModel = hiltViewModel()
@@ -192,14 +169,17 @@ fun ApexRoot() {
         )
     }
 
-    // ═══ UX-2：系统返回键导航链 ═══
-    // 非抽屉一级页（Settings/Terminal/Skill…）按返回 → 回 Agent 聊天主页；
-    // Agent 页不拦截（交系统默认行为）。currentDestination 为 rememberSaveable
-    // （P2-5 已修），route 经 DestinationSaver 往返，返回后旋转/重建不丢。
+    // ═══ UX-2 / #224：系统返回键导航链 ═══
+    // 先沿 #224 历史栈回退（聊天页「去配置」→设置→改完返回 = 回聊天上下文，
+    // 不再被强制拽回 Agent）；栈空（抽屉直入的一级页）保持 UX-2 既有行为：
+    // 回 Agent 聊天主页。Agent 页不拦截（交系统默认行为）。
     // 注意组合顺序：BackHandler 后组合者先消费（LIFO）——抽屉关闭器放在
     // 目标回退之后组合，保证抽屉打开时优先只关抽屉，不再连带跳页。
+    val navigateBack: () -> Unit = {
+        if (!navStack.pop()) navStack.navigateToTopLevel(DrawerDestination.Agent)
+    }
     BackHandler(enabled = currentDestination != DrawerDestination.Agent) {
-        currentDestination = DrawerDestination.Agent
+        navigateBack()
     }
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -215,7 +195,9 @@ fun ApexRoot() {
             ApexDrawerContent(
                 currentDestination = currentDestination,
                 onDestinationSelected = { dest ->
-                    currentDestination = dest
+                    // #224：抽屉一级导航 = 替换语义（清空历史栈 ——
+                    // 顶层切换不产生返回层级，标准 drawer/bottom-nav 惯例）
+                    navStack.navigateToTopLevel(dest)
                     scope.launch { drawerState.close() }
                 },
                 tokenManager = agentVm.githubTokenManager
@@ -225,7 +207,15 @@ fun ApexRoot() {
         Scaffold(
             // 修复：edge-to-edge 后 adjustResize 失效，键盘弹出会直接盖住输入栏 ——
             // 将 IME insets 并入内容内边距，键盘弹出时整个内容区（含底部输入栏）上移。
-            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
+            contentWindowInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // ★ 修复（终端页「输入框挡住命令」的 API<30 档配套）：API 30+ 沿用
+                //   edge-to-edge 的 ime insets 动画通道；API<30 走经典 decor-fits
+                //   （MainActivity 同步开关），装饰层已物理避让系统栏且窗口随键盘
+                //   resize —— 这里传零 insets，避免 Compose 侧再加一份系统栏边距。
+                WindowInsets.systemBars.union(WindowInsets.ime)
+            } else {
+                WindowInsets(0, 0, 0, 0)
+            },
             topBar = {
                 // 终端屏自带二级顶栏（含终端抽屉入口）——若此处再渲染根顶栏，会出现双顶栏双汉堡
                 if (currentDestination != DrawerDestination.Terminal) {
@@ -284,7 +274,8 @@ fun ApexRoot() {
                 // ═══ v1.4.5：新版本浮窗（非强制 —— 检测到新版且未忽略时顶部提醒）═══
                 UpdateBanner(
                     visible = updateBanner,
-                    onOpenAbout = { currentDestination = DrawerDestination.About }
+                    // #224：压栈语义 —— 「查看」进关于页后按返回回原页
+                    onOpenAbout = { navStack.push(DrawerDestination.About) }
                 )
 
                 // ═══ 顶部上下文仪表盘长条（全局）═══
@@ -301,35 +292,44 @@ fun ApexRoot() {
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    when (currentDestination) {
-                        DrawerDestination.Agent -> AgentChatScreen(
-                            // "小大脑"菜单 → 配置模型：跳转设置页模型配置区
-                            // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
-                            onOpenSettings = { currentDestination = DrawerDestination.Settings }
-                        )
-                        DrawerDestination.Code -> CodeScreen(
-                            viewModel = hiltViewModel()
-                        )
-                        DrawerDestination.Templates -> TemplateStudioScreen()
-                        DrawerDestination.Terminal -> TerminalScreen(
-                            onOpenNavDrawer = { scope.launch { drawerState.open() } }
-                        )
-                        DrawerDestination.Market -> MarketScreen()
-                        DrawerDestination.Memory -> MemoryScreen()
-                        DrawerDestination.Tasks -> TaskHistoryScreen()
-                        DrawerDestination.Storage -> StorageScreen()
-                        DrawerDestination.Permissions -> PermissionsScreen()
-                        DrawerDestination.Vault -> VaultScreen()
-                        DrawerDestination.Log -> LogViewerScreen()
-                        DrawerDestination.Usage -> UsageDashboardScreen()
-                        DrawerDestination.Diagnostics -> DiagnosticsScreen()
-                        DrawerDestination.Settings -> SettingsScreen(
-                            // P2-6（6-c）：最小修复双顶栏返回链——SettingsScreen 自带
-                            // TopAppBar 的返回键原为空操作（默认 onBack={}）；接回 Agent 页。
-                            onBack = { currentDestination = DrawerDestination.Agent }
-                        )
-                        DrawerDestination.GlassLab -> GlassLabScreen()
-                        DrawerDestination.About -> AboutScreen()
+                    // #224（症状②）：SaveableStateProvider 以 route 为 key 隔离并
+                    // 保留各目的地 rememberSaveable 状态（滚动位置/展开态）——
+                    // 切页不再随 when 分支整体离开组合而蒸发，返回来源页原样恢复。
+                    destinationStateHolder.SaveableStateProvider(currentDestination.route) {
+                        when (currentDestination) {
+                            DrawerDestination.Agent -> AgentChatScreen(
+                                // "小大脑"菜单 → 配置模型：跳转设置页模型配置区
+                                // （Models 区块默认展开且在设置页顶部，天然满足自动定位）
+                                // #224：改压栈语义 —— 改完按返回回到聊天上下文，
+                                // 不再被强制拽回 Agent
+                                onOpenSettings = { navStack.push(DrawerDestination.Settings) }
+                            )
+                            DrawerDestination.Code -> CodeScreen(
+                                viewModel = hiltViewModel()
+                            )
+                            DrawerDestination.Templates -> TemplateStudioScreen()
+                            DrawerDestination.Terminal -> TerminalScreen(
+                                onOpenNavDrawer = { scope.launch { drawerState.open() } }
+                            )
+                            DrawerDestination.Market -> MarketScreen()
+                            DrawerDestination.Memory -> MemoryScreen()
+                            DrawerDestination.Tasks -> TaskHistoryScreen()
+                            DrawerDestination.Storage -> StorageScreen()
+                            DrawerDestination.Permissions -> PermissionsScreen()
+                            DrawerDestination.Vault -> VaultScreen()
+                            DrawerDestination.Log -> LogViewerScreen()
+                            DrawerDestination.Usage -> UsageDashboardScreen()
+                            DrawerDestination.Diagnostics -> DiagnosticsScreen()
+                            DrawerDestination.Settings -> SettingsScreen(
+                                // P2-6（6-c）：最小修复双顶栏返回链——SettingsScreen 自带
+                                // TopAppBar 的返回键原为空操作（默认 onBack={}）。
+                                // #224：顶栏返回与系统返回统一语义 —— 先弹历史栈回
+                                // 来源页（如聊天页），栈空兜底回 Agent。
+                                onBack = navigateBack
+                            )
+                            DrawerDestination.GlassLab -> GlassLabScreen()
+                            DrawerDestination.About -> AboutScreen()
+                        }
                     }
                 }
             }

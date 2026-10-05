@@ -43,7 +43,8 @@ class StreamingOpenAiClient(
         val body = buildRequestBody(messages, tools, temperature, maxTokens, stream = false)
 
         val request = buildRequest(body)
-        val response = httpClient.newCall(request).await()
+        // #259：重试在 suspend 层（可取消的 delay 退避，总预算见 SuspendHttpRetry）
+        val response = SuspendHttpRetry.execute(config) { httpClient.newCall(request).await() }
         val responseBody = response.body?.string() ?: throw LlmException.EmptyResponse()
 
         if (!response.isSuccessful) {
@@ -68,7 +69,8 @@ class StreamingOpenAiClient(
         )
 
         val request = buildRequest(body)
-        val response = httpClient.newCall(request).await()
+        // #259：重试在 suspend 层（可取消的 delay 退避，总预算见 SuspendHttpRetry）
+        val response = SuspendHttpRetry.execute(config) { httpClient.newCall(request).await() }
         val responseBody = response.body?.string() ?: throw LlmException.EmptyResponse()
 
         if (!response.isSuccessful) {
@@ -100,7 +102,9 @@ class StreamingOpenAiClient(
         val request = buildRequest(body)
 
         val call = httpClient.newCall(request)
-        val response = call.await()
+        // #259：重试在 suspend 层（仅覆盖「响应头返回前」阶段；首 chunk 发射后
+        // 不重试——与旧拦截器语义一致）。取消传播：execute 内 delay 即挂起点。
+        val response = SuspendHttpRetry.execute(config) { call.await() }
 
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: "Unknown error"

@@ -22,6 +22,7 @@ import com.apex.agent.core.codetools.CodeWorkspaceRoots
 import com.apex.agent.core.codetools.git.GitCommandRunner
 import com.apex.agent.core.codetools.tools.CodeTodoTool
 import com.apex.agent.git.ProotGitCommandRunner
+import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.platform.terminal.proot.PRootCapabilitySource
 import com.apex.agent.platform.terminal.proot.PRootHostEnvironment
 import com.apex.agent.core.engine.AgentConfig
@@ -98,6 +99,8 @@ object CodeModule {
      * rootfs 内；工作区恒定 bind 为 guest /workspace（与终端会话同源）。
      * rootfsBaseDir / hostEnvironment / persistentHome 与 McpModule 的
      * ProotMcpProcessLauncher 接线同款约定（TerminalModule 提供）。
+     * v3 S3（G2）：注入 GitHub PAT 供应器——已连接时 git clone/push 等经
+     * 凭据桥真实可用（见 GithubTerminalEnvInjector）。
      */
     @Provides
     @Singleton
@@ -106,7 +109,8 @@ object CodeModule {
         hostEnvironment: PRootHostEnvironment,
         rootfsBaseDir: File,
         workspaceRoots: CodeWorkspaceRoots,
-        capabilitySource: PRootCapabilitySource
+        capabilitySource: PRootCapabilitySource,
+        githubTokenManager: GithubTokenManager
     ): GitCommandRunner {
         return ProotGitCommandRunner(
             hostEnv = hostEnvironment.hostEnv(),
@@ -116,7 +120,9 @@ object CodeModule {
             workspaceRoots = workspaceRoots,
             persistentHomeDir = File(context.filesDir, "linux/home"),
             // T92：argv 能力门（与终端会话/apt 同款版本自适应）
-            capabilities = capabilitySource::invoke
+            capabilities = capabilitySource::invoke,
+            // v3 S3（G2）：GitHub 凭据供应（未连接返回 null = 不注入）
+            gitHubTokenProvider = { githubTokenManager.getToken() }
         )
     }
 
@@ -226,7 +232,10 @@ object CodeModule {
         // 业界标准式权限门，共用主执行器的组合门会双弹窗）
         @javax.inject.Named("standardEngineTools") standardToolExecutor: ToolExecutor,
         // 权限设置源（设置层 → 标准线权限门的实时快照通道）
-        settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository
+        settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
+        // v3 GOAL 模式：目标验收协调器（与 Agent 屏共享单例；深潜线引擎挂
+        // 每轮验收钩子，见 ApexAgentEngine.goalCoordinator）
+        goalCoordinator: com.apex.agent.core.engine.goal.GoalModeCoordinator
     ): AgentEngine {
         val codeConfig = AgentConfig(
             mode = AgentMode.BUILD,
@@ -259,7 +268,9 @@ object CodeModule {
                 // Issue #165：coding 引擎同样接入生命周期钩子（会话/回合/压缩事件）
                 hookRunner = hookRunner,
                 // 技能激活共享（见参数 KDoc）：目录 + 已装备方法论注入。
-                skillActivation = skillActivation
+                skillActivation = skillActivation,
+                // v3 GOAL 模式：每轮收尾快速模型验收（无目标时零行为差异）
+                goalCoordinator = goalCoordinator
             ),
             codeMemory = codeMemory,
             contextProvider = codeContextProvider,
@@ -313,7 +324,12 @@ object CodeModule {
             // 设置层权限接线（权限模式 + 规则三元组，每轮任务前拉取）
             permissionSource = standardPermissionSource,
             // 模型感知上下文窗口（env 块 + 压缩预算）
-            modelInfoProvider = standardModelInfoProvider
+            modelInfoProvider = standardModelInfoProvider,
+            // v3 子代理预算：标准线派发器与深潜线 SubAgentRunner 同源消费
+            // （设置 → 子代理 的快照，改设置即时生效）
+            subAgentSettingsProvider = {
+                settingsRepository.agentSettings.value.subagent.sanitized()
+            }
         )
         return DualLogicCodeEngine(deepDive = deepDive, standard = standard)
     }

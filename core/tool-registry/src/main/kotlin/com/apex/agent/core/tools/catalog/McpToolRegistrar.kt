@@ -22,6 +22,13 @@ import java.util.concurrent.ConcurrentHashMap
  * Registration runs on the supplied [scope] (IO) because discovery is a
  * network call; unregistration is pure in-memory.
  *
+ * ## v3 作用域打标（单一读取点）
+ *
+ * 服务器级 scope（McpServerConfig.scope，与市场 tier 同源）只在
+ * [registerServer] 里读一次配置表：初始 sweep、[onServerConnected] 与
+ * Supervisor 断线重连全部汇入该函数，注册路径无第二处读配置，
+ * scope 打标天然覆盖全链路；注册表的 REPLACE 替换语义保持不变。
+ *
  * ## 竞态治理（P1：注册/注销竞态）
  *
  * 旧实现「异步注册 vs 同步注销」存在两类竞态：
@@ -85,10 +92,16 @@ class McpToolRegistrar(
                 registered.remove(serverName)
                 return
             }
+            // v3 服务器级 scope：与市场 tier 同源的 McpServerConfig.scope，
+            // 在此单一入口读一次配置表（初始 sweep / 连接回调 / Supervisor
+            // 重连都汇入本函数）。快照语义：discovery 期间用户改 scope，下次
+            // 重连生效；配置已删（并发 removeServer）折叠 all，不阻断注册。
+            val serverScope = manager.getConfigs()
+                .firstOrNull { it.name == serverName }?.scope ?: "all"
             val ids = registered.getOrPut(serverName) { ConcurrentHashMap.newKeySet() }
             val fresh = mutableSetOf<String>()
             for (tool in tools) {
-                val mcpTool = McpAgentTool(manager, serverName, tool)
+                val mcpTool = McpAgentTool(manager, serverName, tool, serverScope)
                 registry.register(mcpTool)
                 fresh += mcpTool.id
             }

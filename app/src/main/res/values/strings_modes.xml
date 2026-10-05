@@ -97,4 +97,14 @@
     <string name="mode_guide_agent_tools">General CORE set; code_*/git/github removed — programming is redirected to Coding mode</string>
     <string name="mode_guide_agent_human">ask_user on ambiguity; no forced function calling UI (that lives in Coding)</string>
     <string name="mode_guide_agent_prompt">Mode: AGENT section — all-round non-coding agent, advises Coding for code</string>
+    <string name="mode_guide_loop_cases">Periodic checks: poll a status page, watch a folder, repeated cleanups, one-shot reminders</string>
+    <string name="mode_guide_loop_flow">LoopScheduler fires the prompt on schedule (interval / cron / once); each run is one full agent turn</string>
+    <string name="mode_guide_loop_tools">Same tool surface as AGENT; repeated runs should stay idempotent (check state before acting)</string>
+    <string name="mode_guide_loop_human">You configure the loop (prompt, schedule, max runs) and can stop it anytime; runs auto-log to the session</string>
+    <string name="mode_guide_loop_prompt">Mode: LOOP section — scheduled re-runs, concise per-run status, idempotency discipline</string>
+    <string name="mode_guide_goal_cases">Verifiable missions: "all tests pass", "build succeeds", "page returns 200 under 300ms"</string>
+    <string name="mode_guide_goal_flow">Work rounds like BUILD; on each natural finish a fast model verifies the acceptance criteria; failing rounds auto-continue with the gap note</string>
+    <string name="mode_guide_goal_tools">Full coding tool surface (Build-grade); verification evidence (commands/outputs) beats narration</string>
+    <string name="mode_guide_goal_human">You set the goal + verifiable criteria + max rounds; stop/resume anytime; verdicts stream into the thinking panel</string>
+    <string name="mode_guide_goal_prompt">Mode: GOAL section — verifiable objective, evidence-based completion report, no early stop</string>
 </resources>

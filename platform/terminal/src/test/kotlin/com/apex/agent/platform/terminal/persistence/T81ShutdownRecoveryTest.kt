@@ -217,3 +217,135 @@ class T81RecoveryConvergenceTest {
         assertNull(store.load(5L))
     }
 }
+
+/**
+ * #223 — 恢复会话的真实可见性（原 recover() 空壳修复的回归锁）：
+ *  1. recover() 后恢复会话必须出现在 snapshot(SESSIONS)（EXITED 只读视图，
+ *     id/shell/cwd/pid/cursor 等 autoSave 落盘字段原样回读 —— round-trip）；
+ *  2. 新建会话 id 不与恢复 id 撞车（recover 抬 id 地板）；
+ *  3. 关闭恢复会话 → 记录删除 + 视图消失（僵尸 tab 不复活）；
+ *  4. snapshot 按 id 过滤也能命中恢复视图；
+ *  5. pid 仍在（fd 丢）→ BROKEN（服务级，isPidAlive 注入）。
+ */
+class T223RecoveryVisibilityTest {
+
+    @get:Rule val tmp = TemporaryFolder()
+
+    private fun newRuntime(store: SessionMetadataStore) = TerminalRuntimeImpl(
+        native = FakeNativePty(),
+        policy = TerminalPolicyImpl(),
+        virtualTerminalFactory = { r, c -> RealVirtualTerminal(r, c) },
+        persistenceStore = store
+    )
+
+    /** 模拟 autoSave 每 2s 落盘的记录（RUNNING 会话 + 前台 job —— apt/编译被杀现场）。 */
+    private fun persistedSession(id: Long, pid: Int) =
+        com.apex.agent.platform.terminal.session.TerminalSession(
+            id = id, shell = "/bin/bash", initialCwd = "/root/project", pid = pid,
+            rows = 40, cols = 120, privilege = PrivilegeLevel.NORMAL,
+            state = com.apex.agent.platform.terminal.session.SessionState.RUNNING,
+            createdAt = 123L, lastExitCode = null, cursor = 4321L
+        )
+
+    private fun persistedJob(id: Long, sid: Long) =
+        com.apex.agent.platform.terminal.job.TerminalJob(
+            id = id, sessionId = sid, command = "apt-get install build-essential",
+            owner = com.apex.agent.platform.terminal.io.InputOwner.USER,
+            background = false, startCursor = 0L, endCursor = null,
+            state = com.apex.agent.platform.terminal.job.JobState.RUNNING,
+            exitCode = null, signal = null, startedAt = 100L, finishedAt = null
+        )
+
+    @Test fun `recovered session appears in snapshot with EXITED state and persisted metadata`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(7L, pid = 999991), listOf(persistedJob(3L, 7L)), emptyList())
+        val rt = newRuntime(store)
+        assertEquals(listOf(7L), rt.recover())
+        val snap = rt.snapshot(com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotMode.SESSIONS)
+            .getOrThrow()
+        val rec = snap.sessions.firstOrNull { it.session.id == 7L }
+        assertNotNull("recovered session must be visible in snapshot (#223)", rec)
+        // pid 已死 → EXITED（不伪造 RUNNING，Spec §39）；autoSave 字段原样回读
+        assertEquals(com.apex.agent.platform.terminal.session.SessionState.EXITED, rec!!.session.state)
+        assertEquals("/bin/bash", rec.session.shell)
+        assertEquals("/root/project", rec.session.cwd)
+        assertEquals(999991, rec.session.pid)
+        assertEquals(40, rec.session.rows)
+        assertEquals(4321L, rec.session.cursor)
+        // 活跃 job 收敛为 INTERRUPTED（crash 中断）
+        assertNotNull(rec.foregroundJob)
+        assertEquals("INTERRUPTED", rec.foregroundJob!!.state.name)
+    }
+
+    @Test fun `live session created after recovery never reuses a recovered id`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(7L, pid = 999992), emptyList(), emptyList())
+        val rt = newRuntime(store)
+        rt.recover()
+        val live = rt.create().getOrThrow()
+        assertTrue("new session id must stay above the recovered id floor: ${live.sessionId}", live.sessionId > 7L)
+        val snap = rt.snapshot(com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotMode.SESSIONS)
+            .getOrThrow()
+        // 1 活跃 + 1 恢复，无同 id 双条目
+        assertEquals(2, snap.sessions.size)
+        assertEquals(1, snap.sessions.count { it.session.id == 7L })
+        assertEquals(1, snap.sessions.count { it.session.id == live.sessionId })
+    }
+
+    @Test fun `closing a recovered session removes it from snapshot and the store`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(7L, pid = 999993), emptyList(), emptyList())
+        val rt = newRuntime(store)
+        rt.recover()
+        val r = rt.close(7L, force = true).getOrThrow()
+        assertTrue(r.closed)
+        // 记录删除 —— 否则下次启动 recover() 又把死会话捞回来（僵尸 tab 永生）
+        assertNull(store.load(7L))
+        val snap = rt.snapshot(com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotMode.SESSIONS)
+            .getOrThrow()
+        assertTrue(snap.sessions.none { it.session.id == 7L })
+    }
+
+    @Test fun `snapshot with sessionId filter returns the recovered view`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(7L, pid = 999994), emptyList(), emptyList())
+        store.save(persistedSession(8L, pid = 999995), emptyList(), emptyList())
+        val rt = newRuntime(store)
+        assertEquals(listOf(7L, 8L), rt.recover().sorted())
+        val snap = rt.snapshot(
+            com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotMode.SESSIONS,
+            sessionId = 8L
+        ).getOrThrow()
+        assertEquals(listOf(8L), snap.sessions.map { it.session.id })
+        assertEquals(com.apex.agent.platform.terminal.session.SessionState.EXITED, snap.sessions[0].session.state)
+    }
+
+    @Test fun `recover is idempotent — second reload does not duplicate views`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(7L, pid = 999996), emptyList(), emptyList())
+        val rt = newRuntime(store)
+        assertEquals(listOf(7L), rt.recover())
+        assertEquals(listOf(7L), rt.recover())
+        val snap = rt.snapshot(com.apex.agent.platform.terminal.runtime.TerminalRuntime.SnapshotMode.SESSIONS)
+            .getOrThrow()
+        assertEquals(1, snap.sessions.count { it.session.id == 7L })
+    }
+
+    @Test fun `pid still alive recovers as BROKEN — never faked alive`() = runBlocking {
+        val dir = tmp.newFolder()
+        val store = SessionMetadataStore(dir)
+        store.save(persistedSession(9L, pid = 999997), emptyList(), emptyList())
+        val rt = newRuntime(store)
+        // 服务级：注入 isPidAlive=true（进程仍在但 PTY fd 已丢 —— v1 无法重挂）
+        val svc = RuntimeRecoveryService(store, rt, isPidAlive = { true })
+        assertEquals(listOf(9L), svc.recover())
+        val snap = svc.recoveredSnapshot(9L)
+        assertNotNull(snap)
+        assertEquals("BROKEN", snap!!.session.state.name)
+    }
+}

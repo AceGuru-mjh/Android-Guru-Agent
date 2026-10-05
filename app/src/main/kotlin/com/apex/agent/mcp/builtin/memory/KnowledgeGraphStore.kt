@@ -164,6 +164,28 @@ class KnowledgeGraphStore(private val storageDir: File) {
         appended
     }
 
+    /**
+     * 从实体删除指定观察（对齐官方 server-memory delete_observations 的内容
+     * 精确匹配语义；#219 记忆页「聊天记忆」逐条删除 / 一键清空入口）。
+     *
+     * 与 [addObservations] 的报错语义刻意不同：**删除幂等** —— 实体不存在
+     * （例如恰好撞上 [ChatMemoryPipeline] 基调观察 delete+recreate 的替换
+     * 窗口）或内容无命中时返回 0，不抛错、不落盘。
+     *
+     * @return 实际删除条数（其余观察保序保留，实体壳不删）
+     */
+    fun deleteObservations(entityName: String, contents: List<String>): Int = synchronized(lock) {
+        val existing = entities[entityName] ?: return 0
+        val doomed = contents.toHashSet()
+        val kept = existing.observations.filterNot { it in doomed }
+        val removed = existing.observations.size - kept.size
+        if (removed > 0) {
+            entities[entityName] = existing.copy(observations = kept)
+            save()
+        }
+        removed
+    }
+
     /** 读全图（快照）。 */
     fun readGraph(): KnowledgeGraph = synchronized(lock) {
         KnowledgeGraph(entities.values.toList(), relations.toList())

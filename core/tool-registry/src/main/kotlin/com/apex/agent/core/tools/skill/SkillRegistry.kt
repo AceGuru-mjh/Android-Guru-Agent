@@ -1,5 +1,6 @@
 package com.apex.agent.core.tools.skill
 
+import com.apex.agent.core.tools.ToolMetadata
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -138,6 +139,17 @@ data class SkillDigest(
     val tags: List<String> = emptyList(),
     /** #206 分类域（[SkillCategory.key]；未分类 = null）—— 目录抽样与展示分组用。 */
     val category: String? = null
+)
+
+/**
+ * 技能工具 + 所属技能的工位作用域（[SkillRegistry.getActiveToolsWithScope] 载体）。
+ * v3：[SkillHotReloader] 注册复合工具时把 scope 打进 ToolMetadata——
+ * 与市场分级、prompt 注入过滤（同 manifest 字段）同源。
+ */
+data class SkillToolWithScope(
+    val def: SkillToolDef,
+    /** 已规范化的 manifest scope（"agent" | "coding" | "all"）。 */
+    val scope: String
 )
 
 /**
@@ -491,6 +503,24 @@ class SkillRegistry(
             installedSkills.values
                 .filter { it.enabled }
                 .flatMap { it.manifest.tools }
+        }
+    }
+
+    /**
+     * v3 获取启用技能提供的工具（携带所属技能 manifest 的工位作用域）。
+     *
+     * [SkillHotReloader] 注册复合工具时用它把 scope 打进 ToolMetadata，
+     * 与市场分级、prompt 注入过滤（[getActivePromptInjections]）同源；
+     * scope 经 [ToolMetadata.normalizeScope] 规范化，脏值折叠 all。
+     */
+    fun getActiveToolsWithScope(): List<SkillToolWithScope> {
+        return synchronized(lock) {
+            installedSkills.values
+                .filter { it.enabled }
+                .flatMap { skill ->
+                    val scope = ToolMetadata.normalizeScope(skill.manifest.scope)
+                    skill.manifest.tools.map { SkillToolWithScope(it, scope) }
+                }
         }
     }
 

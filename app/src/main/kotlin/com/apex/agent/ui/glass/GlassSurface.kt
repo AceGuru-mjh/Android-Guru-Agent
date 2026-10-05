@@ -13,8 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -69,7 +68,11 @@ fun GlassSurface(
     val pressed by interaction.collectIsPressedAsState()
 
     // ═══ 激活度：Normal 0 / Focused 0.35 / Selected 0.55 / Pressed 1 —— Spec §14 ═══
-    val activation by animateFloatAsState(
+    // #262 延迟读取：保留 State 而非在此取值 —— 按压缩放（graphicsLayer）与
+    // 叠加层（onDrawBehind）各自在读点订阅，激活度动画期间 GlassSurface
+    // 零重组，drawWithCache 缓存才能跨帧存活（组合期读取会让每帧重组
+    // 重建 drawWithCache 闭包，缓存被动画逐帧击穿）。
+    val activationState = animateFloatAsState(
         targetValue = when {
             !enabled -> 0f
             pressed -> 1f
@@ -93,14 +96,16 @@ fun GlassSurface(
         )
     } else {
         // Frosted 档：主题色薄霜渐变 —— 明确不冒充 backdrop
-        Modifier.background(
-            brush = Brush.verticalGradient(
+        // #262：Brush 记住复用（GlassPalette 是 data class，equals 命中
+        // 即跳过重建），避免每次重组重分配。
+        val frostBrush = remember(palette) {
+            Brush.verticalGradient(
                 colors = listOf(palette.frostLift, palette.frostBase),
                 startY = 0f,
                 endY = Float.POSITIVE_INFINITY
-            ),
-            shape = shape
-        )
+            )
+        }
+        Modifier.background(brush = frostBrush, shape = shape)
     }
 
     Box(
@@ -108,7 +113,8 @@ fun GlassSurface(
             // 深度：外阴影在最外层，不被裁剪
             .shadow(elevation = style.elevation, shape = shape, clip = false)
             // 按压缩放：玻璃的“形变”反馈 —— 替代涟漪的材质语言
-            .glassScale(style, activation, scaleOnPress)
+            //（#262：graphicsLayer 内读 State，动画只失效图层不重组）
+            .glassScale(style, activationState, scaleOnPress)
             // ═══ 层级裁剪（白天模式矩形露角根因修复 v1.4.5）═══
             // Haze 的 backdrop 采样层（API 32+ RenderEffect）与 scrim 兜底层
             //（API < 32）都按**矩形**绘制，`Modifier.clip(shape)` 的 Canvas
@@ -125,8 +131,34 @@ fun GlassSurface(
             }
             .then(materialModifier)
             // 边缘光 / 镜面高光 / 扫掠光带 / 底部内阴影 / 激活增亮 —— 绘制在材质之上、内容之下
-            .drawBehind {
-                drawGlassOverlays(shape, palette, activation, selected, accent, specularSweep)
+            //
+            // #262 Compose 最佳实践（draw 阶段零分配）：drawBehind → drawWithCache。
+            // 缓存层（size 变化才重建）：createOutline 的形状代数 + 描边宽度 ——
+            // 这是旧实现每帧分配的大头（扫掠/流式/按压缩放的 draw 失效以前
+            // 每次都重算）。激活度与扫掠相位是动画 State，刻意只在 onDrawBehind
+            // 里读取：缓存层若读取它们，动画会逐帧击穿缓存，退化为 drawBehind。
+            .drawWithCache {
+                if (size.width <= 0f || size.height <= 0f) {
+                    onDrawBehind { /* 空占位：零尺寸不绘制 */ }
+                } else {
+                    val outline = shape.createOutline(
+                        size = size,
+                        layoutDirection = layoutDirection,
+                        density = this
+                    )
+                    val strokePx = 1.5.dp.toPx()
+                    onDrawBehind {
+                        drawGlassOverlays(
+                            outline = outline,
+                            strokePx = strokePx,
+                            palette = palette,
+                            activation = activationState.value,
+                            selected = selected,
+                            accent = accent,
+                            sweepPhase = specularSweep
+                        )
+                    }
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -134,35 +166,37 @@ fun GlassSurface(
     }
 }
 
-/** 按压缩放 —— activation 已经是动画值，直接映射，无需额外动画。 */
+/** 按压缩放 —— activation 已经是动画值，直接映射，无需额外动画。
+ *  #262：接收 State 在 graphicsLayer 块内读取 —— 动画只失效图层属性，
+ *  不触发重组（组合期读取会让整个 GlassSurface 每帧重组）。 */
 private fun Modifier.glassScale(
     style: GlassStyle,
-    activation: Float,
+    activationState: State<Float>,
     scaleOnPress: Boolean
 ): Modifier = if (!scaleOnPress || style.pressedScale >= 1f) this else graphicsLayer {
+    val activation = activationState.value
     val scale = 1f - (1f - style.pressedScale) * activation
     scaleX = scale
     scaleY = scale
 }
 
 /**
- * 玻璃叠加层 —— 全部为单次绘制，不产生额外图层分配。
+ * 玻璃叠加层 —— 单次绘制，不产生额外图层分配。
  * activation 提升边缘与高光亮度，形成“按压即受光”的材质响应。
+ *
+ * #262：outline / 描边宽度由调用方 drawWithCache 缓存层预建（size 变化
+ * 才重建）；本函数只构建依赖动画值（activation / sweepPhase）的 Brush ——
+ * 这部分输入逐帧变化，无法安全缓存，是设计内的最小剩余分配。
  */
 private fun DrawScope.drawGlassOverlays(
-    shape: Shape,
+    outline: androidx.compose.ui.graphics.Outline,
+    strokePx: Float,
     palette: GlassPalette,
     activation: Float,
     selected: Boolean,
     accent: Color,
     sweepPhase: State<Float>? = null
 ) {
-    if (size.width <= 0f || size.height <= 0f) return
-    val outline = shape.createOutline(
-        size = size,
-        layoutDirection = layoutDirection,
-        density = this
-    )
     val boost = 1f + activation * 0.9f
 
     // ═══ 边缘高光：上缘受光强、下缘余晖 —— 真实的“玻璃边”层次 ═══
@@ -177,7 +211,7 @@ private fun DrawScope.drawGlassOverlays(
             startY = 0f,
             endY = size.height
         ),
-        style = Stroke(width = 1.5.dp.toPx())
+        style = Stroke(width = strokePx)
     )
 
     // ═══ 镜面高光：斜向扫掠（Liquid Glass 标志性受光）═══

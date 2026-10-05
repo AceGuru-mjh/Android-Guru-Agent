@@ -262,8 +262,8 @@ private data class ModeGuideEntry(
 ) {
     companion object {
         /**
-         * #197 双工位拆分后的指南：Agent 屏只保留 Chat/Agent 两模式；
- * Coding 屏是 Build/Plan（该屏无指南入口，模式胶囊自带说明）。
+         * #197 双工位拆分后的指南：Agent 屏 Chat/Agent/Loop；Coding 屏
+         * Build/Plan/Goal（该屏无指南入口，模式胶囊自带说明）。
          * 存量模式（Spec/Reflect/Assist/Custom）不再出现在指南矩阵。
          */
         val entries = listOf(
@@ -282,6 +282,22 @@ private data class ModeGuideEntry(
                 toolPolicyRes = R.string.mode_guide_agent_tools,
                 humanRes = R.string.mode_guide_agent_human,
                 promptRes = R.string.mode_guide_agent_prompt
+            ),
+            ModeGuideEntry(
+                mode = AgentMode.LOOP,
+                casesRes = R.string.mode_guide_loop_cases,
+                flowRes = R.string.mode_guide_loop_flow,
+                toolPolicyRes = R.string.mode_guide_loop_tools,
+                humanRes = R.string.mode_guide_loop_human,
+                promptRes = R.string.mode_guide_loop_prompt
+            ),
+            ModeGuideEntry(
+                mode = AgentMode.GOAL,
+                casesRes = R.string.mode_guide_goal_cases,
+                flowRes = R.string.mode_guide_goal_flow,
+                toolPolicyRes = R.string.mode_guide_goal_tools,
+                humanRes = R.string.mode_guide_goal_human,
+                promptRes = R.string.mode_guide_goal_prompt
             )
         )
     }

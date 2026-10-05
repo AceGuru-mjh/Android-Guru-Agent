@@ -2,6 +2,7 @@ package com.apex.agent.core.tools.skill
 
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.ToolExecutor
+import com.apex.agent.core.tools.ToolMetadata
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -16,16 +17,38 @@ import kotlinx.serialization.json.jsonPrimitive
  * - "composite" — 按顺序执行 steps，每步调用一个 Tool，{{var}} 从 arguments 解析，
  *   {{prev_output}} 替换为上一步输出（截断到 2000 字符防止爆炸）
  * - "script"    — 通过 shell_execute 运行脚本
+ *
+ * ## v3 作用域打标
+ *
+ * 构造参数 [skillScope] 携带所属技能 manifest 的工位作用域（与市场
+ * 分级、prompt 注入过滤同源字段），注册时（[SkillHotReloader]）传入并
+ * 打进 [ToolMetadata]，供引擎计划层做双工位隔离；默认 all = 双工位
+ * 可见（旧调用点与未声明 scope 的 manifest 兼容）。
  */
 class SkillToolAdapter(
     private val skillTool: SkillToolDef,
-    private val toolExecutor: ToolExecutor
+    private val toolExecutor: ToolExecutor,
+    /**
+     * v3 工位作用域（所属技能 manifest 的 scope；默认 all = 双工位可见）。
+     * 命名避开 [ToolMetadata.Builder] 的同名私有字段，防止元数据
+     * lambda 内引用它时的名字解析歧义。
+     */
+    private val skillScope: String = "all"
 ) : AgentTool {
 
     override val id = skillTool.id
     override val name = skillTool.name
     override val description = skillTool.description
     override val parametersSchema = skillTool.parameters
+
+    /**
+     * v3 作用域打标：manifest.scope → ToolMetadata.scope（脏值折叠 all）。
+     * 显式覆盖接口默认的 id 推断元数据只为携带 scope——category / risk /
+     * annotations 仍走同款推断，除 scope 外逐字段等值，存量行为零变化。
+     */
+    override val metadata: ToolMetadata = ToolMetadata.meta(skillTool.id) {
+        scope(ToolMetadata.normalizeScope(skillScope))
+    }
 
     override suspend fun execute(arguments: String): String {
         val impl = skillTool.implementation

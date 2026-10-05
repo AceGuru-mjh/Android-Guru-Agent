@@ -3,9 +3,10 @@ package com.apex.agent.core.engine
 /**
  * Agent执行模式
  *
- * #197 双工位拆分：Agent 聊天屏只暴露 [CHAT] / [AGENT] 两种模式（全能智能体
- * 工位）；[BUILD] / [PLAN] 保留给 Coding 屏（编码工位）使用，Spec/Reflect/
- * Assist/Custom 为存量枚举（老配置反序列化兼容，不再出现在任何模式选择 UI）。
+ * #197 双工位拆分：Agent 聊天屏只暴露 [CHAT] / [AGENT] / [LOOP]（全能智能体
+ * 工位，v3 新增 Loop）；Coding 屏暴露 [BUILD] / [PLAN] / [GOAL]（编码工位，
+ * v3 新增 Goal）；Spec/Reflect/Assist/Custom 为存量枚举（老配置反序列化
+ * 兼容，不再出现在任何模式选择 UI）。
  */
 enum class AgentMode(val displayName: String, val description: String) {
     /**
@@ -29,6 +30,23 @@ enum class AgentMode(val displayName: String, val description: String) {
      * 规划模式（Coding 屏）：先制定完整计划，用户确认后再执行
      */
     PLAN("Plan", "先制定完整计划，确认后再执行"),
+
+    /**
+     * 目标模式（Coding 屏，v3）：设定**可验证的完成条件**（如「所有测试
+     * 通过」）后持续工作——每轮自然收尾时由快速模型（FAST 角色）验收，
+     * 未达标自动注入差距说明续跑，直到目标达成或轮次耗尽（外部状态由
+     * [com.apex.agent.core.engine.goal.GoalModeCoordinator] 持有，引擎只挂
+     * 每轮验收钩子，见 goal 包）。
+     */
+    GOAL("Goal", "目标驱动：设定可验证条件，持续工作直至达成"),
+
+    /**
+     * 循环模式（Agent 屏，v3）：会话内调度器周期性重放提示词 / 轮询状态 /
+     * 一次性提醒（间隔 · Cron · 单次三型，见 app 层 loop 包与
+     * LoopScheduler）。引擎侧只是提示词层告知「你处于周期性任务中」，
+     * 真正的调度与触发在 VM/服务层，不在引擎循环内。
+     */
+    LOOP("Loop", "循环与定时：重复运行提示词/轮询/提醒"),
 
     /**
      * 规格模式：先产出需求规格（目标 / 需求 / 约束 / 验收标准 / 交付物），
@@ -274,7 +292,15 @@ data class AgentConfig(
      * 过滤依据——agent 屏引擎只注入 agent/all 聊天技能，coding 引擎只注入
      * coding/all 编码技能，两个工位的提示词层完全独立（市场分级同源）。
      */
-    val skillScope: String = "all"
+    val skillScope: String = "all",
+
+    /**
+     * v3 工具作用域隔离开关（默认开）：MCP / 技能复合工具按注册时携带的
+     * scope（市场分级同源字段）在工具计划层隔离——agent 工位看不到
+     * coding 级 MCP 工具，反之亦然。false = 回退 v2 全局可见行为。
+     * 设置层（AgentSettings.mcpScopeIsolation）热更新，经 patchConfig 生效。
+     */
+    val mcpScopeIsolation: Boolean = true
 ) {
     companion object {
         /** 快速模式：Build + 无思考 */

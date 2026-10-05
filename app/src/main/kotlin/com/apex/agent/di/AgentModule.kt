@@ -6,6 +6,8 @@ import com.apex.agent.core.engine.compression.ContextCompressor
 import com.apex.agent.core.engine.ExecutionMemoryObserver
 import com.apex.agent.core.engine.compression.HybridCompressor
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
+import com.apex.agent.core.engine.goal.FastModelGoalVerifier
+import com.apex.agent.core.engine.goal.GoalModeCoordinator
 import com.apex.agent.core.engine.orchestrator.DefaultTaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestrator
 import com.apex.agent.core.engine.orchestrator.TaskOrchestratorConfig
@@ -69,6 +71,8 @@ object AgentModule {
             "agent" -> AgentMode.AGENT
             "build" -> AgentMode.BUILD
             "plan" -> AgentMode.PLAN
+            "goal" -> AgentMode.GOAL
+            "loop" -> AgentMode.LOOP
             "spec" -> AgentMode.SPEC
             "reflect" -> AgentMode.REFLECTION
             "assist" -> AgentMode.HUMAN_ASSIST
@@ -159,6 +163,16 @@ object AgentModule {
             modelRuntime = modelRuntime
         )
     }
+
+    @Provides
+    @Singleton
+    fun provideGoalCoordinator(
+        modelRuntime: ModelRuntime,
+        settingsRepository: SettingsRepository
+    ): GoalModeCoordinator = GoalModeCoordinator(
+        verifier = FastModelGoalVerifier(modelRuntime),
+        verifyEnabled = { settingsRepository.agentSettings.value.goalVerifierEnabled }
+    )
 
     @Provides
     @Singleton

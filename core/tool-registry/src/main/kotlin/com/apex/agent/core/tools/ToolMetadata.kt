@@ -164,13 +164,20 @@ enum class ToolRisk(val label: String) {
  *   destructive / idempotent / openWorld / sensitive). Defaults to
  *   [ToolAnnotations.infer] over id + risk so every existing tool gets
  *   hints without code changes; explicit declaration wins.
+ * @param scope v3 workspace scope ("agent" | "coding" | "all", default
+ *   "all"): which screen this tool is visible on. Sourced from the SAME
+ *   field the market tiers use (McpServerConfig.scope / skill manifest
+ *   scope) at registration time; consumed by EngineToolPlanner to enforce
+ *   mode-level isolation. "all" = both workspaces (every built-in tool
+ *   default — zero behavior change for the existing 111 tools).
  */
 data class ToolMetadata(
     val id: String,
     val category: ToolCategory,
     val risk: ToolRisk,
     val tags: List<String> = emptyList(),
-    val annotations: ToolAnnotations = ToolAnnotations.infer(id, risk)
+    val annotations: ToolAnnotations = ToolAnnotations.infer(id, risk),
+    val scope: String = "all"
 ) {
     /** True when this tool's risk level requires gated approval. */
     val isHighRisk: Boolean get() = risk == ToolRisk.HIGH
@@ -193,7 +200,11 @@ data class ToolMetadata(
         private var category: ToolCategory? = null
         private var risk: ToolRisk? = null
         private var annotations: ToolAnnotations? = null
+        private var scope: String = "all"
         private val tags = mutableListOf<String>()
+
+        /** Set the workspace scope ("agent" | "coding" | "all"). */
+        fun scope(scope: String) = apply { this.scope = scope }
 
         /** Set the category; inferred from the id if never called. */
         fun category(category: ToolCategory) = apply { this.category = category }
@@ -229,7 +240,8 @@ data class ToolMetadata(
                 category = resolvedCategory,
                 risk = resolvedRisk,
                 tags = tags,
-                annotations = annotations ?: ToolAnnotations.infer(id, resolvedRisk)
+                annotations = annotations ?: ToolAnnotations.infer(id, resolvedRisk),
+                scope = scope
             )
         }
     }
@@ -352,5 +364,23 @@ data class ToolMetadata(
         @JvmStatic
         fun meta(id: String, block: Builder.() -> Unit = {}): ToolMetadata =
             Builder(id).apply(block).build()
+
+        /**
+         * v3 作用域规范化：把市场 tier / 手改配置里的原始 scope 折叠为
+         * "agent" / "coding" / "all" 三值之一。null、空白与未知值（笔改
+         * mcp_servers.json 或 manifest 的笔误）一律按 "all" 处理——
+         * fail-open：一个拼写错误不应把工具从两个工位同时藏死。注册侧
+         * （McpToolRegistrar / SkillHotReloader）打标前统一过本函数，
+         * 保证 [scope] 恒为合法三值；市场目录侧的可见性仍按原始值精确
+         * 匹配，两侧语义互不越界。
+         */
+        @JvmStatic
+        fun normalizeScope(raw: String?): String {
+            val value = raw?.trim()?.lowercase() ?: return SCOPE_ALL
+            return if (value == "agent" || value == "coding") value else SCOPE_ALL
+        }
+
+        /** v3 作用域常量：与市场 tier / AgentConfig.skillScope 同源。 */
+        const val SCOPE_ALL = "all"
     }
 }

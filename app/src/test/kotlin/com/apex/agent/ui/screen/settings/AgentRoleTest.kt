@@ -126,6 +126,89 @@ class AgentRoleTest {
         assertEquals(AgentRole.ALL_ROUNDER, dangling.activeRole())
     }
 
+    // ═══ v6 Coding 专家模板（用户规格：全栈置顶 / Git / Android / 各语言专家）═══
+
+    @Test
+    fun `coding experts pin full-stack first with git and android specialists`() {
+        val experts = AgentRole.CODING_EXPERTS
+        // 置顶全栈 + Git 角色 + Android 专家（用户点名的三个）
+        assertEquals(AgentRole.BUILTIN_CODING_FULL_STACK_ID, experts[0].id)
+        assertEquals("builtin_coding_git", experts[1].id)
+        assertEquals("builtin_coding_android", experts[2].id)
+        // 全部内置（不可删/编辑）且定义段非空（引擎人设通道有料）
+        experts.forEach { e ->
+            assertTrue("${e.id} 必须内置", e.isBuiltIn)
+            assertTrue("${e.id} 定义不能为空", e.roleDefinition.isNotBlank())
+        }
+        // 每门主流语言都有一个专家：id 覆盖核对（用户规格逐语言点验）
+        val ids = experts.map { it.id }.toSet()
+        listOf(
+            "builtin_coding_kotlin", "builtin_coding_java", "builtin_coding_python",
+            "builtin_coding_javascript", "builtin_coding_typescript", "builtin_coding_go",
+            "builtin_coding_rust", "builtin_coding_cpp", "builtin_coding_csharp",
+            "builtin_coding_swift", "builtin_coding_php", "builtin_coding_ruby",
+            "builtin_coding_sql", "builtin_coding_shell", "builtin_coding_frontend"
+        ).forEach { id ->
+            assertTrue("缺少语言专家 $id", id in ids)
+        }
+    }
+
+    @Test
+    fun `coding roles list places built-in experts before custom roles`() {
+        var s = AgentSettings()
+            .withRoleUpserted(AgentRole(id = "r1", name = "自定义"))
+        val list = s.codingRoles()
+        // 内置专家在前（全栈置顶），自定义接续可用（跨模式复用）
+        assertEquals(AgentRole.BUILTIN_CODING_FULL_STACK_ID, list[0].id)
+        assertEquals(list.size, AgentRole.CODING_EXPERTS.size + 1)
+        assertEquals("自定义", list.last().name)
+    }
+
+    @Test
+    fun `activeCodingRole defaults to full-stack and resolves dangling id`() {
+        // 缺省：全栈置顶
+        assertEquals(
+            AgentRole.BUILTIN_CODING_FULL_STACK_ID,
+            AgentSettings().activeCodingRole().id
+        )
+        // 激活 Git 专家
+        var s = AgentSettings().withCodingRoleActivated("builtin_coding_git")
+        assertEquals("builtin_coding_git", s.codeActiveRoleId)
+        assertEquals("Git 专家", s.activeCodingRole().name)
+        // 悬空 id（手改 JSON）→ 诚实回落全栈
+        val raw = json.encodeToString(AgentSettings.serializer(), s)
+            .replace("builtin_coding_git", "gone")
+        val dangling = json.decodeFromString<AgentSettings>(raw)
+        assertEquals("gone", dangling.codeActiveRoleId)
+        assertEquals(
+            AgentRole.BUILTIN_CODING_FULL_STACK_ID,
+            dangling.activeCodingRole().id
+        )
+    }
+
+    @Test
+    fun `coding role activation ignores unknown ids and accepts custom roles`() {
+        var s = AgentSettings()
+            .withRoleUpserted(AgentRole(id = "r1", name = "自定义"))
+        // 未知 id 静默忽略
+        s = s.withCodingRoleActivated("nonexistent")
+        assertEquals(AgentRole.BUILTIN_CODING_FULL_STACK_ID, s.codeActiveRoleId)
+        // 自定义角色也能在 Coding 工位激活（跨模式复用）
+        s = s.withCodingRoleActivated("r1")
+        assertEquals("r1", s.codeActiveRoleId)
+        assertEquals("自定义", s.activeCodingRole().name)
+    }
+
+    @Test
+    fun `legacy settings json gets default coding role without migration`() {
+        // 老用户落盘 JSON（v6 之前，无 codeActiveRoleId）→ 反序列化即全栈缺省
+        val legacy = "{\"defaultMode\":\"build\",\"thinkLevel\":\"standard\",\"maxIterations\":20}"
+        val settings = json.decodeFromString<AgentSettings>(legacy)
+        assertEquals(AgentRole.BUILTIN_CODING_FULL_STACK_ID, settings.codeActiveRoleId)
+        // 与 Agent 屏角色互不干扰
+        assertEquals(AgentRole.BUILTIN_ALL_ROUNDER_ID, settings.activeRoleId)
+    }
+
     @Test
     fun `settings round-trip preserves roles`() {
         val original = AgentSettings()

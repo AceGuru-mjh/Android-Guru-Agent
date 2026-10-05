@@ -183,6 +183,19 @@ class CodeAgentEngine(
     }
 
     /**
+     * v6 专家模板人设：与 Agent 屏 applyRoleToEngine 同通道（AgentConfig
+     * 人设字段），即时生效——下一轮请求携带。空定义 = 清除回落默认。
+     */
+    override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) {
+        delegate.patchConfig { cfg ->
+            cfg.copy(
+                roleDefinition = roleDefinition.trim(),
+                rolePrompt = rolePrompt?.trim().orEmpty()
+            )
+        }
+    }
+
+    /**
      * #197 强制函数调用（v4 语义）：forcedToolIds 非空 = 本轮只暴露
      * 选中工具且 tool_choice=required；exposeAllTools = 全量暴露。
      */

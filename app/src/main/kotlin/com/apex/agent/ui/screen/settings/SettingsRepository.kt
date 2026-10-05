@@ -566,6 +566,11 @@ data class AgentSettings(
     val agentRoles: List<AgentRole> = emptyList(),
     val activeRoleId: String = AgentRole.BUILTIN_ALL_ROUNDER_ID,
 
+    // v6 Coding 专家模板：Coding 工位的激活角色（独立于 Agent 屏 activeRoleId，
+    // 同一份 agentRoles 自定义池跨模式复用）。悬空/被删 → activeCodingRole()
+    // 诚实回落全栈置顶。操作助手 withCodingRoleActivated（AgentRole.kt）。
+    val codeActiveRoleId: String = AgentRole.BUILTIN_CODING_FULL_STACK_ID,
+
     // ═══ 工具权限（v1.0 #155 业界标准式权限模式）═══
     // 两模式共享的 ToolExecutor 门控：模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
     // + 按序首匹配规则三元组（ALLOW/ASK/DENY，pattern 支持尾缀星号通配，

@@ -132,6 +132,10 @@ class StandardModeEngine(
     @Volatile
     private var sessionExtras: String? = null
 
+    /** v6 专家模板人设段（updateRolePersona 写入；null = 无角色）。 */
+    @Volatile
+    private var rolePersona: String? = null
+
     /** v4 强制函数集 / 全量开关。 */
     @Volatile
     private var forcedToolIds: Set<String> = emptySet()
@@ -862,6 +866,21 @@ class StandardModeEngine(
         planConfirmationDeferred?.complete(PlanAnswer(confirmed, enabledSteps, order))
     }
 
+    /**
+     * v6 专家模板人设：标准线没有 AgentConfig 人设字段——落进系统提示词
+     * 的专家段（拼装点见 buildSystemPrompt 的 persona 段）。空 = 清除。
+     */
+    override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) {
+        rolePersona = buildString {
+            append("## Coding Role\n")
+            append(roleDefinition.trim())
+            if (!rolePrompt.isNullOrBlank()) {
+                append("\n\nAdditional directive from the user:\n")
+                append(rolePrompt.trim())
+            }
+        }.takeIf { it.isNotBlank() }
+    }
+
     override fun updateSessionExtras(extras: String?) {
         sessionExtras = extras?.takeIf { it.isNotBlank() }
     }
@@ -963,6 +982,10 @@ class StandardModeEngine(
                     activeFile = activeFile
                 )
             )
+        }
+        rolePersona?.let { persona ->
+            appendLine()
+            appendLine(persona)
         }
         rulesProvider?.let { rp ->
             rp.formatGlobalRules(globalRules)?.let {

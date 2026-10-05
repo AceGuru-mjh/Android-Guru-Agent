@@ -147,7 +147,9 @@ class CodeViewModel @Inject constructor(
     /** 斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）。 */
     private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
     // i18n：用户可见系统消息按当前语言取词（组合外场景）
-    private val languageManager: com.apex.agent.ui.language.LanguageManager
+    private val languageManager: com.apex.agent.ui.language.LanguageManager,
+    // ═══ v6 Git 工作区（右上角面板直读）：Proot 沙箱 git 执行器 ═══
+    private val gitRunner: com.apex.agent.core.codetools.git.GitCommandRunner
 ) : ViewModel() {
 
     internal val _uiState = MutableStateFlow(CodeUiState())
@@ -216,6 +218,19 @@ class CodeViewModel @Inject constructor(
     /** 双思考逻辑路由门面（右上角切换入口；注入恒为 DualLogicCodeEngine）。 */
     private val dualLogicEngine: DualLogicCodeEngine?
         get() = codeEngine as? DualLogicCodeEngine
+
+    // ═══ v6 控制器接线（lazy：viewModelScope 构造后才可用；God-file 预算：
+    //     Git 工作区与专家模板的逻辑各自独立成文件，VM 只做暴露）═══
+
+    /** Git 工作区面板（右上角入口；CodeWorkspacePanel 直取）。 */
+    internal val gitPanelController: CodeGitPanelController by lazy {
+        CodeGitPanelController(gitRunner, viewModelScope)
+    }
+
+    /** Coding 专家模板（模式行胶囊；设置流 → 引擎人设通道）。 */
+    internal val roleController: CodeRoleController by lazy {
+        CodeRoleController(settingsRepository, { codeEngineImpl }, viewModelScope)
+    }
 
     init {
         // 工作区清单 + 激活恢复（manager init 已恢复 activeId）

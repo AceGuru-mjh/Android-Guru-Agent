@@ -55,7 +55,12 @@ htop
 tmux
 
 # ── 版本控制 ──
+# github-cli（gh）：v3 S3 —— agent 经 terminal.exec 跑 gh 命令（凭据经
+# GH_TOKEN/GITHUB_TOKEN 注入，见 GithubTerminalEnvInjector）；git 的 GitHub
+# HTTPS 凭据桥也依赖 gh（credential.https://github.com.helper = !gh auth git）。
+# Ubuntu 24.04 universe 提供。
 git
+github-cli
 
 # ── 运行时（python 全量 + venv + pip + 编译头文件）──
 # python3-dev：pip install 含 C 扩展的包（numpy 等）需要 Python.h + gcc

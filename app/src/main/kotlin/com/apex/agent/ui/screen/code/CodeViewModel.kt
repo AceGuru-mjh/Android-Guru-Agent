@@ -27,6 +27,7 @@ import com.apex.agent.core.engine.AgentMode
 import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.UserInput
 import com.apex.agent.core.engine.UserQuestionBridge
+import com.apex.agent.core.engine.goal.GoalModeCoordinator
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
@@ -114,6 +115,9 @@ import java.util.concurrent.atomic.AtomicLong
  * - `CodeLongTaskCenterOps.kt` — v1.2 长任务中心用户操作流（面板开关/
  *   刷新、复制/重跑/续跑/删除/父对比/模板启动；run 生命周期钩子仍在
  *   本文件的 runEngine 内）。
+ * - `CodeGoalController.kt` — v3 GOAL 目标模式控制（协调器状态同步/设定
+ *   弹层/开始/停止/重启/首条拦截/深潜线保障；模式附属动作经 setMode 尾部
+ *   的 onEnterGoalMode 单点接入）。
  */
 @HiltViewModel
 class CodeViewModel @Inject constructor(
@@ -125,7 +129,8 @@ class CodeViewModel @Inject constructor(
     private val userQuestionBridge: UserQuestionBridge,
     // Issue #164：全局规则（设置页 RulesSettingsSection 编辑）——每次发送前
     // 同步到引擎，refreshContext 时经 RulesProvider 注入 additionalSystemContext
-    private val settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
+    //（goal 控制器扩展 CodeGoalController.kt 同包消费：轮次默认值/深潜线持久化）
+    internal val settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository,
     // v1.2 长任务中心：追踪器（事件流聚合）+ 复制引擎 + 存储（列表面板直读）
     // + 档位效能统计（长任务记录 → 工作区×档位聚合，档位效能页签数据源）
     // 可见性：longTaskTracker 开放供 CodeEventReducer.kt（main 侧拆分）消费；
@@ -147,7 +152,11 @@ class CodeViewModel @Inject constructor(
     /** 斜杠路由需要 MCP 连接快照（/mcp:<id> 引导提示词据此生成）。 */
     private val mcpManager: com.apex.agent.core.tools.mcp.McpManager,
     // i18n：用户可见系统消息按当前语言取词（组合外场景）
-    private val languageManager: com.apex.agent.ui.language.LanguageManager,
+    //（GOAL 扩展同包消费：目标设定/停止/重启回执）
+    internal val languageManager: com.apex.agent.ui.language.LanguageManager,
+    // v3 GOAL 目标模式：全局目标协调器（与深潜线引擎共享单例；每轮验收钩子
+    // 在引擎侧，UI 侧驱动设定弹层/状态卡——扩展接线见 CodeGoalController.kt）
+    internal val goalCoordinator: GoalModeCoordinator,
     // ═══ v6 Git 工作区（右上角面板直读）：Proot 沙箱 git 执行器 ═══
     private val gitRunner: com.apex.agent.core.codetools.git.GitCommandRunner
 ) : ViewModel() {
@@ -216,7 +225,7 @@ class CodeViewModel @Inject constructor(
         get() = codeEngine as? CodeEngineFacade
 
     /** 双思考逻辑路由门面（右上角切换入口；注入恒为 DualLogicCodeEngine）。 */
-    private val dualLogicEngine: DualLogicCodeEngine?
+    internal val dualLogicEngine: DualLogicCodeEngine?
         get() = codeEngine as? DualLogicCodeEngine
 
     // ═══ v6 控制器接线（lazy：viewModelScope 构造后才可用；God-file 预算：
@@ -242,14 +251,18 @@ class CodeViewModel @Inject constructor(
         // v1.2 七档思考系统：恢复持久化档位（codeThinkingLevel 与聊天页
         // thinkingLevelOverride 互不干扰，两模式各自记忆）
         restoreThinkingLevel()
+        // v1.5 双思考逻辑：恢复持久化档位（空/未知 → 深潜，历史行为零变化）。
+        // 先于 setMode：GOAL 恢复会强制深潜线，若在其后恢复会反切回持久化
+        // 逻辑线、破坏「GOAL 恒走深潜」不变量。
+        restoreLogicMode()
         // #197：Coding 屏模式同步（引擎侧恒为 BUILD/PLAN；未知值回退 BUILD）
         val startupMode = settingsRepository.agentSettings.value.let { s ->
             s.codeExecutionMode.takeIf { it.isNotBlank() }
                 ?.let { runCatching { AgentMode.valueOf(it.uppercase()) }.getOrNull() }
         } ?: AgentMode.BUILD
         setMode(if (startupMode in CODING_SCREEN_MODES) startupMode else AgentMode.BUILD)
-        // v1.5 双思考逻辑：恢复持久化档位（空/未知 → 深潜，历史行为零变化）
-        restoreLogicMode()
+        // v3 GOAL：协调器全局状态流 → uiState.goalState（状态卡数据源）
+        setupGoalController()
     }
 
     // ═══ v1.5 思考逻辑（深潜 = 自研七档 / 标准 = 标准任务循环）═══
@@ -302,13 +315,17 @@ class CodeViewModel @Inject constructor(
 
     /**
      * 切换执行模式：持久化（AgentSettings.codeExecutionMode）+ 引擎
-     * patchConfig 即时生效。PLAN = 先出完整计划、确认后执行；BUILD = 边想边做。
+     * patchConfig 即时生效。PLAN = 先出完整计划、确认后执行；BUILD = 边想边做；
+     * GOAL（v3）= 目标驱动验收循环——切入时强制深潜线（验收只在深潜线引擎
+     * 接线）+ 无活动目标弹设定 Sheet（逻辑单点在 [onEnterGoalMode]，选择器
+     * onSelect 与 init 恢复共用本路径）。
      */
     fun setMode(mode: AgentMode) {
         if (mode !in CODING_SCREEN_MODES) return
         settingsRepository.updateAgentSettings { copy(codeExecutionMode = mode.name.lowercase()) }
         _uiState.update { it.copy(mode = mode) }
         codeEngineImpl?.updateMode(mode)
+        if (mode == AgentMode.GOAL) onEnterGoalMode()
     }
 
     /** #197 PLAN 模式计划确认/驳回（人控门；勾选/重排同 Agent 屏口径）。 */
@@ -591,7 +608,14 @@ class CodeViewModel @Inject constructor(
                 codeEngine.execute(UserInput(text = engineInput)).collect { event ->
                     longTaskTracker.onEvent(event)
                     maybeEscalateOnDeepWater(event)
-                    streamSession.onEvent(event)
+                    if (event is AgentEvent.ThinkingChunk && event.text.contains(GOAL_NOTICE_MARKER)) {
+                        // v3 GOAL：验收结论不走思考卡（默认折叠只有 80 字预览，
+                        // 且下一轮 ThinkingComplete 会整体覆写文本吞掉通知）
+                        // → 注入系统行，时间轴常驻可见并随会话落盘。
+                        appendSystemMessage(event.text.trim())
+                    } else {
+                        streamSession.onEvent(event)
+                    }
                     reduce(event)
                 }
             } catch (e: CancellationException) {

@@ -150,6 +150,8 @@
     <string name="settings_mode_build">Build · 边想边做</string>
     <string name="settings_mode_chat">Chat · 对话（旧）</string>
     <string name="settings_mode_plan">Plan · 先规划后执行</string>
+    <string name="settings_mode_goal">Goal · 可验证目标循环</string>
+    <string name="settings_mode_loop">Loop · 循环与定时</string>
     <string name="settings_mode_spec">Spec · 规格确认后执行</string>
     <string name="settings_mode_reflect">Reflect · 反思改进</string>
     <string name="settings_mode_assist">Assist · 人工决策</string>

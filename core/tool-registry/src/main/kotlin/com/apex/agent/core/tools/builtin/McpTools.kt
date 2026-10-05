@@ -1,6 +1,7 @@
 package com.apex.agent.core.tools.builtin
 
 import com.apex.agent.core.tools.AgentTool
+import com.apex.agent.core.tools.ToolMetadata
 import com.apex.agent.core.tools.mcp.McpManager
 import com.apex.agent.core.tools.mcp.McpServerConfig
 import com.apex.agent.core.tools.mcp.McpTransport
@@ -100,10 +101,23 @@ class McpListTool(
             return "No MCP servers connected. Use mcp_connect to connect one."
         }
 
+        // v3：随清单展示服务器级工位作用域（模型可见，不做过滤——引擎
+        // 计划层已强制隔离）。读取与 McpToolRegistrar 同源的配置字段，
+        // 非法值按 all 折叠展示（与实际过滤行为一致）。
+        val scopeByName = mcpManager.getConfigs().associate { it.name to it.scope }
         val tools = mcpManager.getAllTools()
         return buildString {
             appendLine("🔌 Connected MCP servers (${servers.size}):")
-            servers.forEach { appendLine("  • $it") }
+            servers.forEach { server ->
+                val scope = ToolMetadata.normalizeScope(scopeByName[server])
+                val visibilityHint = when (scope) {
+                    "agent" -> " (Coding 屏不可见)"
+                    "coding" -> " (Agent 屏不可见)"
+                    else -> ""
+                }
+                appendLine("  • $server")
+                appendLine("    scope: $scope$visibilityHint")
+            }
             appendLine()
             appendLine("Available tools (${tools.size}):")
             tools.forEach { t ->

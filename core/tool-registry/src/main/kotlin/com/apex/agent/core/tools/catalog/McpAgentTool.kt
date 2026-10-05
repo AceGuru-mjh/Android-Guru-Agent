@@ -26,12 +26,22 @@ import kotlinx.coroutines.CancellationException
  * - metadata: MCP category, MEDIUM risk (unknown remote capability),
  *   non-idempotent & non-retry-safe — the v3 run policy never blind-retries
  *   a remote side effect (rikkahub-agent gates *all* MCP calls behind
- *   approval; our v3 risk gate covers the same surface via MEDIUM/HIGH).
+ *   approval; our v3 risk gate covers the same surface via MEDIUM/HIGH);
+ * - scope: v3 服务器级工位作用域（McpServerConfig.scope，"agent" |
+ *   "coding" | "all"）由 [McpToolRegistrar] 注册时从配置表读入并打进
+ *   [ToolMetadata] —— 与市场 tier 同源字段，引擎计划层据此做双工位
+ *   隔离（缺口 A：scope 此前只被市场 UI 消费，引擎侧不消费）。
  */
 class McpAgentTool(
     private val manager: McpManager,
     private val serverName: String,
-    private val toolDef: McpToolDef
+    private val toolDef: McpToolDef,
+    /**
+     * v3 工位作用域（服务器级；默认 all = 双工位可见，兼容旧调用点）。
+     * 命名避开 [ToolMetadata.Builder] 的同名私有字段，防止元数据
+     * lambda 内引用它时的名字解析歧义。
+     */
+    private val serverScope: String = "all"
 ) : AgentTool {
 
     override val id: String = McpToolNaming.toolId(serverName, toolDef.name)
@@ -50,6 +60,8 @@ class McpAgentTool(
         category(ToolCategory.MCP)
         risk(ToolRisk.MEDIUM)
         tag("mcp", "server:$serverName")
+        // v3 作用域打标：与市场 tier 同源，供引擎计划层隔离；脏值折叠 all。
+        scope(ToolMetadata.normalizeScope(serverScope))
         annotations(
             ToolAnnotations(
                 readOnlyHint = false,

@@ -6,6 +6,7 @@ import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.code.CodeEngineFacade
 import com.apex.agent.core.code.CodePrompts
 import com.apex.agent.core.code.RulesProvider
+import com.apex.agent.core.code.subagent.SubAgentSettings
 import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
@@ -54,21 +55,14 @@ import kotlinx.coroutines.withTimeout
  *
  * ## 关键决策
  *
- * - **独立循环**：不包装 ApexAgentEngine——标准线有自己的回合语义
- *   （turn = 一次 LLM 请求 + 工具批处理）、自己的系统提示词装配、
- *   自己的权限门与会话压缩；
- * - **事件协议 100% 复用**：发射 [AgentEvent]（IterationStart /
- *   ThinkingChunk / ResponseChunk / ToolCall* / UsageUpdated /
- *   ContextCompressed / UserInputRequired / Plan* / Complete / Aborted /
- *   Error）——CodeStreamSession 胶囊时间轴、LongTaskTracker、
- *   UserQuestionBridge 问答闭环零改动即工作；
- * - **PLAN 档人控门**：规划师画像产出计划 → 解析 [ExecutionPlan] →
- *   PlanAwaitingConfirmation 挂起 → 确认后切构建者画像执行
- *   （复用 VM 的 PlanConfirmationCard）；
- * - **task 工具**：合成定义（[StandardToolSurface.syntheticTaskTool]），
- *   派发 [StandardSubAgentDispatcher] 隔离子代理；
- * - **记忆通道独立**：code_memory_standard（与深潜线的 code_memory
- *   分离——两条思考逻辑各自完整现场，切换不互相污染）。
+ * - **独立循环**：不包装 ApexAgentEngine——自有回合语义（turn = 一次 LLM
+ *   请求 + 工具批处理）、系统提示词装配、权限门与会话压缩；
+ * - **事件协议 100% 复用**：全量 [AgentEvent]——CodeStreamSession /
+ *   LongTaskTracker / UserQuestionBridge 零改动即工作；
+ * - **PLAN 档人控门**：规划师画像 → [ExecutionPlan] → 确认挂起 → 切
+ *   构建者画像（复用 VM 的 PlanConfirmationCard）；
+ * - **task 工具**：合成定义，派发 [StandardSubAgentDispatcher] 隔离子代理；
+ * - **记忆通道独立**：code_memory_standard（与深潜线分离，互不污染）。
  */
 class StandardModeEngine(
     private val runtime: ModelRuntime,
@@ -105,6 +99,11 @@ class StandardModeEngine(
      * 预算的消费源；提供者缺省或返回 null = 静态 [maxContextTokensConfig] 兜底。
      */
     private val modelInfoProvider: (() -> ModelInfo?)? = null,
+    /**
+     * v3 子代理预算快照源（设置 → 子代理；null = 沿用下方构造基线，测试与
+     * 默认装配路径）。接线后派发器超时/并发/输出上限统一由快照驱动。
+     */
+    private val subAgentSettingsProvider: (() -> SubAgentSettings)? = null,
     /** 子代理运行标记（本实例由 task 工具派生）。 */
     internal val subAgentMode: Boolean = false
 ) : AgentEngine, CodeEngineFacade {
@@ -161,9 +160,8 @@ class StandardModeEngine(
     private var usageCalibration: Float = 1.0f
 
     /**
-     * AgentMode.PLAN 档硬门（与设置层权限模式正交）：档位切换不再改写
-     * 权限模式——「规划阶段零副作用」由 [StandardPermissionEngine.decide]
-     * 的 planGate 参数独立承诺，设置层模式是主权档位。
+     * PLAN 档硬门（与设置层权限模式正交）：「规划阶段零副作用」由
+     * [StandardPermissionEngine.decide] 的 planGate 参数独立承诺。
      */
     @Volatile
     private var agentPlanGate: Boolean = false
@@ -196,8 +194,9 @@ class StandardModeEngine(
                     subAgentMode = true
                 ).apply { profile = definition }
             },
-            maxConcurrent = subAgentMaxConcurrent,
-            timeoutMs = subAgentTimeoutMs
+            // v3 预算统一源：接线设置层则快照驱动；未接线回落构造基线
+            settingsProvider = subAgentSettingsProvider
+                ?: { SubAgentSettings(maxConcurrent = subAgentMaxConcurrent, timeoutMs = subAgentTimeoutMs) }
         )
 
     // ═══════════════════════ AgentEngine ═══════════════════════
@@ -324,10 +323,8 @@ class StandardModeEngine(
 
     /**
      * 回合循环：直到无工具调用 / 预算耗尽 / 中止 / 异常。
-     *
-     * @return PLAN 档且以纯文本收官时的规划文本（**未**发射
-     *         ResponseComplete——由 [handlePlanGate] 决定后续）；
-     *         其余情况返回 null（已正常收尾）
+     * @return PLAN 档纯文本收官时的规划文本（未发射 ResponseComplete，由
+     * [handlePlanGate] 决定后续）；其余返回 null（已正常收尾）
      */
     private suspend fun runTurns(
         emit: suspend (AgentEvent) -> Unit,
@@ -598,12 +595,9 @@ class StandardModeEngine(
     }
 
     /**
-     * ASK → UserInputRequired + 挂起等答案（5 分钟超时 = 拒绝）。
-     *
-     * 应答词表：「允许/allow/yes/y/好/ok/1/执行」= 本次；
-     * 「总是/always/全部允许/session/2」= 本会话总允许；其余非空文本 =
-     * 拒绝但携带用户指示（反馈原文回传模型，模型可改道）；空/超时 = 拒绝。
-     *
+     * ASK → UserInputRequired + 挂起等答案（5 分钟超时 = 拒绝）。应答词表：
+     * 「允许」类 = 本次；「总是」类 = 本会话总允许；其余非空文本 = 拒绝但
+     * 携带用户指示（原文回传模型，可改道）；空/超时 = 拒绝。
      * @return 应答 + 拒绝时的用户指示原文（null = 无反馈）
      */
     private suspend fun askPermission(
@@ -647,6 +641,12 @@ class StandardModeEngine(
             val dispatcher = subAgentDispatcher
             if (dispatcher == null) {
                 return "task 工具不可用（子代理不能再派发子代理）" to false
+            }
+            // v3：custom 自定义类型为深潜线（code_task）专属——标准线画像
+            // 封闭，明确报错引导而不是静默回落 explore（主代理会误判角色在跑）。
+            if (extractJsonString(arguments, "subagent_type") == "custom") {
+                return ("custom 子代理类型当前思考逻辑线暂不支持，请切深潜线（code_task）" +
+                    "或使用内置类型（explore/research/general/reviewer）") to false
             }
             val request = parseSubAgentRequest(arguments)
                 ?: return ("task 参数解析失败：需要 description 与 prompt 字段" to false)
@@ -869,10 +869,7 @@ class StandardModeEngine(
         planConfirmationDeferred?.complete(PlanAnswer(confirmed, enabledSteps, order))
     }
 
-    /**
-     * v6 专家模板人设：标准线没有 AgentConfig 人设字段——落进系统提示词
-     * 的专家段（拼装点见 buildSystemPrompt 的 persona 段）。空 = 清除。
-     */
+    /** v6 专家模板人设：无 AgentConfig 人设字段——落进系统提示词专家段（见 buildSystemPrompt persona 段）。空 = 清除。 */
     override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) {
         rolePersona = buildString {
             append("## Coding Role\n")
@@ -1024,6 +1021,7 @@ class StandardModeEngine(
             if (subAgentMode) StandardPrompts.generalSubAgent() else StandardPrompts.generalAgent()
         StandardAgentKind.EXPLORE -> StandardPrompts.exploreSubAgent()
         StandardAgentKind.RESEARCH -> StandardPrompts.researchSubAgent()
+        StandardAgentKind.REVIEWER -> StandardPrompts.reviewerSubAgent()
     }
 
     /** token 估算（native 核优先，纯 Kotlin 回退）。 */
@@ -1159,8 +1157,9 @@ class StandardModeEngine(
             val description = extractJsonString(arguments, "description") ?: return null
             val prompt = extractJsonString(arguments, "prompt") ?: return null
             val typeKey = extractJsonString(arguments, "subagent_type") ?: "explore"
-            // 子代理类型：explore / research / general（general = 全工具面通用
-            // 执行者——子代理上下文不能再派发、不能询问，写操作受权限门约束）
+            // 子代理类型：explore / research / general / reviewer（reviewer =
+            // 只读代码评审：分级发现 + 合入结论；general = 全工具面通用执行者
+            // ——子代理上下文不能再派发、不能询问，写操作受权限门约束）
             val kind = StandardAgentKind.fromKey(typeKey)
                 ?.takeIf { it.role == StandardAgentRole.SUBAGENT || it == StandardAgentKind.GENERAL }
                 ?: StandardAgentKind.EXPLORE

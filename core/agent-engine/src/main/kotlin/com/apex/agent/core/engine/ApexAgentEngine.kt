@@ -877,14 +877,10 @@ class ApexAgentEngine(
                 throw e
             } catch (e: Exception) {
                 // ═══ Tool System v4：工具请求降级重试 ═══
-                // 根因：部分 Provider/网关对带 tools 的请求直接 400（函数名非法/
-                // schema 关键字不支持/tool_choice 形态不支持），旧实现直接把异常
-                // 抛给 UI —— 表象即“直接发送对话就报错，必须手动圈选函数才能发”。
-                // 现在：仅在本轮**尚未输出任何内容**且降级等级未到 2 时，逐级降级
-                // （1=纯 CORE 无强制；2=无工具纯对话）重试同一轮，保证发送永远
-                // 有响应；已流式输出过的轮次不重试（避免内容重复拼接）。
-                // 同时覆盖 ModelRequestRejected（生产多模型路径）与裸
-                // LlmException.Http（SingleClientModelRuntime/测试路径）。
+                // 根因：部分 Provider/网关对带 tools 的请求直接 400，旧实现把异常抛给
+                // UI。现在：本轮尚未输出任何内容且降级等级未到 2 时逐级降级（1=纯
+                // CORE 无强制；2=无工具纯对话）重试同一轮；已流出内容的轮次不重试
+                //（避免重复拼接）。#242：降级同时发用户可见提示（EngineDegradationNotice）。
                 if (contentBuilder.isEmpty() && reasoningBuilder.isEmpty() &&
                     toolCallsAccumulator.isEmpty() && toolDegradationLevel < 2 &&
                     plan.tools.isNotEmpty() && EngineToolPlanner.isToolsRelatedRejection(e)
@@ -895,6 +891,10 @@ class ApexAgentEngine(
                         "Tools rejected by provider (level ${toolDegradationLevel}): " +
                             "${e.message ?: e::class.simpleName} — degrading tool payload and retrying"
                     )
+                    // #242：降级不再静默 —— 用户可见事件（文案见 EngineDegradationNotice.kt）。
+                    EngineDegradationNotice.noticeFor(toolDegradationLevel)?.let {
+                        emit(AgentEvent.ThinkingChunk(it))
+                    }
                     continue
                 }
                 // ═══ 长任务韧性：LLM 瞬时错误退避重试 ═══

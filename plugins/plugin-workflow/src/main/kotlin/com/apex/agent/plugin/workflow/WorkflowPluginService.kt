@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -34,6 +35,8 @@ import java.io.File
 class WorkflowPluginService : Service() {
 
     private val binder = WorkflowPluginBinder()
+
+    override fun onBind(intent: Intent): IBinder = binder
 
     private fun newStore(): WorkflowStore =
         WorkflowStore(File(filesDir, WorkflowStore.WORKFLOWS_DIR_NAME))

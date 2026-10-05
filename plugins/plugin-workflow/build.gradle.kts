@@ -26,4 +26,7 @@ dependencies {
     implementation(project(":plugin-sdk:plugin-api"))
     implementation(libs.core.ktx)
     implementation(libs.serialization.json)
+    // #256 防回退：WorkflowStore 纯逻辑层 JVM 单测（此前插件模块零测试，
+    // 假成功桩存活一个多月无报警）。
+    testImplementation(libs.junit)
 }

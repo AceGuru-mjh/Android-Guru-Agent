@@ -48,7 +48,9 @@ import com.apex.agent.core.tools.ToolRisk
  */
 class RiskAwareToolGate(
     private val gateway: UserQuestionGateway,
-    private val audit: ToolAuditLogger? = null
+    private val audit: ToolAuditLogger? = null,
+    // #208：弹窗文案源（默认中文兜底供 JVM 单测；生产由 DI 注入资源版）。
+    private val strings: GateDialogStrings = GateDialogStrings.DefaultCn
 ) : ToolExecutionGate {
 
     private val manager = ToolPermissionManager(
@@ -143,37 +145,34 @@ class RiskAwareToolGate(
     }
 
     private fun buildQuestion(metadata: ToolMetadata, arguments: String): AgentQuestion {
-        val riskHint = when (metadata.risk) {
-            ToolRisk.HIGH -> "高风险：破坏性或不可逆操作"
-            ToolRisk.MEDIUM -> "中风险：会修改数据或状态"
-            ToolRisk.LOW -> "低风险"
-        }
         // #230：MEDIUM 文件改写类的标题不再谎称「高风险」—— 按实际档位区分，
-        // 避免用户对风险标签脱敏。
+        // 避免用户对风险标签脱敏。#208：文案经 [strings] 取词，不再硬编码中文。
         val title = if (metadata.risk == ToolRisk.MEDIUM) {
-            "文件写入确认：${metadata.id}"
+            strings.fileWriteTitle(metadata.id)
         } else {
-            "高风险工具需要确认：${metadata.id}"
+            strings.riskTitle(metadata.id)
         }
         return AgentQuestion(
             title = title,
-            description = "$riskHint（${categoryLabel(metadata.category)}）\n" +
-                "参数摘要：${arguments.take(200).replace('\n', ' ')}",
+            description = strings.riskLine(
+                riskHintIsHigh = metadata.risk != ToolRisk.MEDIUM,
+                category = metadata.category
+            ) + "\n" + strings.argsLine(arguments),
             options = listOf(
                 AgentQuestionOption(
                     id = "allow_session",
-                    label = "本会话允许",
-                    description = "本次会话中该工具不再询问"
+                    label = strings.allowSessionLabel(),
+                    description = strings.allowSessionDesc()
                 ),
                 AgentQuestionOption(
                     id = "allow_once",
-                    label = "仅允许一次",
-                    description = "下次调用将再次询问"
+                    label = strings.allowOnceLabel(),
+                    description = strings.allowOnceDesc()
                 ),
                 AgentQuestionOption(
                     id = "deny",
-                    label = "拒绝",
-                    description = "不执行，让 Agent 改用其他方案",
+                    label = strings.denyLabel(),
+                    description = strings.denyDesc(),
                     recommended = true
                 )
             ),

@@ -621,4 +621,42 @@
     <!-- ═══ v1.4.4 #4：任务完成通知设置 ═══ -->
     <string name="settings_task_notify_title">任务完成通知</string>
     <string name="settings_task_notify_desc">App 在后台时任务跑完发送系统通知（前台使用时不打扰）</string>
+
+    <!-- ═══ #208：权限 / 风险门弹窗文案（GateDialogStrings.Res）═══ -->
+    <string name="gate_perm_title_fmt">工具执行授权：%1$s</string>
+    <string name="gate_perm_mode_fmt">当前权限模式：%1$s，该工具需要你确认后才能执行。</string>
+    <string name="gate_args_fmt">参数摘要：%1$s</string>
+    <string name="gate_mode_bypass">全放行（BYPASS）</string>
+    <string name="gate_mode_default">默认（DEFAULT）</string>
+    <string name="gate_mode_accept_edits">接受编辑（ACCEPT_EDITS）</string>
+    <string name="gate_mode_plan">只读规划（PLAN）</string>
+    <string name="gate_risk_title_fmt">高风险工具需要确认：%1$s</string>
+    <string name="gate_file_write_title_fmt">文件写入确认：%1$s</string>
+    <string name="gate_risk_hint_high">高风险：破坏性或不可逆操作</string>
+    <string name="gate_risk_hint_medium">中风险：会修改数据或状态</string>
+    <string name="gate_risk_line_fmt">%1$s（%2$s）</string>
+    <string name="gate_opt_allow_session">本会话允许</string>
+    <string name="gate_opt_allow_session_desc">本次会话中该工具不再询问</string>
+    <string name="gate_opt_allow_once">仅允许一次</string>
+    <string name="gate_opt_allow_once_desc">下次调用将再次询问</string>
+    <string name="gate_opt_deny">拒绝</string>
+    <string name="gate_opt_deny_desc">不执行，让 Agent 改用其他方案</string>
+    <string name="tool_cat_shell">Shell 执行</string>
+    <string name="tool_cat_file">文件操作</string>
+    <string name="tool_cat_terminal">终端运行时</string>
+    <string name="tool_cat_web">网络访问</string>
+    <string name="tool_cat_browser">浏览器自动化</string>
+    <string name="tool_cat_memory">记忆</string>
+    <string name="tool_cat_context">上下文回顾</string>
+    <string name="tool_cat_app">应用管理</string>
+    <string name="tool_cat_system">系统控制</string>
+    <string name="tool_cat_security">安全金库</string>
+    <string name="tool_cat_ui">界面操作</string>
+    <string name="tool_cat_sensor">传感器</string>
+    <string name="tool_cat_agent">用户交互</string>
+    <string name="tool_cat_skill">技能</string>
+    <string name="tool_cat_mcp">MCP</string>
+    <string name="tool_cat_github">GitHub</string>
+    <string name="tool_cat_plugin">插件</string>
+    <string name="tool_cat_utility">实用工具</string>
 </resources>

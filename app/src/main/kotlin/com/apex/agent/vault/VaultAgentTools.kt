@@ -335,10 +335,13 @@ class VaultDeleteTool(
     override val id = "vault_delete"
     override val name = "Vault Delete"
     override val description = """
-        Permanently delete a vault entry by label. Irreversible — the stored secret is destroyed. Confirm with the user before deleting. 按标签永久删除金库条目（不可逆，先与用户确认）。
+        Permanently delete a vault entry by label. Irreversible — the stored secret is destroyed. Requires a typed confirmation: ask the user first, and only after explicit approval retry with confirm set to the EXACT label being deleted. 按标签永久删除金库条目（不可逆，必须先征得用户明确同意，并把 confirm 设为待删除条目的标签名）。
     """.trimIndent()
     override val parametersSchema = """
-        {"type":"object","properties":{"label":{"type":"string","description":"Label of the entry to delete"}},"required":["label"]}
+        {"type":"object","properties":{
+            "label":{"type":"string","description":"Label of the entry to delete"},
+            "confirm":{"type":"string","description":"Typed confirmation: set to the EXACT label being deleted, ONLY after the user explicitly approved the deletion. Do NOT set it without asking."}
+        },"required":["label","confirm"]}
     """.trimIndent()
 
     override val metadata: ToolMetadata = ToolMetadata.meta(id) {
@@ -352,6 +355,22 @@ class VaultDeleteTool(
         val json = parseArgs(arguments) ?: return argsParseError(arguments)
         val label = json.stringOf("label")?.trim().orEmpty()
         if (label.isEmpty()) return "Error: 'label' is required."
+        // #207：代码级确认门 —— 「确认」不再只是工具描述里的提示词约束。
+        // typed confirm（值 = 待删除条目的 label）比布尔更强：模型无脑传 true
+        // 无法通过，且天然带 per-label 粒度。与 RiskAwareToolGate 的会话级
+        // HIGH 风险弹窗构成纵深：弹窗防「未经用户」，此处防「会话放行后的
+        // 任意次静默销毁」。fail-closed：confirm 缺失/不匹配一律拒绝。
+        val confirm = json.stringOf("confirm")?.trim().orEmpty()
+        if (confirm.isEmpty()) {
+            return "Error: deletion of vault entry '$label' requires explicit confirmation — " +
+                "STOP and ask the user whether to permanently destroy this secret. " +
+                "Only after the user approves, retry with confirm set to the exact label '$label'. " +
+                "Do NOT set confirm without asking."
+        }
+        if (confirm != label) {
+            return "Error: confirm mismatch — expected the exact label '$label' but got '$confirm'. " +
+                "Deletion refused. Ask the user, then retry with confirm=\"$label\"."
+        }
         val deleted = repository.deleteByLabel(label)
         return if (deleted) {
             "Deleted vault entry '$label'."

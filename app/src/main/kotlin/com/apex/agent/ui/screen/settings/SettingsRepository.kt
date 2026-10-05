@@ -8,6 +8,8 @@ import com.apex.agent.core.engine.modes.ModePreset
 import com.apex.agent.core.engine.modes.migrateLegacyCustomInstruction
 import com.apex.agent.core.engine.modes.selectedModePreset
 import com.apex.agent.core.llm.*
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.permission.PermissionMode
 import com.apex.agent.permission.PermissionRule
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -63,7 +65,17 @@ class SettingsRepository @Inject constructor(
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // 极少数设备 Keystore 初始化失败：退化为普通 SP，宁可不加密也绝不让配置丢失
+            // 极少数设备 Keystore 初始化失败：退化为普通 SP，宁可不加密也绝不让配置丢失。
+            // #257：降级不再静默 —— 留一条 WARN（诊断与安全审计可见），
+            // 与 GithubTokenManager / EncryptedPrefsVaultStore 的告警口径对齐。
+            runCatching {
+                AppLogger.instance.warn(
+                    LogCategory.SYSTEM, "SettingsRepository",
+                    "EncryptedSharedPreferences 初始化失败，LLM API Key 将以明文存储" +
+                        "（${e.javaClass.simpleName}: ${e.message}）—— 建议在系统设置中" +
+                        "清除应用数据后重新配置"
+                )
+            }
             context.getSharedPreferences(PREF_SECURE_FALLBACK, Context.MODE_PRIVATE)
         }
     }

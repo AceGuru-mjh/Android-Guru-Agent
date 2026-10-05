@@ -316,12 +316,38 @@ class VaultAgentToolsTest {
         return regex.find(headers)?.groupValues?.get(1)
     }
 
-    // ═══════════════ vault_delete ═══════════════
+    // ═══════════════ vault_delete（#207：代码级 typed confirm 门）═══════════════
+
+    @Test
+    fun `vault_delete 缺 confirm 拒绝且条目不被删除`() = runTest {
+        repository.save(VaultRepository.newEntry("d", "", "ghp_delete_secret_777888", VaultOrigin.HUMAN))
+        val out = tool("vault_delete").execute("""{"label":"d"}""")
+
+        assertTrue(out.startsWith("Error:"))
+        assertTrue(out.contains("confirmation"))
+        assertTrue(out.contains("STOP and ask the user"))
+        // fail-closed：拒绝路径上条目必须完好。
+        assertEquals(1, repository.entryCount())
+        assertEquals("ghp_delete_secret_777888", repository.resolveSecret("d"))
+    }
+
+    @Test
+    fun `vault_delete confirm 不匹配拒绝（含无脑 true）且条目不被删除`() = runTest {
+        repository.save(VaultRepository.newEntry("d", "", "ghp_delete_secret_777888", VaultOrigin.HUMAN))
+        // 模型无脑传 true —— 必须被拒。
+        val boolOut = tool("vault_delete").execute("""{"label":"d","confirm":true}""")
+        assertTrue(boolOut.startsWith("Error:"))
+        // 错另一个标签名 —— 同样拒绝。
+        val mismatchOut = tool("vault_delete").execute("""{"label":"d","confirm":"other-label"}""")
+        assertTrue(mismatchOut.startsWith("Error:"))
+        assertTrue(mismatchOut.contains("mismatch"))
+        assertEquals(1, repository.entryCount())
+    }
 
     @Test
     fun `vault_delete 按标签删除且旧密钥退出脱敏登记表`() = runTest {
         repository.save(VaultRepository.newEntry("d", "", "ghp_delete_secret_777888", VaultOrigin.HUMAN))
-        val out = tool("vault_delete").execute("""{"label":"d"}""")
+        val out = tool("vault_delete").execute("""{"label":"d","confirm":"d"}""")
 
         assertTrue(out.contains("Deleted") && out.contains("'d'"))
         assertEquals(0, repository.entryCount())
@@ -329,8 +355,17 @@ class VaultAgentToolsTest {
     }
 
     @Test
-    fun `vault_delete 未知标签报错`() = runTest {
-        assertTrue(tool("vault_delete").execute("""{"label":"ghost"}""").contains("no vault entry"))
+    fun `vault_delete schema 要求 confirm 必填`() {
+        val schema = tool("vault_delete").parametersSchema
+        assertTrue(schema.contains("\"confirm\""))
+        assertTrue(schema.contains("\"required\":[\"label\",\"confirm\"]"))
+    }
+
+    @Test
+    fun `vault_delete 未知标签且 confirm 齐备时报 unknown`() = runTest {
+        assertTrue(
+            tool("vault_delete").execute("""{"label":"ghost","confirm":"ghost"}""").contains("no vault entry")
+        )
     }
 
     // ═══════════════ 元数据 ═══════════════

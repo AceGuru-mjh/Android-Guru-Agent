@@ -251,7 +251,20 @@ fun CodeScreen(
                     )
                 }
 
+                // ═══ v3 GOAL 目标状态卡（输入栏上方；目标存在即显示——无论
+                // ACTIVE/ACHIEVED/STOPPED、切走模式也显示，可随时停止/重启；
+                // 实现在 GoalSetupSheet.kt 同文件，与 Loop 状态卡同款形态）═══
+                state.goalState?.let { goalState ->
+                    GoalStatusCard(
+                        state = goalState,
+                        onStop = viewModel::stopActiveGoal,
+                        onResume = viewModel::resumeGoal
+                    )
+                }
+
                 // ═══ #197 模式 + 思考档位选择器行（Build/Plan 双档 + 七档思考）═══
+                //（GOAL 切入的弹层/深潜线保障在 VM setMode → onEnterGoalMode 单点，
+                // 此处保持纯方法引用——选择器与 init 恢复共用同一路径）
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -278,7 +291,14 @@ fun CodeScreen(
                     isRunning = state.isRunning,
                     llmConfigured = llmConfigured,
                     onSendBlocked = { showApiMissingNotice = true },
-                    onSend = viewModel::sendMessage,
+                    onSend = { text ->
+                        // v3 GOAL：GOAL 模式且尚无活动目标 → 首条消息转目标
+                        // 设定弹层（草稿预填），不直接发送；返回 false（非 GOAL/
+                        // 已有目标/斜杠指令）照常走发送管线。
+                        if (!viewModel.maybeGoalFirstSend(text)) {
+                            viewModel.sendMessage(text)
+                        }
+                    },
                     onAbort = viewModel::abort,
                     slashMenuProvider = slashMenuProvider,
                     onAddPendingCommand = { viewModel.addPendingCommand(it) },
@@ -338,6 +358,20 @@ fun CodeScreen(
             currentLevel = state.thinkingLevel,
             onDismiss = { showThinkingGuide = false },
             onSelect = viewModel::setThinkingLevel
+        )
+    }
+
+    // ═══ v3 GOAL 目标设定弹层（切到 GOAL 无活动目标 / GOAL 模式首条消息
+    // 拦截打开；默认轮次读设置页 goalMaxRounds；开始 → startGoalModeGoal
+    //（关闭弹层 + 首条提示 = 打开时携带的草稿））═══
+    if (state.showGoalSetup) {
+        GoalSetupSheet(
+            initialText = state.goalSetupDraft,
+            defaultMaxRounds = viewModel.goalDefaultMaxRounds(),
+            onDismiss = viewModel::dismissGoalSetup,
+            onStart = { statement, criteria, maxRounds ->
+                viewModel.startGoalModeGoal(statement, criteria, maxRounds, state.goalSetupDraft)
+            }
         )
     }
 

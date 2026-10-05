@@ -178,6 +178,15 @@ class McpConnectTool(
             is McpConnectConfigOutcome.Ok -> outcome.config
         }
 
+        // P3 修复（同名覆盖）：UI 添加路径有重名预检，模型经 mcp_connect 添加
+        // 同名服务器却会静默覆盖用户已有配置（command/env/headers 被改写）。
+        // 现在如实拒绝并引导换名 —— 用户配置不可被模型无声劫持。
+        if (mcpManager.getConfigs().any { it.name == config.name }) {
+            return "Error: invalid argument: an MCP server named '${config.name}' already " +
+                "exists. Choose a different name, or ask the user to edit/remove the " +
+                "existing entry in the market's installed tab."
+        }
+
         mcpManager.addServer(config)
         val result = mcpManager.connect(name)
 

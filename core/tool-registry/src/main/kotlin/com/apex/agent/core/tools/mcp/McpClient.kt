@@ -95,13 +95,20 @@ class McpClient(
      * 所有使用点都必须经 [transportHandle] 而不是直接读 [transport]，
      * 否则一次无害查询（如 isTransportAlive）就会白白拉起进程。
      */
-    private val transport: McpTransportHandle by lazy { createTransport() }
+    private val transport: McpTransportHandle by lazy {
+            createdTransport = true
+            createTransport()
+        }
 
     @Volatile
     private var createdTransport = false
 
     private fun transportHandle(): McpTransportHandle {
-        createdTransport = true
+        // P3 修复（createdTransport 时序）：旧实现在 lazy 初始化**之前**置位，
+        // 握手失败走 shutdown() 时 `if (createdTransport) transport.close()`
+        // 会重新触发 lazy —— createTransport() 再次执行（STDIO = 再 fork 一个
+        // 子进程又立即销毁；BUILTIN = 再调一次工厂）。现在置位收敛到 lazy
+        // 初始化器内部：只有真正创建成功才标记，失败路径 shutdown 不会二次拉起。
         return transport
     }
 
@@ -286,27 +293,42 @@ class McpClient(
         try {
             if (!initialized) return@withContext Result.failure(Exception("Not initialized"))
 
-            val request = McpRequest(
-                jsonrpc = "2.0",
-                id = requestId.incrementAndGet(),
-                method = "tools/list",
-                params = buildJsonObject {}
-            )
-
-            val response = sendRequest(request)
-            val tools = response?.get("result")?.jsonObject
-                ?.get("tools")?.jsonArray ?: JsonArray(emptyList())
-
-            val toolList = tools.map { toolJson ->
-                val obj = toolJson.jsonObject
-                McpToolDef(
-                    name = obj["name"]?.jsonPrimitive?.content ?: "",
-                    description = obj["description"]?.jsonPrimitive?.content ?: "",
-                    inputSchema = obj["inputSchema"]?.toString() ?: "{}"
+            // P2 修复（工具分页截断）：MCP 规范允许服务器分页返回工具清单
+            //（result.nextCursor）—— 旧实现读一页即止，工具数超过服务器
+            // 单页上限时后半部分无声消失（注册的一等工具不全，模型也不知道
+            // 少了）。现在循环跟随 nextCursor 直到取完，页数上限防御环。
+            val allTools = mutableListOf<McpToolDef>()
+            var cursor: String? = null
+            var pages = 0
+            do {
+                val request = McpRequest(
+                    jsonrpc = "2.0",
+                    id = requestId.incrementAndGet(),
+                    method = "tools/list",
+                    params = if (cursor == null) {
+                        buildJsonObject {}
+                    } else {
+                        buildJsonObject { put("cursor", cursor) }
+                    }
                 )
-            }
 
-            Result.success(toolList)
+                val response = sendRequest(request)
+                val result = response?.get("result")?.jsonObject
+                val tools = result?.get("tools")?.jsonArray ?: JsonArray(emptyList())
+
+                tools.forEach { toolJson ->
+                    val obj = toolJson.jsonObject
+                    allTools += McpToolDef(
+                        name = obj["name"]?.jsonPrimitive?.content ?: "",
+                        description = obj["description"]?.jsonPrimitive?.content ?: "",
+                        inputSchema = obj["inputSchema"]?.toString() ?: "{}"
+                    )
+                }
+                cursor = result?.get("nextCursor")?.jsonPrimitive?.contentOrNull
+                pages++
+            } while (cursor != null && pages < MAX_TOOLS_LIST_PAGES)
+
+            Result.success(allTools)
         } catch (e: CancellationException) {
             // 全仓纪律：协程取消必须继续抛出（不得折叠成 Result.failure）。
             throw e
@@ -477,7 +499,17 @@ class McpClient(
             put("method", method)
             put("params", params)
         }.toString()
-        runCatching { transportHandle().send(null, notification) }
+        // P3 修复（取消纪律）：runCatching 会吞 CancellationException，截断
+        // 用户 abort 的取消传播（全仓纪律，见 initialize 的 CE 分支注释）。
+        // 通知尽力而为，但取消必须继续抛出。
+        try {
+            transportHandle().send(null, notification)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // 通知失败不应让调用方炸掉 —— 静默留痕即可（无日志依赖，
+            // 上层 MCP 启动时间线已覆盖握手阶段）。
+        }
     }
 
     companion object {
@@ -498,6 +530,13 @@ class McpClient(
          * 不应把时间线淹没 —— 前 N 行如实上报，之后的静默泄放（仍防死锁）。
          */
         const val STDERR_REPORT_CAP = 30
+
+        /**
+         * P2（工具分页）：tools/list 跟随 nextCursor 的最大页数 —— 防御
+         * 恶意/异常服务器返回永不终止的游标环。正常服务器单页几十个工具，
+         * 20 页足以覆盖任何已知实现（Kubernetes MCP 等大目录 server）。
+         */
+        const val MAX_TOOLS_LIST_PAGES = 20
     }
 }
 

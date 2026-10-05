@@ -427,11 +427,14 @@ class TerminalView @JvmOverloads constructor(
                 width, height, advance, cellHeightPx, settings.wideSafetyFactor
             )
         }
-        scrollModel.onGridResized(mergedRows.size.coerceAtLeast(grid.viewRows), grid.viewRows)
         scheduleResizeNotify()
     }
 
+    /** 网格几何推送（含光标锚定，语义见 TerminalScrollModel.onGridResized）+ PTY resize 防抖通知。 */
     private fun scheduleResizeNotify() {
+        if (scrollModel.onGridResized(mergedRows.size.coerceAtLeast(grid.viewRows), grid.viewRows, cursorAnchorRow())) {
+            notifyScrollChanged()
+        }
         resizeRunnable?.let { mainHandler.removeCallbacks(it) }
         val r = Runnable {
             resizeRunnable = null
@@ -451,9 +454,14 @@ class TerminalView @JvmOverloads constructor(
         grid = TerminalTextGrid.compute(
             w, h, renderer.charAdvancePx, cellHeightPx, settings.wideSafetyFactor
         )
-        scrollModel.onGridResized(mergedRows.size.coerceAtLeast(grid.viewRows), grid.viewRows)
         scheduleResizeNotify()
         invalidate()
+    }
+
+    /** 光标合并网格行（无快照/空网格 → null）—— resize 锚定用。 */
+    private fun cursorAnchorRow(): Int? = snapshot?.let { s ->
+        mergedRows.takeIf { it.isNotEmpty() }
+            ?.let { (s.scrollback.size + s.cursorRow).coerceIn(0, it.size - 1) }
     }
 
     // ═════════════════════ 绘制 ═════════════════════

@@ -69,6 +69,16 @@ import java.io.File
  *   偏好跨升级保留；默认 enabled=false，只预置不连接。
  * - 沙箱连接的握手/请求超时按 [requestTimeoutFor] 放宽：npx 首次冷启动
  *   要下载包，60s 会在 initialize 就误判超时，放宽到 180s 兑底。
+ *
+ * ## GitHub 令牌桥（v3 S3 / G8）
+ * - 配置的 `headers` / `env` 值里可写占位符 [GITHUB_TOKEN_PLACEHOLDER]
+ *   （字面 `${GITHUB_TOKEN}`）——官方 GitHub 远程 MCP 预置（app 层
+ *   OfficialGithubMcp）用它引用已连接的 PAT，**真 token 永不进入明文
+ *   配置 / mcp_servers.json 落盘**（占位符原样落盘）；
+ * - [connect] 时若任一值命中占位符 → 从宿主注入的 [gitHubTokenProvider]
+ *   取 PAT 做子串替换（只存在于本次连接的内存 config 副本，每求每取——
+ *   token 轮换后重连即生效）；未注入 provider 或未连接 GitHub → 连接
+ *   失败并给出可行动文案（「GitHub 未连接，无法注入令牌」）。
  */
 class McpManager(
     private val configDir: File,
@@ -92,7 +102,14 @@ class McpManager(
      * 异常/失败现场经此回调外送。宿主注入 AppLogger，测试注入捕获列表；
      * 默认 no-op —— 既有构造点（app/di/McpModule）零改动兼容。
      */
-    private val errorLog: (String) -> Unit = {}
+    private val errorLog: (String) -> Unit = {},
+    /**
+     * GitHub PAT 供应器（v3 S3 / G8 令牌桥）：headers/env 值里的
+     * [GITHUB_TOKEN_PLACEHOLDER] 占位符在 [connect] 时经此取真值填充。
+     * null = 宿主未注入（含占位符的配置连接时报「未注入」——与未连接
+     * 同文案）；既有构造点零改动兼容。
+     */
+    private val gitHubTokenProvider: (() -> String?)? = null
 ) {
     private val clients = LinkedHashMap<String, McpClient>()
     private val configs = LinkedHashMap<String, McpServerConfig>()
@@ -214,6 +231,19 @@ class McpManager(
         val config = synchronized(lock) { configs[name] }
             ?: return Result.failure(Exception("Server '$name' not configured"))
 
+        // v3 S3（G8 令牌桥）：headers/env 值含 ${GITHUB_TOKEN} 占位符时，从
+        // 宿主注入的 provider 取 PAT 填充到本次连接的内存副本（占位符原样
+        // 落盘，真 token 永不进 mcp_servers.json）。GitHub 未连接 → 诚实
+        // 失败并给出可行动指引，不拿占位符串去撞 401。
+        val resolvedConfig = resolveGithubTokenPlaceholders(name, config)
+            ?: return Result.failure(
+                Exception(
+                    "GitHub 未连接，无法注入令牌 — 服务器 '$name' 的配置引用了 " +
+                        "$GITHUB_TOKEN_PLACEHOLDER 占位符，请先连接 GitHub「Coding 屏 " +
+                        "GitHub 图标 / 设置 → GitHub」后再启用"
+                )
+            )
+
         // #197 真实事件：环境检查（配置形态 + 沙箱就绪态；rootfs 检查同
         // ProotMcpProcessLauncher 的门径 —— 存在性探测，不是模拟）。
         // #205：沙箱就绪探针注入后就绪态写入 detail（未注入时不猜测）。
@@ -248,11 +278,13 @@ class McpManager(
         // Issue #149：runInSandbox=true 的 STDIO 配置改走宿主注入的沙箱 launcher
         // （app 层 PRoot Ubuntu 实现）；其余情况传 null → McpClient 回退 JvmProcessLauncher。
         // Issue #163：沙箱连接同时放宽 STDIO 请求超时（npx 冷启动要下载包）。
+        // v3 S3：config 用占位符已解析的副本（headers/env 里的 ${GITHUB_TOKEN}
+        // → 真 PAT；未含占位符时与原配置同引用，零拷贝零行为变化）。
         val client = McpClient(
-            config,
+            resolvedConfig,
             builtinTransportFactory = builtinTransports[name],
-            processLauncher = if (config.runInSandbox) sandboxProcessLauncher else null,
-            stdioRequestTimeoutMs = requestTimeoutFor(config),
+            processLauncher = if (resolvedConfig.runInSandbox) sandboxProcessLauncher else null,
+            stdioRequestTimeoutMs = requestTimeoutFor(resolvedConfig),
             startupListener = startupListener
         )
         val initResult = client.initialize()
@@ -471,6 +503,44 @@ class McpManager(
         return Result.success(Unit)
     }
 
+    /**
+     * GitHub 令牌占位符解析（v3 S3 / G8 令牌桥，纯函数 + provider 读取）：
+     *
+     * - headers / env 值均不含 [GITHUB_TOKEN_PLACEHOLDER] → 原样返回（零拷贝）；
+     * - 含占位符 → 从 [gitHubTokenProvider] 取 PAT（null/空白 = 未连接）做
+     *   子串替换（值可以是 `Bearer ${GITHUB_TOKEN}` / 纯占位符 / 嵌在其他
+     *   文本里），返回仅存于本次连接的内存副本；
+     * - 含占位符但未连接 → 返回 null（调用方转为可行动的连接失败文案）。
+     *
+     * provider 读取侧防御式：抛异常折叠为未连接（不把宿主异常穿透到连接层）。
+     */
+    private fun resolveGithubTokenPlaceholders(
+        serverName: String,
+        config: McpServerConfig
+    ): McpServerConfig? {
+        val hasPlaceholder = config.headers.values.any { it.contains(GITHUB_TOKEN_PLACEHOLDER) } ||
+            config.env.values.any { it.contains(GITHUB_TOKEN_PLACEHOLDER) }
+        if (!hasPlaceholder) return config
+        val token = runCatching { gitHubTokenProvider?.invoke() }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: run {
+                errorLog(
+                    "McpManager.connect('$serverName'): config references " +
+                        "$GITHUB_TOKEN_PLACEHOLDER but no GitHub PAT is available"
+                )
+                return null
+            }
+        return config.copy(
+            headers = config.headers.mapValues { (_, v) ->
+                v.replace(GITHUB_TOKEN_PLACEHOLDER, token)
+            },
+            env = config.env.mapValues { (_, v) ->
+                v.replace(GITHUB_TOKEN_PLACEHOLDER, token)
+            }
+        )
+    }
+
     private fun saveConfigsLocked() {
         val file = File(configDir, "mcp_servers.json")
         val jsonStr = json.encodeToString(configs.values.toList())
@@ -507,6 +577,15 @@ class McpManager(
     }
 
     companion object {
+        /**
+         * GitHub PAT 占位符（v3 S3 / G8 令牌桥）：写在配置 headers/env 值里，
+         * [connect] 时经 [McpManager] 的 gitHubTokenProvider 解析为真 PAT。
+         * 官方 GitHub 远程 MCP 预置（app 层 OfficialGithubMcp）使用；用户自建
+         * 配置同样可用（真 token 不落盘）。注意 Kotlin 源码内写法：
+         * "\${GITHUB_TOKEN}"（$ 转义防模板插值）。
+         */
+        const val GITHUB_TOKEN_PLACEHOLDER = "\${GITHUB_TOKEN}"
+
         /**
          * 沙箱 STDIO 连接的握手/请求超时（Issue #163）。
          *

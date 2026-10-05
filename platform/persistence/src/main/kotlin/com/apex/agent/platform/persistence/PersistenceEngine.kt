@@ -61,6 +61,8 @@ class PersistenceEngine @Inject constructor(
         }
     }
 
+    // #260：保活链路静默失败不可诊断 —— 各层启动失败补 WARN 留痕
+    // （android.util.Log：本模块为 Android library，无 core:logging 依赖）
     private fun startForegroundService() {
         try {
             val intent = Intent().apply {
@@ -71,7 +73,9 @@ class PersistenceEngine @Inject constructor(
             } else {
                 context.startService(intent)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Layer1 前台服务启动失败（后台限制/组件禁用）: ${e.message}")
+        }
     }
 
     private fun scheduleWatchdog() {
@@ -97,7 +101,10 @@ class PersistenceEngine @Inject constructor(
                 }
                 context.startActivity(intent)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // Layer 4 失败：系统弹窗被拒/Activity 限制 —— 保活降级但不静默
+            android.util.Log.w(TAG, "Layer4 电池优化豁免请求失败: ${e.message}")
+        }
     }
 
     private suspend fun installRootDaemon() = withContext(Dispatchers.IO) {
@@ -123,6 +130,10 @@ class PersistenceEngine @Inject constructor(
         PrivilegeDetector.executeShell(
             "dumpsys deviceidle whitelist +${context.packageName}"
         )
+    }
+
+    private companion object {
+        private const val TAG = "PersistenceEngine"
     }
 }
 
@@ -154,9 +165,16 @@ class WatchdogWorker(
                 } else {
                     applicationContext.startService(intent)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // 看门狗重启主进程失败：下次周期重试，但必须留痕（#260）
+                android.util.Log.w(TAG, "Layer3 看门狗重启主进程失败: ${e.message}")
+            }
         }
 
         return Result.success()
+    }
+
+    private companion object {
+        private const val TAG = "WatchdogWorker"
     }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # 提交信息规范检查（guard-rails · CI: "Commit Message Convention"）
 #
 # 纪律依据（AGENTS.md）：提交信息格式 `类型(范围): 中文摘要 —— 关键词 / 关键词`
@@ -13,7 +13,7 @@
 # push = before..after，before 为全 0 时只查 HEAD 单提交）。
 # 本地用法：python3 scripts/check_commit_messages.py <base> <head>
 # 只用标准库；退出码 0 = 通过，1 = 有违规。
-# ═════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 import re
 import subprocess
 import sys
@@ -29,11 +29,22 @@ HEADER = re.compile(
 )
 KEYWORDS_HINT = "——"
 
+
 def git(*args: str) -> str:
-    return subprocess.run(
+    result = subprocess.run(
         ["git", "-C", str(Path(__file__).resolve().parent.parent), *args],
-        capture_output=True, text=True, check=True,
-    ).stdout
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return result.stdout
+
 
 def main() -> int:
     if len(sys.argv) < 3:
@@ -44,7 +55,15 @@ def main() -> int:
     if set(base) == {"0"}:  # 新分支首推：只查 HEAD 单提交
         revs = [head]
     else:
-        revs = git("rev-list", "--no-merges", f"{base}..{head}").split()
+        try:
+            # Some CI runs check out only the PR head SHA, so the base commit may not
+            # be present locally. In that case, fall back to checking only the HEAD
+            # commit instead of crashing with exit status 128.
+            git("cat-file", "-e", f"{base}^{{commit}}")
+            revs = git("rev-list", "--no-merges", f"{base}..{head}").split()
+        except subprocess.CalledProcessError:
+            print(f"⚠ 提交范围 {base}..{head} 无法解析：base SHA 不在当前 checkout 中，回退为仅检查 HEAD 提交")
+            revs = [head]
 
     if not revs:
         print("✓ 提交规范检查通过：范围内没有新增提交")
@@ -80,6 +99,7 @@ def main() -> int:
     print(f"✓ 提交规范检查通过：{len(revs)} 个提交全部合规"
           + (f"（{len(warnings)} 条关键词建议）" if warnings else ""))
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -75,6 +75,7 @@ fun MemoryScreen(
     val message by viewModel.lastMessage.collectAsStateWithLifecycle()
     val quarantinedCount by viewModel.quarantinedCount.collectAsStateWithLifecycle()
     val dreamRunning by viewModel.dreamRunning.collectAsStateWithLifecycle()
+    val chatMemory by viewModel.chatMemory.collectAsStateWithLifecycle()
 
     var showSearch by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EpisodeSummary?>(null) }
@@ -170,6 +171,13 @@ fun MemoryScreen(
                     }
                 }
             } else {
+                // 聊天记忆（#219 隐私合规：画像 / 近况 / 里程碑可见、可删、可清空）
+                ChatMemorySection(
+                    entries = chatMemory,
+                    onDeleteObservation = viewModel::deleteChatObservation,
+                    onClearAll = viewModel::clearChatMemory
+                )
+
                 // 近期 Episode
                 SectionTitle(stringResource(R.string.memory_recent_episodes))
                 if (episodes.isEmpty()) {
@@ -270,8 +278,9 @@ private fun SectionTitle(text: String) {
     )
 }
 
+/** 空态提示（同分区复用：#219 聊天记忆分区亦用，见 ChatMemorySection）。 */
 @Composable
-private fun EmptyHint(text: String) {
+fun EmptyHint(text: String) {
     Box(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
         contentAlignment = Alignment.Center

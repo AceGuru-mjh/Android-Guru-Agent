@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S1 Goal 目标模式字符串（英文默认；中文在 values-zh/strings_goal.xml）。
+     资源名全局唯一：全部 goal_ 前缀（settings_v3_goal_* 等既有键带模块前缀，无冲突）。 -->
+<resources>
+
+    <!-- ═══ 设定弹层（GoalSetupSheet）═══ -->
+    <string name="goal_setup_title">Set Up Goal</string>
+    <string name="goal_statement_label">Goal statement</string>
+    <string name="goal_statement_placeholder">Fix the login screen crash</string>
+    <string name="goal_setup_empty_statement">Goal statement cannot be empty</string>
+    <string name="goal_criteria_label">Acceptance criteria (verifiable)</string>
+    <string name="goal_criteria_placeholder">All tests pass (./gradlew test, zero failures)\nApp launches to the home screen</string>
+    <string name="goal_criteria_hint">Criteria must be objectively verifiable — the verifier judges by evidence (command output / file contents / test results), not by “should be fine”.</string>
+    <string name="goal_setup_empty_criteria">Acceptance criteria cannot be empty</string>
+    <string name="goal_max_rounds">Max verification rounds</string>
+    <string name="goal_start">Start goal</string>
+    <string name="goal_how_it_works">How it works</string>
+    <string name="goal_how_it_works_body">After each round the agent finishes, a fast model checks the work against the criteria. If not met, the agent keeps working with the gap analysis injected, until the goal is achieved or the rounds run out.</string>
+
+    <!-- ═══ 状态卡（GoalStatusCard）═══ -->
+    <string name="goal_status_active">In progress</string>
+    <string name="goal_status_achieved">Achieved</string>
+    <string name="goal_status_stopped">Stopped</string>
+    <string name="goal_rounds_progress">Round %1$d/%2$d</string>
+    <string name="goal_last_check_none">No verification yet</string>
+    <string name="goal_stop">Stop goal</string>
+    <string name="goal_resume">Restart goal</string>
+    <string name="goal_cd_goal_status">Goal status card</string>
+
+    <!-- ═══ 会话内系统提示（CodeGoalController）═══ -->
+    <string name="goal_started_notice">🎯 Goal set: %1$s</string>
+    <string name="goal_stopped_notice">⛔ Goal stopped</string>
+    <string name="goal_restart_notice">🔁 Goal restarted — resuming work</string>
+</resources>

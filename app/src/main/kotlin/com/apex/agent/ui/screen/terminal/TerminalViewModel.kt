@@ -193,7 +193,12 @@ class TerminalViewModel @Inject constructor(
             // StrictMode 违例（与 create/close 链同型修复）。
             val recovered = withContext(Dispatchers.IO) { terminalRuntime.recover() }
             if (recovered.isNotEmpty()) {
-                Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
+                // #223：恢复的会话现已真实进入 snapshot()（EXITED/BROKEN 只读
+                // 视图）—— tab 列表可见、选中即见「已中断 + 重启会话」覆盖层。
+                // 旧实现打出 "Recovered N" 后列表里什么都看不到（恢复态从未
+                // 注册进任何地方）；日志与列表现在终于一致。
+                Log.i("TerminalVM", "Recovered ${recovered.size} interrupted sessions (visible as dead tabs)")
+                notifyFallback(R.string.term_notice_recovered, recovered.size)
             }
             refreshSessionsInternal()
             if (registry.sessionTabs.value.none { it.isAlive }) {

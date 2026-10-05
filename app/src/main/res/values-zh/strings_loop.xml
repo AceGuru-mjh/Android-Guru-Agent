@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S2 Loop 循环与 Cron 模式字符串（中文）—— 英文默认在 values/strings_loop.xml。 -->
+<resources>
+
+    <!-- ═══ 配置弹层（LoopSetupSheet）═══ -->
+    <string name="loop_setup_title">设置循环</string>
+    <string name="loop_prompt_label">循环提示词</string>
+    <string name="loop_prompt_placeholder">每轮让 Agent 检查或执行什么？</string>
+    <string name="loop_prompt_required">提示词不能为空</string>
+    <string name="loop_kind_section">循环方式</string>
+    <string name="loop_kind_interval">固定间隔</string>
+    <string name="loop_kind_cron">Cron 表达式</string>
+    <string name="loop_kind_once">一次性提醒</string>
+
+    <!-- INTERVAL -->
+    <string name="loop_interval_min_format">%1$d 分钟</string>
+    <string name="loop_interval_hour_format">%1$d 小时</string>
+    <string name="loop_interval_custom_label">自定义间隔（分钟）</string>
+    <string name="loop_interval_custom_invalid">请输入有效的分钟数</string>
+    <string name="loop_min_interval_hint">最小间隔 30 秒（防打爆）</string>
+
+    <!-- CRON -->
+    <string name="loop_cron_label">Cron 表达式</string>
+    <string name="loop_cron_invalid">Cron 表达式无效（5 字段：分 时 日 月 周）</string>
+    <string name="loop_cron_next_preview">下次触发：%1$s</string>
+    <string name="loop_cron_preset_5min">每5分钟</string>
+    <string name="loop_cron_preset_hourly">每小时</string>
+    <string name="loop_cron_preset_daily9">每天9点</string>
+    <string name="loop_cron_preset_mon9">每周一9点</string>
+
+    <!-- ONCE -->
+    <string name="loop_once_in_5m">5分钟后</string>
+    <string name="loop_once_in_30m">30分钟后</string>
+    <string name="loop_once_in_1h">1小时后</string>
+    <string name="loop_once_tomorrow">明天此刻</string>
+    <string name="loop_once_custom_label">自定义（分钟后）</string>
+
+    <!-- 通用 -->
+    <string name="loop_max_runs_label">最大执行次数</string>
+    <string name="loop_notify_label">后台触发时通知</string>
+    <string name="loop_background_note">循环独立于模式运行：切走模式或退出会话不停止，跑满轮数或点击停止才结束。</string>
+    <string name="loop_save">启动循环</string>
+
+    <!-- ═══ 状态卡（LoopActiveCard）═══ -->
+    <string name="loop_active_status">Loop 运行中</string>
+    <string name="loop_run_n_of_m">第 %1$d/%2$d 轮</string>
+    <string name="loop_next_run_in">%1$s 后</string>
+    <string name="loop_next_run_at">下次 %1$s</string>
+    <string name="loop_countdown_hm">%1$d时%2$d分</string>
+    <string name="loop_countdown_ms">%1$d分%2$d秒</string>
+    <string name="loop_countdown_s">%1$d秒</string>
+    <string name="loop_stop">停止</string>
+    <string name="loop_run_now">立即触发</string>
+    <string name="loop_cd_loop_status">循环状态卡</string>
+
+    <!-- ═══ 会话内系统提示 ═══ -->
+    <string name="loop_skip_busy">上一轮仍在进行，本轮跳过</string>
+
+    <!-- ═══ 通知（apex_general 渠道）═══ -->
+    <string name="loop_notif_once_title">⏰ 提醒</string>
+    <string name="loop_notif_bg_title">Loop 触发（后台）</string>
+    <string name="loop_notif_bg_text">会话未打开，本轮已跳过</string>
+</resources>

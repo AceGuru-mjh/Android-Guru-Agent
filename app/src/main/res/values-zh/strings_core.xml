@@ -558,6 +558,7 @@
     <string name="github_menu_disconnect">点击断开</string>
     <string name="github_menu_connect">连接 GitHub</string>
     <string name="github_menu_token">GitHub Token (ghp_*) 密钥访问</string>
+    <!-- #229：Token 输入对话框（GithubTokenDialog，原硬编码中文收编） -->
     <string name="common_done">完成</string>
 
     <!-- ═══ 关于页（抽屉底部入口，v1.4.3+）═══ -->

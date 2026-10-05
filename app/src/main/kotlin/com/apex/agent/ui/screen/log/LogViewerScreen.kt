@@ -65,7 +65,11 @@ import com.apex.agent.R
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.core.logging.LogLevel
-import com.apex.agent.ui.theme.LocalExtendedColors
+import com.apex.agent.ui.theme.statusError
+import com.apex.agent.ui.theme.statusInfo
+import com.apex.agent.ui.theme.statusNeutral
+import com.apex.agent.ui.theme.statusSuccess
+import com.apex.agent.ui.theme.statusWarning
 import com.apex.agent.core.logging.LogRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -329,7 +333,7 @@ private fun StatsBar(stats: com.apex.agent.core.logging.LogStats, onClickError: 
                         .weight(1f)
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = if (stats.usageRatio > 0.9f) LocalExtendedColors.current.warning else MaterialTheme.colorScheme.primary,
+                    color = if (stats.usageRatio > 0.9f) statusWarning() else MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainer
                 )
                 Text(
@@ -443,25 +447,23 @@ private fun CategoryTab(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 日志等级色（UI-016 明暗成对）：:core 的 LogLevel.colorArgb 是终端域
- * 单态色（暗底可用），浅色模式下 E57373/FFB74D/81C784 对 surfaceContainer
- * 底仅 1.5-2.6:1 —— 这里按主题成对给出：暗态沿用 :core 原值，亮态换深一
- * 档 AA 色（C62828/8A5300/15803D，均取仓内 Mint 浅色族与语法高亮既有色）。
- * :core 不动（跨模块，不可引 Compose）；明暗判定沿 codeColorScheme 先例
- * （background.luminance()，勿用 isSystemInDarkTheme —— 主题可被设置强制）。
+ * 日志等级色：#244 起统一经 ui/theme/StatusColors 语义函数取词（明暗成对、
+ * 与任务历史/用量页同一套调色板），本函数仅做 LogLevel → 语义档的映射。
+ * :core 的 LogLevel.colorArgb 是终端域单态色，不可引 Compose，:core 不动。
+ * 例外：FATAL 是日志特有的「比 ERROR 更重」一档，无通用语义槽 —— 保留
+ * 本页紫对（明暗判定沿 codeColorScheme 先例：background.luminance()，
+ * 勿用 isSystemInDarkTheme —— 主题可被设置强制）。
  */
 @Composable
-private fun levelColor(level: LogLevel): Color {
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    return when (level) {
-        LogLevel.VERBOSE -> MaterialTheme.colorScheme.onSurfaceVariant
-        LogLevel.DEBUG -> if (dark) Color(0xFF64B5F6) else Color(0xFF1E6BB8)
-        LogLevel.INFO -> if (dark) Color(0xFF81C784) else Color(0xFF15803D)
-        LogLevel.WARN -> if (dark) Color(0xFFFFB74D) else Color(0xFF8A5300)
-        LogLevel.ERROR -> if (dark) Color(0xFFE57373) else Color(0xFFC62828)
-        LogLevel.FATAL -> if (dark) Color(0xFFBA68C8) else Color(0xFF6A1B9A)
-        LogLevel.SILENT -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+private fun levelColor(level: LogLevel): Color = when (level) {
+    LogLevel.VERBOSE, LogLevel.SILENT -> statusNeutral()
+    LogLevel.DEBUG -> statusInfo()
+    LogLevel.INFO -> statusSuccess()
+    LogLevel.WARN -> statusWarning()
+    LogLevel.ERROR -> statusError()
+    LogLevel.FATAL ->
+        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFFBA68C8)
+        else Color(0xFF6A1B9A)
 }
 
 @Composable

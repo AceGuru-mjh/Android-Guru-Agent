@@ -20,11 +20,11 @@ import javax.inject.Singleton
  *
  * 多层保活策略：
  * Layer 1: ForegroundService（specialUse类型）
- * Layer 2: AccessibilityService心跳（system_server管理，不受限）
- * Layer 3: WorkManager周期唤醒（每15分钟）
- * Layer 4: 电池优化白名单
- * Layer 5: [Root] init daemon（真正不死）
- * Layer 6: [Shizuku] 电池优化白名单
+ * Layer 2: WorkManager周期唤醒（每15分钟；原无障碍心跳层因与主进程
+ *          同进程、自检恒真，已按 #241 删除，见 ApexAccessibilityService）
+ * Layer 3: 电池优化白名单
+ * Layer 4: [Root] init daemon（真正不死）
+ * Layer 5: [Shizuku] 电池优化白名单
  */
 @Singleton
 class PersistenceEngine @Inject constructor(
@@ -42,13 +42,13 @@ class PersistenceEngine @Inject constructor(
         // Layer 1: 前台服务
         startForegroundService()
 
-        // Layer 3: WorkManager看门狗
+        // Layer 2: WorkManager看门狗
         scheduleWatchdog()
 
-        // Layer 4: 请求电池优化豁免
+        // Layer 3: 请求电池优化豁免
         requestBatteryExemption()
 
-        // Layer 5/6: 根据权限等级执行额外保活
+        // Layer 4/5: 根据权限等级执行额外保活
         val level = PrivilegeDetector.getPrivilegeLevel()
         when (level) {
             com.apex.agent.platform.privilege.PrivilegeLevel.ROOT -> {

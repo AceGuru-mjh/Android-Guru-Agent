@@ -54,6 +54,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.apex.agent.R
 import com.apex.agent.core.engine.task.AgentTask
 import com.apex.agent.core.engine.task.TaskStatus
+import com.apex.agent.ui.theme.statusError
+import com.apex.agent.ui.theme.statusNeutral
+import com.apex.agent.ui.theme.statusSuccess
+import com.apex.agent.ui.theme.statusWarning
 import com.patrykandpatrick.vico.compose.chart.Chart
 import com.patrykandpatrick.vico.compose.chart.column.columnChart
 import com.patrykandpatrick.vico.core.component.shape.LineComponent
@@ -161,10 +165,11 @@ fun TaskHistoryScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             StatCell(stringResource(R.string.tasks_total), state.stats.total, MaterialTheme.colorScheme.onSurface)
-                            StatCell(stringResource(R.string.tasks_active), state.stats.active, Color(0xFFE0A63C))
-                            StatCell(stringResource(R.string.tasks_completed), state.stats.completed, Color(0xFF3E9C51))
-                            StatCell(stringResource(R.string.tasks_failed), state.stats.failed, Color(0xFFB06055))
-                            StatCell(stringResource(R.string.tasks_cancelled), state.stats.cancelled, MaterialTheme.colorScheme.onSurfaceVariant)
+                            // #244：统计色改语义函数（明暗成对；旧硬编码 E0A63C 对浅色底仅 2.2:1）
+                            StatCell(stringResource(R.string.tasks_active), state.stats.active, statusWarning())
+                            StatCell(stringResource(R.string.tasks_completed), state.stats.completed, statusSuccess())
+                            StatCell(stringResource(R.string.tasks_failed), state.stats.failed, statusError())
+                            StatCell(stringResource(R.string.tasks_cancelled), state.stats.cancelled, statusNeutral())
                         }
 
                         // 近 7 日创建量（Vico 柱状图；无轴设计 —— 柱高即数量，底部自绘周几标签）
@@ -314,10 +319,11 @@ private fun TaskHistoryCard(
                                     else -> "○"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
+                                // #244：步骤状态色改语义函数（明暗随主题）
                                 color = when (step.status.name) {
-                                    "DONE" -> Color(0xFF3E9C51)
-                                    "FAILED" -> Color(0xFFB06055)
-                                    "RUNNING" -> Color(0xFFE0A63C)
+                                    "DONE" -> statusSuccess()
+                                    "FAILED" -> statusError()
+                                    "RUNNING" -> statusWarning()
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.width(16.dp)
@@ -333,7 +339,7 @@ private fun TaskHistoryCard(
                 }
                 task.completionSummary?.let { summary ->
                     Spacer(Modifier.height(6.dp))
-                    Text(stringResource(R.string.tasks_result), style = MaterialTheme.typography.labelMedium, color = Color(0xFF3E9C51), fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.tasks_result), style = MaterialTheme.typography.labelMedium, color = statusSuccess(), fontWeight = FontWeight.SemiBold)
                     Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 5)
                 }
                 task.error?.let { err ->
@@ -353,13 +359,14 @@ private fun TaskHistoryCard(
 
 @Composable
 private fun TaskStatusIcon(status: TaskStatus) {
+    // #244：状态色改语义函数（明暗成对；旧单态 hex 绕过 MaterialTheme）
     val (icon, tint) = when (status) {
-        TaskStatus.COMPLETED -> Icons.Default.CheckCircle to Color(0xFF3E9C51)
-        TaskStatus.FAILED -> Icons.Default.Error to Color(0xFFB06055)
-        TaskStatus.WAITING_USER, TaskStatus.PAUSED -> Icons.Default.HourglassTop to Color(0xFFE0A63C)
+        TaskStatus.COMPLETED -> Icons.Default.CheckCircle to statusSuccess()
+        TaskStatus.FAILED -> Icons.Default.Error to statusError()
+        TaskStatus.WAITING_USER, TaskStatus.PAUSED -> Icons.Default.HourglassTop to statusWarning()
         TaskStatus.RUNNING, TaskStatus.PLANNING, TaskStatus.CANCELLING, TaskStatus.RECOVERING, TaskStatus.RETRYING ->
-            Icons.Default.HourglassTop to Color(0xFFE0A63C)
-        TaskStatus.CANCELLED, TaskStatus.PENDING -> Icons.Default.HourglassTop to Color(0xFF8A93A3)
+            Icons.Default.HourglassTop to statusWarning()
+        TaskStatus.CANCELLED, TaskStatus.PENDING -> Icons.Default.HourglassTop to statusNeutral()
     }
     // v1.4.4 UX 审查：TalkBack 旧实现直读枚举名（"WAITING_USER"），改用同文件已有的
     // 本地化 statusLabel()，与旁侧文字徽标朗读一致。
@@ -382,11 +389,13 @@ private fun statusLabel(status: TaskStatus): String = when (status) {
     TaskStatus.CANCELLED -> stringResource(R.string.tasks_status_cancelled)
 }
 
+/** #244：状态色经语义函数取词（@Composable，明暗随主题；旧硬编码单态 hex）。 */
+@Composable
 private fun statusColor(status: TaskStatus): Color = when (status) {
-    TaskStatus.COMPLETED -> Color(0xFF3E9C51)
-    TaskStatus.FAILED -> Color(0xFFB06055)
-    TaskStatus.CANCELLED -> Color(0xFF8A93A3)
-    else -> Color(0xFFE0A63C)
+    TaskStatus.COMPLETED -> statusSuccess()
+    TaskStatus.FAILED -> statusError()
+    TaskStatus.CANCELLED -> statusNeutral()
+    else -> statusWarning()
 }
 
 private fun formatDuration(ms: Long): String {

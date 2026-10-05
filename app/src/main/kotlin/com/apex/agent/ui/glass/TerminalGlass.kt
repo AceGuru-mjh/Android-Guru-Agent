@@ -6,13 +6,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -75,33 +74,40 @@ fun TerminalGlassSurface(
                 this.clip = true
             }
             .then(materialModifier)
-            .drawBehind { drawTerminalEdge(shape) },
+            // #262 Compose 最佳实践：终端表面随文本滚动/刷新频繁重绘，
+            // 边缘描边的 outline / Brush / 描边宽度全部静态 —— drawWithCache
+            // 后仅在尺寸变化时重建，绘制期零分配。
+            .drawWithCache {
+                if (size.width <= 0f || size.height <= 0f) {
+                    onDrawBehind { /* 空占位：零尺寸不绘制 */ }
+                } else {
+                    val outline = shape.createOutline(
+                        size = size,
+                        layoutDirection = layoutDirection,
+                        density = this
+                    )
+                    val edgeBrush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.10f),
+                            Color.White.copy(alpha = 0.02f)
+                        ),
+                        startY = 0f,
+                        endY = size.height
+                    )
+                    val strokePx = 1.dp.toPx()
+                    onDrawBehind {
+                        drawOutline(
+                            outline = outline,
+                            brush = edgeBrush,
+                            style = Stroke(width = strokePx)
+                        )
+                    }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         content()
     }
-}
-
-/** 终端玻璃边缘：极淡上缘受光 —— 深底上一条呼吸感的「玻璃边」。 */
-private fun DrawScope.drawTerminalEdge(shape: Shape) {
-    if (size.width <= 0f || size.height <= 0f) return
-    val outline = shape.createOutline(
-        size = size,
-        layoutDirection = layoutDirection,
-        density = this
-    )
-    drawOutline(
-        outline = outline,
-        brush = Brush.verticalGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.02f)
-            ),
-            startY = 0f,
-            endY = size.height
-        ),
-        style = Stroke(width = 1.dp.toPx())
-    )
 }
 
 /** 终端基底（与 CodeTerminalPanel 既有恒定深底同源）。 */

@@ -293,6 +293,16 @@ class SubAgentRunner(
                         else -> Unit // 思考 / 工具进度 / 压缩通知等与结论收集无关
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // 引擎工厂 / Flow 收集异常兜底：折叠为 Error 语义（与引擎
+                // 自身「异常 → Error 事件」行为对齐），不让子代理异常击穿
+                // 主代理的工具调用 —— main 契约（SubAgentRunnerTest
+                // 「engine factory throw is folded into failure」）。
+                if (errorMessage == null) {
+                    errorMessage = e.message ?: e::class.simpleName ?: "unknown error"
+                }
             } finally {
                 releaseGate()
             }

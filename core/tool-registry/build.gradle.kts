@@ -14,9 +14,6 @@ kotlin {
 
 dependencies {
     implementation(project(":core:llm-adapter"))
-    // #258：AtomicFileWrite 落盘回退直写时经 AppLogger 记 warn —— 直接声明
-    // core:logging（llm-adapter 对其是 implementation，不向下游传递）。
-    implementation(project(":core:logging"))
     implementation(libs.coroutines.core)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)  // WebFetchTool / WebSearchTool / HttpRequestTool

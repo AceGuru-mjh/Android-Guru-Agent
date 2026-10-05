@@ -694,9 +694,11 @@ class TimeoutTests {
             "Expected at least 1 Error event, got ${events.map { it::class.simpleName }}",
             errors.isNotEmpty()
         )
+        // #216 契约对齐：任务级超时文案已中文化（DefaultTaskOrchestrator TCE 分支
+        // 「任务执行超时（…ms）」）；工具级输出（模型侧）保持英文 "timed out" 不变
         assertTrue(
             "Error message should mention timeout, got: ${errors.last().message}",
-            errors.last().message.contains("timeout", ignoreCase = true)
+            errors.last().message.contains("超时")
         )
 
         // Final state should be Failed

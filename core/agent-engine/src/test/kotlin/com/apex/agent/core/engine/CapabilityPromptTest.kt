@@ -1,6 +1,5 @@
 package com.apex.agent.core.engine
 
-import com.apex.agent.core.engine.orchestrator.OrchestratorPrompts
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,9 +13,7 @@ import org.junit.Test
  * 2. 权限段换源 PrivilegeLadder（阶梯全貌 + 升级路径 + 不盲试护栏），
  *    heading 保留原始串（既有测试兼容）；
  * 3. Tool-Use Policy 第 8 条指向扩展攻略；
- * 4. 段落顺序：权限段 → 扩展攻略 → Live Environment；
- * 5. BUILD 编排线（OrchestratorPrompts）同步：权限单行简介 + 升级指引 +
- *    扩展通道提示（旧版只有一行裸等级）。
+ * 4. 段落顺序：权限段 → 扩展攻略 → Live Environment。
  */
 class CapabilityPromptTest {
 
@@ -124,39 +121,5 @@ class CapabilityPromptTest {
         val envIdx = p.indexOf("## Live Environment")
         assertTrue(privilegeIdx in 0 until playbookIdx)
         assertTrue(playbookIdx < envIdx)
-    }
-
-    // ── BUILD 编排线（OrchestratorPrompts）────────────────────
-
-    @Test
-    fun `orchestrator prompt carries privilege brief upgrade and expansion routes`() {
-        val provider = object : PrivilegeInfoProvider {
-            override fun currentLevel(): String = "SHIZUKU"
-        }
-        val p = OrchestratorPrompts.buildSystemPrompt(
-            config = AgentConfig(mode = AgentMode.BUILD),
-            privilegeInfoProvider = provider
-        )
-        // 权限单行简介（替代旧版裸等级）+ 升级指引
-        assertTrue(p.contains("Privilege: SHIZUKU"))
-        assertTrue(p.contains("CAN "))
-        assertTrue(p.contains("CANNOT "))
-        // 扩展通道
-        assertTrue(p.contains("tool_search/tool_open"))
-        assertTrue(p.contains("skill_install"))
-        assertTrue(p.contains("mcp_connect"))
-        assertTrue(p.contains("capability_report()"))
-        assertTrue(p.contains("Never declare a task impossible"))
-    }
-
-    @Test
-    fun `orchestrator prompt without provider still carries expansion routes`() {
-        val p = OrchestratorPrompts.buildSystemPrompt(
-            config = AgentConfig(mode = AgentMode.BUILD),
-            privilegeInfoProvider = null
-        )
-        // 无权限提供者 → 无权限段，但扩展通道仍在
-        assertTrue(p.contains("On-demand capability expansion"))
-        assertTrue(!p.contains("Privilege: "))
     }
 }

@@ -231,21 +231,3 @@ class ToolTraceRecorder(private val capacity: Int = 200) {
     }
 }
 
-/**
- * Monotonic per-process call id source, exposed for components that want
- * stable correlation across the tracer and the usage tracker without
- * reaching into recorder internals (the batch runner marks batch steps
- * with `batch.<callId>` in its own output).
- */
-object ToolCallIds {
-    private val counter = AtomicLong(1L)
-
-    /** Next id (starts at 1; 0 is reserved as "unassigned"). */
-    fun next(): Long = counter.getAndIncrement()
-
-    /** Current value without consuming (diagnostics). */
-    fun peek(): Long = counter.get()
-
-    /** Reset (test isolation only). */
-    fun reset() = counter.set(1L)
-}

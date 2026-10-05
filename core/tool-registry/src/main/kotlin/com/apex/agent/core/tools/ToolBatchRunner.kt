@@ -78,11 +78,6 @@ class ToolBatchRunner(
         /** True when every step executed successfully. */
         val isComplete: Boolean get() = haltedAtIndex == null && !timedOut
 
-        /** Indices of steps that produced output (for `{n}` references). */
-        fun executedIndices(): List<Int> = outcomes.indices.filter {
-            outcomes[it] is StepOutcome.Executed
-        }
-
         /**
          * Rendered multi-step report for the model: one numbered block per
          * step, exactly preserving v1 "Error:" prefixes so the engine's

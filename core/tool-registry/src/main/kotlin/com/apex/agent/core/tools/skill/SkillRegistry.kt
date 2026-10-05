@@ -551,13 +551,6 @@ class SkillRegistry(
         }
     }
 
-    /** #197 按工位作用域获取已安装技能清单（市场分级列表/斜杠菜单共用口径）。 */
-    fun getInstalledForScope(scope: String?): List<InstalledSkill> {
-        val all = getInstalled()
-        if (scope.isNullOrBlank()) return all
-        return all.filter { it.manifest.scope == "all" || it.manifest.scope == scope }
-    }
-
     /**
      * 渐进披露：仅返回「已激活且启用」技能的 Prompt 注入。
      *
@@ -648,15 +641,6 @@ class SkillRegistry(
             before != enabled
         }
         if (changed) notifyChanged()
-    }
-
-    /**
-     * 设置 Skill 配置
-     */
-    fun setConfig(skillId: String, key: String, value: String) {
-        synchronized(lock) {
-            installedSkills[skillId]?.config?.put(key, value)
-        }
     }
 
     /**

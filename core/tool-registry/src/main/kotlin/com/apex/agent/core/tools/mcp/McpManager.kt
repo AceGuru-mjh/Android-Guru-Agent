@@ -148,10 +148,6 @@ class McpManager(
         }
     }
 
-    fun removeSessionListener(listener: SessionListener) {
-        synchronized(lock) { sessionListeners -= listener }
-    }
-
     private fun fireConnected(serverName: String) {
         synchronized(lock) { sessionListeners.toList() }.forEach {
             runCatching { it.onServerConnected(serverName) }
@@ -382,21 +378,6 @@ class McpManager(
         }
     }
 
-    /**
-     * 断开所有
-     */
-    suspend fun disconnectAll() {
-        val removed = synchronized(lock) {
-            // v3 修复（竞态）：批量断开同样自增代数，拦截全部在途连接。
-            clients.keys.forEach { bumpGenerationLocked(it) }
-            val all = clients.entries.associate { it.key to it.value }
-            clients.clear()
-            all
-        }
-        removed.values.forEach { runCatching { it.shutdown() } }
-        notifyChanged()
-        removed.keys.forEach { fireDisconnected(it) }
-    }
 
     /**
      * 获取已连接服务器列表（快照读，线程安全）。

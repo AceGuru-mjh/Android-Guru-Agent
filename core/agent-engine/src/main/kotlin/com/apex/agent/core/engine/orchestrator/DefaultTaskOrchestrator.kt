@@ -334,7 +334,8 @@ class DefaultTaskOrchestrator(
                     flow {
                         emit(
                             AgentEvent.Error(
-                                "Mode $mode requires a delegate AgentEngine but none was provided",
+                                // #216 口径：配置类错误同样中文 + 可操作指引
+                                "当前模式（$mode）需要委托引擎但未提供，请在设置中检查模式配置",
                                 recoverable = false
                             )
                         )
@@ -364,7 +365,7 @@ class DefaultTaskOrchestrator(
                 emit(event)
             }
         } catch (e: TimeoutCancellationException) {
-            val msg = "Task timeout exceeded (${cfg.taskTimeoutMs}ms)"
+            val msg = "任务执行超时（${cfg.taskTimeoutMs}ms），可重试或缩减任务范围"
             stateMachine.transitionTo(TaskState.Finished.Failed(msg, stateMachine.currentProgress))
             // Best-effort emit — flow may be in the process of being cancelled
             tryEmit(AgentEvent.Error(msg, recoverable = false))
@@ -389,7 +390,9 @@ class DefaultTaskOrchestrator(
                 )
             )
         } catch (e: Throwable) {
-            val msg = "Unexpected error: ${e.message ?: e::class.simpleName}"
+            // #213 残留：原始 message 可携带服务端英文 JSON —— 走 LlmErrorText
+            // （中文指引 + 截断摘要）；全文由各抛出点落日志
+            val msg = com.apex.agent.core.llm.LlmErrorText.userMessage(e)
             stateMachine.transitionTo(TaskState.Finished.Failed(msg, stateMachine.currentProgress))
             tryEmit(AgentEvent.Error(msg, recoverable = false))
         } finally {

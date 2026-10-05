@@ -20,9 +20,9 @@ class NavigationBackStackTest {
 
     /** SaverScope 测试替身：全放行（不校验 Bundle 可存性） */
     private object AllowAll : SaverScope {
-        // 接口签名是 Any?（null 也可判定）—— 覆写必须精确匹配，否则整个
-        // object 不是合法 SaverScope，with(AllowAll) 下 save 解析连锁崩塌
-        override fun canBeSaved(value: Any?): Boolean = true
+        // compose 1.7.6 字节码：canBeSaved(Ljava/lang/Object;)Z 带 @NotNull ——
+        // 参数是非空 Any，覆写必须精确匹配非空签名
+        override fun canBeSaved(value: Any): Boolean = true
     }
 
     @Test
@@ -80,7 +80,10 @@ class NavigationBackStackTest {
         stack.push(DrawerDestination.Settings)
         stack.push(DrawerDestination.About)
 
-        val saved = with(AllowAll) { NavigationBackStack.Saver.save(stack) }
+        // Saver.save 是成员扩展（fun SaverScope.save）—— 调用需要两个接收者
+        // 同时在隐式作用域内：with(AllowAll) 提供扩展接收者，run 提供分派接收者。
+        // 直接写 with(AllowAll) { Saver.save(x) } 在 Kotlin 2.0 下不解析。
+        val saved = with(AllowAll) { NavigationBackStack.Saver.run { save(stack) } }
         val restored = NavigationBackStack.Saver.restore(saved!!)!!
 
         assertEquals(DrawerDestination.About, restored.current)

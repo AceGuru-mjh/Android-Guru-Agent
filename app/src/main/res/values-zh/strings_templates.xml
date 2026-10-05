@@ -3,6 +3,8 @@
     <!-- ═══ #197 模板工坊（Template Studio）═══ -->
     <string name="templates_tab_agent">Agent 模板</string>
     <string name="templates_tab_coding">Coding 模板</string>
+    <string name="templates_coding_roles_title">Coding 专家</string>
+    <string name="templates_coding_roles_subtitle">内置语言与技术专家模板，选择即生效（无需重启）</string>
     <string name="templates_agent_list_title">Agent 提示词模板</string>
     <string name="templates_agent_list_subtitle">翻译/总结/写作等通用任务 —— 服务 Agent 屏</string>
     <string name="templates_coding_list_title">Coding 提示词模板</string>

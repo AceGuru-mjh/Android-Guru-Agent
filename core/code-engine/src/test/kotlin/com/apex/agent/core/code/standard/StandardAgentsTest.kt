@@ -13,8 +13,9 @@ import org.junit.Test
 class StandardAgentsTest {
 
     @Test
-    fun `catalog has five definitions covering all kinds`() {
-        assertEquals(5, StandardAgentCatalog.ALL.size)
+    fun `catalog has six definitions covering all kinds`() {
+        // v3：REVIEWER 评审画像入目录（主代理三 + 子代理三 = 六）
+        assertEquals(6, StandardAgentCatalog.ALL.size)
         StandardAgentKind.entries.forEach { kind ->
             assertNotNull("missing definition for ${kind.key}", StandardAgentCatalog.definitionOf(kind))
         }
@@ -27,7 +28,7 @@ class StandardAgentsTest {
             StandardAgentCatalog.PRIMARY_KINDS
         )
         assertEquals(
-            listOf(StandardAgentKind.EXPLORE, StandardAgentKind.RESEARCH),
+            listOf(StandardAgentKind.EXPLORE, StandardAgentKind.RESEARCH, StandardAgentKind.REVIEWER),
             StandardAgentCatalog.SUBAGENT_KINDS
         )
     }
@@ -37,6 +38,7 @@ class StandardAgentsTest {
         assertTrue(StandardAgentCatalog.PLAN.isReadOnly)
         assertTrue(StandardAgentCatalog.EXPLORE.isReadOnly)
         assertTrue(StandardAgentCatalog.RESEARCH.isReadOnly)
+        assertTrue("评审员只读", StandardAgentCatalog.REVIEWER.isReadOnly)
         assertFalse(StandardAgentCatalog.BUILD.isReadOnly)
         assertFalse(StandardAgentCatalog.GENERAL.isReadOnly)
     }
@@ -100,9 +102,9 @@ class StandardAgentsTest {
 
     @Test
     fun `task subagent types all parse via kind catalog`() {
-        // syntheticTaskTool 的 subagent_type 取值域（explore/research/general）
+        // syntheticTaskTool 的 subagent_type 取值域（explore/research/general/reviewer）
         // 必须都能经 fromKey 解析成画像——工具描述与目录的跨层契约
-        listOf("explore", "research", "general").forEach { key ->
+        listOf("explore", "research", "general", "reviewer").forEach { key ->
             assertNotNull("task subagent_type '$key' 必须能解析为画像", StandardAgentKind.fromKey(key))
         }
         assertEquals(

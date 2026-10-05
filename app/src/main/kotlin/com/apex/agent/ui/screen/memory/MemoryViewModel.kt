@@ -2,11 +2,16 @@ package com.apex.agent.ui.screen.memory
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.agent.R
+import com.apex.agent.mcp.builtin.memory.ChatMemorySchema
+import com.apex.agent.mcp.builtin.memory.KnowledgeGraphStore
 import com.apex.agent.platform.csmem.model.SemanticNode
 import com.apex.agent.platform.csmem.store.EpisodeSummary
 import com.apex.agent.platform.csmem.store.FSMMacro
 import com.apex.agent.platform.csmem.store.MemoryGraphStore
+import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -22,13 +28,24 @@ import javax.inject.Inject
  * 只读为主；删除 Episode 为破坏性操作，由 UI 二次确认后调用 [deleteEpisode]。
  * T76 审计补齐：梦境巩固（DreamRenderer.dreamNow）与免疫系统隔离区
  * （MemoryImmuneSystem）能力此前无 UI 入口 —— 本 VM 接线。
+ * #219 隐私合规：新增「聊天记忆」分区 —— ChatMemoryPipeline 自动沉淀到
+ * [KnowledgeGraphStore]（memory.json）的画像 / 近况 / 里程碑，此前记忆页
+ * 完全不可见、只能靠对话里手动调 MCP memory 工具删除，现可查看 / 逐条
+ * 删 / 一键清空。
  */
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class MemoryViewModel @Inject constructor(
     private val store: MemoryGraphStore,
     private val dreamRenderer: com.apex.agent.platform.csmem.dream.DreamRenderer,
-    private val immuneSystem: com.apex.agent.platform.csmem.immune.MemoryImmuneSystem
+    private val immuneSystem: com.apex.agent.platform.csmem.immune.MemoryImmuneSystem,
+    // #219：聊天画像库 —— 与 memory MCP transport / ChatMemoryPipeline 共享
+    // 同一 Hilt 单例（McpModule.provideKnowledgeGraphStore），删除/清空即对
+    // 下一轮对话的召回立即生效。
+    private val knowledgeGraph: KnowledgeGraphStore,
+    // 记忆页新文案走资源（en/zh 双语）；VM 层非 Compose 场景按仓库惯例经
+    // LanguageManager 取词（SettingsViewModel 同款模式）。
+    private val languageManager: LanguageManager
 ) : ViewModel() {
 
     data class MemoryStats(
@@ -55,6 +72,12 @@ class MemoryViewModel @Inject constructor(
     /** 删除结果提示（如 "已删除 Episode xxx"），UI 消费后清空 */
     private val _lastMessage = MutableStateFlow<String?>(null)
     val lastMessage: StateFlow<String?> = _lastMessage.asStateFlow()
+
+    // #219：聊天记忆条目（画像 → 近况 → 里程碑；空观察实体不占位）。
+    // 与其余状态流同层声明在 init 之前 —— refresh() 自 init 发起，虽经
+    // 挂起点后才写入，仍保持本文件“init 只触达先声明属性”的初始化纪律。
+    private val _chatMemory = MutableStateFlow<List<ChatMemoryEntry>>(emptyList())
+    val chatMemory: StateFlow<List<ChatMemoryEntry>> = _chatMemory.asStateFlow()
 
     init {
         refresh()
@@ -93,6 +116,8 @@ class MemoryViewModel @Inject constructor(
             }.onFailure { e ->
                 _lastMessage.value = "加载记忆失败：${e.message}"
             }
+            // #219：聊天记忆独立加载 —— cs-mem 轨迹库失败不拖累聊天画像区
+            refreshChatMemory()
         }
     }
 
@@ -163,5 +188,85 @@ class MemoryViewModel @Inject constructor(
                 _lastMessage.value = "隔离区已清空"
             }
             .onFailure { _lastMessage.value = "清除隔离区失败：${it.message}" }
+    }
+
+    // ═══ 聊天记忆（#219：KnowledgeGraphStore 的画像 / 近况 / 里程碑）═══
+
+    /** 刷新聊天记忆快照（readGraph 为内存快照，删除/清空后的回刷也走这里）。 */
+    private fun refreshChatMemory() {
+        viewModelScope.launch {
+            runCatching {
+                _chatMemory.value = withContext(Dispatchers.IO) {
+                    knowledgeGraph.readGraph().entities.toChatMemoryEntries()
+                }
+            }.onFailure { e ->
+                _lastMessage.value = languageManager.getString(
+                    R.string.memory_chat_msg_failed, e.message ?: ""
+                )
+            }
+        }
+    }
+
+    /**
+     * 删除单条聊天记忆（#219 逐条删除；UI 二次确认后调用）。
+     *
+     * @param entityName 观察所属实体（ChatMemorySchema 三者之一）
+     * @param observation 观察原文（精确匹配，来自列表项本身）
+     */
+    fun deleteChatObservation(entityName: String, observation: String) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    knowledgeGraph.deleteObservations(entityName, listOf(observation))
+                }
+            }.onSuccess { removed ->
+                _lastMessage.value = if (removed > 0) {
+                    languageManager.getString(R.string.memory_chat_msg_deleted)
+                } else {
+                    // 幂等兜底：条目已被并发删除（如基调替换竞态）
+                    languageManager.getString(R.string.memory_chat_msg_missing)
+                }
+                refreshChatMemory()
+            }.onFailure { e ->
+                _lastMessage.value = languageManager.getString(
+                    R.string.memory_chat_msg_failed, e.message ?: ""
+                )
+            }
+        }
+    }
+
+    /**
+     * 一键清空聊天记忆（#219；UI 二次确认后调用）。
+     *
+     * 语义边界：只清「画像 / 近况 / 里程碑」三个自动沉淀实体的 observations，
+     * **保留实体壳** —— 本进程内 ChatMemoryPipeline 仍可继续 addObservations，
+     * 不会因实体被整删而静默断写（重启后 init 也会重建空壳）。模型经 MCP
+     * 显式建的主题实体与关系不属于自动聊天记忆，不在此清空范围。
+     */
+    fun clearChatMemory() {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val graph = knowledgeGraph.readGraph()
+                    var removed = 0
+                    for (type in ChatMemorySchema.ENTITY_TYPES) {
+                        val entity = graph.entities.firstOrNull { it.entityType == type } ?: continue
+                        removed += knowledgeGraph.deleteObservations(entity.name, entity.observations)
+                    }
+                    removed
+                }
+            }.onSuccess { removed ->
+                _lastMessage.value = if (removed > 0) {
+                    languageManager.getString(R.string.memory_chat_msg_cleared, removed)
+                } else {
+                    languageManager.getString(R.string.memory_chat_msg_clear_empty)
+                }
+                refreshChatMemory()
+            }.onFailure { e ->
+                _lastMessage.value = languageManager.getString(
+                    R.string.memory_chat_msg_failed, e.message ?: ""
+                )
+            }
+        }
     }
 }

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v3 Settings expansion sections (English default). Chinese lives in values-zh/strings_settings_v3.xml. -->
+<resources>
+    <!-- Subagent section (Settings → Agent page) -->
+    <string name="settings_v3_subagent_title">Subagents</string>
+    <string name="settings_v3_subagent_subtitle">Parallel delegate workers with tunable budgets</string>
+    <string name="settings_v3_subagent_enabled">Enable subagents</string>
+    <string name="settings_v3_subagent_enabled_desc">When off, the main agent explores on its own instead of delegating</string>
+    <string name="settings_v3_subagent_concurrency">Max concurrent</string>
+    <string name="settings_v3_subagent_concurrency_desc">Subagents running at the same time</string>
+    <string name="settings_v3_subagent_timeout">Timeout</string>
+    <string name="settings_v3_subagent_timeout_desc">Overall deadline per subagent, queueing included</string>
+    <string name="settings_v3_subagent_max_turns">Max turns</string>
+    <string name="settings_v3_subagent_max_turns_desc">Tool-calling rounds per subagent</string>
+    <string name="settings_v3_subagent_tool_output">Tool output limit (chars)</string>
+    <string name="settings_v3_subagent_tool_output_desc">Per tool call, in steps of 500</string>
+    <string name="settings_v3_subagent_output">Conclusion limit (chars)</string>
+    <string name="settings_v3_subagent_output_desc">Result returned to the main agent, in steps of 500</string>
+    <string name="settings_v3_subagent_context">Context budget</string>
+    <string name="settings_v3_subagent_context_desc">Context window tokens reserved per subagent</string>
+    <string name="settings_v3_subagent_temperature">Sampling temperature</string>
+    <string name="settings_v3_subagent_temperature_desc">Low temperature keeps exploration stable and converging</string>
+    <string name="settings_v3_subagent_custom_title">Custom subagent types</string>
+    <string name="settings_v3_subagent_custom_hint">Resolved by name via the custom_name argument of code_task</string>
+    <string name="settings_v3_subagent_custom_empty">No custom subagents yet — add roles like data-analyst or doc-writer</string>
+    <string name="settings_v3_subagent_custom_add">Add subagent</string>
+    <string name="settings_v3_subagent_custom_new_title">New custom subagent</string>
+    <string name="settings_v3_subagent_custom_key">Key</string>
+    <string name="settings_v3_subagent_custom_key_hint">Lowercase letters, digits and hyphens; resolved by custom_name</string>
+    <string name="settings_v3_subagent_key_reserved">Reserved key: explore / research / general / reviewer</string>
+    <string name="settings_v3_subagent_key_duplicate">This key already exists</string>
+    <string name="settings_v3_subagent_custom_name">Display name</string>
+    <string name="settings_v3_subagent_custom_desc_label">Description</string>
+    <string name="settings_v3_subagent_custom_desc_hint">One-line duty, shown in tool guidance</string>
+    <string name="settings_v3_subagent_custom_prompt">System prompt</string>
+    <string name="settings_v3_subagent_custom_prompt_hint">Role prompt, injected before the shared subagent discipline</string>
+    <string name="settings_v3_subagent_custom_tools">Tool whitelist (comma-separated)</string>
+    <string name="settings_v3_subagent_custom_tools_hint">Empty = default CORE tool plan</string>
+    <string name="settings_v3_subagent_custom_turns">Turns override (0 = default)</string>
+    <string name="settings_v3_subagent_custom_turns_desc">Falls back to the global max-turns budget when 0</string>
+    <string name="settings_v3_subagent_custom_delete">Delete subagent</string>
+
+    <!-- Goal section -->
+    <string name="settings_v3_goal_title">Goal Mode</string>
+    <string name="settings_v3_goal_subtitle">Verifiable objective loop defaults</string>
+    <string name="settings_v3_goal_verifier">Fast-model verification</string>
+    <string name="settings_v3_goal_verifier_desc">When off, the main model self-assesses — saves tokens</string>
+    <string name="settings_v3_goal_max_rounds">Default max verification rounds</string>
+    <string name="settings_v3_goal_max_rounds_desc">Upper bound prefill for new goals (create dialog)</string>
+    <string name="settings_v3_goal_auto_resume">Offer to resume on session restore</string>
+    <string name="settings_v3_goal_auto_resume_desc">Prompt only — unfinished goals are never auto-run</string>
+    <string name="settings_v3_goal_note">Verification runs on the Fast model role — assign it a cheap small model in Models tab → Roles</string>
+
+    <!-- Loop section -->
+    <string name="settings_v3_loop_title">Loop Mode</string>
+    <string name="settings_v3_loop_subtitle">Scheduled re-run defaults</string>
+    <string name="settings_v3_loop_interval">Default interval</string>
+    <string name="settings_v3_loop_interval_desc">Prefill for new loops (create dialog)</string>
+    <string name="settings_v3_loop_max_runs">Default max runs</string>
+    <string name="settings_v3_loop_max_runs_desc">Execution count cap prefill for new loops</string>
+    <string name="settings_v3_loop_notify">Notify on background runs</string>
+    <string name="settings_v3_loop_notify_desc">System notification when a loop fires while the app is backgrounded; muted in foreground</string>
+    <string name="settings_v3_loop_catch_up">Catch up missed runs</string>
+    <string name="settings_v3_loop_catch_up_desc">Re-run missed due rounds when the session reopens; one-shot reminders always fire immediately</string>
+
+    <!-- Coding workspace section -->
+    <string name="settings_v3_coding_title">Coding Workspace</string>
+    <string name="settings_v3_coding_subtitle">Tool surface and guardrails for the Code screen</string>
+    <string name="settings_v3_coding_surface">Tool surface</string>
+    <string name="settings_v3_coding_surface_desc">Full = CORE + activated extras; Core = code, git, github and terminal only</string>
+    <string name="settings_v3_coding_surface_full">Full (CORE + activated)</string>
+    <string name="settings_v3_coding_surface_core">Core (code / git / github / terminal)</string>
+    <string name="settings_v3_coding_read_guard">Read guard</string>
+    <string name="settings_v3_coding_read_guard_desc">Files must be read before editing — the industry-standard misuse guard</string>
+    <string name="settings_v3_coding_auto_rules">Auto project rules</string>
+    <string name="settings_v3_coding_auto_rules_desc">Auto-discover and inject the workspace\'s AGENTS.md / CLAUDE.md / .cursorrules</string>
+    <string name="settings_v3_coding_mcp_scope">MCP and skill scope isolation</string>
+    <string name="settings_v3_coding_mcp_scope_desc">Isolate MCP and skill tools by market tier (Agent or Coding); off restores v2 global visibility</string>
+
+    <!-- GitHub section -->
+    <string name="settings_v3_github_title">GitHub</string>
+    <string name="settings_v3_github_subtitle">Connection status and default repository</string>
+    <string name="settings_v3_github_status_connected">Connected: %1$s</string>
+    <string name="settings_v3_github_status_disconnected">Not connected</string>
+    <string name="settings_v3_github_connect_hint">Connect a token via the GitHub button on the Code screen</string>
+    <string name="settings_v3_github_default_repo">Default repository</string>
+    <string name="settings_v3_github_default_repo_unset">Not set</string>
+    <string name="settings_v3_github_repo_edit_label">Set default repo</string>
+    <string name="settings_v3_github_default_repo_hint">owner/repo or owner; empty = not set</string>
+    <string name="settings_v3_github_repo_invalid">Unrecognized format</string>
+    <string name="settings_v3_github_repo_saved">Saved</string>
+    <string name="settings_v3_github_clear">Clear</string>
+    <string name="settings_v3_github_disconnect">Disconnect</string>
+</resources>

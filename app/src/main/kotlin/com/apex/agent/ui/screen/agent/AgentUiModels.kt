@@ -3,6 +3,7 @@ package com.apex.agent.ui.screen.agent
 import androidx.compose.runtime.Immutable
 import com.apex.agent.core.engine.*
 import com.apex.agent.core.llm.ReasoningEffort
+import com.apex.agent.loop.LoopConfig
 
 /**
  * Agent 对话界面状态
@@ -38,7 +39,10 @@ data class AgentChatUiState(
     val contextUsedTokens: Int = 0,
     val contextMaxTokens: Int = 1,
     /** 会话累计消耗 token（多轮真实 usage 累加；0 = 端点未返回统计）。 */
-    val sessionTotalTokens: Long = 0
+    val sessionTotalTokens: Long = 0,
+    /** S2：当前会话激活的 Loop 循环（null = 无循环；独立于 mode 存活——
+     *    切走 LOOP 模式不停止循环，状态卡仍显示，轮次照常记账）。 */
+    val activeLoop: LoopConfig? = null
 )
 
 /**

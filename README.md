@@ -11,8 +11,8 @@
 
 **An autonomous AI agent that lives entirely on your Android device.**
 
-一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、6 种执行模式、
-111 个内置工具（v3 新增超时/重试/限流/熔断/追踪/批量/组合动作八层执行硬化；P83 环境闭环补全）、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
+一个开源的 Android 端自主智能体应用：OpenAI 兼容流式 LLM 接入、8 种执行模式（v3 新增 Goal 目标循环 / Loop 循环与 Cron）、
+111 个内置工具（v3 新增超时/重试/限流/熔断/追踪/批量/组合动作八层执行硬化；P83 环境闭环补全；MCP/技能按工位作用域隔离）、PRoot 沙箱化 Ubuntu 终端、仿生认知记忆系统（差分摄取 → 轨迹蒸馏 →
 FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、插件化 SDK ——
 全部跑在一台手机上，无需任何服务器。
 
@@ -59,7 +59,7 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 **项目事实**
 
 <a href="#tools"><img src="https://img.shields.io/badge/🧰_tools-111-ff69b4" alt="111 Tools"/></a>
-<a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-6-00C2D1" alt="6 Modes"/></a>
+<a href="#engine"><img src="https://img.shields.io/badge/🧠_agent_modes-8-00C2D1" alt="8 Modes"/></a>
 <a href="#architecture"><img src="https://img.shields.io/badge/📦_gradle_modules-20-8A2BE2" alt="20 Modules"/></a>
 <a href="#testing"><img src="https://img.shields.io/badge/🧪_tests-252_files_·_4k_用例-2EA44F" alt="252 Tests"/></a>
 <a href="#cs-mem"><img src="https://img.shields.io/badge/🧠_memory-cs--mem-00C2D1" alt="cs-mem"/></a>

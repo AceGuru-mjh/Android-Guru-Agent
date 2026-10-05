@@ -3,7 +3,7 @@ package com.apex.agent.core.code.standard
 /**
  * # Standard Agent Catalog — Agent 画像目录（标准任务循环的「用工表」）
  *
- * 五个内置画像（对齐业界标准 Agent 工作流的角色分工）：
+ * 六个内置画像（对齐业界标准 Agent 工作流的角色分工）：
  *
  * | 画像 | 角色 | 工具面 | 典型用途 |
  * |---|---|---|---|
@@ -12,6 +12,7 @@ package com.apex.agent.core.code.standard
  * | [GENERAL] 通用 | 主代理 | 全量 | BUILD/PLAN 之外的兜底（小任务/答疑式编码）；亦可作 task 工具的子代理类型（通用执行者） |
  * | [EXPLORE] 探索 | 子代理 | 只读 | "找出所有用到 X 的地方"类委派 |
  * | [RESEARCH] 调研 | 子代理 | 联网+读 | "查一下这个库怎么用"类委派 |
+ * | [REVIEWER] 评审 | 子代理 | 只读+git 变更面 | "评审本次改动"类委派（v3） |
  *
  * ## 工具面前缀白名单语义
  *
@@ -93,8 +94,25 @@ object StandardAgentCatalog {
         subagentMaxTurns = 10
     )
 
-    /** 全量目录（稳定顺序：主代理三画像在前，子代理两画像在后）。 */
-    val ALL: List<StandardAgentDefinition> = listOf(BUILD, PLAN, GENERAL, EXPLORE, RESEARCH)
+    /** 评审（子代理，v3）：只读代码评审——先看 git 变更再深入读相关文件，
+     *  按严重性分级输出发现并给出合入结论（画像段见
+     *  [StandardPrompts.reviewerSubAgent]）。 */
+    val REVIEWER: StandardAgentDefinition = StandardAgentDefinition(
+        kind = StandardAgentKind.REVIEWER,
+        description = "评审员：只读评审代码（先看 git 变更再深入读相关文件），" +
+            "按严重性分级输出发现（阻断/警告/建议），给出是否可合入的结论。",
+        toolAllowlist = setOf(
+            "code_read", "code_grep", "code_glob", "code_check",
+            "code_git_status", "code_git_diff", "code_git_log"
+        ),
+        writeToolsAllowed = false,
+        defaultMaxTurns = 16,
+        subagentMaxTurns = 10
+    )
+
+    /** 全量目录（稳定顺序：主代理三画像在前，子代理三画像在后）。 */
+    val ALL: List<StandardAgentDefinition> =
+        listOf(BUILD, PLAN, GENERAL, EXPLORE, RESEARCH, REVIEWER)
 
     /** 可作为 task 工具 subagent_type 的画像（角色 = 子代理）。 */
     val SUBAGENT_KINDS: List<StandardAgentKind> =

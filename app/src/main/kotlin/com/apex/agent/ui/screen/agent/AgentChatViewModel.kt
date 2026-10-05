@@ -20,6 +20,7 @@ import com.apex.agent.core.tools.skill.SkillActivationStore
 import com.apex.agent.core.tools.skill.SkillAutoActivator
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.github.GithubTokenManager
+import com.apex.agent.loop.LoopScheduler
 import com.apex.agent.net.NetworkMonitor
 import com.apex.agent.notify.ApexNotifications
 import com.apex.agent.notify.ForegroundTracker
@@ -91,7 +92,10 @@ class AgentChatViewModel @Inject constructor(
     /** #4 通知中心：任务完成通知发射器。 */
     internal val notifications: ApexNotifications,
     /** #6 网络监测：离线状态源（Screen 顶部横幅消费）。 */
-    val networkMonitor: NetworkMonitor
+    val networkMonitor: NetworkMonitor,
+    /** S2：LOOP 循环调度器（会话屏打开即 start——循环真正的驱动源；
+     *  事件收集与轮次注入逻辑在 AgentChatLoopController.kt 扩展文件）。 */
+    internal val loopScheduler: LoopScheduler
 ) : ViewModel() {
 
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
@@ -217,6 +221,10 @@ class AgentChatViewModel @Inject constructor(
 
         // #214/#215：问题桥超时诚实提示 + 迟交兜底（逻辑在 AgentChatQuestionHandler.kt）
         installQuestionExpiredNotice()
+
+        // ═══ S2：LOOP 循环控制接线（dueEvents 收集 / activeLoop 状态同步 /
+        // 调度器心跳复活 —— 逻辑主体在 AgentChatLoopController.kt 扩展文件）═══
+        setupLoopController()
     }
 
     /** 全量角色列表（内置在前；AgentRoleSelector / 设置页共用）。 */
@@ -744,7 +752,7 @@ class AgentChatViewModel @Inject constructor(
      * 并复位 isLoading，避免异常冒泡到 viewModelScope 导致崩溃或 isLoading 卡死；
      * [CancellationException] 重抛以保留协程取消语义。
      */
-    private suspend fun executeNormalMessage(
+    internal suspend fun executeNormalMessage(
         text: String,
         currentAttachments: List<Attachment>
     ) {

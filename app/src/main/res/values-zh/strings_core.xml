@@ -150,6 +150,8 @@
     <string name="settings_mode_build">Build · 边想边做</string>
     <string name="settings_mode_chat">Chat · 对话（旧）</string>
     <string name="settings_mode_plan">Plan · 先规划后执行</string>
+    <string name="settings_mode_goal">Goal · 可验证目标循环</string>
+    <string name="settings_mode_loop">Loop · 循环与定时</string>
     <string name="settings_mode_spec">Spec · 规格确认后执行</string>
     <string name="settings_mode_reflect">Reflect · 反思改进</string>
     <string name="settings_mode_assist">Assist · 人工决策</string>
@@ -394,6 +396,23 @@
     <string name="memory_quarantined">已隔离 %1$d 个可疑 UI 指纹（钓鱼/悬浮窗特征）</string>
     <string name="memory_quarantine_clear">无可疑 UI 指纹被隔离（正常态）</string>
     <string name="memory_clear">清除</string>
+    <!-- #219 聊天记忆分区（KnowledgeGraphStore 的画像 / 近况 / 里程碑） -->
+    <string name="memory_chat_title">聊天记忆</string>
+    <string name="memory_chat_count_fmt">已记住 %1$d 条</string>
+    <string name="memory_chat_empty">还没有聊天记忆\n对话中提到的画像事实、近期情绪、重要日子会自动记在这里</string>
+    <string name="memory_chat_badge_profile">画像</string>
+    <string name="memory_chat_badge_state">近况</string>
+    <string name="memory_chat_badge_milestone">里程碑</string>
+    <string name="memory_chat_delete_title">删除这条记忆</string>
+    <string name="memory_chat_delete_text">确定删除 \"%1$s\" 吗？删除后 Agent 将不再记得这条内容。</string>
+    <string name="memory_chat_clear_title">清空聊天记忆</string>
+    <string name="memory_chat_clear_text">将删除全部 %1$d 条聊天记忆（画像 / 近况 / 里程碑），删除后无法恢复。</string>
+    <string name="memory_chat_clear">一键清空</string>
+    <string name="memory_chat_msg_deleted">已删除该条记忆</string>
+    <string name="memory_chat_msg_missing">该条记忆已不存在</string>
+    <string name="memory_chat_msg_cleared">已清空 %1$d 条聊天记忆</string>
+    <string name="memory_chat_msg_clear_empty">没有可清空的聊天记忆</string>
+    <string name="memory_chat_msg_failed">操作失败：%1$s</string>
 
     <!-- ═══ 任务历史（TaskHistoryScreen）═══ -->
     <string name="tasks_title">任务</string>
@@ -540,14 +559,6 @@
     <string name="github_menu_connect">连接 GitHub</string>
     <string name="github_menu_token">GitHub Token (ghp_*) 密钥访问</string>
     <!-- #229：Token 输入对话框（GithubTokenDialog，原硬编码中文收编） -->
-    <string name="github_token_dialog_title">输入 GitHub Personal Access Token</string>
-    <string name="github_token_dialog_hint">在 GitHub → Settings → Developer settings → Personal access tokens 中创建。\n需要 repo 权限。</string>
-    <string name="github_token_field_label">ghp_xxxx 或 github_pat_xxx</string>
-    <string name="github_token_error_format">Token 应以 ghp_ 或 github_pat_ 开头</string>
-    <string name="github_token_error_validate">Token 验证失败，请检查权限或网络</string>
-    <string name="github_token_validating">验证中…</string>
-    <string name="github_token_connect">连接</string>
-    <string name="github_token_cancel">取消</string>
     <string name="common_done">完成</string>
 
     <!-- ═══ 关于页（抽屉底部入口，v1.4.3+）═══ -->

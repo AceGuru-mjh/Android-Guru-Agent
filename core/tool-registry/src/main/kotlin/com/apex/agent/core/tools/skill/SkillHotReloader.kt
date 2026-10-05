@@ -38,13 +38,15 @@ fun interface SkillHotReloadLogSink {
  * 每次 [resync] 只做差异同步，绝不先全部 unregister 再重新 register——那样会
  * 闪断正在执行的调用（差异间隙里的查找会落空，正在运行的调用步骤引用也会错乱）：
  *
- * 1. 期望集 desired = [SkillRegistry.getActiveTools]，不同技能重复声明的工具 id
- *    只保留首个声明，其余记 warn 跳过；
+ * 1. 期望集 desired = [SkillRegistry.getActiveToolsWithScope]（v3 起携带
+ *    manifest scope），不同技能重复声明的工具 id 只保留首个声明，其余记
+ *    warn 跳过；
  * 2. 白名单内不再被期望的 id → unregister（先移除后注册，天然覆盖「卸旧装新」）；
- * 3. 期望集中注册表缺失的 id → 以 [SafeAgentTool] 包装 [SkillToolAdapter] 注册，
- *    策略 REPLACE；
- * 4. 已注册但定义（名称、描述、参数 schema）发生变化的 id → REPLACE 刷新包装
- *    实例，支持技能原地升级（不先卸载直接 install 新版本）。
+ * 3. 期望集中注册表缺失的 id → 以 [SafeAgentTool] 包装 [SkillToolAdapter]
+ *    注册，策略 REPLACE；
+ * 4. 已注册但定义（名称、描述、参数 schema、v3 作用域）发生变化的 id →
+ *    REPLACE 刷新包装实例，支持技能原地升级（不先卸载直接 install 新版本）
+ *    与 manifest 改写工位归属后的作用域刷新。
  *
  * ## 防劫持机制（核心）
  *
@@ -192,17 +194,18 @@ class SkillHotReloader(
 
     /** 增量 diff 同步主体，见类 KDoc 的算法与防劫持说明。 */
     private fun syncLocked() {
-        // 1. 期望集：启用技能声明的工具，重复 id 只保留首个声明
-        val desired = LinkedHashMap<String, SkillToolDef>()
-        for (def in skillRegistry.getActiveTools()) {
-            if (desired.containsKey(def.id)) {
+        // 1. 期望集：启用技能声明的工具（v3 起携带 manifest scope），
+        //    重复 id 只保留首个声明
+        val desired = LinkedHashMap<String, SkillToolWithScope>()
+        for (entry in skillRegistry.getActiveToolsWithScope()) {
+            if (desired.containsKey(entry.def.id)) {
                 log(
                     SkillHotReloadLogLevel.WARN,
-                    "技能工具 id '${def.id}' 被多个技能重复声明，仅保留首个声明"
+                    "技能工具 id '${entry.def.id}' 被多个技能重复声明，仅保留首个声明"
                 )
                 continue
             }
-            desired[def.id] = def
+            desired[entry.def.id] = entry
         }
 
         var added = 0
@@ -231,11 +234,12 @@ class SkillHotReloader(
         }
 
         // 3. 再注册与刷新：期望集中缺失或定义已变化的工具
-        for ((id, def) in desired) {
+        for ((id, entry) in desired) {
+            val def = entry.def
             val current = toolRegistry.getTool(id)
             if (current == null) {
                 // 全新 id，或白名单内的 id 被外部移除后自愈补回
-                registerLocked(def)
+                registerLocked(entry)
                 added++
                 continue
             }
@@ -258,12 +262,14 @@ class SkillHotReloader(
                 ownedWrappers.remove(id)
                 continue
             }
-            // 定义变化（技能原地升级）才 REPLACE 刷新，避免无谓的实例抖动
+            // 定义变化（技能原地升级）才 REPLACE 刷新，避免无谓的实例抖动；
+            // v3：作用域变化（manifest 改写工位归属）同样触发刷新
             if (current.name != def.name ||
                 current.description != def.description ||
-                current.parametersSchema != def.parameters
+                current.parametersSchema != def.parameters ||
+                current.metadata.scope != entry.scope
             ) {
-                registerLocked(def)
+                registerLocked(entry)
                 added++
             }
         }
@@ -274,12 +280,15 @@ class SkillHotReloader(
         )
     }
 
-    /** 注册一个技能工具（SafeAgentTool 统一安全包装），并登记白名单与实例账本。 */
-    private fun registerLocked(def: SkillToolDef) {
-        val wrapper = SafeAgentTool(SkillToolAdapter(def, toolExecutor))
+    /**
+     * 注册一个技能工具（SafeAgentTool 统一安全包装；v3 把所属技能的
+     * manifest scope 打进 ToolMetadata），并登记白名单与实例账本。
+     */
+    private fun registerLocked(entry: SkillToolWithScope) {
+        val wrapper = SafeAgentTool(SkillToolAdapter(entry.def, toolExecutor, entry.scope))
         toolRegistry.register(wrapper, DuplicateToolIdPolicy.REPLACE)
-        skillOwnedIds.add(def.id)
-        ownedWrappers[def.id] = wrapper
+        skillOwnedIds.add(entry.def.id)
+        ownedWrappers[entry.def.id] = wrapper
     }
 
     private fun log(level: SkillHotReloadLogLevel, message: String) {

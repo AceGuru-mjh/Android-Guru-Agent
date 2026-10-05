@@ -15,6 +15,7 @@ import com.apex.agent.R
 import com.apex.browser.engine.BrowserEngine
 import com.apex.browser.chrome.BrowserOverlay
 import com.apex.agent.browser.CyberNeonBallManager
+import com.apex.agent.loop.LoopScheduler
 import com.apex.agent.notify.ForegroundTracker
 import com.apex.agent.plugin.host.PluginManager
 import com.apex.agent.platform.terminal.runtime.TerminalRuntime
@@ -68,6 +69,12 @@ class ApexCoreService : LifecycleService() {
     @Inject
     lateinit var foregroundTracker: ForegroundTracker
 
+    /** S2：LOOP 循环调度器 —— 服务宿主（Keep Alive 开启时循环跨会话/跨屏存活）；
+     *  会话屏 VM init 亦会幂等 start（双通道：屏开着 VM 驱动，屏关了服务驱动）。
+     *  循环独立于 AgentMode 存活：切模式不停止，详见 LoopScheduler KDoc。 */
+    @Inject
+    lateinit var loopScheduler: LoopScheduler
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -101,6 +108,10 @@ class ApexCoreService : LifecycleService() {
                     }
             }
         }
+        // S2：LOOP 调度器随服务启动（幂等——与 VM 侧 start 双通道互保险）；
+        // tick 循环在调度器自己的 IO 域内，不占服务 scope。
+        runCatching { loopScheduler.start() }
+            .onFailure { android.util.Log.w("ApexCoreService", "loop scheduler start failed: ${it.message}") }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -114,10 +125,9 @@ class ApexCoreService : LifecycleService() {
         }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, createNotification(), serviceType)
 
-        // 启动Agent引擎后台循环
-        scope.launch {
-            // Agent后台任务（定时任务、事件监听等）
-        }
+        // 启动Agent引擎后台循环（S2 填充：占位协程退役，LOOP 调度器已在
+        // onCreate 启动且幂等——此处重申一次，覆盖 sticky 重启等边缘路径）
+        loopScheduler.start()
 
         return START_STICKY
     }
@@ -154,6 +164,10 @@ class ApexCoreService : LifecycleService() {
                 }
             }
         }
+
+        // S2：LOOP 调度器随服务销毁停止（VM 侧心跳会在会话屏存活时复活接管；
+        // Keep Alive 关闭且屏已关 = 循环休眠到下次有人 start，状态不丢——持久化在 store）。
+        runCatching { loopScheduler.stop() }
         scope.cancel()
         super.onDestroy()
     }

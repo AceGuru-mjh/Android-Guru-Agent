@@ -266,7 +266,20 @@ fun CodeScreen(
                     )
                 }
 
+                // ═══ v3 GOAL 目标状态卡（输入栏上方；目标存在即显示——无论
+                // ACTIVE/ACHIEVED/STOPPED、切走模式也显示，可随时停止/重启；
+                // 实现在 GoalSetupSheet.kt 同文件，与 Loop 状态卡同款形态）═══
+                state.goalState?.let { goalState ->
+                    GoalStatusCard(
+                        state = goalState,
+                        onStop = viewModel::stopActiveGoal,
+                        onResume = viewModel::resumeGoal
+                    )
+                }
+
                 // ═══ #197 模式 + 思考档位选择器行（Build/Plan 双档 + 七档思考）═══
+                //（GOAL 切入的弹层/深潜线保障在 VM setMode → onEnterGoalMode 单点，
+                // 此处保持纯方法引用——选择器与 init 恢复共用同一路径）
                 // v6 前插专家模板胶囊（全栈置顶/Git/Android/各语言专家——
                 // 选择即持久化 codeActiveRoleId，经 roleController 落引擎人设）
                 Row(
@@ -301,7 +314,14 @@ fun CodeScreen(
                     isRunning = state.isRunning,
                     llmConfigured = llmConfigured,
                     onSendBlocked = { showApiMissingNotice = true },
-                    onSend = viewModel::sendMessage,
+                    onSend = { text ->
+                        // v3 GOAL：GOAL 模式且尚无活动目标 → 首条消息转目标
+                        // 设定弹层（草稿预填），不直接发送；返回 false（非 GOAL/
+                        // 已有目标/斜杠指令）照常走发送管线。
+                        if (!viewModel.maybeGoalFirstSend(text)) {
+                            viewModel.sendMessage(text)
+                        }
+                    },
                     onAbort = viewModel::abort,
                     slashMenuProvider = slashMenuProvider,
                     onAddPendingCommand = { viewModel.addPendingCommand(it) },
@@ -364,7 +384,20 @@ fun CodeScreen(
         )
     }
 
-    // ═══ #197 GitHub 连接对话框（斜杠 /mcp:github 未连接信号）═══
+    // ═══ v3 GOAL 目标设定弹层（切到 GOAL 无活动目标 / GOAL 模式首条消息
+    // 拦截打开；默认轮次读设置页 goalMaxRounds；开始 → startGoalModeGoal
+    //（关闭弹层 + 首条提示 = 打开时携带的草稿））═══
+    if (state.showGoalSetup) {
+        GoalSetupSheet(
+            initialText = state.goalSetupDraft,
+            defaultMaxRounds = viewModel.goalDefaultMaxRounds(),
+            onDismiss = viewModel::dismissGoalSetup,
+            onStart = { statement, criteria, maxRounds ->
+                viewModel.startGoalModeGoal(statement, criteria, maxRounds, state.goalSetupDraft)
+            }
+        )
+    }
+
     // ═══ v6 Git 工作区面板（右上角入口；打开即拉 status 现场）═══
     if (showGitPanel) {
         CodeWorkspacePanel(
@@ -373,12 +406,18 @@ fun CodeScreen(
         )
     }
 
+    // ═══ #197 GitHub 连接对话框（斜杠 /mcp:github 未连接信号）═══
+    // v3 S3：onSuccess 第三参 = 对话框归一化后的默认仓库（null = 未填/无法
+    // 识别，不改动既有值）
     if (showGithubConnectDialog) {
         GithubTokenDialog(
             onDismiss = { showGithubConnectDialog = false },
             onSubmit = { token -> viewModel.githubTokenManager.validateToken(token) },
-            onSuccess = { token, username ->
+            onSuccess = { token, username, normalizedRepo ->
                 viewModel.githubTokenManager.saveToken(token, username)
+                normalizedRepo?.let {
+                    viewModel.githubTokenManager.saveDefaultRepoCanonical(it)
+                }
                 showGithubConnectDialog = false
             }
         )

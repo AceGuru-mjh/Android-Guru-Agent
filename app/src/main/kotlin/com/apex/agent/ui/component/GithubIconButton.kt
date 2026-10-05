@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -39,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
+import com.apex.agent.github.GithubRepoNormalizer
 import com.apex.agent.github.GithubTokenManager
 import kotlinx.coroutines.launch
 
@@ -51,7 +53,7 @@ import kotlinx.coroutines.launch
  * - 未连接：mark + onSurfaceVariant 色
  *
  * 点击展开下拉菜单：
- * - 已连接 → 显示用户名 + 断开按钮
+ * - 已连接 → 默认仓库信息行（v3 S3，defaultRepo 流）+ 用户名 + 断开按钮
  * - 未连接 → "连接 GitHub"（浏览器跳转）+ "Token 密钥访问"（弹对话框输入）
  */
 @Composable
@@ -60,6 +62,8 @@ fun GithubIconButton(
     modifier: Modifier = Modifier
 ) {
     val connectionState by tokenManager.connectionState.collectAsStateWithLifecycle()
+    // v3 S3：默认仓库信息行（连接态菜单首行；未设置时显示引导文案）
+    val defaultRepo by tokenManager.defaultRepo.collectAsStateWithLifecycle()
     var showMenu by remember { mutableStateOf(false) }
     var showTokenDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -95,6 +99,18 @@ fun GithubIconButton(
             onDismissRequest = { showMenu = false }
         ) {
             if (connectionState.isConnected) {
+                // 默认仓库信息行（非交互 Text —— 菜单 Column 直接子项）：
+                // 与设置页、系统提示词注入共用同一 defaultRepo 数据源
+                Text(
+                    text = if (defaultRepo.isBlank()) {
+                        stringResource(R.string.github_v3_menu_default_repo_unset)
+                    } else {
+                        stringResource(R.string.github_v3_menu_default_repo, defaultRepo)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp)
+                )
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -157,8 +173,10 @@ fun GithubIconButton(
                 // suspend 调用：在 IO 调度器中验证 Token；返回 username 表示成功，null 表示失败
                 tokenManager.validateToken(token)
             },
-            onSuccess = { token, username ->
+            onSuccess = { token, username, normalizedRepo ->
                 tokenManager.saveToken(token, username)
+                // 地址框已归一化的 canonical 直存（null/未填 = 不改动既有默认仓库）
+                normalizedRepo?.let { tokenManager.saveDefaultRepoCanonical(it) }
                 showTokenDialog = false
             }
         )
@@ -166,31 +184,53 @@ fun GithubIconButton(
 }
 
 /**
- * Token 输入对话框。
+ * Token + 默认仓库输入对话框（v3 S3 升级）。
  *
- * 修复点：
- * 1. onSubmit 改为 suspend + nullable username 返回值，避免 UI 假死；
- * 2. 增加 errorMessage 字段，验证失败时 inline 提示，不直接关闭弹窗；
- * 3. 调用期间禁用输入框与按钮；
- * 4. 加入格式预检（ghp_ / github_pat_ 前缀）；
- * 5. #229：全部文案 stringResource 化，随系统语言取词（原硬编码中文）。
+ * 相对旧版（单 Token 输入）的升级：
+ * 1. 新增「GitHub 地址（可选）」输入框：placeholder 提示三种形态；输入
+ *    非空时 supportingText 实时显示 [GithubRepoNormalizer] 归一化结果
+ *    （`✓ 已识别：仓库 owner/repo` / `✓ 已识别：用户 owner` / 红字无法
+ *    识别）。归一化失败不阻断提交——按未填写处理（onSuccess 第三参传
+ *    null，调用方不改动既有默认仓库）；
+ * 2. `onSubmit` 只负责验证 Token（返回 username 或 null）；地址归一化由
+ *    对话框自行完成，确认时经 `onSuccess(token, username, normalizedRepo)`
+ *    透传 canonical（`owner` / `owner/repo`）；
+ * 3. Token 侧原样保留：格式预检（ghp_ / github_pat_ 前缀）、密码掩码、
+ *    验证失败 inline 错误、验证期间禁用输入与按钮；
+ * 4. #229：全部文案 stringResource 化，随系统语言取词（原硬编码中文）。
  *    错误提示经资源 id 存态（onClick/协程非 composable），展示层解析。
  *
- * `internal`（非 private）以便 [com.apex.agent.ui.screen.agent.AgentChatScreen]
- * 在 `/mcp:github` 未连接时复用同一个对话框 —— 避免在两处维护一份 Token 输入 UI。
+ * `internal` 以便 CodeScreen（/mcp:github 未连接信号）与市场页 GitHub 账号
+ * 分区复用同一份输入 UI —— 避免多处维护；3 个调用点签名保持一致。
  */
 @Composable
 internal fun GithubTokenDialog(
     onDismiss: () -> Unit,
-    onSubmit: suspend (String) -> String?,
-    onSuccess: (token: String, username: String) -> Unit
+    onSubmit: suspend (token: String) -> String?,
+    onSuccess: (token: String, username: String, normalizedRepo: String?) -> Unit
 ) {
     var token by remember { mutableStateOf("") }
+    var repoInput by remember { mutableStateOf("") }
     var isValidating by remember { mutableStateOf(false) }
     // #229：错误文案以资源 id 存态（onClick/协程是非 composable 上下文，
     // 不能直接 stringResource），展示层再解析 —— 与导出 chooser 标题同款模式
     var errorMessageRes by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
+
+    // 地址实时归一化反馈（每次输入重算——纯函数，开销可忽略）：
+    // repoRef = null 表示未填写（空）或无法识别。文案在组合上下文内预解析，
+    // slot lambda 只捕获纯字符串（与 Token 字段 errorMessage 同款模式）。
+    val repoRef = GithubRepoNormalizer.normalize(repoInput)
+    val repoFeedbackText: String? = when {
+        repoInput.isBlank() -> null
+        repoRef == null -> stringResource(R.string.github_v3_dialog_repo_invalid)
+        repoRef.repo != null -> stringResource(
+            R.string.github_v3_dialog_repo_ok_repo,
+            GithubRepoNormalizer.canonical(repoRef)
+        )
+        else -> stringResource(R.string.github_v3_dialog_repo_ok_user, repoRef.owner)
+    }
+    val repoFeedbackIsError = repoInput.isNotBlank() && repoRef == null
 
     AlertDialog(
         onDismissRequest = { if (!isValidating) onDismiss() },
@@ -205,15 +245,13 @@ internal fun GithubTokenDialog(
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.size(20.dp)
                 )
-                // #229：标题随语言取词（原硬编码中文）
-                Text(stringResource(R.string.github_token_dialog_title))
+                Text(stringResource(R.string.github_v3_dialog_title))
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    // #229：说明文案随语言取词（原硬编码中文，\n 换行双侧一致）
-                    stringResource(R.string.github_token_dialog_hint),
+                    stringResource(R.string.github_v3_dialog_help),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -223,8 +261,7 @@ internal fun GithubTokenDialog(
                         token = it
                         errorMessageRes = null
                     },
-                    // #229：占位 label 随语言取词（原硬编码中文）
-                    label = { Text(stringResource(R.string.github_token_field_label)) },
+                    label = { Text(stringResource(R.string.github_v3_dialog_token_label)) },
                     singleLine = true,
                     isError = errorMessageRes != null,
                     supportingText = errorMessageRes?.let { res ->
@@ -233,6 +270,30 @@ internal fun GithubTokenDialog(
                         }
                     },
                     visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isValidating
+                )
+                OutlinedTextField(
+                    value = repoInput,
+                    onValueChange = { repoInput = it },
+                    label = { Text(stringResource(R.string.github_v3_dialog_repo_label)) },
+                    placeholder = { Text(stringResource(R.string.github_v3_dialog_repo_placeholder)) },
+                    singleLine = true,
+                    // 输入非空时实时归一化反馈（合法=绿色已识别；非法=红字提示
+                    // 但不阻断提交——按未填写处理，Token 连接照常进行）
+                    supportingText = repoFeedbackText?.let { feedback ->
+                        {
+                            Text(
+                                feedback,
+                                color = if (repoFeedbackIsError) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isValidating
                 )
@@ -246,7 +307,7 @@ internal fun GithubTokenDialog(
 
                     // 格式预检：避免无效 token 浪费网络请求（#229：文案键直存态）
                     if (!isValidTokenFormat(trimmedToken)) {
-                        errorMessageRes = R.string.github_token_error_format
+                        errorMessageRes = R.string.github_v3_dialog_token_prefix_error
                         return@Button
                     }
 
@@ -256,10 +317,13 @@ internal fun GithubTokenDialog(
                         val username = onSubmit(trimmedToken)
                         isValidating = false
                         if (username != null) {
-                            onSuccess(trimmedToken, username)
+                            // 地址归一化在确认时定格（失败/未填 → null，不改动既有值）
+                            val normalizedRepo = GithubRepoNormalizer.normalize(repoInput)
+                                ?.let { GithubRepoNormalizer.canonical(it) }
+                            onSuccess(trimmedToken, username, normalizedRepo)
                             onDismiss()
                         } else {
-                            errorMessageRes = R.string.github_token_error_validate
+                            errorMessageRes = R.string.github_v3_dialog_token_invalid
                         }
                     }
                 },
@@ -273,12 +337,9 @@ internal fun GithubTokenDialog(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                // #229：验证中/连接/取消随语言取词（原硬编码中文）
                 Text(
-                    stringResource(
-                        if (isValidating) R.string.github_token_validating
-                        else R.string.github_token_connect
-                    )
+                    if (isValidating) stringResource(R.string.github_v3_dialog_validating)
+                    else stringResource(R.string.github_v3_dialog_connect)
                 )
             }
         },
@@ -286,7 +347,7 @@ internal fun GithubTokenDialog(
             TextButton(
                 onClick = onDismiss,
                 enabled = !isValidating
-            ) { Text(stringResource(R.string.github_token_cancel)) }
+            ) { Text(stringResource(R.string.github_v3_dialog_cancel)) }
         }
     )
 }

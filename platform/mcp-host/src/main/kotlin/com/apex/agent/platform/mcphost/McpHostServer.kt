@@ -552,6 +552,9 @@ class McpHostServer(
         try {
             HttpCodec.writeResponse(socket.getOutputStream(), response())
         } catch (_: IOException) {
+            // #260（补档说明）：本模块为纯 JVM（无日志依赖）；503 短路应答写失败
+            // 的唯一成因是对端已断开 —— 尽力而为语义，finally 保证 socket 必关。
+            // 若后续需要观测，可接入 _auditLog（状态码 499/客户端断开约定）。
         } finally {
             runCatching { socket.close() }
         }

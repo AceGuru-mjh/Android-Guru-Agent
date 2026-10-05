@@ -56,7 +56,13 @@ class ApexAccessibilityService : AccessibilityService() {
 
         private fun notifyAvailabilityChanged(connected: Boolean) {
             lifecycleListeners.forEach { listener ->
-                try { listener(connected) } catch (_: Exception) {}
+                // #260：监听器异常不得中断扇出（其余监听器照常收通知），但必须留痕
+                try { listener(connected) } catch (e: Exception) {
+                    android.util.Log.w(
+                        "ApexA11yService",
+                        "lifecycle listener failed (connected=$connected): ${e.message}"
+                    )
+                }
             }
         }
     }
@@ -75,7 +81,13 @@ class ApexAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         eventListeners.forEach { listener ->
-            try { listener(event) } catch (_: Exception) {}
+            // #260：单监听器异常不阻断事件扇出（其余监听器照常消费），但必须留痕
+            try { listener(event) } catch (e: Exception) {
+                android.util.Log.w(
+                    "ApexA11yService",
+                    "event listener failed (${event.eventType}): ${e.message}"
+                )
+            }
         }
     }
 
@@ -276,9 +288,11 @@ class ApexAccessibilityService : AccessibilityService() {
 
     // ═══ 内部方法 ═══
 
+
     // #241：checkMainProcessAlive / keepAliveEnabled（旧「不死心跳」的实现体）
     // 已删除 —— 服务与主进程同进程，runningAppProcesses 自检恒为真，
     // 每 30 秒的 binder IPC 空转既耗电又给不出任何有效信号。
+
 
     private fun traverseNode(
         node: AccessibilityNodeInfo,
@@ -309,7 +323,11 @@ class ApexAccessibilityService : AccessibilityService() {
                 val child = node.getChild(i) ?: continue
                 traverseNode(child, result, depth + 1, maxDepth)
                 child.recycle()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // #260：高频 UI 树遍历路径用 debug 级（避免刷屏）；单子树失败
+                // 不阻断整树采集（其余兄弟节点继续）
+                android.util.Log.d("ApexA11yService", "traverseNode child[$i] failed: ${e.message}")
+            }
         }
     }
 

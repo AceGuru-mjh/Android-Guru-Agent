@@ -108,6 +108,10 @@ object SlashCommandRouter {
      * `ToolModule` adds/removes a GitHub tool, update this list in lockstep
      * （与上方 [GITHUB_MCP_TOOLS] 是两套共存的能力：原生工具直调，MCP 工具走
      * mcp_call —— 提示词里两者都列出，互为备份）。
+     *
+     * v3 S3（G7）：与 GithubTools.kt 实际注册的 9 个工具对齐——旧清单漏了
+     * github_list_branches / github_search_repos（/mcp:github 提示词少列 2 个
+     * 可用工具，模型误以为不存在）。
      */
     private val GITHUB_TOOL_IDS: List<String> = listOf(
         "github_get_user",
@@ -116,7 +120,9 @@ object SlashCommandRouter {
         "github_write_file",
         "github_create_issue",
         "github_list_issues",
-        "github_search_code"
+        "github_search_code",
+        "github_list_branches",
+        "github_search_repos"
     )
 
     fun route(

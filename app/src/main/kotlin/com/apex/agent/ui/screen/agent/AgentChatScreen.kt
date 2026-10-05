@@ -156,6 +156,9 @@ fun AgentChatScreen(
     // ═══ #168 模式指南底部弹层（AgentModeSelector 的「?」图标打开）═══
     var showModeGuide by remember { mutableStateOf(false) }
 
+    // ═══ S2：Loop 循环配置弹层（切到 LOOP 模式 / 首条消息拦截打开）═══
+    var showLoopSetup by remember { mutableStateOf(false) }
+
     // ═══ #197 模型 API 未配置浮窗（发送时拦截并提示去配置）═══
     var showApiMissingNotice by remember { mutableStateOf(false) }
 
@@ -309,6 +312,11 @@ fun AgentChatScreen(
                         current = uiState.mode,
                         onSelect = { mode ->
                             viewModel.setMode(mode)
+                            // S2：切到 LOOP 且尚无激活循环 → 弹循环配置 Sheet
+                            //（首条消息发送也会被拦截进入，预填草稿文本）
+                            if (mode == AgentMode.LOOP && viewModel.uiState.value.activeLoop == null) {
+                                showLoopSetup = true
+                            }
                         },
                         onOpenGuide = { showModeGuide = true },
                         modes = AGENT_SCREEN_MODES
@@ -540,6 +548,17 @@ fun AgentChatScreen(
                     )
                 }
 
+                // ═══ S2：Loop 运行状态卡（输入栏上方；activeLoop 独立于 mode 存活，
+                // 切走 LOOP 模式也持续显示；实现在 LoopSetupSheet.kt 同文件）═══
+                uiState.activeLoop?.let { loopConfig ->
+                    LoopActiveCard(
+                        config = loopConfig,
+                        nextRunAtOf = { cfg, _ -> viewModel.loopNextRunAt(cfg) },
+                        onStop = { viewModel.stopLoop() },
+                        onRunNow = { viewModel.triggerLoopNow() }
+                    )
+                }
+
                 // ═══ Viro 桌宠：站于输入栏上方（独占 56dp 行槽位，不遮挡消息列表与功能控件）═══
                 // 情绪随 Agent 运行态切换（思考/执行工具/回复/等待输入/出错/完成），
                 // 新会话挥手打招呼、RunSummary 出现跳跃庆祝、点击可随机跳跃/挥手。
@@ -680,6 +699,12 @@ fun AgentChatScreen(
                                     showApiMissingNotice = true
                                     return@SkillChipInputField
                                 }
+                                // S2：LOOP 模式首条消息 → 转循环配置 Sheet（预填草稿），
+                                // 不直接发送；返回 false（非首条/斜杠指令）则照常发送。
+                                if (viewModel.maybeInterceptLoopFirstSend(inputText.trim())) {
+                                    showLoopSetup = true
+                                    return@SkillChipInputField
+                                }
                                 // P2-9（6-c）：附件-only 消息同样可发（仅计可用附件；二轮审计 A-1 口径对齐）
                                 // chip-only（输入框空文本）同样可发：VM 走斜杠管线
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
@@ -696,6 +721,8 @@ fun AgentChatScreen(
                                 AgentMode.HUMAN_ASSIST -> stringResource(R.string.chat_hint_human_assist)
                                 AgentMode.CUSTOM -> stringResource(R.string.chat_hint_custom)
                                 AgentMode.BUILD -> stringResource(R.string.chat_hint_build)
+                                AgentMode.GOAL -> stringResource(R.string.chat_hint_goal)
+                                AgentMode.LOOP -> stringResource(R.string.chat_hint_loop)
                             }
                         )
                         // ═══ / 实时联想（输入以 / 开头时弹出命令候选，点击挂 chip）═══
@@ -739,6 +766,11 @@ fun AgentChatScreen(
                                 // #197 模型 API 未配置：拦截发送并弹浮窗引导去配置。
                                 if (!llmConfigured) {
                                     showApiMissingNotice = true
+                                    return@FilledIconButton
+                                }
+                                // S2：LOOP 模式首条消息 → 转循环配置 Sheet（预填草稿）。
+                                if (viewModel.maybeInterceptLoopFirstSend(inputText.trim())) {
+                                    showLoopSetup = true
                                     return@FilledIconButton
                                 }
                                 val hasUsableAttachment = attachments.any { it.status != UploadStatus.ERROR }
@@ -796,6 +828,23 @@ fun AgentChatScreen(
     // ═══ #168 模式指南底部弹层（双模式行为矩阵 + 思考档位简表）═══
     if (showModeGuide) {
         ModeGuideSheet(onDismiss = { showModeGuide = false })
+    }
+
+    // ═══ S2：Loop 循环配置弹层（提示词预填输入框草稿；默认值读 AgentSettings
+    // 的 loop 预埋字段；保存 → viewModel.startLoop）═══
+    if (showLoopSetup) {
+        LoopSetupSheet(
+            initialPrompt = inputTextState.value,
+            sessionTag = viewModel.currentSessionTag(),
+            defaultIntervalMs = uiSettings.loopDefaultIntervalMs,
+            defaultMaxRuns = uiSettings.loopMaxRunsDefault,
+            defaultNotify = uiSettings.loopNotifyOnRun,
+            onDismiss = { showLoopSetup = false },
+            onStart = { config ->
+                viewModel.startLoop(config)
+                showLoopSetup = false
+            }
+        )
     }
 
     // ═══ #197 模型 API 未配置浮窗（发送被拦截时弹出，带「去配置」入口）═══

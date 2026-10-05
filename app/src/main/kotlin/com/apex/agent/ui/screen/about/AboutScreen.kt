@@ -15,7 +15,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -500,7 +499,12 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
     }
 }
 
-/** 极光氛围：顶部主色洗刷 + 三枚 Lissajous 漂移光晕 + 七粒上升微尘。 */
+/** 极光氛围：顶部主色洗刷 + 三枚 Lissajous 漂移光晕 + 七粒上升微尘。
+ *
+ *  #262 Compose 最佳实践：Canvas（drawBehind）→ Box + drawWithCache。
+ *  光晕的 Lissajous 轨迹只动**中心**，半径只依赖尺寸 —— 渐变 Brush 以
+ *  原点为中心缓存，绘制期 translate 到动点（颜色/半径/中心零逐帧分配）。
+ *  洗刷渐变整体静态。微尘 alpha 随闪烁动画，保留最小 copy 分配。 */
 @Composable
 private fun AuroraCanvas(drift: State<Float>, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
@@ -510,65 +514,95 @@ private fun AuroraCanvas(drift: State<Float>, modifier: Modifier = Modifier) {
     val wash = scheme.primaryContainer.copy(alpha = 0.18f)
     val speckColor = scheme.primary
 
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val t = drift.value * 2.0 * PI
-
-        // 顶部主色洗刷
-        drawRect(
-            brush = Brush.verticalGradient(
+    Box(
+        modifier = modifier.drawWithCache {
+            val w = size.width
+            val h = size.height
+            // ── 缓存层（size 变化才重建）──
+            val washBrush = Brush.verticalGradient(
                 colors = listOf(wash, Color.Transparent),
                 startY = 0f,
                 endY = h * 0.55f
             )
-        )
-        // 三枚漂移光晕（Lissajous 轨迹互不同步，永不重复构图）
-        drawOrb(
-            color = orbA,
-            cx = w * (0.80f + 0.09f * sin(t).toFloat()),
-            cy = h * (0.20f + 0.10f * cos(t * 0.7).toFloat()),
-            radius = w * 0.55f
-        )
-        drawOrb(
-            color = orbB,
-            cx = w * (0.14f + 0.08f * sin(t * 1.3 + 1.1).toFloat()),
-            cy = h * (0.74f + 0.12f * cos(t * 0.9).toFloat()),
-            radius = w * 0.48f
-        )
-        drawOrb(
-            color = orbC,
-            cx = w * (0.50f + 0.15f * sin(t * 0.8 + 2.4).toFloat()),
-            cy = h * (0.45f + 0.16f * cos(t * 1.1).toFloat()),
-            radius = w * 0.42f
-        )
-        // 七粒微尘：上升 + 摇曳 + 闪烁
-        repeat(7) { i ->
-            val phase = (drift.value + i * 0.143f) % 1f
-            val y = h * (1.06f - 1.18f * phase)
-            val x = w * (0.08f + 0.84f * ((i * 0.37f) % 1f)) +
-                w * 0.025f * sin(t * 1.6 + i * 1.9).toFloat()
-            val twinkle = 0.5f + 0.5f * sin(t * 2.4 + i * 1.7).toFloat()
-            drawCircle(
-                color = speckColor.copy(alpha = 0.10f + 0.22f * twinkle),
-                radius = (1.1f + (i % 3) * 0.5f).dp.toPx(),
-                center = Offset(x, y)
+            // 光晕渐变原点化：半径只依赖宽度（0.55/0.48/0.42 × w），
+            // 中心随 translate 移动 —— Brush 完全静态可缓存。
+            val orbABrush = Brush.radialGradient(
+                colors = listOf(orbA, Color.Transparent),
+                center = Offset.Zero,
+                radius = w * 0.55f
             )
+            val orbBBrush = Brush.radialGradient(
+                colors = listOf(orbB, Color.Transparent),
+                center = Offset.Zero,
+                radius = w * 0.48f
+            )
+            val orbCBrush = Brush.radialGradient(
+                colors = listOf(orbC, Color.Transparent),
+                center = Offset.Zero,
+                radius = w * 0.42f
+            )
+            val orbARadius = w * 0.55f
+            val orbBRadius = w * 0.48f
+            val orbCRadius = w * 0.42f
+            // 微尘半径只有 3 档（i % 3），预换算缓存
+            val speckRadii = floatArrayOf(
+                1.1f.dp.toPx(),
+                1.6f.dp.toPx(),
+                2.1f.dp.toPx()
+            )
+            onDrawBehind {
+                val t = drift.value * 2.0 * PI
+
+                // 顶部主色洗刷
+                drawRect(brush = washBrush)
+                // 三枚漂移光晕（Lissajous 轨迹互不同步，永不重复构图）
+                drawOrb(
+                    brush = orbABrush,
+                    cx = w * (0.80f + 0.09f * sin(t).toFloat()),
+                    cy = h * (0.20f + 0.10f * cos(t * 0.7).toFloat()),
+                    radius = orbARadius
+                )
+                drawOrb(
+                    brush = orbBBrush,
+                    cx = w * (0.14f + 0.08f * sin(t * 1.3 + 1.1).toFloat()),
+                    cy = h * (0.74f + 0.12f * cos(t * 0.9).toFloat()),
+                    radius = orbBRadius
+                )
+                drawOrb(
+                    brush = orbCBrush,
+                    cx = w * (0.50f + 0.15f * sin(t * 0.8 + 2.4).toFloat()),
+                    cy = h * (0.45f + 0.16f * cos(t * 1.1).toFloat()),
+                    radius = orbCRadius
+                )
+                // 七粒微尘：上升 + 摇曳 + 闪烁
+                repeat(7) { i ->
+                    val phase = (drift.value + i * 0.143f) % 1f
+                    val y = h * (1.06f - 1.18f * phase)
+                    val x = w * (0.08f + 0.84f * ((i * 0.37f) % 1f)) +
+                        w * 0.025f * sin(t * 1.6 + i * 1.9).toFloat()
+                    val twinkle = 0.5f + 0.5f * sin(t * 2.4 + i * 1.7).toFloat()
+                    drawCircle(
+                        color = speckColor.copy(alpha = 0.10f + 0.22f * twinkle),
+                        radius = speckRadii[i % 3],
+                        center = Offset(x, y)
+                    )
+                }
+            }
         }
-    }
+    )
 }
 
-/** 单枚径向光晕。 */
-private fun DrawScope.drawOrb(color: Color, cx: Float, cy: Float, radius: Float) {
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(color, Color.Transparent),
-            center = Offset(cx, cy),
-            radius = radius
-        ),
-        radius = radius,
-        center = Offset(cx, cy)
-    )
+/** 单枚径向光晕 —— 缓存渐变以原点为中心，translate 到动点后绘制。
+ *  （与原 `radialGradient(center=Offset(cx,cy))` 逐像素等效：渐变中心与
+ *  圆心同经 translate，半径不变。） */
+private fun DrawScope.drawOrb(brush: Brush, cx: Float, cy: Float, radius: Float) {
+    translate(left = cx, top = cy) {
+        drawCircle(
+            brush = brush,
+            radius = radius,
+            center = Offset.Zero
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -226,7 +226,8 @@ fun CodeScreen(
                         content = state.stream.terminalContent,
                         activeCommand = state.stream.activeTerminalCallId,
                         collapsed = terminalCollapsed,
-                        onToggleCollapse = { terminalCollapsed = !terminalCollapsed }
+                        onToggleCollapse = { terminalCollapsed = !terminalCollapsed },
+                        glassState = glassState
                     )
                 }
 
@@ -238,14 +239,18 @@ fun CodeScreen(
                         onAnswer = { optionIds, customText ->
                             viewModel.answerAgentQuestion(optionIds, customText)
                         },
-                        onCancel = viewModel::cancelAgentQuestion
+                        onCancel = viewModel::cancelAgentQuestion,
+                        glassState = glassState
                     )
                 }
 
                 state.error?.let { err ->
                     // #209：运行失败类错误（errorRetriable）提供一键重试；运行中不重复触发。
+                    // v6 玻璃接线：错误条从实色 errorContainer 改 GlassCard 真采样 ——
+                    // accent=error 保错误语义在玻璃材质上仍可辨。
                     ErrorBar(
                         message = err,
+                        glassState = glassState,
                         onRetry = if (state.errorRetriable && !state.isRunning) viewModel::retryLastRun else null,
                         onDismiss = viewModel::dismissError
                     )
@@ -658,7 +663,7 @@ private fun CodeInputBar(
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             // ═══ v5：技能 chip 已内联进输入框（SkillChipInputField），独立的
             // 胶囊行移除 —— 不再出现「胶囊行叠在输入框上方」的重叠观感。═══
 
@@ -867,11 +872,15 @@ private fun ApiMissingFloatingNotice(
 @Composable
 private fun ErrorBar(
     message: String,
+    glassState: HazeState?,
     onRetry: (() -> Unit)?,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
+    GlassCard(
+        state = glassState,
+        style = GlassStyle.Floating,
+        shape = RoundedCornerShape(12.dp),
+        accent = MaterialTheme.colorScheme.error,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -881,14 +890,14 @@ private fun ErrorBar(
             Icon(
                 Icons.Default.ErrorOutline,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer,
+                tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis

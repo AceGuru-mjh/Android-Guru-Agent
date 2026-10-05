@@ -9,15 +9,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -92,7 +92,8 @@ internal fun CodeStreamTimeline(
                 .fillMaxSize()
                 .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier),
             // v5：底部悬浮栈（终端尾窗/输入栏）动态补偿 —— 最后一条不被遮挡
-            contentPadding = PaddingValues(bottom = 12.dp + bottomInset)
+            // v6 紧凑化：12 → 8dp（悬浮栈自身已瘦身）
+            contentPadding = PaddingValues(bottom = 8.dp + bottomInset)
         ) {
             grouped.forEach { segment ->
                 when (segment) {
@@ -124,18 +125,20 @@ internal fun CodeStreamTimeline(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            ExtendedFloatingActionButton(
+            // v6 紧凑化：ExtendedFAB(56dp+文字) → SmallFAB(40dp 纯图标) ——
+            // 回底是时间轴高频小操作，缩小视觉质量但不减可达性（CD 保留语义）
+            SmallFloatingActionButton(
                 onClick = { scope.launch { anchor.animateToLast() } },
-                icon = {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = null
-                    )
-                },
-                text = { Text(stringResource(R.string.code_stream_fab_bottom)) },
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.padding(bottom = 8.dp + bottomInset)
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = stringResource(R.string.code_stream_fab_bottom),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

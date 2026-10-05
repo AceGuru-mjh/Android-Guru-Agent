@@ -68,6 +68,7 @@ class FileWriteTool(
             val existed = file.exists()
             val oldSize = if (existed) file.length() else 0L
 
+            var atomic = true
             when (mode) {
                 "append" -> {
                     // P3-j 修复：仅当内容非空且不以换行结尾时才补 "\n"。
@@ -76,7 +77,11 @@ class FileWriteTool(
                     val separator = if (content.isNotEmpty() && !content.endsWith("\n")) "\n" else ""
                     file.appendText(content + separator)
                 }
-                else -> file.writeText(content)
+                else -> {
+                    // #258：覆盖写改原子写（同目录 tmp + renameTo）——
+                    // 写一半崩溃/断电不再留下截断的用户文件。
+                    atomic = AtomicFileWrite.writeText(file, content)
+                }
             }
 
             val lineCount = content.lines().size
@@ -91,6 +96,8 @@ class FileWriteTool(
                 }
                 appendLine("  $lineCount lines, ${formatSize(file.length())}")
                 appendLine("  Path: ${file.absolutePath}")
+                // #258：仅罕见的 rename 失败回退时注记（成功路径输出保持不变）。
+                if (!atomic) appendLine("  (non-atomic fallback: rename failed)")
             }
         } catch (e: Exception) {
             "Write error: ${e.message}"

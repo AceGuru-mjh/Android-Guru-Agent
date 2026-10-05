@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.apex.agent.core.logging.AppLogger
+import com.apex.agent.core.logging.LogCategory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +39,16 @@ class EncryptedPrefsVaultStore @Inject constructor(
         } catch (e: Exception) {
             // 与 GithubTokenManager 同款退化策略：Keystore/主密钥不可用时
             // 不让金库整体不可用，降级为普通 SP（进程内仍受沙箱保护）。
+            // #257：降级不再静默 —— 留一条 WARN（诊断与安全审计可见），
+            // 与 GithubTokenManager 的 P2 告警口径对齐。
+            runCatching {
+                AppLogger.instance.warn(
+                    LogCategory.SYSTEM, "EncryptedPrefsVaultStore",
+                    "EncryptedSharedPreferences 初始化失败，金库密钥将以明文存储" +
+                        "（${e.javaClass.simpleName}: ${e.message}）—— 建议在系统设置中" +
+                        "清除应用数据后重新录入密钥"
+                )
+            }
             context.getSharedPreferences("vault_prefs_fallback", Context.MODE_PRIVATE)
         }
     }

@@ -218,7 +218,14 @@ class EnhancedToolExecutor(
 
             // Failed attempt: classify, trace, inform breaker.
             traceRecorder?.completeFailure(span, errorSlugOf(result))
-            breaker?.recordFailure(toolId, result)
+            // P1 修复（熔断误开）：域层失败（文件不存在 / grep exit=1 / 会话不存在
+            // 等正常探索结果）不再计入熔断器 —— 旧实现任何 "Error:" 前缀都
+            // recordFailure，Agent 连续探索 5 个不存在的路径就把 read_file
+            // 熔断 OPEN，后续 15-120s 内全拒绝。熔断只统计基础设施失败
+            // （超时 / IO / 崩溃），域失败交给 RetryClassifier 与模型自行换路。
+            if (isInfraFailure(result)) {
+                breaker?.recordFailure(toolId, result)
+            }
 
             val retryable = annotations.retrySafe &&
                 RetryClassifier.classify(result) == RetryClassifier.Verdict.Retryable
@@ -392,7 +399,11 @@ class EnhancedToolExecutor(
             if (invocation != null) {
                 if (sawError) {
                     usageTracker?.failure(invocation, lastError)
-                    breaker?.recordFailure(toolId, lastError)
+                    // P1 修复（熔断误开，与非流式路径同源）：工具自报的域层
+                    // 错误（文件不存在/退出码非零/会话不存在）不计入熔断。
+                    if (isInfraFailure(lastError)) {
+                        breaker?.recordFailure(toolId, lastError)
+                    }
                 } else {
                     usageTracker?.success(invocation)
                     breaker?.recordSuccess(toolId)
@@ -403,7 +414,9 @@ class EnhancedToolExecutor(
             if (invocation != null) {
                 if (result.startsWith("Error")) {
                     usageTracker?.failure(invocation, result)
-                    breaker?.recordFailure(toolId, result)
+                    if (isInfraFailure(result)) {
+                        breaker?.recordFailure(toolId, result)
+                    }
                 } else {
                     usageTracker?.success(invocation)
                     breaker?.recordSuccess(toolId)
@@ -493,7 +506,12 @@ class EnhancedToolExecutor(
     }
 
     private fun rateLimitMessage(toolId: String, policy: ToolRunPolicy, retryInMs: Long): String =
-        "Error: invalid argument: rate limit for '$toolId' is ${policy.rateLimitPerMinute}/min; " +
+        // P2 修复（文案语义）：旧文案前缀 "Error: invalid argument: rate limit…"
+        // 把限流伪装成参数错误 —— 对模型不诚实且误导排障。新前缀
+        // "Error: rate limited:" 同时进 RetryClassifier 终止前缀表与
+        // FailureClassifier 的守卫表（两处已同步）：执行器与引擎都不盲重放
+        // 被限流的同一调用（旧引擎层会按 TRANSIENT 重试，浪费预算且再撞限流）。
+        "Error: rate limited: '$toolId' quota ${policy.rateLimitPerMinute}/min; " +
             "next call possible in ${((retryInMs + 999) / 1000)}s. Stop repeating the same call — " +
             "inspect previous results and change your approach."
 
@@ -507,6 +525,14 @@ class EnhancedToolExecutor(
         verdict.lastError?.let { append("; last error: ").append(it.take(120)) }
         append(". Do not retry immediately — use a different tool or wait, " +
             "and tell the user what failed.")
+    }
+
+    /**
+     * 任务级熔断复位（[ToolExecutor.resetBreakers] 的实现）：清零全部
+     * 熔断计数。引擎在每个新任务开始时调用 —— 见接口 KDoc。
+     */
+    override suspend fun resetBreakers() {
+        breaker?.resetAll()
     }
 
     private fun timeoutResult(timeoutMs: Long): String =
@@ -531,6 +557,38 @@ class EnhancedToolExecutor(
         val slug = rest.substringBefore(':').lowercase().replace(' ', '_')
         return slug.takeIf { it.isNotBlank() && it.length <= 24 }
     }
+
+    /**
+     * P1 修复（熔断误开）：判定一条 "Error:" 结果是否为**基础设施失败** ——
+     * 熔断器只计数这类失败。
+     *
+     * 生产链路里工具几乎全部经 SafeAgentTool 包装（异常折叠为字符串），
+     * 执行器看不到异常类型；但折叠串与执行器自身的三类硬失败文案
+     * 都有稳定的机器可判签名（见 timeoutResult / ioFailureResult /
+     * crashResult 与 SafeAgentTool 的同源前缀）：
+     *
+     * - 超时：`Error: timeout: tool call exceeded …ms budget`；
+     * - IO：含 `I/O error in '…'`（执行器 ioFailureResult 与
+     *   SafeAgentTool 的 IOException 折叠串同源）；
+     * - 崩溃：`Error: execution failed: XxxException in '…'`（执行器
+     *   crashResult）或含 `工具执行失败（…）`（SafeAgentTool 的通用
+     *   Throwable 折叠串）。
+     *
+     * 域层失败（文件不存在 / exit≠0 / invalid argument / 会话不存在 /
+     * 权限拒绝等）不命中任何签名 → 不计入熔断 —— 连续探索不该把工具
+     * 锁死（误开方向的代价是整段任务的工具被禁用，漏开方向只是
+     * 少一道对系统性崩溃的熔断保护，且超时/IO/崩溃仍受保护）。
+     */
+    internal fun isInfraFailure(message: String?): Boolean {
+        if (message == null) return false
+        if (message.startsWith("Error: timeout: tool call exceeded")) return true
+        if (message.contains("I/O error in '")) return true
+        if (message.contains("工具执行失败（")) return true
+        return INFRA_CRASH_PATTERN.containsMatchIn(message)
+    }
+
+    /** 执行器 crashResult 的崩溃签名：`Error: execution failed: Xxx in 'tool'`。 */
+    private val INFRA_CRASH_PATTERN = Regex("Error: execution failed: [A-Za-z0-9_.]+Exception in '")
 }
 
 /**

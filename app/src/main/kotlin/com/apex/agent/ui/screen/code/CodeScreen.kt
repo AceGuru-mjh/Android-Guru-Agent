@@ -77,8 +77,10 @@ import com.apex.agent.ui.component.SlashCommandButton
 import com.apex.agent.ui.component.SkillChipInputField
 import com.apex.agent.ui.component.SlashMenuProvider
 import com.apex.agent.ui.component.rememberSlashMenuProvider
+import androidx.compose.material.icons.filled.CallSplit
 import com.apex.agent.ui.screen.agent.CODING_SCREEN_MODES
 import com.apex.agent.ui.screen.agent.AgentModeSelector
+import com.apex.agent.ui.screen.agent.AgentRoleSelector
 import com.apex.agent.ui.screen.agent.PendingPipelineCommand
 import com.apex.agent.ui.screen.agent.PlanConfirmationCard
 import com.apex.agent.ui.screen.agent.QuestionCard
@@ -115,6 +117,9 @@ fun CodeScreen(
     // E4（#2-c P1-6）：主状态流对齐全仓 117 处先例换 lifecycle 版 —— 后台/不可见
     // 期间停收集（StateFlow 无参重载语义与 collectAsState 一致，初始值取 value）。
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // v6 Coding 专家模板（模式行胶囊数据源）
+    val codingRoles by viewModel.roleController.roles.collectAsStateWithLifecycle()
+    val activeCodingRole by viewModel.roleController.active.collectAsStateWithLifecycle()
     val pendingAgentQuestion by viewModel.pendingAgentQuestion.collectAsStateWithLifecycle()
     val pendingCommands by viewModel.pendingCommands.collectAsStateWithLifecycle()
     val llmConfigured by viewModel.llmConfigured.collectAsStateWithLifecycle()
@@ -140,6 +145,8 @@ fun CodeScreen(
 
     var showNewWorkspace by rememberSaveable { mutableStateOf(false) }
     var showThinkingGuide by rememberSaveable { mutableStateOf(false) }
+    // v6 Git 工作区面板（右上角入口；面板打开即拉取 status 现场）
+    var showGitPanel by rememberSaveable { mutableStateOf(false) }
     // 胶囊详情弹层选中项（存 id 不存对象：StreamToolCall 是不可变快照，
     // 每 25ms 批次按 index 替换新实例——存对象会冻结在点击瞬间，
     // 状态/耗时/Diff 永不更新；存 id 每次重组从活快照重查）。
@@ -165,7 +172,9 @@ fun CodeScreen(
             onOpenLongTasks = viewModel::openLongTaskCenter,
             // v1.5 右上角思考逻辑切换（深潜 = 自研 / 标准 = 标准任务循环）
             logicMode = state.logicMode,
-            onSwitchLogic = viewModel::setLogicMode
+            onSwitchLogic = viewModel::setLogicMode,
+            // v6 右上角 Git 工作区（变更文件 + git 功能）
+            onOpenGit = { showGitPanel = true }
         )
 
         if (state.todos.isNotEmpty()) {
@@ -180,7 +189,8 @@ fun CodeScreen(
                 isLoading = state.editorLoading,
                 errorText = state.editorError,
                 onClose = viewModel::closeEditor,
-                onLineClick = { line -> viewModel.insertAtRef("@$editorPath:$line") }
+                onLineClick = { line -> viewModel.insertAtRef("@$editorPath:$line") },
+                onDismissError = viewModel::dismissEditorError
             )
         }
 
@@ -226,7 +236,8 @@ fun CodeScreen(
                         content = state.stream.terminalContent,
                         activeCommand = state.stream.activeTerminalCallId,
                         collapsed = terminalCollapsed,
-                        onToggleCollapse = { terminalCollapsed = !terminalCollapsed }
+                        onToggleCollapse = { terminalCollapsed = !terminalCollapsed },
+                        glassState = glassState
                     )
                 }
 
@@ -238,14 +249,18 @@ fun CodeScreen(
                         onAnswer = { optionIds, customText ->
                             viewModel.answerAgentQuestion(optionIds, customText)
                         },
-                        onCancel = viewModel::cancelAgentQuestion
+                        onCancel = viewModel::cancelAgentQuestion,
+                        glassState = glassState
                     )
                 }
 
                 state.error?.let { err ->
                     // #209：运行失败类错误（errorRetriable）提供一键重试；运行中不重复触发。
+                    // v6 玻璃接线：错误条从实色 errorContainer 改 GlassCard 真采样 ——
+                    // accent=error 保错误语义在玻璃材质上仍可辨。
                     ErrorBar(
                         message = err,
+                        glassState = glassState,
                         onRetry = if (state.errorRetriable && !state.isRunning) viewModel::retryLastRun else null,
                         onDismiss = viewModel::dismissError
                     )
@@ -265,13 +280,21 @@ fun CodeScreen(
                 // ═══ #197 模式 + 思考档位选择器行（Build/Plan 双档 + 七档思考）═══
                 //（GOAL 切入的弹层/深潜线保障在 VM setMode → onEnterGoalMode 单点，
                 // 此处保持纯方法引用——选择器与 init 恢复共用同一路径）
+                // v6 前插专家模板胶囊（全栈置顶/Git/Android/各语言专家——
+                // 选择即持久化 codeActiveRoleId，经 roleController 落引擎人设）
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 12.dp, vertical = 2.dp)
                 ) {
+                    AgentRoleSelector(
+                        current = activeCodingRole,
+                        roles = codingRoles,
+                        onSelect = viewModel.roleController::select
+                    )
                     AgentModeSelector(
                         current = state.mode,
                         onSelect = viewModel::setMode,
@@ -375,6 +398,14 @@ fun CodeScreen(
         )
     }
 
+    // ═══ v6 Git 工作区面板（右上角入口；打开即拉 status 现场）═══
+    if (showGitPanel) {
+        CodeWorkspacePanel(
+            controller = viewModel.gitPanelController,
+            onDismiss = { showGitPanel = false }
+        )
+    }
+
     // ═══ #197 GitHub 连接对话框（斜杠 /mcp:github 未连接信号）═══
     // v3 S3：onSuccess 第三参 = 对话框归一化后的默认仓库（null = 未填/无法
     // 识别，不改动既有值）
@@ -439,7 +470,8 @@ private fun WorkspaceBar(
     onClearChat: () -> Unit,
     onOpenLongTasks: () -> Unit,
     logicMode: StandardLogicMode = StandardLogicMode.DEEP_DIVE,
-    onSwitchLogic: (StandardLogicMode) -> Boolean = { false }
+    onSwitchLogic: (StandardLogicMode) -> Boolean = { false },
+    onOpenGit: () -> Unit = {}
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     // v1.5 切换被拒提示（运行中拒绝；2s 自清，行内告警形态）
@@ -559,6 +591,17 @@ private fun WorkspaceBar(
             )
 
             Spacer(Modifier.width(4.dp))
+
+            // ═══ v6 Git 工作区（右上角：变更文件 + git 功能）═══
+            // 48dp 触区（主操作红线；CallSplit 即分支意象）
+            IconButton(onClick = onOpenGit, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                Icon(
+                    Icons.Default.CallSplit,
+                    contentDescription = stringResource(R.string.code_git_cd),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
 
             // v1.2 长任务中心入口（记录/模板两页签的 ModalBottomSheet）
             // UI-012：48dp 触区红线（原 28dp）
@@ -697,7 +740,7 @@ private fun CodeInputBar(
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
             // ═══ v5：技能 chip 已内联进输入框（SkillChipInputField），独立的
             // 胶囊行移除 —— 不再出现「胶囊行叠在输入框上方」的重叠观感。═══
 
@@ -906,11 +949,15 @@ private fun ApiMissingFloatingNotice(
 @Composable
 private fun ErrorBar(
     message: String,
+    glassState: HazeState?,
     onRetry: (() -> Unit)?,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
+    GlassCard(
+        state = glassState,
+        style = GlassStyle.Floating,
+        shape = RoundedCornerShape(12.dp),
+        accent = MaterialTheme.colorScheme.error,
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -920,14 +967,14 @@ private fun ErrorBar(
             Icon(
                 Icons.Default.ErrorOutline,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onErrorContainer,
+                tint = MaterialTheme.colorScheme.error,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis

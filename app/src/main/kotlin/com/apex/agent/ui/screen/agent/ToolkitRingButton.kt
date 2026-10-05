@@ -63,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -726,16 +727,20 @@ private fun ToolkitChip(
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text(label, style = MaterialTheme.typography.labelSmall)
-            IconButton(
-                onClick = onClose,
-                // UI-012：48dp 触区红线（原 20dp）
-                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            // v6 紧凑化：48dp IconButton 撑高每颗 chip → 32dp 可点图标盒。
+            // chip 摘除是输入区二级操作；主操作（发送/停止）仍保 48dp 触区。
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button, onClick = onClose),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = stringResource(R.string.chat_cd_close),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }

@@ -91,7 +91,10 @@ class ClawHubSource(
         try {
             val root = json.parseToJsonElement(bodyText).jsonObject
             val raw = root["items"]?.jsonArray ?: emptyList()
+            // P2-1：上游重复条目按 key（owner/slug）去重 —— 消费点 LazyColumn
+            // 用 key = it.key，重复 key 会直接抛 IllegalArgumentException 崩市场页
             val entries = raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseTrendingItem) }
+                .distinctBy { it.key }
             Result.success(ClawHubPage(entries, raw.size >= limit))
         } catch (e: Exception) {
             Result.failure(Exception("热门列表解析失败: ${e.message}"))
@@ -119,7 +122,9 @@ class ClawHubSource(
         try {
             val root = json.parseToJsonElement(bodyText).jsonObject
             val raw = root["results"]?.jsonArray ?: emptyList()
+            // P2-1：同 trending —— 重复 key 去重防 LazyColumn 崩溃
             val entries = raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseSearchItem) }
+                .distinctBy { it.key }
             Result.success(ClawHubPage(entries, raw.size >= limit))
         } catch (e: Exception) {
             Result.failure(Exception("搜索结果解析失败: ${e.message}"))

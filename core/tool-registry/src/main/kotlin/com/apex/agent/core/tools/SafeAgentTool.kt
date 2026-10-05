@@ -43,10 +43,17 @@ import java.io.IOException
  *
  * 异常处理与 [execute] 对称：CancellationException 重抛，其余转成
  * [ToolStreamEvent.Error]，保证收集方永远收到完整事件序列。
+ *
+ * ## 环境前置门透传（P2 修复）
+ *
+ * [ToolEnvironmentGate] 通过 `tool as? EnvironmentAwareTool` 检测；本类
+ * 旧实现未实现该接口 → 包装后门禁恒放行（fail-open），`input_text` 等
+ * 工具的「先 ui_tap 聚焦输入框」引导提示全部失效，工具真跑失败后模型
+ * 在更深的错误里打转。现在透传 delegate 的 [EnvironmentAwareTool.requiredEnv]。
  */
 class SafeAgentTool(
     private val delegate: AgentTool
-) : StreamingAgentTool {
+) : StreamingAgentTool, EnvironmentAwareTool {
 
     override val id: String get() = delegate.id
     override val name: String get() = delegate.name
@@ -55,6 +62,10 @@ class SafeAgentTool(
 
     /** v2 元数据透传：包装层不丢失类别/风险/标签（engine 与 UI 依赖它）。 */
     override val metadata: ToolMetadata get() = delegate.metadata
+
+    /** P2 修复：环境前置门透传 —— delegate 声明的硬前置不再被包装层吞掉。 */
+    override val requiredEnv: List<String>
+        get() = (delegate as? EnvironmentAwareTool)?.requiredEnv ?: emptyList()
 
     override suspend fun execute(arguments: String): String {
         return try {

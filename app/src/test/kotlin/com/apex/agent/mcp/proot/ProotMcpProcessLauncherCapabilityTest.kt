@@ -3,10 +3,12 @@ package com.apex.agent.mcp.proot
 import com.apex.agent.platform.terminal.proot.PRootArgvCapabilities
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 
 /**
  * T92（D5 完成度）：ProotMcpProcessLauncher 的 argv 能力门测试。
@@ -93,5 +95,55 @@ class ProotMcpProcessLauncherCapabilityTest {
         )
         assertTrue(argv.contains("--kill-on-exit"))
         assertEquals("--", argv[envIdx(argv) - 1])
+    }
+
+    /**
+     * P1 修复（home bind 路径推导）回归锁：生产布局
+     * `rootfsDir = <filesDir>/rootfs/ubuntu` 时，持久化 home 必须解析到
+     * `<filesDir>/linux/home`（上推两级），bind 为 `.../linux/home:/root`。
+     * 旧实现只上推一级（`<filesDir>/rootfs/linux/home` 永不存在）→ bind
+     * 被静默跳过，KDoc 承诺的终端/MCP 共享 home 全部落空。
+     */
+    @Test
+    fun `persistent home bind resolves to filesDir slash linux slash home in production layout`() {
+        val filesDir = tmp.newFolder("app-files")
+        // 生产布局：<filesDir>/rootfs/ubuntu（TerminalModule 的 rootfsBaseDir）
+        val rootfsBase = File(filesDir, "rootfs/ubuntu").apply { mkdirs() }
+        // 持久化 home：<filesDir>/linux/home（TerminalModule provideGuestUserHome）
+        val home = File(filesDir, "linux/home").apply { mkdirs() }
+
+        val launcher = ProotMcpProcessLauncher(
+            hostEnv = mapOf("PATH" to "/system/bin"),
+            libprootPath = "/fake/nativeDir/libproot.so",
+            rootfsDir = rootfsBase,
+            isRootfsReady = { true }
+        )
+
+        val homeBind = launcher.buildBinds().firstOrNull { it.second == "/root" }
+        assertNotNull("home bind 必须存在（旧实现推导错路径被静默跳过）", homeBind)
+        assertEquals(
+            "bind 源必须是 <filesDir>/linux/home（上推两级），而不是 <filesDir>/rootfs/linux/home",
+            home.absolutePath,
+            homeBind!!.first
+        )
+    }
+
+    /** home 目录不存在（终端从未初始化）→ 诚实跳过 bind，不抛错。 */
+    @Test
+    fun `persistent home bind is skipped honestly when directory missing`() {
+        val filesDir = tmp.newFolder("app-files-2")
+        val rootfsBase = File(filesDir, "rootfs/ubuntu").apply { mkdirs() }
+
+        val launcher = ProotMcpProcessLauncher(
+            hostEnv = mapOf("PATH" to "/system/bin"),
+            libprootPath = "/fake/nativeDir/libproot.so",
+            rootfsDir = rootfsBase,
+            isRootfsReady = { true }
+        )
+
+        assertFalse(
+            "home 目录不存在时不应有 /root bind",
+            launcher.buildBinds().any { it.second == "/root" }
+        )
     }
 }

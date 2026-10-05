@@ -186,6 +186,17 @@ interface ToolExecutor {
      *   [ToolStreamEvent.Output] + [ToolStreamEvent.Complete]（失败时为 [ToolStreamEvent.Error]）。
      */
     fun executeStream(toolId: String, arguments: String): Flow<ToolStreamEvent>
+
+    /**
+     * 任务级熔断复位（P1 修复：跨任务熔断污染）：默认 no-op。
+     *
+     * 熔断器是进程级单例，冷却窗口 15s→120s 指数加宽；旧实现无任何生产
+     * 调用点复位 —— 上一个任务里被误开的熔断（连续探索失败等域层噪声）
+     * 会把整个冷却期带进下一个任务，新任务开局即「工具被暂时封锁」。
+     * 引擎在新任务开始时调用本方法清零计数。[EnhancedToolExecutor] 的
+     * 实现委托 [ToolCircuitBreaker.resetAll]。
+     */
+    suspend fun resetBreakers() {}
 }
 
 /**

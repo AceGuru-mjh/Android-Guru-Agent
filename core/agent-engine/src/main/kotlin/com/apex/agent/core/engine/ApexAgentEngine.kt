@@ -442,8 +442,10 @@ class ApexAgentEngine(
         // v4：新任务开始 —— 会话激活的工具不跨任务泄漏；降级状态复位。
         toolActivation.reset()
         toolDegradationLevel = 0
-        // 长任务韧性：新任务重置重试/换路预算（与降级复位同位）。
+        // 长任务韧性：新任务重置重试/换路预算（与降级复位同位）；同步清零
+        // 熔断计数（P1：上一任务的连续探索失败不应把冷却期带进新任务开局）。
         resilience.resetForTask()
+        runCatching { toolExecutor.resetBreakers() }
         // 循环检测：新任务清空检测窗口与恢复预算（与编排器 reset 语义一致）。
         loopDetector.reset()
         loopRecovery.reset()
@@ -895,8 +897,13 @@ class ApexAgentEngine(
                 // ═══ 长任务韧性：LLM 瞬时错误退避重试 ═══
                 // 限流/超时/断连/5xx 退避后重试同一轮（不消耗迭代配额）；预算用尽
                 // 或非瞬时错误才抛出交旧错误链路。
+                // P2 修复：Retry 分支补「本轮零输出」前置 —— 旧实现整轮重放
+                // 已流出半截的回答（UI 重复拼接 + 四层重试叠加放大 ~60 请求）。
+                val hasPartialOutput = contentBuilder.isNotEmpty() ||
+                    reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty()
                 when (val retryDecision = resilience.onLlmFailure(e)) {
                     is EngineResilienceGuard.LlmRetryDecision.Retry -> {
+                        if (hasPartialOutput) throw e
                         AppLogger.instance.warn(
                             LogCategory.LLM, "ApexAgentEngine",
                             "LLM 瞬时失败（${e::class.simpleName}），退避 ${retryDecision.delayMs}ms " +

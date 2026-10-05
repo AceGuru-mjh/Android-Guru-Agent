@@ -156,7 +156,9 @@ class CodeViewModel @Inject constructor(
     internal val languageManager: com.apex.agent.ui.language.LanguageManager,
     // v3 GOAL 目标模式：全局目标协调器（与深潜线引擎共享单例；每轮验收钩子
     // 在引擎侧，UI 侧驱动设定弹层/状态卡——扩展接线见 CodeGoalController.kt）
-    internal val goalCoordinator: GoalModeCoordinator
+    internal val goalCoordinator: GoalModeCoordinator,
+    // ═══ v6 Git 工作区（右上角面板直读）：Proot 沙箱 git 执行器 ═══
+    private val gitRunner: com.apex.agent.core.codetools.git.GitCommandRunner
 ) : ViewModel() {
 
     internal val _uiState = MutableStateFlow(CodeUiState())
@@ -225,6 +227,19 @@ class CodeViewModel @Inject constructor(
     /** 双思考逻辑路由门面（右上角切换入口；注入恒为 DualLogicCodeEngine）。 */
     internal val dualLogicEngine: DualLogicCodeEngine?
         get() = codeEngine as? DualLogicCodeEngine
+
+    // ═══ v6 控制器接线（lazy：viewModelScope 构造后才可用；God-file 预算：
+    //     Git 工作区与专家模板的逻辑各自独立成文件，VM 只做暴露）═══
+
+    /** Git 工作区面板（右上角入口；CodeWorkspacePanel 直取）。 */
+    internal val gitPanelController: CodeGitPanelController by lazy {
+        CodeGitPanelController(gitRunner, viewModelScope)
+    }
+
+    /** Coding 专家模板（模式行胶囊；设置流 → 引擎人设通道）。 */
+    internal val roleController: CodeRoleController by lazy {
+        CodeRoleController(settingsRepository, { codeEngineImpl }, viewModelScope)
+    }
 
     init {
         // 工作区清单 + 激活恢复（manager init 已恢复 activeId）
@@ -862,7 +877,9 @@ class CodeViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 if (_uiState.value.editorFilePath == trimmed) {
-                    _uiState.update { it.copy(editorLoading = false, editorError = e.message ?: "文件加载失败") }
+                    // #209 收尾：编辑器加载失败同样走 sanitize —— 裸 message
+                    // （英文堆栈/null）不直出错误行。
+                    _uiState.update { it.copy(editorLoading = false, editorError = sanitizeErrorText(e)) }
                 }
             }
         }
@@ -871,6 +888,11 @@ class CodeViewModel @Inject constructor(
     fun closeEditor() {
         editorJob?.cancel()
         _uiState.update { it.copy(editorFilePath = null, editorFile = null, editorLoading = false, editorError = null) }
+    }
+
+    /** #209 收尾：单独清掉编辑器错误行（面板保留，不整块关闭）。 */
+    fun dismissEditorError() {
+        _uiState.update { it.copy(editorError = null) }
     }
 
     // ═══ 工作区管理 ═══

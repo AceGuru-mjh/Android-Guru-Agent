@@ -1,9 +1,11 @@
 package com.apex.agent.core.tools.mcp
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -30,6 +32,19 @@ import java.io.File
  * - `enabled=false` 的服务器：不出现在 `/` 斜杠菜单、不会被 Agent 工具看到（[getEnabledConfigs]）；
  *   禁用时主动断开其活跃连接。
  * - 修复旧实现 `enabled` 字段"只写不读"的空转状态。
+ *
+ * ## 连接生命周期代数（v3 修复：connect 与断开意图的竞态）
+ * - `connect()` 的握手最长可达 180s（沙箱 npx 冷启动）；期间用户调用
+ *   `disconnect` / `setEnabled(false)` / `removeServer` 时，旧实现只能移除
+ *   「旧」 client —— 在途连接成功后直接 `put` 回 `clients`，用户刚表达的
+ *   断开意图被静默丢弃，且 McpSupervisor 继续看护它。现在每台服务器持有
+ *   连接代数：断开/禁用/移除时 `generation++`，connect 在注册前校验代数
+ *   与配置状态，过期连接立即关闭并如实报错。
+ *
+ * ## 持久化线程（v3 修复：主线程磁盘 I/O）
+ * - `addServer` 等写路径虽是 suspend，但旧实现内部在调用方线程同步完成
+ *   JSON 序列化 + 临时文件写 + rename —— 市场页全部在主线程直调，掉帧/
+ *   ANR 风险。现在落盘统一切 `Dispatchers.IO`。
  *
  * ## 内置服务器（BUILTIN 传输）
  * - core 不依赖 app 层实现：宿主（app 的 McpModule）在构造时把
@@ -98,6 +113,14 @@ class McpManager(
 ) {
     private val clients = LinkedHashMap<String, McpClient>()
     private val configs = LinkedHashMap<String, McpServerConfig>()
+
+    /**
+     * 连接代数（v3 修复）：服务器名 → 当前代。disconnect / setEnabled(false) /
+     * removeServer 时代数 +1；connect 注册前校验代数未变，防止在途连接
+     * 覆盖用户的断开意图。锁保护，快照读写。
+     */
+    private val generations = HashMap<String, Long>()
+
     private val lock = Any()
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
@@ -147,26 +170,38 @@ class McpManager(
     }
 
     /**
+     * 代数自增（断开/禁用/移除时调用）—— 在途 connect 检测到代数变化后
+     * 不得注册新连接。
+     */
+    private fun bumpGenerationLocked(name: String) {
+        generations[name] = (generations[name] ?: 0L) + 1L
+    }
+
+    /**
      * 添加MCP服务器配置
      */
-    suspend fun addServer(config: McpServerConfig): Result<Unit> {
+    suspend fun addServer(config: McpServerConfig): Result<Unit> = withContext(Dispatchers.IO) {
+        // v3 修复：落盘切 IO —— 市场页主线程直调 addServer 时，JSON 序列化 +
+        // 临时文件写 + rename 不再钉死主线程。
         val error = synchronized(lock) {
             runCatching {
                 configs[config.name] = config
                 saveConfigsLocked()
             }.exceptionOrNull()
         }
-        if (error != null) return Result.failure(error)
+        if (error != null) return@withContext Result.failure(error)
         notifyChanged()
-        return Result.success(Unit)
+        Result.success(Unit)
     }
 
     /** 启用/禁用服务器配置（禁用时主动断开活跃连接）。 */
-    suspend fun setEnabled(name: String, enabled: Boolean): Result<Unit> {
+    suspend fun setEnabled(name: String, enabled: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         val staleClient: McpClient?
         val error = synchronized(lock) {
             val existing = configs[name]
-                ?: return Result.failure(Exception("Server '$name' not configured"))
+                ?: return@withContext Result.failure(Exception("Server '$name' not configured"))
+            // v3 修复（竞态）：禁用打断在途连接的注册资格（代数 +1）。
+            if (!enabled) bumpGenerationLocked(name)
             staleClient = if (enabled) null else clients.remove(name)
             runCatching {
                 configs[name] = existing.copy(enabled = enabled)
@@ -177,9 +212,9 @@ class McpManager(
             runCatching { it.shutdown() }
             fireDisconnected(name)
         }
-        if (error != null) return Result.failure(error)
+        if (error != null) return@withContext Result.failure(error)
         notifyChanged()
-        return Result.success(Unit)
+        Result.success(Unit)
     }
 
     /**
@@ -235,6 +270,10 @@ class McpManager(
         // 先关闭旧连接，避免旧实现「直接覆盖导致连接泄漏」的问题
         synchronized(lock) { clients.remove(name) }?.let { runCatching { it.shutdown() } }
 
+        // v3 修复（竞态）：握手前记录当前代数 —— 握手期间用户断开/禁用/
+        // 移除该服务器时代数 +1，注册前校验发现代数变化即放弃注册。
+        val connectGeneration = synchronized(lock) { generations[name] ?: 0L }
+
         // BUILTIN 传输按名取注入的工厂；HTTP/SSE/STDIO 传 null（工厂参数不参与）。
         // Issue #149：runInSandbox=true 的 STDIO 配置改走宿主注入的沙箱 launcher
         // （app 层 PRoot Ubuntu 实现）；其余情况传 null → McpClient 回退 JvmProcessLauncher。
@@ -251,11 +290,25 @@ class McpManager(
         val initResult = client.initialize()
 
         if (initResult.isSuccess) {
-            // 竞态兜底：并发 connect 同一服务器时，后到者胜出，输家连接立即关闭
-            val loser = synchronized(lock) { clients.put(name, client) }
-            loser?.let { runCatching { it.shutdown() } }
-            notifyChanged()
-            fireConnected(name)
+            // v3 修复（竞态兜底）：并发 connect 同一服务器时，后到者胜出，输家
+            // 连接立即关闭；握手期间用户表达断开/禁用/移除意图（代数已变）时，
+            // 在途连接同样不注册、立即关闭 —— 旧实现静默把用户刚断开的
+            // 服务器拉回连接态并交给 Supervisor 看护。
+            val stillCurrent = synchronized(lock) {
+                (generations[name] ?: 0L) == connectGeneration &&
+                    configs[name]?.enabled == true
+            }
+            if (stillCurrent) {
+                val loser = synchronized(lock) { clients.put(name, client) }
+                loser?.let { runCatching { it.shutdown() } }
+                notifyChanged()
+                fireConnected(name)
+            } else {
+                runCatching { client.shutdown() }
+                return Result.failure(
+                    Exception("Server '$name' was disconnected or disabled during connect")
+                )
+            }
         } else {
             // STDIO 服务器在构造阶段就已 fork 出子进程；握手失败若不收尾就是进程泄漏
             runCatching { client.shutdown() }
@@ -319,6 +372,8 @@ class McpManager(
      * 断开连接
      */
     suspend fun disconnect(name: String) {
+        // v3 修复（竞态）：代数 +1 使在途 connect 的注册前置校验失败。
+        synchronized(lock) { bumpGenerationLocked(name) }
         val client = synchronized(lock) { clients.remove(name) }
         client?.let {
             runCatching { it.shutdown() }
@@ -332,6 +387,8 @@ class McpManager(
      */
     suspend fun disconnectAll() {
         val removed = synchronized(lock) {
+            // v3 修复（竞态）：批量断开同样自增代数，拦截全部在途连接。
+            clients.keys.forEach { bumpGenerationLocked(it) }
             val all = clients.entries.associate { it.key to it.value }
             clients.clear()
             all
@@ -400,7 +457,9 @@ class McpManager(
     /**
      * 删除配置（同时断开活跃连接）。
      */
-    suspend fun removeServer(name: String) {
+    suspend fun removeServer(name: String) = withContext(Dispatchers.IO) {
+        // v3 修复（竞态）：代数 +1 拦截在途 connect；落盘切 IO 线程。
+        synchronized(lock) { bumpGenerationLocked(name) }
         val client = synchronized(lock) { clients.remove(name) }
         client?.let {
             runCatching { it.shutdown() }

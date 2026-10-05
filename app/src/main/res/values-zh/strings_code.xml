@@ -222,4 +222,16 @@
     <string name="code_logic_switched_standard">🧭 思考逻辑已切换为「标准」（Agent 任务循环）。深潜会话现场已保留，切回即恢复。</string>
     <string name="code_logic_switched_deep_dive">🤿 思考逻辑已切换为「深潜」（自研七档思考）。标准会话现场已保留，切回即恢复。</string>
     <string name="code_logic_unknown_mode">⚠️ /logic:%1$s 不是可识别的逻辑模式——可用 /logic:standard 或 /logic:deep_dive（别名：std、deep）</string>
+    <!-- ═══ v6 Git 工作区面板（右上角入口：变更文件 + git 功能）═══ -->
+    <string name="code_git_cd">打开 Git 工作区</string>
+    <string name="code_git_panel_title">Git 工作区</string>
+    <string name="code_git_branch_fmt">分支：%1$s</string>
+    <string name="code_git_not_repo">当前工作区还不是 Git 仓库</string>
+    <string name="code_git_init">初始化仓库</string>
+    <string name="code_git_clean">工作区干净——暂无变更</string>
+    <string name="code_git_changes_fmt">%1$d 个变更文件</string>
+    <string name="code_git_refresh">刷新 git 状态</string>
+    <string name="code_git_commit_hint">提交说明</string>
+    <string name="code_git_commit">提交全部变更</string>
+    <string name="code_git_new_file">新的未跟踪文件（尚未加入索引）</string>
 </resources>

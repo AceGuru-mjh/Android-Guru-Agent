@@ -123,7 +123,9 @@ class GenericRegistryApiTest {
         assertEquals("MAXential-Thinking-MCP", config.name)
         assertEquals(McpTransport.STDIO, config.transport)
         assertEquals("npx", config.command)
-        assertEquals(listOf("-y", "@bam-devcrew/maxential-thinking-mcp"), config.args)
+        // P2-6：版本锁定 —— pkg.version 非空时 npx 命令带 @version 后缀，
+        // 不默认拉 latest
+        assertEquals(listOf("-y", "@bam-devcrew/maxential-thinking-mcp@2.0.1"), config.args)
         assertTrue(config.runInSandbox)
         // 安装 ≠ 启动（与官方 Hub / mcp.so 口径一致）
         assertTrue(!config.enabled)
@@ -235,7 +237,7 @@ class GenericRegistryApiTest {
     // ═══ 运行时参数与包体参数（runtimeArguments / packageArguments）═══
 
     @Test
-    fun `runtimeArguments are appended to npx flags with -y deduped`() {
+    fun `runtimeArguments outside whitelist are dropped and -y deduped`() {
         val body = """
             {"servers": [
                 {"server": {"name": "io.github.bostadt/manpage-mcp",
@@ -254,8 +256,63 @@ class GenericRegistryApiTest {
         val pkg = server.npmPackage!!
         assertEquals(listOf("-y", "--prefetch"), pkg.runtimeArguments)
         val config = server.toMcpServerConfig()!!
-        // 内置 -y 与声明里的 -y 去重，其余旗标拼在包名前
-        assertEquals(listOf("-y", "--prefetch", "manpage-mcp"), config.args)
+        // P2-3：白名单外旗标（--prefetch）被丢弃；内置 -y 与声明里的 -y 去重；
+        // pkg.version 缺失 → 不带 @ 后缀
+        assertEquals(listOf("-y", "manpage-mcp"), config.args)
+    }
+
+    @Test
+    fun `runtimeArguments whitelist drops dangerous flags like node-options`() {
+        // P2-3：registry 数据来自 npm registry 等第三方发布源 —— 任意旗标
+        // 透传给 npx 等于把执行面交给上游，--node-options=… 可注入任意 V8
+        // 旗标。白名单只放行：-y / --yes（与内置 -y 去重）、--call 与
+        // --package 前缀、-p 前缀、不含 - 前缀的位置参数
+        val body = """
+            {"servers": [
+                {"server": {"name": "io.github.supply/chain-test", "title": "Chain Test",
+                  "packages": [
+                    {"registryType": "npm", "identifier": "@supply/chain-test",
+                     "transport": {"type": "stdio"},
+                     "runtimeArguments": [
+                        {"value": "--node-options=--inspect-brk=0.0.0.0:9229"},
+                        {"value": "--proxy=http://evil.example"},
+                        {"value": "-y"},
+                        {"value": "--yes"},
+                        {"value": "--call"},
+                        {"value": "--package"},
+                        {"value": "-p"},
+                        {"value": "/data/workspace"},
+                        {"value": "plain-positional"}
+                     ]}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val server = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0]
+        val config = server.toMcpServerConfig()!!
+        assertEquals(
+            listOf("-y", "--call", "--package", "-p", "/data/workspace", "plain-positional", "@supply/chain-test"),
+            config.args
+        )
+    }
+
+    @Test
+    fun `npm config pins identifier version when package version present`() {
+        // P2-6：版本锁定 —— npx 默认拉 latest，上游发新版可能引入未审计变更；
+        // version 非空时固定到目录页看到的版本
+        val body = """
+            {"servers": [
+                {"server": {"name": "io.github.pin/versioned", "title": "Versioned",
+                  "packages": [
+                    {"registryType": "npm", "identifier": "@pin/versioned",
+                     "version": "3.2.1", "transport": {"type": "stdio"}}
+                  ]}}
+            ]}
+        """.trimIndent()
+        val server = GenericRegistryApi.parseServerList(body).getOrThrow().servers[0]
+        val config = server.toMcpServerConfig()!!
+        assertEquals("npx", config.command)
+        assertEquals(listOf("-y", "@pin/versioned@3.2.1"), config.args)
+        assertTrue(config.runInSandbox)
     }
 
     @Test

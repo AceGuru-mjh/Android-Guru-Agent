@@ -222,4 +222,17 @@
     <string name="code_logic_switched_standard">🧭 Thinking logic switched to Standard (agent loop). Your Deep Dive session is kept and will resume when you switch back.</string>
     <string name="code_logic_switched_deep_dive">🤿 Thinking logic switched to Deep Dive (self-designed seven tiers). Your Standard session is kept and will resume when you switch back.</string>
     <string name="code_logic_unknown_mode">⚠️ /logic:%1$s is not a known mode — use /logic:standard or /logic:deep_dive (aliases: std, deep)</string>
+
+    <!-- ═══ v6 Git 工作区面板（右上角入口：变更文件 + git 功能）═══ -->
+    <string name="code_git_cd">Open Git workspace</string>
+    <string name="code_git_panel_title">Git Workspace</string>
+    <string name="code_git_branch_fmt">Branch: %1$s</string>
+    <string name="code_git_not_repo">This workspace is not a git repository yet</string>
+    <string name="code_git_init">Initialize repository</string>
+    <string name="code_git_clean">Working tree clean — no pending changes</string>
+    <string name="code_git_changes_fmt">%1$d changed files</string>
+    <string name="code_git_refresh">Refresh git status</string>
+    <string name="code_git_commit_hint">Commit message</string>
+    <string name="code_git_commit">Commit all changes</string>
+    <string name="code_git_new_file">New untracked file (not in index yet)</string>
 </resources>

@@ -55,9 +55,13 @@ class FailureClassifier {
      * 1. Timeout flag ([ToolFailure.timedOut] / TimeoutCancellationException) → [FailureClass.TIMEOUT]
      * 2. Permission-ish exception types → [FailureClass.PERMISSION]
      * 3. Permission-ish message patterns → [FailureClass.PERMISSION]
-     * 4. Transient message patterns → [FailureClass.TRANSIENT]
-     * 5. Transient-ish exception types (IOException family) → [FailureClass.TRANSIENT]
-     * 6. Anything else → [FailureClass.FATAL]
+     * 4. **Rate-limit guard (P2 修复) → [FailureClass.FATAL]**：本应用
+     *    执行器自身的限流拒绝（"Error: rate limited: …"）不重试 ——
+     *    引擎退避上限 30s < 限流窗口 60s，重放同一调用只会再撞一次
+     *    限流白烧预算；文案已要求模型换路/等冷却。
+     * 5. Transient message patterns → [FailureClass.TRANSIENT]
+     * 6. Transient-ish exception types (IOException family) → [FailureClass.TRANSIENT]
+     * 7. Anything else → [FailureClass.FATAL]
      */
     fun classify(failure: ToolFailure): FailureClass {
         // 1. Timeout — explicit flag wins (set by the orchestrator's withTimeout catch),
@@ -73,11 +77,14 @@ class FailureClassifier {
             return FailureClass.PERMISSION
         }
 
-        // 3–5. Message / exception-type heuristics (case-insensitive)
+        // 3–6. Message / exception-type heuristics (case-insensitive)
         val message = buildString {
             append(failure.errorMessage)
             exception?.let { append(" | ").append(it::class.java.simpleName) }
         }.lowercase()
+
+        // 4. Rate-limit guard（先于 transient 匹配）—— 见方法 KDoc。
+        if (RATE_LIMIT_GUARD_PATTERNS.any { message.contains(it) }) return FailureClass.FATAL
 
         if (PERMISSION_PATTERNS.any { message.contains(it) }) return FailureClass.PERMISSION
         if (TRANSIENT_PATTERNS.any { message.contains(it) }) return FailureClass.TRANSIENT
@@ -111,6 +118,17 @@ class FailureClassifier {
             "permission denied", "permission", "eacces", "eperm",
             "unauthorized", "401", "403", "forbidden", "access denied",
             "not granted", "shizuku", "privilege", "securityexception"
+        )
+
+        /**
+         * P2 修复（限流守卫）：本应用执行器的限流拒绝签名 —— 与
+         * EnhancedToolExecutor.rateLimitMessage 同源。命中即 FATAL：
+         * 重放同一调用只会再撞限流（引擎退避上限 30s < 窗口 60s）。
+         * 精确到 "error: rate limited" 前缀，避免误伤外部 API 的
+         * "rate limit exceeded"（那类是 TRANSIENT，值得退避重试）。
+         */
+        internal val RATE_LIMIT_GUARD_PATTERNS = listOf(
+            "error: rate limited"
         )
     }
 }

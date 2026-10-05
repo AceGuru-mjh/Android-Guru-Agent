@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine.orchestrator
 
+import com.apex.agent.core.tools.ToolRetrySchedules
 import kotlin.math.min
 import kotlin.math.roundToLong
 import kotlin.random.Random
@@ -43,7 +44,15 @@ data class RetryPolicy(
     /** Total retries allowed across the entire task. */
     val retryBudget: Int = 6,
     /** Extra retry allowance for TIMEOUT specifically (timeouts are often one-off stalls). */
-    val extraTimeoutRetries: Int = 0
+    val extraTimeoutRetries: Int = 0,
+    /**
+     * Exact retry ladder (ms) — when set, [backoffDelayMs] returns the
+     * ladder entry verbatim (deterministic, no jitter) and the exponential
+     * parameters are ignored. Used by [AGENT_LADDER] (user spec:
+     * 2s/5s/10s/20s/40s/80s/160s, auto-stop once the next step would
+     * reach the 3-minute cap). Shared table: [ToolRetrySchedules].
+     */
+    val ladderDelays: List<Long>? = null
 ) {
     init {
         require(maxRetries >= 0) { "maxRetries must be >= 0" }
@@ -96,6 +105,13 @@ data class RetryPolicy(
      * `min(initial * multiplier^(attempt-1), max) * (1 ± jitterRatio)`.
      */
     fun backoffDelayMs(attempt: Int, random: Random = Random.Default): Long {
+        // Ladder mode: exact deterministic entry (user-visible contract is
+        // 2s/5s/10s/... — jittering it would break the observable spec).
+        ladderDelays?.let { ladder ->
+            val index = (attempt - 1).coerceAtLeast(0)
+            return if (index < ladder.size) ladder[index]
+            else ToolRetrySchedules.LADDER_CAP_MS
+        }
         val base = min(
             (initialBackoffMs * Math.pow(backoffMultiplier, (attempt - 1).coerceAtLeast(0).toDouble()))
                 .roundToLong(),
@@ -115,6 +131,22 @@ data class RetryPolicy(
         val DISABLED = RetryPolicy(
             maxRetries = 0,
             retryBudget = 0
+        )
+
+        /**
+         * User-spec ladder for engine-level tool retries (network-class
+         * transient failures): 2s/5s/10s/20s/40s/80s/160s — the next step
+         * would reach the 3-minute cap so the ladder auto-stops; the task
+         * continues via the recovery/change-of-approach prompt instead of
+         * being aborted. Deterministic (no jitter) per the observable spec.
+         */
+        val AGENT_LADDER = RetryPolicy(
+            maxRetries = ToolRetrySchedules.AGENT_LADDER_MS.size,
+            initialBackoffMs = 2_000L,
+            maxBackoffMs = 160_000L,
+            jitterRatio = 0.0,
+            retryBudget = ToolRetrySchedules.AGENT_LADDER_MS.size,
+            ladderDelays = ToolRetrySchedules.AGENT_LADDER_MS
         )
 
         /** Fast retry profile for tests: no backoff, no jitter. */

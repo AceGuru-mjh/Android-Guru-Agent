@@ -221,7 +221,18 @@ data class EngineResiliencePolicy(
     val maxRecoveryPrompts: Int = 3
 ) {
     companion object {
-        val DEFAULT = EngineResiliencePolicy()
+        /**
+         * Production default. Since the user-spec retry ladder, the engine
+         * tool-retry channel uses [RetryPolicy.AGENT_LADDER] (2s/5s/10s/...
+         * 160s, 3-minute cap auto-stop) instead of the orchestrator's
+         * 2-retry/8s ceiling: a flaky network must not abort a long task
+         * while the ladder still has room. The data-class default stays
+         * [RetryPolicy.DEFAULT] so test presets (FAST/DISABLED/explicit)
+         * keep their historic semantics.
+         */
+        val DEFAULT = EngineResiliencePolicy(
+            toolRetryPolicy = RetryPolicy.AGENT_LADDER
+        )
 
         /** 测试用：全部自动重试关闭（保留旧「遇错即停」行为以兼容断言）。 */
         val DISABLED = EngineResiliencePolicy(

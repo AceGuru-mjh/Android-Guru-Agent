@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -48,6 +49,7 @@ import com.apex.agent.core.code.stream.StreamEntryGroup
 import com.apex.agent.core.code.stream.StreamToolCall
 import com.apex.agent.core.code.stream.ToolCallStatus
 import com.apex.agent.core.code.stream.ToolKind
+import com.apex.agent.ui.theme.LocalExtendedColors
 
 /**
  * # Code Capsule \u2014 工具调用胶囊（规格书【2】胶囊层）
@@ -71,6 +73,9 @@ internal fun CodeCapsule(
         targetValue = statusColor(call.status),
         label = "capsule-status"
     )
+    // 终态语义色（成对槽位）：浅色主题下 exit 0 的亮绿 4ADE80 对白底仅
+    // ~2:1 对比度（UI-016 同源问题），改走 LocalExtendedColors 明暗成对色
+    val successColor = LocalExtendedColors.current.success
     // 状态的无障碍描述：成败不能只靠色/形传达（TalkBack 不可感知）
     val statusDesc = stringResource(
         when (call.status) {
@@ -87,7 +92,8 @@ internal fun CodeCapsule(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 12.dp, vertical = 1.dp)
             .clickable(role = Role.Button) { onClick(call) }
             .semantics { contentDescription = "${call.displayName} ${call.target}, $statusDesc" }
     ) {
@@ -95,11 +101,11 @@ internal fun CodeCapsule(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp)
+                .padding(horizontal = 8.dp, vertical = 5.dp)
         ) {
-            // \u2500\u2500 左：族图标（着色底）\u2500\u2500
+            // 左：族图标（着色底，紧凑井 20dp）
             Surface(
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(7.dp),
                 color = style.color.copy(alpha = 0.14f)
             ) {
                 Icon(
@@ -107,11 +113,11 @@ internal fun CodeCapsule(
                     contentDescription = null,
                     tint = style.color,
                     modifier = Modifier
-                        .padding(5.dp)
-                        .size(16.dp)
+                        .padding(3.dp)
+                        .size(14.dp)
                 )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
 
             // \u2500\u2500 中：名称 + target（可点击主体）\u2500\u2500
             Column(modifier = Modifier.weight(1f)) {
@@ -163,7 +169,7 @@ internal fun CodeCapsule(
                     text = stringResource(R.string.code_stream_exit_code_fmt, code),
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
-                    color = if (code == 0) Color(0xFF4ADE80) else MaterialTheme.colorScheme.error
+                    color = if (code == 0) successColor else MaterialTheme.colorScheme.error
                 )
                 Spacer(Modifier.width(6.dp))
             }
@@ -180,7 +186,7 @@ internal fun CodeCapsule(
                 imageVector = statusIcon(call.status),
                 contentDescription = statusDesc,
                 tint = statusColor,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -205,19 +211,20 @@ internal fun CodeCapsuleGroupRow(
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp)
+                .heightIn(min = 44.dp)
+                .padding(horizontal = 12.dp, vertical = 1.dp)
                 .clickable { onToggle() }
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp)
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
             ) {
                 Icon(
                     imageVector = style.icon,
                     contentDescription = null,
                     tint = style.color.copy(alpha = 0.7f),
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(14.dp)
                 )
                 Text(
                     text = stringResource(R.string.code_stream_group_more_fmt, calls.size),
@@ -273,13 +280,17 @@ internal fun capsuleStyle(kind: ToolKind): CapsuleStyle = when (kind) {
 }
 
 @Composable
-internal fun statusColor(status: ToolCallStatus): Color = when (status) {
-    ToolCallStatus.WAITING -> MaterialTheme.colorScheme.outline
-    ToolCallStatus.RUNNING -> MaterialTheme.colorScheme.primary
-    ToolCallStatus.SUCCESS -> Color(0xFF059669)
-    ToolCallStatus.FAILED -> MaterialTheme.colorScheme.error
-    ToolCallStatus.APPLIED -> Color(0xFF2563EB)
-    ToolCallStatus.PARTIAL -> Color(0xFFD97706)
+internal fun statusColor(status: ToolCallStatus): Color {
+    // v6 白天模式修复：成功/部分 走成对语义色（浅色下不再对比度不足）
+    val extended = LocalExtendedColors.current
+    return when (status) {
+        ToolCallStatus.WAITING -> MaterialTheme.colorScheme.outline
+        ToolCallStatus.RUNNING -> MaterialTheme.colorScheme.primary
+        ToolCallStatus.SUCCESS -> extended.success
+        ToolCallStatus.FAILED -> MaterialTheme.colorScheme.error
+        ToolCallStatus.APPLIED -> Color(0xFF2563EB)
+        ToolCallStatus.PARTIAL -> extended.warning
+    }
 }
 
 internal fun statusIcon(status: ToolCallStatus): ImageVector = when (status) {

@@ -77,13 +77,13 @@ private fun UserBubble(text: String) {
         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         )
     }
 }
@@ -101,9 +101,9 @@ private fun AssistantBubble(text: String, isStreaming: Boolean) {
         accent = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             MarkdownText(markdown = text)
             if (isStreaming) {
                 Text(
@@ -135,7 +135,7 @@ private fun ThinkingCard(text: String, isStreaming: Boolean) {
     ) {
         Column(
             modifier = Modifier
-                .padding(10.dp)
+                .padding(horizontal = 10.dp, vertical = 7.dp)
                 .clickable { expanded = !expanded }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -203,7 +203,7 @@ private fun VerifyCycleCard(entry: StreamEntry.VerifyCycleEntry, onToolClick: (S
             .padding(horizontal = 12.dp, vertical = 2.dp)
             .clickable { expanded = !expanded }
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
@@ -276,9 +276,9 @@ private fun ErrorCard(entry: StreamEntry.ErrorEntry) {
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.BugReport,
@@ -322,11 +322,11 @@ private fun StopCard(reason: String) {
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(10.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.StopCircle,
@@ -352,7 +352,7 @@ private fun FileChipsCard(files: List<String>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -414,7 +414,7 @@ private fun LightLine(text: String) {
         color = MaterialTheme.colorScheme.outline,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
     )
 }
 
@@ -426,7 +426,7 @@ private fun SystemLine(text: String) {
         color = MaterialTheme.colorScheme.tertiary,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
     )
 }
 

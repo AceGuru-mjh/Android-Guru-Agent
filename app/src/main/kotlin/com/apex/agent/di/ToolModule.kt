@@ -65,6 +65,7 @@ import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
+import com.apex.agent.tools.GateDialogStrings
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.tools.ToolAuditLogger
 import com.apex.agent.permission.PermissionModeGate
@@ -171,6 +172,9 @@ object ToolModule {
     private const val VIA_GATE_DENIED = "gate-denied"
     private const val VIA_EXCEPTION = "exception"
 
+    /** 设备类工具通道的默认超时（毫秒）—— 与 PrivilegeDetector 旧默认一致。 */
+    private const val DEFAULT_SHELL_TIMEOUT_MS = 30_000L
+
     @Provides
     @Singleton
     fun provideToolHttpClient(): OkHttpClient = OkHttpClient.Builder()
@@ -239,8 +243,14 @@ object ToolModule {
     @Singleton
     fun provideRiskAwareToolGate(
         gateway: UserQuestionGateway,
-        toolAuditLogger: ToolAuditLogger
-    ): RiskAwareToolGate = RiskAwareToolGate(gateway, toolAuditLogger)
+        toolAuditLogger: ToolAuditLogger,
+        languageManager: com.apex.agent.ui.language.LanguageManager
+    ): RiskAwareToolGate = RiskAwareToolGate(
+        gateway = gateway,
+        audit = toolAuditLogger,
+        // #208：弹窗文案按当前语言取词（默认英文资源 + values-zh 中文）。
+        strings = GateDialogStrings.Res(languageManager)
+    )
 
     /**
      * v1.0 #155：业界标准式权限模式门——模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
@@ -252,7 +262,8 @@ object ToolModule {
     @Singleton
     fun providePermissionModeGate(
         gateway: UserQuestionGateway,
-        settingsRepository: SettingsRepository
+        settingsRepository: SettingsRepository,
+        languageManager: com.apex.agent.ui.language.LanguageManager
     ): PermissionModeGate = PermissionModeGate(
         gateway = gateway,
         settingsProvider = {
@@ -261,7 +272,9 @@ object ToolModule {
                 mode = agent.permissionMode,
                 rules = agent.permissionRules
             )
-        }
+        },
+        // #208：弹窗文案按当前语言取词（默认英文资源 + values-zh 中文）。
+        strings = GateDialogStrings.Res(languageManager)
     )
 
     /**
@@ -396,7 +409,10 @@ object ToolModule {
         }
         .usageTracker(toolUsageTracker)
         .policyResolver(
-            DefaultToolRunPolicyResolver(TERMINAL_TOOL_RUN_POLICIES)
+            DefaultToolRunPolicyResolver(
+                TERMINAL_TOOL_RUN_POLICIES,
+                OPEN_WORLD_PREFIX_TOOL_RUN_POLICIES
+            )
         )
         .rateLimiter(ToolRateLimiter())
         .breaker(breaker)
@@ -510,7 +526,10 @@ object ToolModule {
         // 门禁 + 执行的统一出口（T92 / #255 权限链审计）：返回带 via 通道真相的
         // ShellExecResult。via 为 VIA_GATE_DENIED / VIA_EXCEPTION 时 output 已是
         // 面向模型的最终错误文案（与旧版逐字节一致）。
-        val shellExecResult: suspend (String) -> ShellExecResult = { cmd ->
+        // P1 修复（timeout 死参数）：闭包签名增加 timeoutMs —— ShellExecuteTool
+        // 的 schema 声明了 timeout 参数但旧链路从不透传，PrivilegeDetector 固定
+        // 30s 默认值，长命令（编译/安装/构建）全部误判失败。
+        val shellExecResult: suspend (String, Long) -> ShellExecResult = { cmd, timeoutMs ->
             if (!commandPermissionGate.ensureAllowed(cmd)) {
                 // #F-⑯：工具层审计（拒绝也留痕）；结构化结果见下方 T92 注释。
                 toolAuditLogger.log(ToolAuditLogger.Event(
@@ -526,7 +545,9 @@ object ToolModule {
             } else {
                 val startedAt = System.currentTimeMillis()
                 try {
-                    val result = PrivilegeDetector.executeShell(cmd, workDir = shellWorkDir.currentDir())
+                    val result = PrivilegeDetector.executeShell(
+                        cmd, timeoutMs = timeoutMs, workDir = shellWorkDir.currentDir()
+                    )
                     // #F-⑯：结构化审计 —— 命令走了哪个权限通道（root/shizuku/
                     // shell）、耗时、结果，全部落盘可举证（工具层；平台层逐命令
                     // 遥测见 PrivilegeDetector —— T92 / #255 双层互补）。
@@ -579,14 +600,20 @@ object ToolModule {
         }
 
         // 设备类工具通道（AppList/DeviceInfo 等对输出做行级过滤/计数/拼接，
-        // 输出与旧版完全一致 —— 不受 via 标记污染）。
+        // 输出与旧版完全一致 —— 不受 via 标记污染）。设备工具全部短命令，
+        // 用默认 30s 超时。
         val shellExec: suspend (String) -> String = { cmd ->
-            formatShellResult(shellExecResult(cmd), cmd, withVia = false)
+            formatShellResult(shellExecResult(cmd, DEFAULT_SHELL_TIMEOUT_MS), cmd, withVia = false)
         }
 
-        // shell_execute 专属通道：成功输出尾部附通道标记。
-        val shellExecAudited: suspend (String) -> String = { cmd ->
-            formatShellResult(shellExecResult(cmd), cmd, withVia = true)
+        // shell_execute 专属通道：成功输出尾部附通道标记；超时按工具传入的
+        // 秒数透传（P1 修复 —— schema 的 timeout 参数真实生效）。
+        val shellExecAudited: suspend (String, Int) -> String = { cmd, timeoutSec ->
+            val timeoutMs = (timeoutSec * 1000L).coerceIn(
+                com.apex.agent.core.tools.builtin.ShellExecuteTool.MIN_TIMEOUT_SECONDS * 1000L,
+                com.apex.agent.core.tools.builtin.ShellExecuteTool.MAX_TIMEOUT_SECONDS * 1000L
+            )
+            formatShellResult(shellExecResult(cmd, timeoutMs), cmd, withVia = true)
         }
 
         // ═══ 1. Shell (1) ═══
@@ -1102,7 +1129,12 @@ object ToolModule {
             delegate = ToolExecutorBuilder(registry)
                 .gate(ToolEnvironmentGate(environmentState))
                 .usageTracker(toolUsageTracker)
-                .policyResolver(DefaultToolRunPolicyResolver(TERMINAL_TOOL_RUN_POLICIES))
+                .policyResolver(
+                    DefaultToolRunPolicyResolver(
+                        TERMINAL_TOOL_RUN_POLICIES,
+                        OPEN_WORLD_PREFIX_TOOL_RUN_POLICIES
+                    )
+                )
                 .rateLimiter(ToolRateLimiter())
                 .breaker(circuitBreaker)
                 .tracer(traceRecorder)

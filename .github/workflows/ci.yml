@@ -473,6 +473,18 @@ jobs:
             -Pkotlin.incremental=false \
             --stacktrace
 
+      - name: Run plugins:plugin-workflow unit tests (#256 regression lock)
+        run: |
+          # #256 防回退：workflow 插件曾有「save 假成功 / list 永远空 /
+          # execute 无条件成功」的桩实现，存活一个多月无测试报警。
+          # WorkflowStore 纯逻辑层抽取后，此处锁死诚实契约（save ⇔ 落盘、
+          # 失败以 Error 开头、原子写无 tmp 残留、目录穿越折叠）。
+          # Pure JVM（TemporaryFolder），无设备依赖。
+          ./gradlew :plugins:plugin-workflow:testDebugUnitTest \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
   build-apk:
     name: Build Debug APK
     runs-on: ubuntu-latest

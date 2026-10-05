@@ -202,8 +202,16 @@ class TaskRuntime(
                 AppLogger.instance.warn(LogCategory.ENGINE, TAG, "engine stream cancelled: ${e.message}")
             } catch (e: Throwable) {
                 AppLogger.instance.error(LogCategory.ENGINE, TAG, "mirror collector failed: ${e.message}", e)
-                // 转发错误给 UI（引擎内部已捕获大多数异常，这里是保险层）
-                runCatching { tap.send(AgentEvent.Error(e.message ?: "runtime failure", recoverable = false)) }
+                // #213 残留收口：保险层错误文案走 LlmErrorText（中文指引 +
+                // 截断摘要）——原始全文已在上一行落日志，不进用户消息
+                runCatching {
+                    tap.send(
+                        AgentEvent.Error(
+                            com.apex.agent.core.llm.LlmErrorText.userMessage(e),
+                            recoverable = false
+                        )
+                    )
+                }
                 finalizeWith(task.taskId, TaskStatus.FAILED, e.message)
             } finally {
                 // 异常安全：finalize 内部任何异常都不得吞掉 done/close

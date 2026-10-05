@@ -2,6 +2,7 @@ package com.apex.agent.tools
 
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
+import com.apex.agent.github.GithubTerminalEnvInjector
 import com.apex.agent.platform.terminal.exec.CommandSpawner
 import com.apex.agent.platform.terminal.exec.SpawnRequest
 import com.apex.agent.platform.terminal.exec.SpawnedCommand
@@ -66,6 +67,9 @@ private const val TAG = "ProotExec"
  * - guest env 只经 env trampoline 传入：PATH（LinuxEnvironmentManager.GUEST_PATH
  *   单源）、TERM=dumb（管道执行无终端转义）、HOME=/root、LANG=C.UTF-8、
  *   PWD/TMPDIR 对齐 -w；SpawnRequest.env 追加在其后（调用方显式 env 优先）；
+ *   v3 S3（G2）：命令首词为 git/gh 且 GitHub 已连接时，
+ *   [GithubTerminalEnvInjector] 最后追加 GH_TOKEN / GITHUB_TOKEN + git 凭据
+ *   桥（仅存活于本次进程 env；调用方伪造的同名 env 被真实 PAT 覆盖）；
  * - Android app 进程的任何变量不被继承。
  *   env 值含 `\n` / NUL 的条目（TM6 守卫会拒绝）在进入构建器前被过滤并在
  *   stderr 提示（诚实而非崩溃）。
@@ -95,7 +99,13 @@ class ProotCommandSpawner(
      * 能力自适应（与终端会话/apt 同款能力门，根除默认 Termux 基线的静默
      * 差异）。默认 Termux 基线仅保既有测试夹具语义；生产 DI 注入真实源。
      */
-    private val capabilities: () -> PRootArgvCapabilities = { PRootArgvCapabilities.TERMUX_BUNDLED }
+    private val capabilities: () -> PRootArgvCapabilities = { PRootArgvCapabilities.TERMUX_BUNDLED },
+    /**
+     * v3 S3（G2）：GitHub PAT 供应器（null = 不注入，既有测试夹具零变化）。
+     * 命令首词为 git/gh 且已连接时注入凭据（agent 经 terminal.exec 跑
+     * git clone / gh repo list 等真实可用）。
+     */
+    private val gitHubTokenProvider: (() -> String?)? = null
 ) : CommandSpawner {
 
     private val commandBuilder = PRootCommandBuilderImpl()
@@ -236,8 +246,13 @@ class ProotCommandSpawner(
             request.env.forEach { (k, v) ->
                 if (k !in droppedEnv) guestEnv[k] = v
             }
+            // v3 S3（G2）：git/gh 命令凭据注入（放最后——真实 PAT 覆盖调用方
+            // 拼凑的同名 env；仅存活于本次进程，不写盘不进 profile）
+            val finalGuestEnv = GithubTerminalEnvInjector.inject(
+                guestEnv, request.command, gitHubTokenProvider?.invoke()
+            )
 
-            val command = buildCommand(route, plan, guestEnv, request)
+            val command = buildCommand(route, plan, finalGuestEnv, request)
             val argv = listOf(command.executable.value) + command.arguments
             val pb = ProcessBuilder(argv).redirectErrorStream(false)
             // G4：宿主 env 清空后整体替换（不继承 Android app 进程的任何变量）

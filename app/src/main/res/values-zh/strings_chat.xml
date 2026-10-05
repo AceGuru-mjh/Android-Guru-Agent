@@ -9,6 +9,8 @@
     <string name="chat_cd_back_to_bottom">回到底部</string>
     <string name="chat_unknown_provider">未知 Provider</string>
     <string name="chat_hint_plan">描述任务，Agent先规划…</string>
+    <string name="chat_hint_goal">描述目标与可验证的完成条件…</string>
+    <string name="chat_hint_loop">配置循环：提示词 + 间隔/Cron/单次…</string>
     <string name="chat_hint_chat">打个招呼——纯聊天，人设与聊天技能在线…</string>
     <string name="chat_hint_agent">问什么/交任务都行——全能智能体为你代劳…</string>
     <string name="chat_hint_spec">描述需求，Agent先产出规格…</string>
@@ -231,6 +233,8 @@
     <string name="chat_mode_agent_desc">全能智能体——通用工具，编程请去 Coding</string>
     <string name="chat_mode_build_desc">边想边做，实时执行</string>
     <string name="chat_mode_plan_desc">先制定完整计划，确认后再执行</string>
+    <string name="chat_mode_goal_desc">目标驱动——可验证条件，不达成不罢休</string>
+    <string name="chat_mode_loop_desc">循环与定时——重复提示词/轮询/提醒</string>
     <string name="chat_mode_spec_desc">先产出需求规格，确认后再执行</string>
     <string name="chat_mode_reflect_desc">生成 → 评审 → 修正，提高输出质量</string>
     <string name="chat_mode_assist_desc">遇多选时弹出选项菜单，人工决策</string>

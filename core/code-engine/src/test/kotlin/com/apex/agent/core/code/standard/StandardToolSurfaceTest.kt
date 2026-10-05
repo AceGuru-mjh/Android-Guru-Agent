@@ -183,10 +183,11 @@ class StandardToolSurfaceTest {
         val def = StandardToolSurface.syntheticTaskTool()
         assertEquals("task", def.name)
         assertTrue(def.description.contains("sub-agent"))
-        // 三种子代理类型（explore / research / general）
-        assertTrue(def.parameters.contains("\"enum\": [\"explore\", \"research\", \"general\"]"))
+        // 四种子代理类型（explore / research / general / reviewer，v3）
+        assertTrue(def.parameters.contains("\"enum\": [\"explore\", \"research\", \"general\", \"reviewer\"]"))
         assertTrue(def.description.contains("path:line evidence"))
         assertTrue(def.description.contains("sourced conclusions"))
+        assertTrue(def.description.contains("merge verdict"))
         assertTrue(def.description.contains("full-surface autonomous executor"))
         // 用法精华：自包含 / 写码或纯调研 / 结果仅主代理可见
         assertTrue(def.description.contains("does NOT see this conversation"))

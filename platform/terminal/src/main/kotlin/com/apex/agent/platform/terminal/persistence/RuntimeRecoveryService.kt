@@ -34,6 +34,9 @@ import java.io.File
  *      - Reconstruct the SemanticStateReducer from the record (so terminal.snapshot() returns
  *        the recovered session even though the PTY is gone).
  *   3. terminal.snapshot() now returns recovered sessions for Agent context rebuilding.
+ *     （#223：第 3 步是真实现 —— 恢复视图登记进 [recoveredViews]，Runtime 的
+ *      snapshot() 经 [recoveredSessionsExcluding] 合并，UI 会话列表/Agent 上下文
+ *      均可见；原实现只返回 id，恢复态从未进入任何列表。）
  *
  * Periodic save: [startAutoSave] launches a coroutine that saves all live sessions every
  * [intervalMs] (default 2s). [stopAutoSave] cancels it.
@@ -55,6 +58,13 @@ class RuntimeRecoveryService(
     private var autoSaveJob: kotlinx.coroutines.Job? = null
 
     /**
+     * #223：恢复视图缓存 —— recover() 启动时一次性装载，snapshot() 合并与
+     * [recoveredSnapshot] 共用同一份数据（两条路径状态收敛一致）。
+     * key = sessionId，value = 只读语义视图（EXITED/BROKEN，绝不伪造存活）。
+     */
+    private val recoveredViews = java.util.concurrent.ConcurrentHashMap<Long, TerminalSemanticState>()
+
+    /**
      * Load persisted sessions and reconstruct their SemanticState view.
      * Returns the list of recovered session ids (now visible via terminal.snapshot).
      *
@@ -65,9 +75,15 @@ class RuntimeRecoveryService(
      *    视图状态，不篡改原始记录；
      *  - CLOSED 记录在恢复后删除（终态，无需保留）。
      *
+     * #223：pid 探活结果真实参与视图构造（原实现 `val alive = …` 算了就丢）——
+     * !alive → EXITED（App 被杀的常见情形）；alive 但 fd 已丢 → BROKEN。
+     * 构造出的视图登记进 [recoveredViews]，Runtime 的 snapshot() 由此合并进
+     * 会话列表（UI tab + 死会话覆盖层 + Agent 上下文重建均可见）。
+     *
      * NOTE: this does NOT re-open PTYs. Recovered sessions have state EXITED or BROKEN.
      */
     suspend fun recover(): List<Long> {
+        recoveredViews.clear()
         val records = store.loadAll()
         val recovered = mutableListOf<Long>()
         for (rec in records) {
@@ -76,11 +92,30 @@ class RuntimeRecoveryService(
                 store.delete(rec.id)
                 continue
             }
-            val alive = isPidAlive(rec.pid)
             // alive 但 fd 已丢 → BROKEN；!alive → EXITED。不伪造 RUNNING。
+            recoveredViews[rec.id] = buildRecoveredView(rec, alive = isPidAlive(rec.pid))
             recovered.add(rec.id)
         }
         return recovered
+    }
+
+    /**
+     * #223：snapshot() 合并入口 —— 返回「不在活跃会话集」里的恢复视图。
+     *
+     * 活跃会话 id 优先：recover() 已把 SessionManager 的 id 计数器抬过全部
+     * 恢复 id（见 TerminalRuntimeImpl.recover()），正常不撞车；此处过滤是
+     * 对 id 复用场景的防御 —— 撞车时持久化记录随后被活跃会话的 autoSave
+     * 覆盖，恢复视图让位（不产生同 id 双条目）。
+     */
+    fun recoveredSessionsExcluding(liveIds: Set<Long>): List<TerminalSemanticState> =
+        recoveredViews.filterKeys { it !in liveIds }.values.toList()
+
+    /**
+     * #223：会话关闭 → 驱逐恢复视图缓存（持久化记录由 Runtime.close() 主路径
+     * 删除）。不驱逐的话：死视图永驻 snapshot()，下次启动还会从记录里复活。
+     */
+    fun forget(sessionId: Long) {
+        recoveredViews.remove(sessionId)
     }
 
     /** 恢复视图中的 job 状态映射：活跃态 → INTERRUPTED（crash 中断）。 */
@@ -92,13 +127,16 @@ class RuntimeRecoveryService(
     }
 
     /**
-     * Get a recovered session's last-known SemanticState (read-only, from persisted metadata).
-     * Returns null if no record exists.
-     * T81 (D-5)：job 活跃态收敛为 INTERRUPTED（不伪造 RUNNING）。
+     * #223：持久化记录 → 恢复视图的唯一构造路径（[recover] 装载与
+     * [recoveredSnapshot] 兜底共用，保证两条路径状态收敛一致）。
+     *
+     * @param alive pid 探活结果：false → EXITED（进程已死）；true → BROKEN
+     *（进程仍在但 PTY fd 已丢，v1 无法重挂 —— Spec §39 不伪造存活）。
      */
-    suspend fun recoveredSnapshot(sessionId: Long): TerminalSemanticState? {
-        val rec = store.load(sessionId) ?: return null
-        val alive = isPidAlive(rec.pid)
+    private fun buildRecoveredView(
+        rec: SessionMetadataStore.SessionRecord,
+        alive: Boolean
+    ): TerminalSemanticState {
         val state = when {
             rec.state == SessionState.CLOSED.name -> SessionState.CLOSED
             !alive -> SessionState.EXITED
@@ -124,7 +162,7 @@ class RuntimeRecoveryService(
             foregroundJob = rec.jobs.lastOrNull { !it.background }?.let {
                 com.apex.agent.platform.terminal.state.JobSnapshot(
                     id = it.id, sessionId = it.sessionId, command = it.command,
-                    owner = runCatching { com.apex.agent.platform.terminal.io.InputOwner.valueOf(it.owner) }
+                    owner = runCatching { InputOwner.valueOf(it.owner) }
                         .getOrDefault(InputOwner.SYSTEM),
                     background = it.background, state = recoveredJobState(it.state),
                     exitCode = it.exitCode, startedAt = it.startedAt, finishedAt = it.finishedAt
@@ -133,13 +171,27 @@ class RuntimeRecoveryService(
             backgroundJobs = rec.jobs.filter { it.background }.map {
                 com.apex.agent.platform.terminal.state.JobSnapshot(
                     id = it.id, sessionId = it.sessionId, command = it.command,
-                    owner = runCatching { com.apex.agent.platform.terminal.io.InputOwner.valueOf(it.owner) }
+                    owner = runCatching { InputOwner.valueOf(it.owner) }
                         .getOrDefault(InputOwner.SYSTEM),
                     background = true, state = recoveredJobState(it.state),
                     exitCode = it.exitCode, startedAt = it.startedAt, finishedAt = it.finishedAt
                 )
             }
         )
+    }
+
+    /**
+     * Get a recovered session's last-known SemanticState (read-only, from persisted metadata).
+     * Returns null if no record exists.
+     * T81 (D-5)：job 活跃态收敛为 INTERRUPTED（不伪造 RUNNING）。
+     *
+     * #223：recover() 已装载的视图直接命中（与 snapshot() 合并同一份数据）；
+     * 未走过 recover() 的调用仍按需从 store 读（兜底语义不变）。
+     */
+    suspend fun recoveredSnapshot(sessionId: Long): TerminalSemanticState? {
+        recoveredViews[sessionId]?.let { return it }
+        val rec = store.load(sessionId) ?: return null
+        return buildRecoveredView(rec, alive = isPidAlive(rec.pid))
     }
 
     /**
@@ -163,8 +215,16 @@ class RuntimeRecoveryService(
                         val jobs = liveJobsProvider(session.id)
                         val events = recentEventsProvider(session.id)
                         store.save(session = session, jobs = jobs, recentEvents = events)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // 取消必须穿透：外层 scope cancel 时 autoSaveJob 要能真正退出
+                        throw e
                     } catch (e: Exception) {
-                        // 单 session 保存失败不杀循环（下一周期重试）。
+                        // #260：单 session 保存失败不杀循环（下一周期重试），
+                        // 但崩溃恢复链路静默失败 = 恢复功能形同虚设且不可诊断
+                        android.util.Log.w(
+                            "RuntimeRecovery",
+                            "autoSave session ${session.id} failed: ${e.message}"
+                        )
                     }
                 }
             }

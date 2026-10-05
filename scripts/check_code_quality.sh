@@ -3,7 +3,7 @@
 # check_code_quality.sh — targeted anti-pattern gates
 # ═══════════════════════════════════════════════════════════════════════════
 #
-# Three targeted checks (NOT a full linter — Gradle handles compilation and
+# Four targeted checks (NOT a full linter — Gradle handles compilation and
 # tests; this catches the anti-patterns that compile fine but rot code):
 #
 #  1. GATE  `javaClass.getMethod(...)` in main sources — reflective dispatch
@@ -17,7 +17,14 @@
 #     invisible in production (no logcat routing, no tag). Use the
 #     structured logger (AppLogger in core, android.util.Log in app).
 #
-#  3. AUDIT empty catch blocks — reported (not gated): swallowing errors
+#  3. GATE  bare `collectAsState(` in main sources — lifecycle-unaware state
+#     collection. All UI collection must use `collectAsStateWithLifecycle()`
+#     (Google/NIA best practice: stops collection when UI is invisible).
+#     The 2026-10 sweep (commit b33e4b7) brought the repo to 0 occurrences;
+#     the browser kit re-introduced 2 in September before that — this gate
+#     keeps it at 0. Comment lines are skipped (docs may show the pattern).
+#
+#  4. AUDIT empty catch blocks — reported (not gated): swallowing errors
 #     silently is sometimes correct (best-effort logging) but should be
 #     visible in review.
 #
@@ -73,6 +80,32 @@ else
     echo "✅ GATE 2 — no printStackTrace() in main sources"
 fi
 
+# ── Gate 3: lifecycle-unaware state collection in main sources ───────────
+# `\.collectAsState\(` with a literal `(` — matches the bare overload only;
+# `collectAsStateWithLifecycle(` does NOT match (its call site reads
+# `.collectAsStateWithLifecycle(`). KDoc/line-comment continuations skipped
+# via the same filter as Gate 1.
+BARE_COLLECT_HITS=""
+if [ -n "$MAIN_KT_LIST" ]; then
+    # -H: force the file:line: prefix even when xargs' last batch holds a
+    # single file — the comment filters below key on that prefix shape.
+    BARE_COLLECT_HITS=$(printf '%s\n' "$MAIN_KT_LIST" \
+        | xargs grep -HnE '\.collectAsState\(' 2>/dev/null \
+        | grep -v ':[0-9]*: *\*' \
+        | grep -v ':[0-9]*: *//' || true)
+fi
+
+if [ -n "$BARE_COLLECT_HITS" ]; then
+    echo "❌ GATE 3 — bare collectAsState() in main sources (use collectAsStateWithLifecycle):"
+    echo "$BARE_COLLECT_HITS"
+    echo ""
+    echo "   Fix: replace with androidx.lifecycle.compose.collectAsStateWithLifecycle"
+    echo "   (dependency already declared: libs.lifecycle.runtime.compose)."
+    FAIL=1
+else
+    echo "✅ GATE 3 — no bare collectAsState() in main sources (all lifecycle-aware)"
+fi
+
 # ── Audit: empty catch blocks (report-only) ────────────────────────────────
 EMPTY_CATCH_COUNT=0
 if [ -n "$MAIN_KT_LIST" ]; then
@@ -99,6 +132,7 @@ echo "📋 AUDIT — TODO/FIXME/XXX markers in main sources: $TODO_COUNT (review
     echo "|-------|--------|"
     echo "| Reflective dispatch (\`javaClass.getMethod\`) | $([ -z "$REFLECT_HITS" ] && echo '✅ none' || echo '❌ found') |"
     echo "| \`printStackTrace()\` in main sources | $([ -z "$STACK_HITS" ] && echo '✅ none' || echo '❌ found') |"
+    echo "| Bare \`collectAsState()\` in main sources | $([ -z "$BARE_COLLECT_HITS" ] && echo '✅ none' || echo '❌ found') |"
     echo "| Empty catch blocks (audit-only) | $EMPTY_CATCH_COUNT |"
     echo "| TODO/FIXME markers (audit-only) | $TODO_COUNT |"
 } >> "$SUMMARY_FILE" 2>/dev/null || true

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S1 Goal 目标模式字符串（中文镜像；英文默认在 values/strings_goal.xml）。 -->
+<resources>
+
+    <!-- ═══ 设定弹层（GoalSetupSheet）═══ -->
+    <string name="goal_setup_title">设定目标</string>
+    <string name="goal_statement_label">目标陈述</string>
+    <string name="goal_statement_placeholder">修复登录页崩溃</string>
+    <string name="goal_setup_empty_statement">目标陈述不能为空</string>
+    <string name="goal_criteria_label">完成条件（可验证）</string>
+    <string name="goal_criteria_placeholder">所有测试通过（./gradlew test 零失败）\n应用能正常启动到主页</string>
+    <string name="goal_criteria_hint">条件必须可客观验证——验收器按证据（命令输出/文件内容/测试结果）判定，不接受「应该没问题」。</string>
+    <string name="goal_setup_empty_criteria">完成条件不能为空</string>
+    <string name="goal_max_rounds">最大验收轮次</string>
+    <string name="goal_start">开始目标</string>
+    <string name="goal_how_it_works">工作方式</string>
+    <string name="goal_how_it_works_body">Agent 每轮收尾后由快速模型对照条件验收，未达标自动续跑并注入差距说明，直到达标或轮次耗尽。</string>
+
+    <!-- ═══ 状态卡（GoalStatusCard）═══ -->
+    <string name="goal_status_active">进行中</string>
+    <string name="goal_status_achieved">已达成</string>
+    <string name="goal_status_stopped">已停止</string>
+    <string name="goal_rounds_progress">第 %1$d/%2$d 轮</string>
+    <string name="goal_last_check_none">尚未验收</string>
+    <string name="goal_stop">停止目标</string>
+    <string name="goal_resume">重启目标</string>
+    <string name="goal_cd_goal_status">目标状态卡</string>
+
+    <!-- ═══ 会话内系统提示（CodeGoalController）═══ -->
+    <string name="goal_started_notice">🎯 目标已设定：%1$s</string>
+    <string name="goal_stopped_notice">⛔ 目标已停止</string>
+    <string name="goal_restart_notice">🔁 目标已重启，继续推进</string>
+</resources>

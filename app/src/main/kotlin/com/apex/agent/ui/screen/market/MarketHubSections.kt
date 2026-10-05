@@ -464,11 +464,14 @@ internal fun BuiltinMcpConfigDialog(
 
     if (showGithubToken) {
         val tokenManager = viewModel.hub.githubTokens
+        // v3 S3：onSuccess 第三参 = 对话框归一化后的默认仓库（null = 未填/
+        // 无法识别，不改动既有值）
         GithubTokenDialog(
             onDismiss = { showGithubToken = false },
             onSubmit = { token -> tokenManager.validateToken(token) },
-            onSuccess = { token, username ->
+            onSuccess = { token, username, normalizedRepo ->
                 tokenManager.saveToken(token, username)
+                normalizedRepo?.let { tokenManager.saveDefaultRepoCanonical(it) }
                 showGithubToken = false
             }
         )

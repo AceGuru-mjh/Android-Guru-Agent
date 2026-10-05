@@ -150,6 +150,8 @@
     <string name="settings_mode_build">Build · think and act</string>
     <string name="settings_mode_chat">Chat (legacy)</string>
     <string name="settings_mode_plan">Plan · plan first, then execute</string>
+    <string name="settings_mode_goal">Goal · verifiable objective loop</string>
+    <string name="settings_mode_loop">Loop · scheduled re-runs</string>
     <string name="settings_mode_spec">Spec · confirm the spec, then execute</string>
     <string name="settings_mode_reflect">Reflect · review and improve</string>
     <string name="settings_mode_assist">Assist · human decides</string>
@@ -394,6 +396,23 @@
     <string name="memory_quarantined">%1$d suspicious UI fingerprints quarantined (phishing / overlay traits)</string>
     <string name="memory_quarantine_clear">No suspicious UI fingerprints quarantined (normal)</string>
     <string name="memory_clear">Clear</string>
+    <!-- #219 聊天记忆分区（KnowledgeGraphStore 的画像 / 近况 / 里程碑） -->
+    <string name="memory_chat_title">Chat memory</string>
+    <string name="memory_chat_count_fmt">%1$d remembered</string>
+    <string name="memory_chat_empty">No chat memories yet\nFacts, recent mood and important dates you mention in chats are remembered here automatically</string>
+    <string name="memory_chat_badge_profile">Profile</string>
+    <string name="memory_chat_badge_state">Recent mood</string>
+    <string name="memory_chat_badge_milestone">Milestones</string>
+    <string name="memory_chat_delete_title">Delete this memory</string>
+    <string name="memory_chat_delete_text">Delete \"%1$s\"? The Agent will no longer remember this.</string>
+    <string name="memory_chat_clear_title">Clear chat memory</string>
+    <string name="memory_chat_clear_text">This deletes all %1$d remembered items (profile, recent mood, milestones). This cannot be undone.</string>
+    <string name="memory_chat_clear">Clear all</string>
+    <string name="memory_chat_msg_deleted">Memory deleted</string>
+    <string name="memory_chat_msg_missing">That memory no longer exists</string>
+    <string name="memory_chat_msg_cleared">Cleared %1$d chat memories</string>
+    <string name="memory_chat_msg_clear_empty">No chat memories to clear</string>
+    <string name="memory_chat_msg_failed">Operation failed: %1$s</string>
 
     <!-- ═══ Task history (TaskHistoryScreen) ═══ -->
     <string name="tasks_title">Tasks</string>

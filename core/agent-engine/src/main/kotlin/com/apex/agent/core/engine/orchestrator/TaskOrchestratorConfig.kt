@@ -37,7 +37,7 @@ data class TaskOrchestratorConfig(
      * [com.apex.agent.core.engine.AgentEvent.Complete] / [com.apex.agent.core.engine.AgentEvent.Aborted]).
      *
      * When this fires, the orchestrator transitions to [TaskState.Finished.Failed]
-     * with message "Task timeout exceeded" and emits a final
+     * with message "任务执行超时（…ms）" and emits a final
      * [com.apex.agent.core.engine.AgentEvent.Error] (recoverable=false).
      *
      * Set to `0L` to disable task-level timeout. Default matches

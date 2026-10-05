@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- S2 Loop 循环与 Cron 模式字符串（英文默认；中文在 values-zh/strings_loop.xml）。
+     资源名全局唯一：全部 loop_ 前缀。 -->
+<resources>
+
+    <!-- ═══ 配置弹层（LoopSetupSheet）═══ -->
+    <string name="loop_setup_title">Set Up Loop</string>
+    <string name="loop_prompt_label">Prompt</string>
+    <string name="loop_prompt_placeholder">What should the agent check or do each round?</string>
+    <string name="loop_prompt_required">Prompt cannot be empty</string>
+    <string name="loop_kind_section">Schedule type</string>
+    <string name="loop_kind_interval">Fixed interval</string>
+    <string name="loop_kind_cron">Cron</string>
+    <string name="loop_kind_once">One-shot reminder</string>
+
+    <!-- INTERVAL -->
+    <string name="loop_interval_min_format">%1$d min</string>
+    <string name="loop_interval_hour_format">%1$d h</string>
+    <string name="loop_interval_custom_label">Custom interval (minutes)</string>
+    <string name="loop_interval_custom_invalid">Enter a valid number of minutes</string>
+    <string name="loop_min_interval_hint">Minimum interval is 30 seconds (anti-flood)</string>
+
+    <!-- CRON -->
+    <string name="loop_cron_label">Cron expression</string>
+    <string name="loop_cron_invalid">Invalid cron expression (5 fields: minute hour day month weekday)</string>
+    <string name="loop_cron_next_preview">Next run: %1$s</string>
+    <string name="loop_cron_preset_5min">Every 5 min</string>
+    <string name="loop_cron_preset_hourly">Hourly</string>
+    <string name="loop_cron_preset_daily9">Daily 9:00</string>
+    <string name="loop_cron_preset_mon9">Mon 9:00</string>
+
+    <!-- ONCE -->
+    <string name="loop_once_in_5m">In 5 minutes</string>
+    <string name="loop_once_in_30m">In 30 minutes</string>
+    <string name="loop_once_in_1h">In 1 hour</string>
+    <string name="loop_once_tomorrow">Tomorrow, same time</string>
+    <string name="loop_once_custom_label">Custom delay (minutes)</string>
+
+    <!-- 通用 -->
+    <string name="loop_max_runs_label">Max runs</string>
+    <string name="loop_notify_label">Notify in background</string>
+    <string name="loop_background_note">The loop keeps running when you switch modes or leave this screen; it ends after the last round or when you tap Stop.</string>
+    <string name="loop_save">Start loop</string>
+
+    <!-- ═══ 状态卡（LoopActiveCard）═══ -->
+    <string name="loop_active_status">Loop running</string>
+    <string name="loop_run_n_of_m">Round %1$d/%2$d</string>
+    <string name="loop_next_run_in">Next in %1$s</string>
+    <string name="loop_next_run_at">Next at %1$s</string>
+    <string name="loop_countdown_hm">%1$dh %2$dm</string>
+    <string name="loop_countdown_ms">%1$dm %2$ds</string>
+    <string name="loop_countdown_s">%1$ds</string>
+    <string name="loop_stop">Stop</string>
+    <string name="loop_run_now">Run now</string>
+    <string name="loop_cd_loop_status">Loop status card</string>
+
+    <!-- ═══ 会话内系统提示 ═══ -->
+    <string name="loop_skip_busy">Previous round still running — this round skipped</string>
+
+    <!-- ═══ 通知（apex_general 渠道）═══ -->
+    <string name="loop_notif_once_title">⏰ Reminder</string>
+    <string name="loop_notif_bg_title">Loop triggered (background)</string>
+    <string name="loop_notif_bg_text">Session not open — this round was skipped</string>
+</resources>

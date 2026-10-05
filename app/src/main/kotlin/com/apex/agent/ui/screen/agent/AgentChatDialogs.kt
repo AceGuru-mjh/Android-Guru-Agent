@@ -48,6 +48,9 @@ import com.apex.agent.core.engine.AgentQuestion
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.R
+import com.apex.agent.ui.glass.GlassCard
+import com.apex.agent.ui.glass.GlassStyle
+import dev.chrisbanes.haze.HazeState
 
 // ═══ 自定义模式组件 ═══
 
@@ -247,11 +250,49 @@ private fun reasoningEffortLabelShort(effort: ReasoningEffort): String = when (e
     ReasoningEffort.MAX -> stringResource(R.string.chat_effort_max)
 }
 
+/**
+ * 工具/权限门的结构化提问卡（Agent 屏历史形态 + Coding 屏 v6 玻璃接线）。
+ *
+ * [glassState]：悬浮栈与时间轴 hazeSource 互为兄弟时传入 —— 提问卡从
+ * GlassCard 获得真实 backdrop 采样（白天模式乳白磨砂而非实色 ElevatedCard）；
+ * null 时保持原 ElevatedCard 形态（Agent 屏历史调用零变更）。
+ */
 @Composable
 internal fun QuestionCard(
     question: AgentQuestion,
     onAnswer: (List<String>, String?) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    glassState: HazeState? = null
+) {
+    if (glassState != null) {
+        GlassCard(
+            state = glassState,
+            style = GlassStyle.Card,
+            shape = RoundedCornerShape(12.dp),
+            accent = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            QuestionCardBody(question, onAnswer, onCancel, compactPadding = true)
+        }
+    } else {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp), // 统一卡片半径（Plan/Spec/ToolCall/TaskStatus 均 12dp，原 16 为孤例）
+            colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+            )
+        ) {
+            QuestionCardBody(question, onAnswer, onCancel, compactPadding = false)
+        }
+    }
+}
+
+@Composable
+private fun QuestionCardBody(
+    question: AgentQuestion,
+    onAnswer: (List<String>, String?) -> Unit,
+    onCancel: () -> Unit,
+    compactPadding: Boolean
 ) {
     // 多选（allowMultiSelect）用集合状态；单选沿用单值状态。
     val multiSelect = question.allowMultiSelect
@@ -277,14 +318,8 @@ internal fun QuestionCard(
         }
     }
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp), // 统一卡片半径（Plan/Spec/ToolCall/TaskStatus 均 12dp，原 16 为孤例）
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    val innerPadding = if (compactPadding) 12.dp else 16.dp
+    Column(modifier = Modifier.padding(innerPadding)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -460,7 +495,6 @@ internal fun QuestionCard(
                 }
             }
         }
-    }
 }
 
 /**

@@ -1,6 +1,7 @@
 package com.apex.agent.ui.screen.code.stream
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,9 +20,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,11 +28,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
+import com.apex.agent.ui.glass.TerminalGlassSurface
+import dev.chrisbanes.haze.HazeState
 
 /**
  * # Code Terminal Panel — 终端面板（规格书：终端日志 + 独立锚定）
@@ -46,6 +48,13 @@ import com.apex.agent.R
  *   用户上翻进入阅读模式后暂停跟随（与时间轴锚定互不干扰）；
  * - ANSI 转义清洗（CSI + OSC 标题序列 + 回车进度条，渲染层兜底）；
  * - 可折叠：头行 = 活跃命令 + 展开箭头；折叠态只留头行（时间轴优先）。
+ *
+ * ## v6 玻璃接入 + 尾窗瘦身
+ *
+ * - [glassState]：悬浮栈与时间轴 hazeSource 互为兄弟 —— 传入即经
+ *   TerminalGlassSurface 获得 Haze 真实 backdrop 采样（恒定深色玻璃
+ *   材质，白天模式也是深色磨砂而非实心黑板）；null = 深色霜面兜底。
+ * - 尾窗高度 260 → 168dp：悬浮栈总高「流水 UI 太大」反馈的主诉项。
  */
 @Composable
 internal fun CodeTerminalPanel(
@@ -53,15 +62,15 @@ internal fun CodeTerminalPanel(
     activeCommand: String?,
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    glassState: HazeState? = null
 ) {
     // 滚动状态提升到折叠开关之外：折叠（正文离开组合）不丢滚动位置
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF101418), // 终端恒定深底（浅色主题下也是终端语义）
+    TerminalGlassSurface(
+        state = glassState,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)
@@ -90,9 +99,15 @@ internal fun CodeTerminalPanel(
                     maxLines = 1,
                     modifier = Modifier.weight(1f)
                 )
-                // 48dp 触区（Material 无障碍红线）+ 16dp 视觉图标：
-                // minimumInteractiveComponentSize 保触区，Icon 缩到视觉尺寸
-                IconButton(onClick = onToggleCollapse, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                // v6 尾窗瘦身：折叠开关从 48dp IconButton 收为 36dp 紧凑
+                // 可点区（终端折叠是二级操作，不占主操作触区预算）。
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button, onClick = onToggleCollapse),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
                         contentDescription = stringResource(R.string.code_stream_terminal_toggle),
@@ -134,7 +149,9 @@ private fun TerminalBody(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 260.dp)
+            // v6 尾窗瘦身：260 → 168dp（约 8 行正文，流式预览够用；
+            // 全量输出走胶囊详情弹层），悬浮栈总高显著回落
+            .heightIn(max = 168.dp)
             .horizontalScroll(horizontal)
     ) {
         Text(

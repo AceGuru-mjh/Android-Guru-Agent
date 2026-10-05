@@ -128,7 +128,26 @@
 | `ui/ApexDrawerContent.kt` | 抽屉迁移：氛围背景源 + GlassNavigationItem |
 | `ui/screen/agent/AgentChatScreen.kt` | 聊天迁移：haze 源 + 悬浮玻璃输入栏 + FAB |
 | `ui/screen/agent/AgentChatMessages.kt` | v5 流式玻璃气泡（Agent/Streaming/Thinking 三气泡） |
-| `ui/screen/code/CodeScreen.kt` | v5 Coding 玻璃悬浮层：时间轴 haze 源 + 悬浮栈 + Floating 输入栏 |
+| `ui/screen/code/CodeScreen.kt` | v5 Coding 玻璃悬浮层：时间轴 haze 源 + 悬浮栈 + Floating 输入栏；v6 错误条/提问卡接线 |
 | `ui/screen/code/stream/CodeStreamCards.kt` | v5 Coding 流式结论/思考卡玻璃化 |
+| `ui/glass/TerminalGlass.kt` | v6 终端语义玻璃：恒定深色材质，Haze 真采样（白天模式深色磨砂而非实心黑板） |
+| `ui/screen/code/stream/CodeTerminalPanel.kt` | v6 终端尾窗接 TerminalGlass + 尾窗 260→168dp 瘦身 |
 
 > v5 变更详情（流式玻璃 + 技能 chip 输入框 + 按钮防挤压 + 函数调用文案纠偏）见 [chat-input-v5-glass-chips.md](chat-input-v5-glass-chips.md)。
+
+## 9. v6 悬浮栈全玻璃接线（白天模式收口）
+
+v5 只接线了 Coding 屏输入栏，悬浮栈其余成员仍是实色 Surface / ElevatedCard
+—— 白天模式下「输入栏是磨砂玻璃、旁边是死色色块」的割裂观感是 v6 的
+直接动机：
+
+| 悬浮栈成员 | v5 | v6 |
+|------|------|------|
+| 输入栏 | GlassCard(Floating) 真采样 | 不变 |
+| 终端尾窗 | 实色深底 Surface | TerminalGlassSurface 真采样（恒定深色材质） |
+| 提问卡 | ElevatedCard 实色 | GlassCard(Card) 真采样（Agent 屏调用不传 state 保持原形态） |
+| 错误条 | 实色 errorContainer | GlassCard(Floating) + error accent 真采样 |
+
+同批收口的流水紧凑化（终端尾窗 260→168dp、胶囊 ~49→44dp、chip 行
+48→32dp、回底 FAB 56→40dp、卡片垂直内边距全面下调）与白天模式语义色
+修复（胶囊 exit-0 绿 4ADE80 → ExtendedColors 成对槽位）详见 PR 描述。

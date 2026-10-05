@@ -55,6 +55,10 @@ class RuntimeRecoveryService(
         if (pid <= 0) false else File("/proc/$pid").exists()
     }
 ) {
+    // T94：startAutoSave/stopAutoSave 可能从不同线程调用（App 启动装配 vs
+    // runtime shutdown），跨线程可见性由 @Volatile 保证（原普通 var 存在
+    // stop 写 null 后 start 仍读到旧引用的窄窗口）。
+    @Volatile
     private var autoSaveJob: kotlinx.coroutines.Job? = null
 
     /**

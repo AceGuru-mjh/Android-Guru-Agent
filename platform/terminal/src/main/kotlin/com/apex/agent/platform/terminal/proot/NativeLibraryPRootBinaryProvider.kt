@@ -193,8 +193,10 @@ class NativeLibraryPRootBinaryProvider(
                 pb.environment().clear()
                 pb.environment().putAll(envMap)
                 val proc = pb.start()
-                val out = proc.inputStream.bufferedReader().readText().trim()
-                val err = proc.errorStream.bufferedReader().readText().trim()
+                // T94：探针流用完即关 —— 旧实现不关闭 reader，管道 fd 靠 GC
+                // 回收；探针在每次 create/refresh 反复执行，fd 缓慢累积。
+                val out = proc.inputStream.bufferedReader().use { it.readText().trim() }
+                val err = proc.errorStream.bufferedReader().use { it.readText().trim() }
                 // T92：有界等待 —— 无界 waitFor 会把一次挂死的 --version 钉死在
                 // verify（每次会话创建都调）上，进而钉死 create/availability。
                 val exited = proc.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -223,8 +225,9 @@ class NativeLibraryPRootBinaryProvider(
                 pb.environment().clear()
                 pb.environment().putAll(envMap)
                 val proc = pb.start()
-                proc.inputStream.bufferedReader().readText()
-                proc.errorStream.bufferedReader().readText()
+                // T94：探针流用完即关（同版本探针 —— fd 回收不靠 GC）。
+                proc.inputStream.bufferedReader().use { it.readText() }
+                proc.errorStream.bufferedReader().use { it.readText() }
                 val exited = proc.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 if (!exited) {
                     runCatching { proc.destroyForcibly() }
@@ -257,8 +260,9 @@ class NativeLibraryPRootBinaryProvider(
                     pb.environment().clear()
                     pb.environment().putAll(envMap)
                     val proc = pb.start()
-                    proc.inputStream.bufferedReader().readText()
-                    proc.errorStream.bufferedReader().readText()
+                    // T94：探针流用完即关（同版本探针 —— fd 回收不靠 GC）。
+                    proc.inputStream.bufferedReader().use { it.readText() }
+                    proc.errorStream.bufferedReader().use { it.readText() }
                     val exited = proc.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     if (!exited) {
                         runCatching { proc.destroyForcibly() }

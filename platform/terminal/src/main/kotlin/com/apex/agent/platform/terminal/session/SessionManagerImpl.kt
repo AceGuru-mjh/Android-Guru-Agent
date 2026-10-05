@@ -178,10 +178,14 @@ class SessionManagerImpl(
         backend: com.apex.agent.platform.terminal.runtime.BackendSessionMetadata?
     ): Result<TerminalSession> {
         val pid = native.nativeGetPid(nativeId)
+        // T94：已创建的 VT 引擎引用 —— 装配失败/取消回滚时释放（引擎可能
+        // 已分配 native 资源：NativeVtCore 句柄），见 catch 块。
+        var createdVt: VirtualTerminal? = null
         try {
             // 2. assemble deps
             val ringBuffer = RingTerminalBuffer()
             val vt = virtualTerminalFactory(rows, cols)
+            createdVt = vt
             val reducer = SemanticStateReducer(
                 sessionId = sessionId, shell = shell, initialCwd = initialCwd, privilege = privilege,
                 pid = pid, rows = rows, cols = cols,
@@ -232,6 +236,7 @@ class SessionManagerImpl(
         } catch (ce: kotlinx.coroutines.CancellationException) {
             // REVIEW-R4：结构性取消（scope shutdown）不吞 —— 取消不是装配失败，
             // 吞掉会拿伪失败掩盖取消语义。同样回滚 native 资源后重抛。
+            runCatching { createdVt?.release() }
             runCatching { native.nativeCloseSession(nativeId) }
             assemblies.remove(sessionId)
             stateFlows.remove(sessionId)
@@ -239,6 +244,9 @@ class SessionManagerImpl(
             throw ce
         } catch (t: Throwable) {
             // R-2：装配失败回滚 —— 回收 native PTY 与 fork 的 shell，清理登记。
+            // T94：VT 引擎一并释放（工厂成功但后续装配抛异常的窗口里
+            // native 句柄直接泄漏）。
+            runCatching { createdVt?.release() }
             runCatching { native.nativeCloseSession(nativeId) }
             assemblies.remove(sessionId)
             stateFlows.remove(sessionId)
@@ -297,6 +305,12 @@ class SessionManagerImpl(
         // cleanup
         inputManager.drop(id)
         waitEngine.drop(id)
+        // T94（引擎生命周期收口）：释放 VT 引擎 —— 设备端 NativeVtCore 持有
+        // C++ Engine（屏幕环/样式表，数百 KB native 堆），此前全链路无人
+        // close，每关一个会话泄漏一个引擎；VtFeedTrail 的 live-engine 计数
+        // 也永不归零（每次退出误报「疑似 native 崩溃」）。pump 已停、native
+        // 会话已关，此处是引擎的安全终点；release 自身幂等且吞异常。
+        runCatching { a.virtualTerminal.release() }
         assemblies.remove(id)
         stateFlows.remove(id)
         // P3 fix（审计 6-b）：迁移锁随会话清理（在途 transition 已拿到旧锁实例，

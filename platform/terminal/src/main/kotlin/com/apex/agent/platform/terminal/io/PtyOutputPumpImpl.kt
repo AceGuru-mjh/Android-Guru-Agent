@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -139,7 +140,10 @@ class PtyOutputPumpImpl(
                                     running.set(false)
                                     break
                                 }
-                                Thread.sleep(POLL_IDLE_MS)
+                                // T94：协程内休眠用 delay（可取消）—— Thread.sleep
+                                // 阻塞 IO worker 且对 scope.cancel 不响应（pump 停止
+                                // 要等满 sleep 余量）。
+                                delay(POLL_IDLE_MS)
                             } else {
                                 idleDeadPolls = 0
                                 native.nativeWaitForData(nativeSessionId, POLL_TIMEOUT_MS)

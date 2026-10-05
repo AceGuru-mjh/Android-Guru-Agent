@@ -28,6 +28,41 @@ permissions:
   contents: read
 
 jobs:
+  workflow-yaml-selfcheck:
+    name: Workflow YAML Self-Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every workflow file (PyYAML strict)
+        run: |
+          # 事故教训（2026-10-05）：guard-rails.yml 的 run 字面块曾因一行注释
+          # 丢失行首缩进而被截断 —— GitHub 整个 workflow 静默失效（四联检查
+          # 全部瘫痪，run 报 "workflow file issue"），而没有任何门禁发现。
+          # 本步骤把「workflow 文件自身可解析」变成显式门禁：任何 .github/
+          # workflows 下的 YAML 解析失败都会带行号报错并阻断合并。
+          python3 - <<'PY'
+          import glob, subprocess, sys
+          try:
+              import yaml
+          except ImportError:
+              subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "pyyaml"], check=True)
+              import yaml
+          bad = []
+          for f in sorted(glob.glob('.github/workflows/*.yml') + glob.glob('.github/workflows/*.yaml')):
+              try:
+                  yaml.safe_load(open(f, encoding='utf-8'))
+                  print(f"OK  {f}")
+              except Exception as e:
+                  bad.append(f"{f}: {e}")
+          if bad:
+              print("\nBROKEN WORKFLOW FILES:")
+              for b in bad:
+                  print(" -", b)
+              sys.exit(1)
+          print(f"All workflow files parse cleanly")
+          PY
+
   i18n-mirror:
     name: i18n String Mirror (values vs values-zh)
     runs-on: ubuntu-latest
@@ -74,7 +109,7 @@ jobs:
         run: |
           BASE="${PR_BASE:-$PUSH_BEFORE}"
           if [ -z "$BASE" ]; then BASE=$(git rev-parse HEAD~1); fi
-# push 事件范围校正（main 侧 ca61b1c3）：分支合并 main 后，PUSH_BEFORE..HEAD
+          # push 事件范围校正（main 侧 ca61b1c3）：分支合并 main 后，PUSH_BEFORE..HEAD
           # 会把 main 的历史提交圈进校验范围（main 上存在历史遗留的不合规提交时，
           # 所有 merge main 的分支全部误伤）。非 main 分支的 push 改用与 origin/main
           # 的 merge-base 作为 BASE —— 只校验分支独有提交，与 pull_request 事件

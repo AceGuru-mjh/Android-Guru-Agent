@@ -61,6 +61,8 @@ import com.apex.agent.core.logging.LogCategory
 import com.apex.agent.ui.glass.GlassButton
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassIconButton
+import com.apex.agent.ui.theme.statusSuccess
+import com.apex.agent.ui.theme.statusWarning
 import com.apex.agent.usage.UsageDaily
 import com.apex.agent.usage.UsageLedger
 import com.apex.agent.usage.UsageModelStat
@@ -313,10 +315,11 @@ private fun SummaryCard(totals: UsageTotals) {
             )
             Row(Modifier.fillMaxWidth()) {
                 StatCell(stringResource(R.string.usage_stat_all_time), totals.allTimeTokens, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                StatCell(stringResource(R.string.usage_stat_today), totals.todayTokens, Green, Modifier.weight(1f))
+                // #244：汇总色改语义函数（明暗成对；旧硬编码 Green/Amber 单态 hex）
+                StatCell(stringResource(R.string.usage_stat_today), totals.todayTokens, statusSuccess(), Modifier.weight(1f))
             }
             Row(Modifier.fillMaxWidth()) {
-                StatCell(stringResource(R.string.usage_stat_7d), totals.last7dTokens, Amber, Modifier.weight(1f))
+                StatCell(stringResource(R.string.usage_stat_7d), totals.last7dTokens, statusWarning(), Modifier.weight(1f))
                 StatCell(stringResource(R.string.usage_stat_30d), totals.last30dTokens, MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -526,10 +529,6 @@ private fun ClearConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 // ═══════════════════════════════════════════════════════════════════════════
 //  工具
 // ═══════════════════════════════════════════════════════════════════════════
-
-/** 语义色（与 TaskHistoryScreen 统计卡一致的仓库既有调色板）。 */
-private val Green = Color(0xFF3E9C51)
-private val Amber = Color(0xFFE0A63C)
 
 /** 千分位分组的整数格式（跟随系统 Locale）。 */
 private fun formatTokens(n: Long): String = String.format(Locale.getDefault(), "%,d", n)

@@ -213,6 +213,25 @@ fun TerminalViewHost(
         }
     }
 
+    /**
+     * 工具栏/扩展键粘贴（#234）：与上下文菜单的 onTerminalPasteRequest 同口径 ——
+     * 剪贴板为空/非文本时给轻提示，不再 ?.let{} 静默无动作（用户以为无响应）。
+     */
+    fun pasteFromClipboard() {
+        val text = clipboard.getText()?.text
+        if (!text.isNullOrEmpty()) {
+            viewModel.pasteText(text)
+        } else {
+            runCatching {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.term_clipboard_empty),
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize().background(scheme.backgroundC)) {
         Box(
             modifier = Modifier
@@ -294,9 +313,7 @@ fun TerminalViewHost(
                 onText = viewModel::sendInput,
                 onKey = { key -> sendKeyWithLatches(key) },
                 onControl = viewModel::sendControlChar,
-                onPaste = {
-                    clipboard.getText()?.text?.let { viewModel.pasteText(it) }
-                }
+                onPaste = { pasteFromClipboard() }
             )
         }
 
@@ -313,9 +330,7 @@ fun TerminalViewHost(
                 onKey = { key -> sendKeyWithLatches(key) },
                 onControl = viewModel::sendControlChar,
                 onShowKeyboard = { viewState.value?.requestFocusAndShowKeyboard() },
-                onPaste = {
-                    clipboard.getText()?.text?.let { viewModel.pasteText(it) }
-                }
+                onPaste = { pasteFromClipboard() }
             )
         }
     }

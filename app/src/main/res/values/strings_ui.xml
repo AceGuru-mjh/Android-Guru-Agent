@@ -34,4 +34,9 @@
     <!-- ═══ Glass Lab 演示页（#280：硬编码中文收编）═══ -->
     <string name="glasslab_cd_icon_button">Sample-verify icon button</string>
     <string name="glasslab_cd_floating_button">Sample-verify floating button</string>
+
+    <!-- ═══ Glass Lab：Cloudy 真模糊材质样本（v7 agent 回复气泡）═══ -->
+    <string name="glasslab_cloudy_title">Cloudy true-blur frost</string>
+    <string name="glasslab_cloudy_hint">Chat-bubble material: light bands diffused by native CPU bitmap blur (all API levels) — self-blur, not backdrop sampling</string>
+    <string name="glasslab_cloudy_note">Left: legacy gradient frost (flat milky white by day). Right: Cloudy material — bands diffuse into a soft glowing frost; day mode keeps a milky base with soft lit bands instead of dead white. Text is never blurred: only the material layer node is blurred.</string>
 </resources>

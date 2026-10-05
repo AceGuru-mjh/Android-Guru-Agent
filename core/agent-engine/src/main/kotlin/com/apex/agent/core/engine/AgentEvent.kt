@@ -172,6 +172,25 @@ sealed interface AgentEvent {
      * 回执驱动显式失败提示，不再静默丢弃。
      */
     data object UserInputExpired : AgentEvent
+
+    /**
+     * LLM 请求容错调度通知（Coding 标准线引入）：流式请求失败后引擎
+     * 决定**继续**而非终止——要么按阶梯延迟重试（[delayMs] > 0），要么
+     * 已降级为无工具纯文本续跑（[delayMs] == 0，[reason] 为完整说明句）。
+     *
+     * 与 [Error] 的分工：Error 意味着任务收口（recoverable 与否都终止本
+     * 轮）；本事件是「过程可见性」——UI 在时间轴留一条状态行即可，
+     * 不弹错误横幅。
+     *
+     * @param attempt 即将进行的重试序号（1-based；降级路径为 0）
+     * @param delayMs 重试前等待毫秒数（降级续跑 = 0）
+     * @param reason 失败原因摘要（降级路径为完整中文说明句）
+     */
+    data class LlmRetryScheduled(
+        val attempt: Int,
+        val delayMs: Long,
+        val reason: String
+    ) : AgentEvent
     
     /** 错误 */
     data class Error(

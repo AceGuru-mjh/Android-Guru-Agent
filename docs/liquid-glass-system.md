@@ -127,10 +127,11 @@
 | `ui/screen/glass/GlassLabScreen.kt` | 验证屏 |
 | `ui/ApexDrawerContent.kt` | 抽屉迁移：氛围背景源 + GlassNavigationItem |
 | `ui/screen/agent/AgentChatScreen.kt` | 聊天迁移：haze 源 + 悬浮玻璃输入栏 + FAB |
-| `ui/screen/agent/AgentChatMessages.kt` | v5 流式玻璃气泡（Agent/Streaming/Thinking 三气泡） |
+| `ui/screen/agent/AgentChatMessages.kt` | v5 流式玻璃气泡（Agent/Streaming/Thinking 三气泡）；v7 三气泡换 AgentBubbleGlass 真模糊材质 |
 | `ui/screen/code/CodeScreen.kt` | v5 Coding 玻璃悬浮层：时间轴 haze 源 + 悬浮栈 + Floating 输入栏；v6 错误条/提问卡接线 |
 | `ui/screen/code/stream/CodeStreamCards.kt` | v5 Coding 流式结论/思考卡玻璃化 |
 | `ui/glass/TerminalGlass.kt` | v6 终端语义玻璃：恒定深色材质，Haze 真采样（白天模式深色磨砂而非实心黑板） |
+| `ui/glass/CloudyFrost.kt` | v7 Cloudy 真模糊霜面材质 + AgentBubbleGlass 气泡壳（cloudy 集成唯一文件） |
 | `ui/screen/code/stream/CodeTerminalPanel.kt` | v6 终端尾窗接 TerminalGlass + 尾窗 260→168dp 瘦身 |
 
 > v5 变更详情（流式玻璃 + 技能 chip 输入框 + 按钮防挤压 + 函数调用文案纠偏）见 [chat-input-v5-glass-chips.md](chat-input-v5-glass-chips.md)。
@@ -151,3 +152,72 @@ v5 只接线了 Coding 屏输入栏，悬浮栈其余成员仍是实色 Surface 
 同批收口的流水紧凑化（终端尾窗 260→168dp、胶囊 ~49→44dp、chip 行
 48→32dp、回底 FAB 56→40dp、卡片垂直内边距全面下调）与白天模式语义色
 修复（胶囊 exit-0 绿 4ADE80 → ExtendedColors 成对槽位）详见 PR 描述。
+
+## 10. v7 Cloudy 真模糊材质（agent 回复气泡）
+
+### 用户痛点
+
+「agent 的回复的白天模式液态玻璃 UI 做的简直没有用到 Cloudy，所有显示的不行」
+—— 完成态 / 流式 / 思考三气泡此前用 Frosted 档（垂直渐变假霜面），白天
+模式下是一块「平而死白」的乳白块，没有磨砂玻璃的光影纵深。根因结构性
+存在：气泡位于 hazeSource（消息 LazyColumn）子树内，Haze 1.4 不支持嵌套
+采样，Backdrop 档永远拿不到真模糊 —— 无论怎么调渐变参数都是「假霜」。
+
+### 方案：Cloudy 自体模糊材质（CloudyFrost）
+
+引入 [Cloudy](https://github.com/skydoves/Cloudy)（com.github.skydoves:cloudy），
+`Modifier.cloudy(radius)` 把**材质层自身内容**做真实位图模糊：材质层
+（`ui/glass/CloudyFrost.kt` 的 `CloudyFrostLayer`）手绘斜向光带 ×3 +
+垂直渐变，整层经真实模糊扩散成柔和发光磨砂 —— 白天 = 乳白底 + 柔和
+受光带（治死白），夜间 = 白/primary 霓虹光雾。文字是兄弟节点，
+**永不被模糊**；边缘光/镜面高光叠加层保持在模糊材质之上 crisp 绘制。
+
+### 版本选型（Maven Central 元数据 + 源码核实）
+
+| 版本 | Compose 要求 | Kotlin 要求 | 结论 |
+|------|-------------|-------------|------|
+| 1.0.0-alpha01 | 1.8.x | **2.4**（toolchain 不兼容） | ✗ |
+| 0.2.7 | **1.8.1**（BOM 2024.12.01 = 1.7.6 ✗） | 2.0 | ✗ |
+| **0.2.3** | **1.7.1**（项目 1.7.6 向后兼容） | **2.0.20**（消费端 2.0.21 一版兼容） | ✓ |
+
+其他核实：AAR minSdk 21 < 项目 26 ✓；纯 Kotlin + JNI，无反射，无需
+proguard keep；自带 baseline profile；四 ABI 原生库 ≈0.37~0.42MB/个。
+
+### 与 Haze 的分工（两套互补的真模糊能力）
+
+| 引擎 | 语义 | 适用位置 | 降级路径 |
+|------|------|----------|----------|
+| Haze 1.4（Backdrop 档） | 采样**背后内容**再模糊 | 悬浮组件（输入栏/终端尾窗/抽屉导航/对话框） | API < 32 → scrim |
+| Cloudy 0.2.3（Frosted 档 Cloudy 变体） | 模糊**材质层自身**（自绘光带纹理） | 列表内嵌组件（聊天气泡）—— Haze 无法嵌套采样的死角 | 见下表 |
+
+### 降级行为表（源码级核实，非 README 转述）
+
+| 环境 | 行为 |
+|------|------|
+| 真机 / 模拟器（**全 API 级别**） | 原生 RenderScriptToolkit（NEON/SIMD CPU，自有线程池）迭代模糊 —— 0.2.3 源码中**没有** RenderEffect 分支，API 31+ 也是同一条 CPU 路径（高版本走 GPU 的是 0.2.7+ / 1.0.0 的实现） |
+| Android Studio 预览（LocalInspectionMode） | 自动回退 `Modifier.blur`（系统 blur 修饰符） |
+| 位图回读 / 模糊抛异常 | Cloudy 层不绘制 —— 霜面零底（GlassSurface 渐变 background）仍在，观感回到 Gradient 变体，不出现空白气泡 |
+
+### 性能边界（适用范围裁决）
+
+- Cloudy 0.2.3 的 draw 路径：材质层 record 进 GraphicsLayer →
+  `toImageBitmap()` 位图回读 → `runBlocking(Dispatchers.IO)` 原生模糊 →
+  绘制模糊位图。**只在材质层节点（重）绘制时发生**（出现 / 尺寸变化 /
+  主题切换）；静态内容不逐帧重模糊，纯滚动位移不触发重录（RenderNode
+  平移复用）。
+- 每个使用点一个离屏层 + 一次 CPU 模糊（NEON 毫秒级）—— 因此**只用于
+  低数量、高价值表面**：目前仅 agent 三气泡（一屏可见通常 < 15 个）；
+  工具卡 / 时间线 / 输入栏等密集或高频重排表面维持 Haze + Gradient，
+  风险与性能隔离。
+- LazyColumn 复用 OK（item 复用时节点与 GraphicsLayer 一并复用）；流式
+  气泡高度增长按换行频率重模糊（NEON 单趟毫秒级，可接受）。
+
+### 架构落点（玻璃系统纪律）
+
+- `com.skydoves.cloudy` 的 import 全仓库**只出现在**
+  `ui/glass/CloudyFrost.kt`（单点集成，换库只改这一个文件）；
+- 业务侧新 API：`AgentBubbleGlass`（agent 三气泡统一玻璃壳），内部 =
+  `GlassSurface(frostMaterial = Cloudy)` + `GlassStyle.Bubble` 专用档
+  （scrim 0.55→0.44 更透、blur 14→16dp 更柔，白天列表内容经半透明霜面
+  透出）；
+- 其余 GlassCard 调用点（工具卡/输入栏/抽屉/对话框）零改动。

@@ -196,7 +196,9 @@ fun GithubIconButton(
  *    对话框自行完成，确认时经 `onSuccess(token, username, normalizedRepo)`
  *    透传 canonical（`owner` / `owner/repo`）；
  * 3. Token 侧原样保留：格式预检（ghp_ / github_pat_ 前缀）、密码掩码、
- *    验证失败 inline 错误、验证期间禁用输入与按钮。
+ *    验证失败 inline 错误、验证期间禁用输入与按钮；
+ * 4. #229：全部文案 stringResource 化，随系统语言取词（原硬编码中文）。
+ *    错误提示经资源 id 存态（onClick/协程非 composable），展示层解析。
  *
  * `internal` 以便 CodeScreen（/mcp:github 未连接信号）与市场页 GitHub 账号
  * 分区复用同一份输入 UI —— 避免多处维护；3 个调用点签名保持一致。
@@ -210,7 +212,9 @@ internal fun GithubTokenDialog(
     var token by remember { mutableStateOf("") }
     var repoInput by remember { mutableStateOf("") }
     var isValidating by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    // #229：错误文案以资源 id 存态（onClick/协程是非 composable 上下文，
+    // 不能直接 stringResource），展示层再解析 —— 与导出 chooser 标题同款模式
+    var errorMessageRes by remember { mutableStateOf<Int?>(null) }
     val scope = rememberCoroutineScope()
 
     // 地址实时归一化反馈（每次输入重算——纯函数，开销可忽略）：
@@ -227,9 +231,6 @@ internal fun GithubTokenDialog(
         else -> stringResource(R.string.github_v3_dialog_repo_ok_user, repoRef.owner)
     }
     val repoFeedbackIsError = repoInput.isNotBlank() && repoRef == null
-    // onClick（非组合上下文）内使用的文案预解析（stringResource 不可在点击回调里调）
-    val tokenPrefixErrorText = stringResource(R.string.github_v3_dialog_token_prefix_error)
-    val tokenInvalidText = stringResource(R.string.github_v3_dialog_token_invalid)
 
     AlertDialog(
         onDismissRequest = { if (!isValidating) onDismiss() },
@@ -258,14 +259,14 @@ internal fun GithubTokenDialog(
                     value = token,
                     onValueChange = {
                         token = it
-                        errorMessage = null
+                        errorMessageRes = null
                     },
                     label = { Text(stringResource(R.string.github_v3_dialog_token_label)) },
                     singleLine = true,
-                    isError = errorMessage != null,
-                    supportingText = errorMessage?.let { msg ->
+                    isError = errorMessageRes != null,
+                    supportingText = errorMessageRes?.let { res ->
                         {
-                            Text(msg, color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(res), color = MaterialTheme.colorScheme.error)
                         }
                     },
                     visualTransformation = PasswordVisualTransformation(),
@@ -304,15 +305,15 @@ internal fun GithubTokenDialog(
                     val trimmedToken = token.trim()
                     if (trimmedToken.isBlank()) return@Button
 
-                    // 格式预检：避免无效 token 浪费网络请求
+                    // 格式预检：避免无效 token 浪费网络请求（#229：文案键直存态）
                     if (!isValidTokenFormat(trimmedToken)) {
-                        errorMessage = tokenPrefixErrorText
+                        errorMessageRes = R.string.github_v3_dialog_token_prefix_error
                         return@Button
                     }
 
                     scope.launch {
                         isValidating = true
-                        errorMessage = null
+                        errorMessageRes = null
                         val username = onSubmit(trimmedToken)
                         isValidating = false
                         if (username != null) {
@@ -322,7 +323,7 @@ internal fun GithubTokenDialog(
                             onSuccess(trimmedToken, username, normalizedRepo)
                             onDismiss()
                         } else {
-                            errorMessage = tokenInvalidText
+                            errorMessageRes = R.string.github_v3_dialog_token_invalid
                         }
                     }
                 },

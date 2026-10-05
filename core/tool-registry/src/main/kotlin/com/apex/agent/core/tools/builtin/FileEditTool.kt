@@ -166,8 +166,8 @@ class FileEditTool(
                 }
             }
 
-            // 写入文件
-            file.writeText(content)
+            // 写入文件（#258：原子写 —— 同目录 tmp + renameTo，断电/崩溃不留截断文件）
+            val atomic = AtomicFileWrite.writeText(file, content)
 
             // 生成变更摘要
             val addedLines = content.lines().size - originalContent.lines().size
@@ -178,6 +178,8 @@ class FileEditTool(
                     appendLine("  Net change: ${if (addedLines > 0) "+" else ""}$addedLines lines")
                 }
                 appendLine("  File now: ${content.lines().size} lines, ${formatSize(content.length.toLong())}")
+                // #258：仅罕见的 rename 失败回退时注记（成功路径输出保持不变）。
+                if (!atomic) appendLine("  (non-atomic fallback: rename failed)")
             }
         } catch (e: Exception) {
             "Edit error: ${e.message}"

@@ -65,6 +65,12 @@
     <string name="diag_log_clear_confirm_title">Clear log files?</string>
     <string name="diag_log_clear_confirm_text">%1$d log files (%2$s) will be deleted permanently</string>
 
+    <!-- ═══ Crash/log viewer dialog (#228) ═══ -->
+    <string name="diag_viewer_failed">Failed to read file</string>
+    <string name="diag_viewer_missing">File no longer exists (it may have been cleared)</string>
+    <string name="diag_viewer_retry">Retry</string>
+    <string name="diag_viewer_close">Close</string>
+
     <!-- ═══ Diagnostic report ═══ -->
     <string name="diag_report_section">Diagnostics report</string>
     <string name="diag_report_content_desc">The zip contains device.txt (app and device info), logs/ (log files) and crashes/ (crash records); share it to help troubleshoot</string>

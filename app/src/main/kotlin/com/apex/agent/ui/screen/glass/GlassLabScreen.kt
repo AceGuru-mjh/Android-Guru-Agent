@@ -226,6 +226,8 @@ private fun GlassLabContent(mode: GlassLabMode) {
         DynamicsSection()
         BackdropZone(state = backdropState, mode = mode)
         SamplesSection(state = backdropState, mode = mode)
+        // v7：Cloudy 真模糊材质样本（agent 回复气泡同款，白天/夜间自动跟随主题）
+        CloudyFrostSection()
         if (mode == GlassLabMode.DAY) {
             DaylightRefinementSection()
         }

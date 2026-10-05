@@ -39,6 +39,10 @@ import dev.chrisbanes.haze.hazeEffect
  *  - Backdrop：仅当 state != null 且本组件悬浮于 hazeSource 内容之上时生效；
  *    Haze 通过 GraphicsLayer 采样背后内容，API 32+ 走 GPU RenderEffect 模糊，
  *    低版本自动降级 scrim —— 不虚报为 blur。
+ *  - Frosted（state == null）两变体（[frostMaterial]）：
+ *    - Gradient（默认）：主题色垂直渐变假霜面，零额外开销；
+ *    - Cloudy：材质层自绘光带纹理，经 Cloudy 位图模糊（原生 NEON CPU）
+ *      扩散成真磨砂发光材质 —— 仍不采样 backdrop（自体模糊，不冒充）。
  *  - Material response：pressed / focused / selected / disabled 驱动
  *    激活度动画，影响高光亮度、边缘强度与按压缩放；动画短促、非循环。
  *  - Edge lighting：drawOutline 内描边渐变 —— 上强下弱的受光边缘。
@@ -60,6 +64,8 @@ fun GlassSurface(
     focused: Boolean = false,
     interactionSource: MutableInteractionSource? = null,
     scaleOnPress: Boolean = true,
+    /** Frosted 档材质变体（state == null 时生效；Backdrop 档忽略此参数） */
+    frostMaterial: GlassFrostMaterial = GlassFrostMaterial.Gradient,
     /** 共享扫掠相位（null = 不绘制动态光带）；多卡传同一 State 即完全同步 */
     specularSweep: State<Float>? = null,
     content: @Composable () -> Unit
@@ -86,6 +92,8 @@ fun GlassSurface(
 
     val palette = glassPalette(style = style, accent = accent)
     val hazeState = state
+    // Cloudy 变体只在 Frosted 档（无 backdrop 采样）生效；Backdrop 档有更强的真采样能力
+    val useCloudyFrost = hazeState == null && frostMaterial == GlassFrostMaterial.Cloudy
 
     // ═══ 材质层 ═══
     val materialModifier = if (hazeState != null) {
@@ -95,7 +103,8 @@ fun GlassSurface(
             style = style.toHazeStyle(palette)
         )
     } else {
-        // Frosted 档：主题色薄霜渐变 —— 明确不冒充 backdrop
+        // Frosted 档：主题色薄霜渐变 —— 明确不冒充 backdrop；
+        // Cloudy 变体下它是模糊层之下的零底（blur 失败时的诚实降级）
         // #262：Brush 记住复用（GlassPalette 是 data class，equals 命中
         // 即跳过重建），避免每次重组重分配。
         val frostBrush = remember(palette) {
@@ -131,37 +140,81 @@ fun GlassSurface(
             }
             .then(materialModifier)
             // 边缘光 / 镜面高光 / 扫掠光带 / 底部内阴影 / 激活增亮 —— 绘制在材质之上、内容之下
+            //（Cloudy 变体改由内部 crisp 叠层子节点绘制，保证在模糊材质之上）
             //
             // #262 Compose 最佳实践（draw 阶段零分配）：drawBehind → drawWithCache。
             // 缓存层（size 变化才重建）：createOutline 的形状代数 + 描边宽度 ——
             // 这是旧实现每帧分配的大头（扫掠/流式/按压缩放的 draw 失效以前
             // 每次都重算）。激活度与扫掠相位是动画 State，刻意只在 onDrawBehind
             // 里读取：缓存层若读取它们，动画会逐帧击穿缓存，退化为 drawBehind。
-            .drawWithCache {
-                if (size.width <= 0f || size.height <= 0f) {
-                    onDrawBehind { /* 空占位：零尺寸不绘制 */ }
-                } else {
-                    val outline = shape.createOutline(
-                        size = size,
-                        layoutDirection = layoutDirection,
-                        density = this
-                    )
-                    val strokePx = 1.5.dp.toPx()
-                    onDrawBehind {
-                        drawGlassOverlays(
-                            outline = outline,
-                            strokePx = strokePx,
-                            palette = palette,
-                            activation = activationState.value,
-                            selected = selected,
-                            accent = accent,
-                            sweepPhase = specularSweep
+            .then(
+                if (useCloudyFrost) Modifier else Modifier.drawWithCache {
+                    if (size.width <= 0f || size.height <= 0f) {
+                        onDrawBehind { /* 空占位：零尺寸不绘制 */ }
+                    } else {
+                        val outline = shape.createOutline(
+                            size = size,
+                            layoutDirection = layoutDirection,
+                            density = this
                         )
+                        val strokePx = 1.5.dp.toPx()
+                        onDrawBehind {
+                            drawGlassOverlays(
+                                outline = outline,
+                                strokePx = strokePx,
+                                palette = palette,
+                                activation = activationState.value,
+                                selected = selected,
+                                accent = accent,
+                                sweepPhase = specularSweep
+                            )
+                        }
                     }
                 }
-            },
+            ),
         contentAlignment = Alignment.Center
     ) {
+        if (useCloudyFrost) {
+            // ═══ Cloudy 真模糊材质（v7）═══
+            // 结构（自下而上）：霜面零底（外层 background）→ 模糊材质层
+            //（CloudyFrostLayer：光带纹理 + 真位图模糊）→ crisp 叠加层
+            //（边缘光/高光，不被模糊）→ 内容。文字与 crisp 叠加永不受模糊
+            // 影响 —— Cloudy 自体模糊只包裹材质层自身节点（drawContent 仅
+            // 光带纹理，内容是兄弟节点不在其子树内）。
+            CloudyFrostLayer(
+                palette = palette,
+                style = style,
+                modifier = Modifier.matchParentSize()
+            )
+            // crisp 叠加层同样走 #262 drawWithCache 缓存路径（零分配 + 缓存跨帧存活）
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .drawWithCache {
+                        if (size.width <= 0f || size.height <= 0f) {
+                            onDrawBehind { /* 空占位：零尺寸不绘制 */ }
+                        } else {
+                            val outline = shape.createOutline(
+                                size = size,
+                                layoutDirection = layoutDirection,
+                                density = this
+                            )
+                            val strokePx = 1.5.dp.toPx()
+                            onDrawBehind {
+                                drawGlassOverlays(
+                                    outline = outline,
+                                    strokePx = strokePx,
+                                    palette = palette,
+                                    activation = activationState.value,
+                                    selected = selected,
+                                    accent = accent,
+                                    sweepPhase = specularSweep
+                                )
+                            }
+                        }
+                    }
+            )
+        }
         content()
     }
 }

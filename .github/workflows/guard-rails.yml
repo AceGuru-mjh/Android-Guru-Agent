@@ -74,7 +74,7 @@ jobs:
         run: |
           BASE="${PR_BASE:-$PUSH_BEFORE}"
           if [ -z "$BASE" ]; then BASE=$(git rev-parse HEAD~1); fi
-# push 事件范围校正（main 侧 ca61b1c3）：分支合并 main 后，PUSH_BEFORE..HEAD
+          # push 事件范围校正（main 侧 ca61b1c3）：分支合并 main 后，PUSH_BEFORE..HEAD
           # 会把 main 的历史提交圈进校验范围（main 上存在历史遗留的不合规提交时，
           # 所有 merge main 的分支全部误伤）。非 main 分支的 push 改用与 origin/main
           # 的 merge-base 作为 BASE —— 只校验分支独有提交，与 pull_request 事件

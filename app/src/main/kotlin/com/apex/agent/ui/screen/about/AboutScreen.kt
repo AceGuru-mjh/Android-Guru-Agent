@@ -428,6 +428,9 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
                         layoutDirection = layoutDirection,
                         density = this
                     )
+                    // CacheDrawScope 只暴露 size/layoutDirection/density ——
+                    // DrawScope 的 center 在此不可用，显式换算
+                    val heroCenter = Offset(size.width / 2f, size.height / 2f)
                     val borderBrush = Brush.sweepGradient(
                         colors = listOf(
                             Color.Transparent,
@@ -436,7 +439,7 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
                             scheme.tertiary.copy(alpha = 0.55f),
                             Color.Transparent
                         ),
-                        center = center
+                        center = heroCenter
                     )
                     val borderStroke = Stroke(width = 1.8.dp.toPx())
                     val sheenColors = listOf(
@@ -447,7 +450,7 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
                     val halfBand = size.width * 0.24f
                     onDrawWithContent {
                         drawContent()
-                        rotate(degrees = borderAngle.value, pivot = center) {
+                        rotate(degrees = borderAngle.value, pivot = heroCenter) {
                             drawOutline(
                                 outline = outline,
                                 brush = borderBrush,

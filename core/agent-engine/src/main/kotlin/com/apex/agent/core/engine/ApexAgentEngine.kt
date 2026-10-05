@@ -143,9 +143,8 @@ class ApexAgentEngine(
      */
     internal val resilience: EngineResilienceGuard = EngineResilienceGuard(),
     /**
-     * v3 GOAL 模式协调器：GOAL 模式每轮纯文本收尾前调
-     * [GoalModeCoordinator.onAgentTurn] 快速验收——未达标注入差距续跑，
-     * 达标/轮次耗尽照常收尾。null = 无目标，退化为 BUILD 行为。
+     * v3 GOAL 模式协调器：每轮纯文本收尾前调 [GoalModeCoordinator.onAgentTurn]
+     * 快速验收——未达标注入差距续跑，达标/轮次耗尽照常收尾。null = 无目标。
      */
     private val goalCoordinator: GoalModeCoordinator? = null
 ) : AgentEngine, ConfirmationSink {
@@ -877,11 +876,9 @@ class ApexAgentEngine(
                 throw e
             } catch (e: Exception) {
                 // ═══ Tool System v4：工具请求降级重试 ═══
-                // 根因：部分 Provider/网关对带 tools 的请求直接 400（400/13/
-                // schema/tool_choice），旧实现把异常抛给 UI。现在：本轮尚未输出
-                // 任何内容且降级等级未到 2 时逐级降级（1=纯 CORE 无强制；2=无工具
-                // 纯对话）重试同一轮；已流出内容的轮次不重试（避免重复拼接）。
-                // 覆盖 ModelRequestRejected 与裸 Http 两路径。
+                // Provider 拒带 tools 请求（400/13/schema/tool_choice；覆盖
+                // ModelRequestRejected 与裸 Http 两路径）时逐级降级（1=纯 CORE；
+                // 2=无工具）重试同一轮，仅本轮零输出时（防重复拼接）。
                 // #242：降级同时发用户可见提示（EngineDegradationNotice）。
                 if (contentBuilder.isEmpty() && reasoningBuilder.isEmpty() &&
                     toolCallsAccumulator.isEmpty() && toolDegradationLevel < 2 &&
@@ -893,10 +890,7 @@ class ApexAgentEngine(
                         "Tools rejected by provider (level ${toolDegradationLevel}): " +
                             "${e.message ?: e::class.simpleName} — degrading tool payload and retrying"
                     )
-                    // #242：降级不再静默 —— 用户可见事件（文案见 EngineDegradationNotice.kt）。
-                    EngineDegradationNotice.noticeFor(toolDegradationLevel)?.let {
-                        emit(AgentEvent.ThinkingChunk(it))
-                    }
+                    EngineDegradationNotice.noticeFor(toolDegradationLevel)?.let { emit(AgentEvent.ThinkingChunk(it)) } // #242 降级可见提示（文案见 EngineDegradationNotice.kt）
                     continue
                 }
                 // ═══ 长任务韧性：LLM 瞬时错误退避重试 ═══
@@ -1015,9 +1009,8 @@ class ApexAgentEngine(
                     }
 
                     // ═══ v3 GOAL 模式：每轮自然收尾 → 快速模型验收 ═══
-                    // 验收未达标 → 注入差距说明（System）继续跑；达标/轮次耗尽/
-                    // 无活动目标 → 照常收尾（绝不丢已生成的回复）。验收逻辑全在
-                    // GoalModeCoordinator（薄包装纪律：引擎只留接线）。
+                    // 验收未达标 → 注入差距说明（System）继续跑；达标/轮次耗尽/无活动
+                    // 目标 → 照常收尾（不丢已生成回复）；验收逻辑全在 GoalModeCoordinator。
                     if (config.mode == AgentMode.GOAL && goalCoordinator != null) {
                         val decision = goalCoordinator.onAgentTurn(contentBuilder.toString())
                         when (decision) {

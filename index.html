@@ -6,6 +6,12 @@
 <title>Android Guru Agent —— 装进口袋的自主智能体</title>
 <meta name="description" content="Android 原生自主智能体：真实 Ubuntu 终端、109 个工具、自愈长任务引擎、双向 MCP 生态、仿生认知记忆。无需服务器，数据不出设备。">
 <meta name="theme-color" content="#EAEEE6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Guru Agent">
 <link rel="canonical" href="https://aceguru-mjh.github.io/Android-Guru-Agent/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Android Guru Agent">
@@ -114,7 +120,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; row-gap: 4px;
   min-height: 64px;
-  padding: 8px 0;
+  /* 长写法：不覆盖 .wrap 的水平 padding（简写会把水平挤成 0，导航贴边） */
+  padding-top: 8px; padding-bottom: 8px;
 }
 .wordmark {
   font-family: var(--font-display);
@@ -146,7 +153,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   }
 
 /* ── 英雄区 ── */
-.hero { padding: 88px 0 96px; }
+/* 长写法：水平 padding 交给 .wrap（同元素双类时简写会互相覆盖） */
+.hero { padding-top: 88px; padding-bottom: 96px; }
 .hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
@@ -154,7 +162,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 }
 @media (max-width: 940px) {
   .hero-grid { grid-template-columns: 1fr; gap: 56px; }
-  .hero { padding: 56px 0 80px; }
+  .hero { padding-top: 56px; padding-bottom: 80px; }
 }
 .hero h1 {
   font-family: var(--font-display);
@@ -239,7 +247,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 .terminal .prompt { color: var(--term-amber); }
 
 /* ── 区块骨架 ── */
-.section { padding: 96px 0; }
+/* 长写法：水平 padding 交给 .wrap，否则 section 上的简写会把它归零 */
+.section { padding-top: 96px; padding-bottom: 96px; }
 .section + .section { padding-top: 0; }
 .section-head {
   font-family: var(--font-display);
@@ -278,7 +287,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
   background: var(--paper-deep);
   border-top: 1px solid rgba(23, 27, 22, 0.1);
   border-bottom: 1px solid rgba(23, 27, 22, 0.1);
-  padding: 88px 0;
+  padding-top: 88px; padding-bottom: 88px;
 }
 .band .window {
   background: var(--term-bg);
@@ -324,13 +333,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
        选择器用 .hero h1 —— 与基础规则同优先级（0,1,1）且源码更晚，稳定生效。 */
     .hero h1 { font-size: 33px; line-height: 1.22; }
     .lede { font-size: 15.5px; }
-    /* 窄屏密度：边距收窄，长文本换行更从容，大字体下更不易碰壁 */
-    .wrap { padding: 0 18px; }
-    .section { padding: 64px 0; }
-    .band { padding: 56px 0; }
-    .hero { padding: 40px 0 64px; }
-    .terminal { font-size: 12px; padding: 12px 14px 16px; }
-    .phone-status { padding: 10px 14px 6px; }
+    /* 窄屏密度：边距收窄但保留呼吸感 —— 22px 是 320px 屏下可读性与宽度的平衡点 */
+    .wrap { padding: 0 22px; }
+    .section { padding-top: 64px; padding-bottom: 64px; }
+    .band { padding-top: 56px; padding-bottom: 56px; }
+    .hero { padding-top: 40px; padding-bottom: 64px; }
+    .terminal { font-size: 12px; padding: 14px 18px 18px; }
+    .phone-status { padding: 10px 18px 6px; }
     .install-links a { white-space: normal; }
   }
 .mode {
@@ -724,7 +733,7 @@ footer {
   position: relative;
   flex: 1; min-height: 0;
   overflow-y: auto; overscroll-behavior: contain;
-  padding: 16px 18px 10px;
+  padding: 16px 20px 12px;
   color: var(--px-fg);
   font-size: 13.5px; line-height: 1.72;
   -webkit-overflow-scrolling: touch;
@@ -753,7 +762,7 @@ footer {
 /* 输入行 */
 .px-in-row {
   display: flex; align-items: baseline; gap: 9px;
-  padding: 12px 18px;
+  padding: 12px 20px;
   border-top: 1px solid var(--px-edge);
   flex-shrink: 0;
 }
@@ -775,7 +784,7 @@ footer {
 .px-toolbar {
   display: none;
   gap: 7px; flex-wrap: wrap;
-  padding: 9px 12px calc(9px + env(safe-area-inset-bottom, 0px));
+  padding: 9px 14px calc(9px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--px-edge);
   flex-shrink: 0;
 }
@@ -824,6 +833,106 @@ footer {
   width: 100%; height: 100%;
   background: var(--px-bg);
 }
+
+/* ═══ PRETEXT 街机（snake / bug / mem）═══ */
+.px-game { max-width: 440px; margin: 10px auto 14px; }
+.px-hud {
+  display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+  font-size: 12px; color: var(--px-dim); margin-bottom: 8px;
+  font-family: var(--font-mono);
+}
+.px-hud b { color: var(--term-green); font-weight: 600; }
+.px-window.px-light .px-hud b { color: var(--pine); }
+.px-gamemsg {
+  text-align: center; font-size: 12px; color: var(--px-dim);
+  font-family: var(--font-mono); margin-top: 6px; min-height: 1.4em;
+}
+
+/* 贪吃蛇：贡献图棋盘 */
+.snk-grid { display: grid; grid-template-columns: repeat(14, 1fr); gap: 3px; }
+.snk-c {
+  aspect-ratio: 1; border-radius: 3px;
+  background: var(--term-edge); opacity: 0.5;
+}
+.snk-c.bd { background: #3E7A52; opacity: 0.9; }
+.snk-c.hd { background: var(--term-amber); opacity: 1; }
+.snk-c.f1 { background: #2E6E44; opacity: 1; }
+.snk-c.f2 { background: #3F9C63; opacity: 1; }
+.snk-c.f3 { background: #57C77E; opacity: 1; }
+.snk-c.f4 { background: #8CD7A0; opacity: 1; box-shadow: 0 0 8px rgba(140, 215, 160, 0.45); }
+.px-dpad {
+  display: none; grid-template-columns: repeat(3, 56px); gap: 6px;
+  justify-content: center; margin-top: 10px;
+}
+@media (pointer: coarse) { .px-dpad { display: grid; } }
+.px-dpad button {
+  height: 44px; border-radius: 10px;
+  border: 1px solid var(--px-edge); background: none;
+  color: var(--px-fg); font-family: var(--font-mono); font-size: 17px;
+  cursor: pointer; touch-action: manipulation;
+}
+.px-dpad .u { grid-column: 2; }
+.px-dpad .l { grid-column: 1; grid-row: 2; }
+.px-dpad .d { grid-column: 2; grid-row: 2; }
+.px-dpad .r { grid-column: 3; grid-row: 2; }
+
+/* 拍虫：九宫格救火 */
+.bug-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 340px; margin: 0 auto; }
+.bug-cell {
+  aspect-ratio: 1; border-radius: 12px;
+  border: 1px solid var(--px-edge);
+  background: rgba(140, 215, 160, 0.04);
+  font-size: 30px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0; touch-action: manipulation;
+  font-family: var(--font-body);
+}
+.bug-cell.bug { background: rgba(140, 215, 160, 0.13); border-color: rgba(140, 215, 160, 0.4); }
+.bug-cell.hit { background: rgba(223, 165, 63, 0.22); border-color: var(--term-amber); }
+.bug-cell.miss { background: rgba(217, 136, 115, 0.16); border-color: var(--term-red); }
+.bug-timer { height: 5px; border-radius: 3px; background: var(--term-edge); overflow: hidden; max-width: 340px; margin: 10px auto 0; }
+.bug-timer i { display: block; height: 100%; width: 100%; background: var(--term-amber); }
+
+/* 记忆翻牌：cs-mem 蒸馏 */
+.mem-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.mem-c {
+  aspect-ratio: 1; border-radius: 10px;
+  border: 1px solid var(--px-edge);
+  background: var(--term-edge);
+  font-family: var(--font-mono); font-size: clamp(20px, 6vw, 30px);
+  color: var(--px-fg); cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation; position: relative;
+}
+.mem-c::before { content: "?"; color: var(--px-dim); opacity: 0.6; }
+.mem-c .glyph { opacity: 0; }
+.mem-c.up::before, .mem-c.done::before { content: ""; }
+.mem-c.up .glyph { opacity: 1; transition: opacity 0.2s; }
+.mem-c.up { background: #1F2A20; border-color: rgba(140, 215, 160, 0.55); }
+.mem-c.done { background: rgba(140, 215, 160, 0.14); border-color: var(--term-green); cursor: default; }
+.mem-c.done .glyph { opacity: 0.85; }
+
+/* 街机菜单按钮行 */
+.px-gamebtn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+.px-gamebtn {
+  font-family: var(--font-mono); font-size: 12.5px;
+  padding: 9px 13px; border-radius: 8px;
+  border: 1px solid var(--px-edge); background: none;
+  color: var(--px-fg); cursor: pointer;
+}
+.px-gamebtn:hover { border-color: var(--term-green); color: var(--term-green); }
+
+/* 老内核退化：不支持 aspect-ratio 时给固定高度，避免格子塌陷 */
+@supports not (aspect-ratio: 1) {
+  .snk-c { height: 16px; }
+  .bug-cell { height: 96px; }
+  .mem-c { height: 82px; }
+}
+
+/* ═══ 渐次显现（滚动进入视口轻抬；无 JS 时内容照常显示）═══ */
+.rv { opacity: 0; transform: translateY(16px); transition: opacity 0.55s ease, transform 0.55s ease; }
+.rv.rv-in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .rv { opacity: 1; transform: none; transition: none; } }
 </style>
 </head>
 <body>
@@ -1291,6 +1400,10 @@ footer {
     danger:    { n: "危险人物",    d: "???" },
     archivist: { n: "档案管理员",  d: "???" },
     konami:    { n: "上上下下",    d: "你以为没人会试的秘技" },
+    snakebite: { n: "贡献吞噬者",  d: "贪吃蛇吃掉 20 个提交" },
+    bugmaster: { n: "害虫终结者",  d: "拍虫 30 秒拿到 12 分" },
+    photographic: { n: "过目不忘",  d: "记忆翻牌 ≤ 20 步蒸馏完成" },
+    arcade:    { n: "街机常客",    d: "三台游戏都玩过一遍" },
     graduate:  { n: "Guru 毕业证", d: "集齐前 10 枚成就" }
   };
   function toast(html) {
@@ -1382,19 +1495,21 @@ footer {
 
   function motd(typed) {
     if (typed && !reduced) {
-      typeLine("amber", "PRETEXT v1.0 —— 每个产品页都需要一个借口（pretext）。").then(function () {
+      typeLine("amber", "PRETEXT v1.1 —— 每个产品页都需要一个借口（pretext）。").then(function () {
         return typeLine("", "这一台的借口是：终端。");
       }).then(function () {
         print("", "");
         print("dim", "输入 help 查看命令 · Tab 补全 · ↑↓ 翻历史 · Esc 离开");
+        print("dim", "街机已上线：snake · bug · mem —— 输入即玩。");
         print("dim", "纯前端演出，不联网、不上传 —— 和产品一个脾气。");
         print("", "");
       });
     } else {
-      print("amber", "PRETEXT v1.0 —— 每个产品页都需要一个借口（pretext）。");
+      print("amber", "PRETEXT v1.1 —— 每个产品页都需要一个借口（pretext）。");
       print("", "这一台的借口是：终端。");
       print("", "");
       print("dim", "输入 help 查看命令 · Tab 补全 · ↑↓ 翻历史 · Esc 离开");
+      print("dim", "街机已上线：snake · bug · mem —— 输入即玩。");
       print("dim", "纯前端演出，不联网、不上传 —— 和产品一个脾气。");
       print("", "");
     }
@@ -1412,6 +1527,10 @@ footer {
     print("", "  modes      六种执行模式");
     print("", "  fact       随机一条工程冷知识");
     print("", "  guru       导师今天说");
+    print("amber", "街机");
+    print("", "  snake      贪吃蛇：吃掉我的贡献（GitHub 图）");
+    print("", "  bug        拍虫：CI 又红了，30 秒救火");
+    print("", "  mem        cs-mem 记忆翻牌：八对工具符号");
     print("amber", "导航");
     print("", "  download   去拿 APK（真实链接）");
     print("", "  wiki       去看文档（真实链接）");
@@ -1421,7 +1540,7 @@ footer {
     print("", "  history    命令历史");
     print("", "  clear      清屏（Ctrl+L 也行）");
     print("", "  exit       离开（Esc 也行）");
-    print("dim", "提示：help 只列了一半 —— 终端嘛，总要留点 ls 才能发现的东西。");
+    print("dim", "提示：help 只列了一半 —— 终端嘛，总要留点 ls 才能发现的东西。街机成就也算在墙上。 ");
   });
 
   cmd("about", "这个项目是什么", function () {
@@ -1440,9 +1559,10 @@ footer {
       "    |:_/ |        OS      Android Guru Agent v1.4.4",
       "   //   \\ \\       Host    你的浏览器（就是现在这个）",
       "  (|     | )      Kernel  纯前端 · 零依赖 · 无构建",
-      " /'\\_   _/`\\      Shell   pretext 1.0",
+      " /'\\_   _/`\\      Shell   pretext 1.1",
       " \\___)=(___/      Uptime  " + uptimeMin() + " 分钟",
       "                  Tools   109（本终端谦虚地只带 " + Object.keys(CMDS).length + " 个）",
+      "                  Games   3（snake · bug · mem）",
       "                  Memory  localStorage"
     ].join("\n"));
   });
@@ -1850,6 +1970,510 @@ footer {
   window.addEventListener("hashchange", function () {
     if (location.hash === "#pretext" && !dlg.open) open();
   });
+
+  /* ── 对外 API：给街机脚本用（保持单文件、零全局污染，只此一个出口） ── */
+  window.PX = {
+    cmd: cmd, exec: exec, print: print, esc: esc, link: link,
+    unlock: unlock, wait: wait, scrollEnd: scrollEnd,
+    dlg: dlg, screen: screenEl, out: out, input: input,
+    reduced: function () { return reduced; },
+    fxBegin: function () { fxGuard = Infinity; },
+    fxHold: function (ms) { fxGuard = Date.now() + ms; },
+    open: open
+  };
+})();
+</script>
+
+<!-- ═══ PRETEXT ARCADE：三台小游戏（全部本地运行，零请求）═══ -->
+<script>
+(function () {
+  "use strict";
+  var PX = window.PX;
+  if (!PX) return;
+
+  var out = PX.out, input = PX.input, dlg = PX.dlg;
+  var LS_SNAKE = "aga.px.snakeHi", LS_BUG = "aga.px.bugHi", LS_MEM = "aga.px.memBest", LS_PLAYED = "aga.px.played";
+  function lsNum(k, d) { try { var v = parseInt(localStorage.getItem(k), 10); return isNaN(v) ? d : v; } catch (e) { return d; } }
+  function lsSetNum(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+  function playedObj() { try { return JSON.parse(localStorage.getItem(LS_PLAYED)) || {}; } catch (e) { return {}; } }
+  function markPlayed(name) {
+    var p = playedObj(); p[name] = 1;
+    try { localStorage.setItem(LS_PLAYED, JSON.stringify(p)); } catch (e) {}
+    if (p.snake && p.bug && p.mem) PX.unlock("arcade");
+  }
+
+  /* 对话框意外关闭时终止进行中的游戏（防悬挂定时器） */
+  var activeCleanup = null;
+  dlg.addEventListener("close", function () { if (activeCleanup) activeCleanup(); });
+
+  function boardArea() {
+    var d = document.createElement("div");
+    d.className = "px-game";
+    out.appendChild(d);
+    PX.scrollEnd();
+    return d;
+  }
+  function keyTrap(handler) {
+    var fn = function (e) {
+      var k = e.key;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Enter"].indexOf(k) >= 0) e.preventDefault();
+      handler(k, e);
+    };
+    document.addEventListener("keydown", fn, true);
+    return function () { document.removeEventListener("keydown", fn, true); };
+  }
+  function swipeTrap(el, handler) {
+    var sx = 0, sy = 0;
+    function ts(e) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }
+    function tm(e) { e.preventDefault(); }
+    function te(e) {
+      var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+      if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;
+      if (Math.abs(dx) > Math.abs(dy)) handler(dx > 0 ? "right" : "left");
+      else handler(dy > 0 ? "down" : "up");
+    }
+    el.addEventListener("touchstart", ts, { passive: true });
+    el.addEventListener("touchmove", tm, { passive: false });
+    el.addEventListener("touchend", te, { passive: true });
+    return function () {
+      el.removeEventListener("touchstart", ts);
+      el.removeEventListener("touchmove", tm);
+      el.removeEventListener("touchend", te);
+    };
+  }
+  function holdOn() { PX.fxBegin(); input.disabled = true; input.blur(); }
+  function holdOff() {
+    PX.fxHold(400);
+    input.disabled = false;
+    if (dlg.open) setTimeout(function () { try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); } }, 40);
+  }
+
+  /* ═══ 贪吃蛇：吃掉我的贡献 ═══ */
+  function snakeRun() {
+    return new Promise(function (resolve) {
+      PX.print("amber", "SNAKE —— 贪吃蛇：吃掉我的贡献");
+      PX.print("", "棋盘就是 GitHub 贡献图，绿格是提交，你是 cs-mem 的指针。");
+      PX.print("dim", "方向键 / WASD / 滑动 · 越吃越快 · 撞到自己 = 贡献历史重写失败 · Esc 放弃");
+      var area = boardArea();
+      var hud = document.createElement("div"); hud.className = "px-hud"; area.appendChild(hud);
+      var grid = document.createElement("div"); grid.className = "snk-grid"; area.appendChild(grid);
+      var msg = document.createElement("div"); msg.className = "px-gamemsg"; area.appendChild(msg);
+      var COLS = 14, ROWS = 9;
+      var cells = [];
+      for (var i = 0; i < COLS * ROWS; i++) {
+        var c = document.createElement("div"); c.className = "snk-c";
+        grid.appendChild(c); cells.push(c);
+      }
+      var dpad = document.createElement("div"); dpad.className = "px-dpad";
+      [["u", "▲", "up"], ["l", "◀", "left"], ["d", "▼", "down"], ["r", "▶", "right"]].forEach(function (d) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = d[0]; b.textContent = d[1];
+        b.setAttribute("aria-label", d[2]);
+        b.addEventListener("pointerdown", function (e) { e.preventDefault(); start(); turn(d[2]); });
+        dpad.appendChild(b);
+      });
+      area.appendChild(dpad);
+
+      var snake = [{ x: 6, y: 4 }, { x: 5, y: 4 }, { x: 4, y: 4 }];
+      var dir = { x: 1, y: 0 }, queued = [];
+      var food = null, commits = 0, dead = false, started = false;
+      var timer = null, delay = 170, hi = lsNum(LS_SNAKE, 0);
+      var stopKeys = null, stopSwipe = null;
+
+      function idx(p) { return p.y * COLS + p.x; }
+      function spawnFood() {
+        var free = [];
+        for (var y = 0; y < ROWS; y++) for (var x = 0; x < COLS; x++) {
+          var hit = snake.some(function (s) { return s.x === x && s.y === y; });
+          if (!hit) free.push({ x: x, y: y });
+        }
+        if (!free.length) { food = null; finish(true); return; }
+        var p = free[Math.floor(Math.random() * free.length)];
+        var r = Math.random();
+        p.lv = r < 0.45 ? 1 : r < 0.75 ? 2 : r < 0.92 ? 3 : 4;
+        food = p;
+      }
+      function draw() {
+        for (var i = 0; i < cells.length; i++) cells[i].className = "snk-c";
+        if (food) cells[idx(food)].className = "snk-c f" + food.lv;
+        for (var j = snake.length - 1; j >= 0; j--) {
+          cells[idx(snake[j])].className = j === 0 ? "snk-c hd" : "snk-c bd";
+        }
+      }
+      function setHud() {
+        hud.innerHTML = "提交 <b>" + commits + "</b> · 长度 <b>" + snake.length + "</b> · 纪录 <b>" + hi + "</b>";
+      }
+      var DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
+      function turn(name) {
+        var nd = DIRS[name];
+        if (!nd) return;
+        if (queued.length < 2) queued.push(nd);
+      }
+      function step() {
+        if (queued.length) {
+          var nd = queued.shift();
+          if (nd.x !== -dir.x || nd.y !== -dir.y) dir = nd;
+        }
+        var h = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
+        for (var i = 0; i < snake.length - 1; i++) {
+          if (snake[i].x === h.x && snake[i].y === h.y) { finish(false); return; }
+        }
+        snake.unshift(h);
+        if (food && h.x === food.x && h.y === food.y) {
+          commits += food.lv;
+          if (commits >= 20) PX.unlock("snakebite");
+          delay = Math.max(95, delay - 4);
+          if (commits > hi) { hi = commits; lsSetNum(LS_SNAKE, hi); }
+          spawnFood();
+        } else snake.pop();
+        draw(); setHud();
+      }
+      function loop() {
+        if (dead) return;
+        timer = setTimeout(function () { step(); loop(); }, delay);
+      }
+      function start() {
+        if (started || dead) return;
+        started = true; markPlayed("snake");
+        msg.textContent = "";
+        loop();
+      }
+      function finish(won) {
+        if (dead) return;
+        dead = true;
+        clearTimeout(timer);
+        if (stopKeys) stopKeys();
+        if (stopSwipe) stopSwipe();
+        holdOff();
+        activeCleanup = null;
+        var len = snake.length;
+        msg.textContent = won ? "整张图吃空了" : "撞到自己 —— 贡献历史重写失败";
+        PX.print("amber", "── 结算 ──");
+        PX.print("", "吃掉 " + commits + " 个提交 · 最终长度 " + len + (hi > 0 ? " · 纪录 " + hi : ""));
+        if (won) PX.print("ok", "整张贡献图吃空 —— locust 级别的智能体。");
+        else if (commits === 0) PX.print("dim", "一天都没 commit 的日历，说的就是你这局。");
+        else if (commits < 10) PX.print("dim", "约等于一个悠闲的周末提交量。");
+        else if (commits < 20) PX.print("dim", "cs-mem：这些提交本可以蒸馏成宏的 —— 结果全进了你的胃。");
+        else PX.print("ok", "贡献吞噬者！cs-mem 已把你的吃法蒸馏成肌肉记忆（0 token 回放）。");
+        PX.print("dim", "再来一局：snake · 换一台：games");
+        PX.print("", "");
+        PX.scrollEnd();
+        resolve();
+      }
+      holdOn();
+      draw(); setHud();
+      spawnFood(); draw();
+      msg.textContent = "▶ 回车 / 点击棋盘 / 任意方向键 开始";
+      stopKeys = keyTrap(function (k) {
+        if (dead) return;
+        if (k === "Escape") { finish(false); return; }
+        if (k === "Enter") { start(); return; }
+        var map = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down", ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right" };
+        if (map[k]) { start(); turn(map[k]); }
+      });
+      stopSwipe = swipeTrap(grid, function (d) { start(); turn(d); });
+      grid.addEventListener("click", function () { start(); });
+      activeCleanup = function () {
+        if (dead) return;
+        dead = true;
+        clearTimeout(timer);
+        if (stopKeys) stopKeys();
+        if (stopSwipe) stopSwipe();
+        input.disabled = false;
+        resolve();
+      };
+    });
+  }
+
+  /* ═══ 拍虫：CI 又红了 ═══ */
+  function bugRun() {
+    return new Promise(function (resolve) {
+      PX.print("amber", "BUG —— 拍虫模式：CI 又红了");
+      PX.print("", "九宫格里虫子随机探头，30 秒内拍死尽量多的。");
+      PX.print("dim", "点格子 / 数字键 1-9 · 🐛+1 · 🦗+2 · ✨+3 · Esc 放弃");
+      var area = boardArea();
+      var hud = document.createElement("div"); hud.className = "px-hud"; area.appendChild(hud);
+      var grid = document.createElement("div"); grid.className = "bug-grid"; area.appendChild(grid);
+      var bar = document.createElement("div"); bar.className = "bug-timer";
+      var fill = document.createElement("i"); bar.appendChild(fill); area.appendChild(bar);
+      var msg = document.createElement("div"); msg.className = "px-gamemsg"; area.appendChild(msg);
+      var cells = [];
+      for (var i = 0; i < 9; i++) {
+        (function (idx) {
+          var b = document.createElement("button");
+          b.type = "button"; b.className = "bug-cell";
+          b.addEventListener("click", function () { if (!started) start(); whack(idx); });
+          grid.appendChild(b); cells.push(b);
+        })(i);
+      }
+      var score = 0, combo = 0, bestCombo = 0;
+      var TIME = 30, left = TIME, started = false, over = false;
+      var tick = null, bugTimer = null, hi = lsNum(LS_BUG, 0);
+      var stopKeys = null;
+
+      function setHud() {
+        hud.innerHTML = "得分 <b>" + score + "</b> · 连击 <b>" + combo + "</b> · 剩余 <b>" + Math.max(0, Math.ceil(left)) + "s</b> · 纪录 <b>" + hi + "</b>";
+      }
+      function spawnBug() {
+        if (over) return;
+        var empty = [];
+        cells.forEach(function (c, i) { if (!c.textContent) empty.push(i); });
+        if (!empty.length) { bugTimer = setTimeout(spawnBug, 300); return; }
+        var i = empty[Math.floor(Math.random() * empty.length)];
+        var r = Math.random();
+        var bug = r < 0.68 ? { g: "🐛", p: 1 } : r < 0.92 ? { g: "🦗", p: 2 } : { g: "✨", p: 3 };
+        var c = cells[i];
+        c.textContent = bug.g;
+        c.className = "bug-cell bug";
+        c._p = bug.p;
+        c._hide = setTimeout(function () {
+          if (c.textContent === bug.g) { combo = 0; setHud(); }
+          c.textContent = ""; c.className = "bug-cell"; c._p = 0;
+          if (!over) bugTimer = setTimeout(spawnBug, Math.max(90, 320 - score * 4));
+        }, Math.max(500, 920 - score * 14));
+      }
+      function whack(i) {
+        if (over) return;
+        var c = cells[i];
+        if (c.textContent) {
+          clearTimeout(c._hide);
+          score += c._p || 1;
+          combo++; bestCombo = Math.max(bestCombo, combo);
+          c.textContent = "💥"; c.className = "bug-cell hit";
+          (function (cc) { setTimeout(function () { if (cc.textContent === "💥") { cc.textContent = ""; cc.className = "bug-cell"; } }, 130); })(c);
+          if (score > hi) { hi = score; lsSetNum(LS_BUG, hi); }
+          if (score >= 12) PX.unlock("bugmaster");
+          msg.textContent = combo >= 5 ? "连击 ×" + combo + " —— 自愈引擎直呼内行" : "";
+          clearTimeout(bugTimer);
+          bugTimer = setTimeout(spawnBug, Math.max(60, 180 - score * 3));
+        } else {
+          combo = 0;
+          c.className = "bug-cell miss";
+          (function (cc) { setTimeout(function () { if (cc.className.indexOf("miss") >= 0) cc.className = "bug-cell"; }, 150); })(c);
+          msg.textContent = "拍空 —— 工具调用失败 ×1";
+        }
+        setHud();
+      }
+      function start() {
+        if (started || over) return;
+        started = true; markPlayed("bug");
+        msg.textContent = "";
+        tick = setInterval(function () {
+          left -= 0.1;
+          fill.style.width = Math.max(0, left / TIME * 100) + "%";
+          if (left <= 10) fill.style.background = "var(--term-red)";
+          setHud();
+          if (left <= 0) finish();
+        }, 100);
+        spawnBug();
+      }
+      function finish() {
+        if (over) return;
+        over = true;
+        clearInterval(tick); clearTimeout(bugTimer);
+        cells.forEach(function (c) { clearTimeout(c._hide); c.textContent = ""; c.className = "bug-cell"; });
+        if (stopKeys) stopKeys();
+        holdOff();
+        activeCleanup = null;
+        msg.textContent = "";
+        PX.print("amber", "── 结算 ──");
+        PX.print("", "拍虫得分 " + score + " · 最高连击 " + bestCombo + (hi > 0 ? " · 纪录 " + hi : ""));
+        if (score === 0) PX.print("dim", "一只都没拍到。CI：那我自己修吧。");
+        else if (score < 12) PX.print("dim", "v3 八层硬化表示欣慰 —— 但虫子跑得比你快。");
+        else PX.print("ok", "害虫终结者 —— 全组 CI 恢复绿色，你拍出来的。");
+        PX.print("dim", "再来一局：bug · 换一台：games");
+        PX.print("", "");
+        PX.scrollEnd();
+        resolve();
+      }
+      holdOn();
+      setHud();
+      fill.style.width = "100%";
+      msg.textContent = "▶ 回车 / 点击任意格子 开始";
+      stopKeys = keyTrap(function (k) {
+        if (over) return;
+        if (k === "Escape") { finish(); return; }
+        if (k === "Enter") { start(); return; }
+        if (k >= "1" && k <= "9") { start(); whack(parseInt(k, 10) - 1); }
+      });
+      grid.addEventListener("click", function () { start(); });
+      activeCleanup = function () {
+        if (over) return;
+        over = true;
+        clearInterval(tick); clearTimeout(bugTimer);
+        cells.forEach(function (c) { clearTimeout(c._hide); });
+        if (stopKeys) stopKeys();
+        input.disabled = false;
+        resolve();
+      };
+    });
+  }
+
+  /* ═══ cs-mem 记忆翻牌 ═══ */
+  function memRun() {
+    return new Promise(function (resolve) {
+      PX.print("amber", "MEM —— cs-mem 记忆翻牌");
+      PX.print("", "16 张牌 = 8 对终端符号。全部配对 = 蒸馏完成。");
+      PX.print("dim", "点击翻牌 · 步数越少越聪明 · Esc 放弃");
+      var area = boardArea();
+      var hud = document.createElement("div"); hud.className = "px-hud"; area.appendChild(hud);
+      var grid = document.createElement("div"); grid.className = "mem-grid"; area.appendChild(grid);
+      var msg = document.createElement("div"); msg.className = "px-gamemsg"; area.appendChild(msg);
+
+      var pool = ["$", "#", "%", "&", "@", "~", "+", "!"];
+      var deck = pool.concat(pool);
+      for (var i = deck.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+      }
+      var open = [], matched = 0, moves = 0, lock = false, over = false, started = false;
+      var best = lsNum(LS_MEM, 0);
+      var stopKeys = null;
+
+      function setHud() {
+        hud.innerHTML = "步数 <b>" + moves + "</b> · 已配对 <b>" + matched + " / 8</b>" + (best ? " · 最佳 <b>" + best + "</b>" : "");
+      }
+      deck.forEach(function (g) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "mem-c";
+        var s = document.createElement("span"); s.className = "glyph"; s.textContent = g;
+        b.appendChild(s);
+        b.addEventListener("click", function () { flip(b, g); });
+        grid.appendChild(b);
+      });
+      function flip(b, g) {
+        if (over || lock || b._up || b._done) return;
+        if (!started) { started = true; markPlayed("mem"); msg.textContent = ""; }
+        b._up = true; b.classList.add("up");
+        open.push({ b: b, g: g });
+        if (open.length === 2) {
+          moves++; setHud(); lock = true;
+          var a = open[0], c = open[1];
+          var hit = a.g === c.g;
+          setTimeout(function () {
+            if (hit) {
+              a.b._done = c.b._done = true;
+              a.b.classList.remove("up"); c.b.classList.remove("up");
+              a.b.classList.add("done"); c.b.classList.add("done");
+              matched++;
+              msg.textContent = "✓ 配对成功 —— 一条轨迹入库";
+              if (matched === 8) { finish(); return; }
+            } else {
+              a.b._up = c.b._up = false;
+              a.b.classList.remove("up"); c.b.classList.remove("up");
+            }
+            open = []; lock = false;
+          }, hit ? 320 : 620);
+        }
+      }
+      function finish() {
+        if (over) return;
+        over = true;
+        if (stopKeys) stopKeys();
+        holdOff();
+        activeCleanup = null;
+        if (!best || moves < best) { best = moves; lsSetNum(LS_MEM, best); }
+        if (moves <= 20) PX.unlock("photographic");
+        msg.textContent = "";
+        PX.print("amber", "── 结算 ──");
+        PX.print("", moves + " 步完成全部 8 对 · 最佳纪录 " + best);
+        if (moves <= 20) PX.print("ok", "过目不忘 —— cs-mem 想挖你去做指纹索引。");
+        else if (moves <= 30) PX.print("dim", "蒸馏完成。下次同型任务 0 token 直接回放 —— 记忆还行。");
+        else PX.print("dim", "蒸馏完成，但过程有点费 token。cs-mem 建议早睡。");
+        PX.print("dim", "再来一局：mem · 换一台：games");
+        PX.print("", "");
+        PX.scrollEnd();
+        resolve();
+      }
+      holdOn();
+      setHud();
+      msg.textContent = "▶ 点击第一张牌开始 · Esc 放弃";
+      stopKeys = keyTrap(function (k) {
+        if (k === "Escape" && !over) {
+          over = true;
+          if (stopKeys) stopKeys();
+          holdOff();
+          activeCleanup = null;
+          PX.print("err", "（游戏放弃 —— 16 张牌散落一地）");
+          PX.print("", "");
+          resolve();
+        }
+      });
+      activeCleanup = function () {
+        if (over) return;
+        over = true;
+        if (stopKeys) stopKeys();
+        input.disabled = false;
+        resolve();
+      };
+    });
+  }
+
+  /* ═══ 注册 + 街机菜单 ═══ */
+  PX.cmd("games", "街机菜单", function () {
+    PX.print("amber", "PRETEXT 街机 —— 三台游戏，全部本地运行：");
+    var d = document.createElement("div");
+    d.className = "px-gamebtn-row";
+    [["snake", "🐍 贪吃蛇 · 吃掉我的贡献"], ["bug", "🐛 拍虫 · CI 又红了"], ["mem", "🧠 记忆翻牌 · cs-mem"]].forEach(function (g) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "px-gamebtn"; b.textContent = g[1];
+      b.addEventListener("click", function () { PX.exec(g[0]); });
+      d.appendChild(b);
+    });
+    out.appendChild(d);
+    PX.print("dim", "（或直接输入游戏名。成就墙新增 4 枚街机徽章：贡献吞噬者 / 害虫终结者 / 过目不忘 / 街机常客。）");
+    PX.print("", "");
+    PX.scrollEnd();
+  });
+  PX.cmd("snake", "贪吃蛇：吃掉我的贡献", function () { return snakeRun(); });
+  PX.cmd("bug", "拍虫：CI 又红了", function () { return bugRun(); });
+  PX.cmd("mem", "cs-mem 记忆翻牌", function () { return memRun(); });
+
+  /* 触屏工具栏加街机入口（手机免打字） */
+  var tb = document.querySelector(".px-toolbar");
+  if (tb) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "px-tb-btn"; b.textContent = "🎮 街机";
+    var achBtn = tb.querySelector('[data-px-act="ach"]');
+    if (achBtn && achBtn.parentNode) tb.insertBefore(b, achBtn);
+    else tb.appendChild(b);
+    b.addEventListener("click", function () { PX.exec("games"); });
+  }
+})();
+</script>
+
+<!-- ═══ 渐次显现（滚动进入视口轻抬；渐进增强，无 JS 时内容直接可见）+ PWA 注册 ═══ -->
+<script>
+(function () {
+  "use strict";
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* 滚动显现：只接管视口之下的块，首屏内容不参与，避免加载闪烁 */
+  if (!reduced && "IntersectionObserver" in window) {
+    var els = document.querySelectorAll(".section > *, .band .wrap > *");
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          en.target.classList.add("rv-in");
+          io.unobserve(en.target);
+        }
+      });
+    }, { rootMargin: "0px 0px -5% 0px", threshold: 0.05 });
+    Array.prototype.forEach.call(els, function (el) {
+      var r = el.getBoundingClientRect();
+      if (r.top < window.innerHeight * 0.9) return;
+      el.classList.add("rv");
+      io.observe(el);
+    });
+  }
+
+  /* PWA：仅安全上下文注册（https 或本地调试），失败不影响浏览 */
+  if ("serviceWorker" in navigator &&
+      (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () { /* 静默 */ });
+    });
+  }
 })();
 </script>
 </body>

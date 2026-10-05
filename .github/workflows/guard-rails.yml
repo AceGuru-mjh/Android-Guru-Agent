@@ -74,5 +74,18 @@ jobs:
         run: |
           BASE="${PR_BASE:-$PUSH_BEFORE}"
           if [ -z "$BASE" ]; then BASE=$(git rev-parse HEAD~1); fi
+          # push 事件范围校正：分支合并 main 后，PUSH_BEFORE..HEAD 会把 main 的
+          # 历史提交圈进校验范围（main 上存在历史遗留的不合规提交时，所有
+          # merge main 的分支全部误伤）。非 main 分支的 push 改用与 origin/main
+          # 的 merge-base 作为 BASE —— 只校验分支独有提交，与 pull_request 事件
+          # 的 base.sha..head 语义对齐；main 自身的 push 保持 before..after 语义。
+          if [ -z "$PR_BASE" ] && [ "${GITHUB_REF_NAME:-}" != "main" ] \
+            && git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+            MB=$(git merge-base HEAD origin/main) || MB=""
+            if [ -n "$MB" ]; then
+              echo "push-range recalculated via merge-base with origin/main: $MB"
+              BASE="$MB"
+            fi
+          fi
           echo "range: ${BASE}..$(git rev-parse HEAD)"
           python3 scripts/check_commit_messages.py "$BASE" HEAD

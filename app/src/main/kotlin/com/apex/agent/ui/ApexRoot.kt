@@ -1,5 +1,6 @@
 package com.apex.agent.ui
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -225,7 +226,15 @@ fun ApexRoot() {
         Scaffold(
             // 修复：edge-to-edge 后 adjustResize 失效，键盘弹出会直接盖住输入栏 ——
             // 将 IME insets 并入内容内边距，键盘弹出时整个内容区（含底部输入栏）上移。
-            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
+            contentWindowInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // ★ 修复（终端页「输入框挡住命令」的 API<30 档配套）：API 30+ 沿用
+                //   edge-to-edge 的 ime insets 动画通道；API<30 走经典 decor-fits
+                //   （MainActivity 同步开关），装饰层已物理避让系统栏且窗口随键盘
+                //   resize —— 这里传零 insets，避免 Compose 侧再加一份系统栏边距。
+                WindowInsets.systemBars.union(WindowInsets.ime)
+            } else {
+                WindowInsets(0, 0, 0, 0)
+            },
             topBar = {
                 // 终端屏自带二级顶栏（含终端抽屉入口）——若此处再渲染根顶栏，会出现双顶栏双汉堡
                 if (currentDestination != DrawerDestination.Terminal) {

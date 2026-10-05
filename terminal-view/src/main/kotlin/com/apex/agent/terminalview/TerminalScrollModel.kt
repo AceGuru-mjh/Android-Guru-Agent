@@ -105,13 +105,46 @@ class TerminalScrollModel(
     fun scrollForNewInput(): Boolean = snapToBottom()
 
     /**
+     * 把指定合并网格行以**最小滚动量**滚进视口（grid resize 后的光标锚定用）。
+     *
+     * 与 [snapToBottom] 的区别：不无脑贴底 —— 只在目标行已在视口外时滚动，
+     * 且滚动量恰好让它落在视口边缘内；已可见时零动作（不偷滚动位置）。
+     *
+     * @param row 合并网格行下标（越界自动 coerce 进 [0, gridRows)）
+     * @return 是否发生了滚动
+     */
+    fun ensureRowVisible(row: Int): Boolean {
+        if (gridRows <= 0 || viewRows <= 0) return false
+        val target = row.coerceIn(0, gridRows - 1)
+        val first = firstVisibleRow
+        if (target < first) return scrollBy(target - first)
+        val last = (first + viewRows - 1).coerceAtMost(gridRows - 1)
+        return if (target > last) scrollBy(target - last) else false
+    }
+
+    /**
      * 网格/视口尺寸变化（resize 握手完成、字号变化重排后）。贴底保持贴底；
      * 否则只 clamp（Termux resize 不偷阅读位置）。
+     *
+     * ★ [anchorRow] 光标锚定（IME 弹出「命令位置乱跳 / 输入框挡住命令」根治）：
+     * 非 null 且「resize 前贴底，或该行已在视口内」时，resize 后以最小滚动量
+     * 保持该行可见。IME insets 动画逐帧收缩视口而 PTY resize 有防抖 —— 旧逻辑
+     * 的贴底推算会把视口对到**旧网格底部空行**上：输入行（光标）先被甩出视口、
+     * 等 PTY 重排落地后又跳回。锚定后光标行逐帧稳定钉在原屏位置；用户上翻阅读
+     * 且光标本不在视口时不传/跳过锚定，维持不偷位置的语义。
+     *
+     * @return 本轮滚动位置是否变化（宿主据此刷新滚动 UI / 浮标）。
      */
-    fun onGridResized(newGridRows: Int, newViewRows: Int): Boolean {
+    fun onGridResized(newGridRows: Int, newViewRows: Int, anchorRow: Int? = null): Boolean {
+        // 前态必须在改写 gridRows/viewRows 前取（firstVisibleRow 依赖旧几何）
+        val anchor = anchorRow?.takeIf { row ->
+            isAtBottom || row in firstVisibleRow until firstVisibleRow + viewRows
+        }
         gridRows = newGridRows.coerceAtLeast(1)
         viewRows = newViewRows.coerceAtLeast(1)
-        return clamp()
+        var changed = clamp()
+        if (anchor != null && ensureRowVisible(anchor)) changed = true
+        return changed
     }
 
     /** 用当前快照同步网格高度（内容更新但尺寸语义未变的常规 submit 路径）。 */

@@ -514,7 +514,13 @@ class TerminalCanvasRenderer {
         else (frame.density * 14f).toInt()
         if (fadePx <= 0 || frame.viewHeightPx <= fadePx * 2) return
         ensureFadeShaders(frame, fadePx.toFloat())
-        if (!frame.scroll.isAtTop && frame.scroll.firstVisibleRow > 0) {
+        // ★ 修复（首行命令被「顶栏裁切」假象）：旧条件 `!isAtTop && firstVisibleRow > 0`
+        //   在贴底（topRow == 0）且有任意 scrollback 时恒为真 —— 顶部 14dp 渐变常驻，
+        //   视口首行（通常正是提示符/输入行）上半永远被压暗半裁，用户看到的是
+        //   「命令被工具栏遮住一半」。渐隐的语义应是「当前视口之上还有真实的历史行
+        //   且用户已主动上翻」：topRow < 0 才上翻；firstVisibleRow > 0 保证视口之上
+        //   确有未显示的行（小 scrollback 上翻到头时二者共同排除误画）。
+        if (frame.scroll.topRow < 0 && frame.scroll.firstVisibleRow > 0) {
             canvas.drawRect(0f, 0f, frame.viewWidthPx.toFloat(), fadePx.toFloat(), fadePaintTop)
         }
         if (!frame.scroll.isAtBottom) {

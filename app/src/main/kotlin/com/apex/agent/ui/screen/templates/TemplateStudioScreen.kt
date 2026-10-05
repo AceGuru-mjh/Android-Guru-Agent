@@ -74,7 +74,9 @@ import com.apex.agent.ui.screen.settings.AgentRolesSection
  * ```
  *
  * 模板的 scope 由 [TemplateScope] 分层；Agent 角色编辑复用设置页的
- * [AgentRolesSection]（生效链路同源：agentSettings → 引擎人设字段热更新）。
+ * [AgentRolesSection]（生效链路同源：agentSettings → 引擎人设字段热更新）；
+ * Coding 页签顶部为专家角色区 [CodingRolesSection]（品牌图标 + 选择即
+ * 激活 codeActiveRoleId，引擎人设通道热切换）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +148,14 @@ fun TemplateStudioScreen(
                         }
                     }
                     TemplateScope.CODING -> {
+                        // ═══ Coding 专家角色（官方品牌图标 + 选择即激活 codeActiveRoleId）═══
+                        item(key = "coding-roles") {
+                            CodingRolesSection(
+                                agent = agentSettings,
+                                onAgent = { viewModel.updateAgentSettings { it } }
+                            )
+                        }
+
                         item(key = "coding-templates-header") {
                             TemplateListHeader(
                                 title = stringResource(R.string.templates_coding_list_title),

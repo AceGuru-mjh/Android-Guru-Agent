@@ -98,8 +98,8 @@ internal fun AgentRolesSection(
     }
 }
 
-/** 另存为自定义副本（内置角色的唯一定制路径）。 */
-private fun AgentRole.duplicateForEditing(): AgentRole = copy(
+/** 另存为自定义副本（内置角色的唯一定制路径；模板工坊 Coding 页签复用）。 */
+internal fun AgentRole.duplicateForEditing(): AgentRole = copy(
     id = AgentRole.newId(),
     name = if (isBuiltIn) "$name " + "②" else name,
     isBuiltIn = false
@@ -208,9 +208,10 @@ private fun RoleCard(
 /**
  * 角色编辑对话框：核心四字段（名字/称呼/角色定义/提示词）+ 更多自定义选项
  * （图标 / 语气风格 / 回复语言）。名字必填（空名保存按钮禁用 + 提示）。
+ * 模板工坊 Coding 页签复用（internal），保存链路同源 withRoleUpserted。
  */
 @Composable
-private fun AgentRoleEditorDialog(
+internal fun AgentRoleEditorDialog(
     initial: AgentRole,
     isNew: Boolean,
     onDismiss: () -> Unit,

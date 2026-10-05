@@ -10,7 +10,6 @@ import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.AgentMode
-import com.apex.agent.core.engine.EngineResilienceGuard
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.UserInput
@@ -28,6 +27,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withTimeout
@@ -87,6 +87,8 @@ class StandardModeEngine(
     private val subAgentMaxConcurrent: Int = 3,
     /** 子代理整体超时。 */
     private val subAgentTimeoutMs: Long = 240_000L,
+    /** LLM 容错阶梯延迟执行器（测试注入；语义见 StandardLlmResilience）。 */
+    private val retrySleeper: suspend (Long) -> Unit = { delay(it) },
     /** 工具输出截断预算（字符）。 */
     private val toolOutputBudget: Int = 8_000,
     /** 上下文窗口预算（token）。 */
@@ -339,9 +341,6 @@ class StandardModeEngine(
         var planText: String? = null
         val repeatGuard = RepeatGuard()
 
-        // P1 修复（标准线韧性）：每次运行新建守卫（预算不跨运行泄漏）。
-        val llmResilience = EngineResilienceGuard()
-
         while (isRunning && turn < maxTurns) {
             turn++
             report.turns = turn
@@ -351,12 +350,12 @@ class StandardModeEngine(
             maybeCompact(emit)
 
             // ── 装配请求 ──
-            val toolPlan = StandardToolSurface.buildToolPlan(
+            val plan = StandardToolSurface.buildToolPlan(
                 profile, toolRegistry, forcedToolIds, exposeAllTools,
                 // 子代理不能再派发子代理——合成 task 工具不进子代理面
                 includeSyntheticTools = !subAgentMode
             )
-            val planIds = toolPlan.map { it.name }
+            val planIds = plan.definitions.map { it.name }
             val systemPrompt = buildSystemPrompt(planIds)
             val messages = buildList {
                 add(LlmMessage.System(systemPrompt))
@@ -367,24 +366,23 @@ class StandardModeEngine(
                 }
             }
 
-            // ── 流式请求（P1 修复：瞬时错误退避重试，助手见 StandardLlmResilience）──
             val contentBuilder = StringBuilder()
             val reasoningBuilder = StringBuilder()
             val toolCallsAccumulator = LinkedHashMap<String, ToolCallAccumulator>()
 
             StandardLlmResilience.run(
-                guard = llmResilience,
                 emit = emit,
+                retrySleeper = retrySleeper,
                 hasPartialOutput = { contentBuilder.isNotEmpty() ||
                     reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty() },
                 appendInterruptNote = { contentBuilder.append("\n\n[请求中断：$it]") }
-            ) {
+            ) { textOnly ->
                 runtime.chatStream(
                     context = LlmRequestContext.primary(
                         if (subAgentMode) "standard_subagent_loop" else "standard_loop"
                     ),
                     messages = messages,
-                    tools = toolPlan
+                    tools = if (textOnly) emptyList() else plan.definitions
                 ).collect { chunk ->
                         chunk.content?.let {
                             contentBuilder.append(it)
@@ -443,7 +441,7 @@ class StandardModeEngine(
 
             for (call in toolCalls) {
                 if (!isRunning) break
-                executeOneToolCall(call, emit, report, repeatGuard)
+                executeOneToolCall(call, emit, report, repeatGuard, plan.providerNameToId)
             }
 
             // ── 防循环守卫：同参重复调用告警 / 强收敛 ──
@@ -498,9 +496,12 @@ class StandardModeEngine(
         call: ToolCall,
         emit: suspend (AgentEvent) -> Unit,
         report: RunReportBuilder,
-        repeatGuard: RepeatGuard
+        repeatGuard: RepeatGuard,
+        providerNameToId: Map<String, String>
     ) {
-        val registryName = StandardToolSurface.resolveRegistryId(call.name)
+        // 请求体携带 provider 名（清洗后合法）：先反查回注册表 id，未命中走别名归一。
+        val registryName = providerNameToId[call.name]
+            ?: StandardToolSurface.resolveRegistryId(call.name)
         val callId = call.id.ifBlank {
             StandardIds.toolCallId(if (subAgentMode) "sub_" else "std_")
         }
@@ -953,7 +954,7 @@ class StandardModeEngine(
             )
         )
         val discipline = StandardPrompts.toolDiscipline(
-            hasShell = planToolIds.any { it == "shell_execute" || it == "terminal.exec" }
+            hasShell = planToolIds.any { it.startsWith("shell_") || it.startsWith("terminal") }
         )
         if (discipline.isNotBlank()) {
             appendLine()

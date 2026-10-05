@@ -110,7 +110,7 @@ class StandardToolSurfaceTest {
     fun `build profile sees full registry plus task tool`() {
         val r = registry("code_read", "code_edit", "shell_execute", "web_search", "mcp__x__y")
         val plan = StandardToolSurface.buildToolPlan(StandardAgentCatalog.BUILD, r)
-        val names = plan.map { it.name }
+        val names = plan.definitions.map { it.name }
         assertTrue(names.contains("code_read"))
         assertTrue(names.contains("shell_execute"))
         assertTrue(names.contains("mcp__x__y"))
@@ -125,7 +125,7 @@ class StandardToolSurfaceTest {
             "code_write", "code_edit", "shell_execute", "web_search"
         )
         val plan = StandardToolSurface.buildToolPlan(StandardAgentCatalog.PLAN, r)
-        val names = plan.map { it.name }
+        val names = plan.definitions.map { it.name }
         assertTrue(names.contains("code_read"))
         assertTrue(names.contains("code_git_status"))
         assertFalse("规划师不该看到写工具", names.contains("code_write"))
@@ -139,7 +139,7 @@ class StandardToolSurfaceTest {
     fun `explore subagent gets readonly surface and no task tool`() {
         val r = registry("code_read", "code_grep", "code_write", "shell_execute")
         val plan = StandardToolSurface.buildToolPlan(StandardAgentCatalog.EXPLORE, r)
-        val names = plan.map { it.name }
+        val names = plan.definitions.map { it.name }
         assertTrue(names.contains("code_read"))
         assertFalse(names.contains("code_write"))
         assertFalse(names.contains("shell_execute"))
@@ -153,7 +153,7 @@ class StandardToolSurfaceTest {
             StandardAgentCatalog.BUILD, r,
             forcedToolIds = setOf("code_edit")
         )
-        val names = plan.map { it.name }
+        val names = plan.definitions.map { it.name }
         assertEquals(listOf("code_edit"), names)
     }
 
@@ -163,7 +163,7 @@ class StandardToolSurfaceTest {
         val plan = StandardToolSurface.buildToolPlan(
             StandardAgentCatalog.PLAN, r, exposeAll = true
         )
-        val names = plan.map { it.name }
+        val names = plan.definitions.map { it.name }
         assertTrue(names.contains("code_write"))
     }
 
@@ -173,7 +173,7 @@ class StandardToolSurfaceTest {
         val r = registry(*ids.toTypedArray())
         val plan = StandardToolSurface.buildToolPlan(StandardAgentCatalog.GENERAL, r)
         // ≤ MAX_TOOLS + 1（task 合成不占预算）
-        assertTrue(plan.size <= StandardToolSurface.MAX_TOOLS + 1)
+        assertTrue(plan.definitions.size <= StandardToolSurface.MAX_TOOLS + 1)
     }
 
     // ═══ 合成工具定义 ═══

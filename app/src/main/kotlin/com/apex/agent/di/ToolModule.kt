@@ -482,7 +482,9 @@ object ToolModule {
         skillActivation: com.apex.agent.core.tools.skill.SkillActivationStore,
         // 能力自省：官方市场源（MarketplaceModule 单例）—— market_search
         // 工具检索技能+MCP 双 hub 目录。
-        hubSource: HubSource
+        hubSource: HubSource,
+        // v3 子代理预算接线（设置 → 子代理）：SubAgentRunner 每次运行读快照。
+        settingsRepository: SettingsRepository
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
@@ -1022,6 +1024,9 @@ object ToolModule {
                     skillActivation = skillActivation
                 )
             },
+            // v3 设置层预算接线（设置 → 子代理）：每次 run 读快照，改设置
+            // 即时生效；sanitized 收敛旧版本/手改 JSON 的越界值。
+            settingsProvider = { settingsRepository.agentSettings.value.subagent.sanitized() },
             // Issue #165 —— SubagentStop：子代理回合收官（结果返回前）非阻断派发。
             // sessionId 置空：子代理引擎的会话号内生于其自身 execute，工具侧
             // 不可见；subagentId 由类型 + 任务描述组成，审计日志可定位。

@@ -106,6 +106,13 @@ class CapabilityReportTool(
                             "browse; market_search(kind=\"mcp\")/mcp_connect() to add more."
                     )
                 }
+                // v3 双工位作用域（事实性描述）：本工具不感知设置开关
+                // （AgentSettings.mcpScopeIsolation），只陈述引擎计划层的
+                // 隔离机制本身；开关语义见 docs/scope-isolation.md。
+                appendLine(
+                    "Workspace isolation: scope enforcement at engine plan level " +
+                        "(per workspace: agent/coding/all)."
+                )
                 appendLine()
                 appendLine("Expansion ladder (when a capability is missing):")
                 appendLine("1. tool_search(query) → tool_open(tool_name) — any registered tool")

@@ -318,7 +318,12 @@ object CodeModule {
             // 设置层权限接线（权限模式 + 规则三元组，每轮任务前拉取）
             permissionSource = standardPermissionSource,
             // 模型感知上下文窗口（env 块 + 压缩预算）
-            modelInfoProvider = standardModelInfoProvider
+            modelInfoProvider = standardModelInfoProvider,
+            // v3 子代理预算：标准线派发器与深潜线 SubAgentRunner 同源消费
+            // （设置 → 子代理 的快照，改设置即时生效）
+            subAgentSettingsProvider = {
+                settingsRepository.agentSettings.value.subagent.sanitized()
+            }
         )
         return DualLogicCodeEngine(deepDive = deepDive, standard = standard)
     }

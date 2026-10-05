@@ -3,15 +3,12 @@
 package com.apex.agent.ui.screen.settings
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,8 +21,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -38,10 +33,7 @@ import com.apex.agent.core.llm.*
 import com.apex.agent.permission.PermissionSettingsSection
 import com.apex.agent.ui.component.BrandLogo
 import com.apex.agent.ui.component.ModelBrands
-import com.apex.agent.ui.theme.AccentPalette
-import com.apex.agent.ui.theme.accentSwatchColor
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 import java.util.Locale
 
 /**
@@ -255,6 +247,13 @@ private fun AgentTab(
 
         AgentSection(agent, onAgent)
 
+        // ═══ v3 S4 新分区：子代理 / GOAL / LOOP / Coding 工位 / GitHub（实现见 SettingsV3Sections.kt）═══
+        SubAgentSettingsSection(agent, onAgent)
+        GoalSettingsSection(agent, onAgent)
+        LoopSettingsSection(agent, onAgent)
+        CodingSettingsSection(agent, onAgent)
+        GithubSettingsSection(viewModel)
+
         // ═══ #168 自定义模式预设：多套命名指令，单选即用（CUSTOM 模式）═══
         ModePresetEditorSection(agent, onAgent)
 
@@ -322,9 +321,9 @@ internal fun SectionCard(
     }
 }
 
-/** 控件下方的一行小字说明；为 null 时不占位。 */
+/** 控件下方的一行小字说明；为 null 时不占位。（internal：SettingsV3Sections 复用） */
 @Composable
-private fun DescriptionText(description: String?) {
+internal fun DescriptionText(description: String?) {
     if (description != null) {
         Text(
             description,
@@ -335,7 +334,7 @@ private fun DescriptionText(description: String?) {
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     label: String,
     checked: Boolean,
     description: String? = null,
@@ -351,7 +350,7 @@ private fun SwitchRow(
 }
 
 @Composable
-private fun SliderRow(
+internal fun SliderRow(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
@@ -384,7 +383,7 @@ private fun SliderRow(
 }
 
 @Composable
-private fun IntFieldRow(
+internal fun IntFieldRow(
     label: String,
     value: Int,
     description: String? = null,
@@ -408,7 +407,7 @@ private fun IntFieldRow(
 }
 
 @Composable
-private fun TextFieldRow(
+internal fun TextFieldRow(
     label: String,
     value: String,
     description: String? = null,
@@ -653,36 +652,6 @@ private fun ToolsSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
 }
 
 @Composable
-private fun VisionSection(
-    agent: AgentSettings,
-    roles: ModelRoleConfig,
-    profiles: List<ModelProfile>,
-    viewModel: SettingsViewModel
-) {
-    SectionCard(stringResource(R.string.settings_section_vision), Icons.Outlined.Visibility) {
-        SwitchRow("Enable Vision", agent.visionEnabled,
-            description = stringResource(R.string.settings_vision_desc)) {
-            viewModel.updateAgentSettings { copy(visionEnabled = it) }
-        }
-        DropdownRow("Screenshot Quality",
-            listOf("auto" to "Auto", "low" to "Low", "medium" to "Medium", "high" to "High"),
-            agent.screenshotQuality,
-            description = stringResource(R.string.settings_screenshot_quality_desc)) {
-            viewModel.updateAgentSettings { copy(screenshotQuality = it) }
-        }
-        IntFieldRow("Max Screenshots in Context", agent.maxScreenshots,
-            description = stringResource(R.string.settings_max_screenshots_desc), min = 1, max = 20) {
-            viewModel.updateAgentSettings { copy(maxScreenshots = it) }
-        }
-        DropdownRow(stringResource(R.string.settings_vision_model_label),
-            listOf("" to stringResource(R.string.settings_not_set)) + profiles.map { it.id to it.name },
-            roles.visionProfileId) {
-            viewModel.updateRoles { copy(visionProfileId = it) }
-        }
-    }
-}
-
-@Composable
 private fun NetworkSection(p: ModelProfile, onUpdate: (ModelProfile) -> Unit) {
     SectionCard(stringResource(R.string.settings_section_network), Icons.Outlined.Cloud) {
         IntFieldRow("Connect Timeout (ms)", p.connectTimeoutMs.toInt(),
@@ -870,167 +839,9 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
     }
 }
 
-@Composable
-private fun CompressionSection(agent: AgentSettings, onAgent: (AgentSettings) -> Unit) {
-    SectionCard(
-        stringResource(R.string.settings_section_compression),
-        Icons.Outlined.Storage,
-        subtitle = stringResource(R.string.settings_compression_subtitle)
-    ) {
-        IntFieldRow("Max Context Tokens", agent.maxContextTokens,
-            description = stringResource(R.string.settings_max_ctx_tokens_desc),
-            min = 1000, max = 10_000_000) { onAgent(agent.copy(maxContextTokens = it)) }
-        SliderRow("Compression Threshold", agent.compressionThreshold, 0.5f..0.95f, 8,
-            description = stringResource(R.string.settings_threshold_desc),
-            onValueChange = { onAgent(agent.copy(compressionThreshold = it)) },
-            fmt = { String.format(Locale.US, "%.2f", it) })
-        IntFieldRow("Preserve Recent Turns", agent.preserveRecentTurns,
-            description = stringResource(R.string.settings_preserve_turns_desc), min = 1, max = 50) {
-            onAgent(agent.copy(preserveRecentTurns = it))
-        }
-        IntFieldRow("Max Tool Output Length", agent.maxToolOutputLength,
-            description = stringResource(R.string.settings_tool_output_len_desc), min = 200, max = 100_000) {
-            onAgent(agent.copy(maxToolOutputLength = it))
-        }
-    }
-}
-
 // ───────────────────────────── 界面页分区 ─────────────────────────────
-
-@Composable
-private fun AppearanceSection(agent: AgentSettings, onAgent: (AgentSettings) -> Unit) {
-    SectionCard(stringResource(R.string.settings_section_appearance), Icons.Outlined.Palette, initiallyExpanded = true) {
-        // 语言（system | zh | en；切换后 MainActivity recreate 生效，见 LanguageManager）
-        DropdownRow(
-            stringResource(R.string.settings_language),
-            listOf(
-                "system" to stringResource(R.string.settings_language_system),
-                "zh" to stringResource(R.string.settings_language_chinese),
-                "en" to stringResource(R.string.settings_language_english),
-            ),
-            agent.language,
-            description = stringResource(R.string.settings_language_desc)
-        ) {
-            onAgent(agent.copy(language = it))
-        }
-        DropdownRow(stringResource(R.string.settings_theme_mode),
-            listOf(
-                "system" to stringResource(R.string.settings_theme_system),
-                "dark" to stringResource(R.string.settings_theme_dark),
-                "light" to stringResource(R.string.settings_theme_light),
-            ),
-            agent.themeMode,
-            description = stringResource(R.string.settings_apply_now)) {
-            onAgent(agent.copy(themeMode = it))
-        }
-        SwitchRow(stringResource(R.string.settings_dynamic_color), agent.dynamicColor,
-            description = stringResource(R.string.settings_dynamic_color_desc)) {
-            onAgent(agent.copy(dynamicColor = it))
-        }
-        AccentPaletteRow(
-            selected = AccentPalette.fromKey(agent.accentPalette),
-            onSelect = { onAgent(agent.copy(accentPalette = it.key)) }
-        )
-        SliderRow(stringResource(R.string.settings_font_scale), agent.fontScale, 0.8f..1.4f, 12,
-            description = stringResource(R.string.settings_font_scale_desc),
-            onValueChange = { onAgent(agent.copy(fontScale = it)) },
-            fmt = { "${(it * 100).roundToInt()}%" })
-    }
-}
-
-/**
- * 预设主题配色选择器：色点 + 名称的横向滚动行。
- *
- * 色点颜色跟随当前深浅态（深色态展示霓虹提亮色，浅色态展示可读深色），
- * 选中项以 onSurface 描边环 + 主色勾标标记；Dynamic Color 开启时
- * 预设被覆盖，但仍可预选（关闭动态取色后立即生效）。
- */
-@Composable
-private fun AccentPaletteRow(
-    selected: AccentPalette,
-    onSelect: (AccentPalette) -> Unit
-) {
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    Column(Modifier.fillMaxWidth()) {
-        Text(stringResource(R.string.settings_accent_palettes), style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.height(6.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(AccentPalette.entries, key = { it.name }) { palette ->
-                val swatch = accentSwatchColor(palette, dark)
-                val isSelected = palette == selected
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSelect(palette) }
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(swatch)
-                            .border(
-                                width = if (isSelected) 2.dp else 1.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.outlineVariant,
-                                shape = CircleShape
-                            )
-                    ) {
-                        if (isSelected) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = stringResource(R.string.settings_accent_selected),
-                                tint = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        palette.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        DescriptionText(stringResource(R.string.settings_accent_desc))
-    }
-}
-
-@Composable
-private fun ChatDisplaySection(agent: AgentSettings, onAgent: (AgentSettings) -> Unit) {
-    SectionCard(stringResource(R.string.settings_section_chat), Icons.Outlined.Chat) {
-        SwitchRow(stringResource(R.string.settings_timestamps), agent.showTimestamps,
-            description = stringResource(R.string.settings_timestamps_desc)) {
-            onAgent(agent.copy(showTimestamps = it))
-        }
-        // 发送键行为：send → IME「发送」直接发出；newline → IME「换行」（发送用按钮）
-        DropdownRow(
-            stringResource(R.string.settings_send_key),
-            listOf(
-                "send" to stringResource(R.string.settings_send_key_send),
-                "newline" to stringResource(R.string.settings_send_key_newline),
-            ),
-            agent.sendKeyBehavior,
-            description = stringResource(R.string.settings_send_key_desc)
-        ) {
-            onAgent(agent.copy(sendKeyBehavior = it))
-        }
-        // 任务总结卡片：默认隐藏（不占空间），开启后任务完成时显示总结卡
-        SwitchRow(
-            stringResource(R.string.settings_show_run_summary),
-            agent.showRunSummary,
-            description = stringResource(R.string.settings_show_run_summary_desc)
-        ) {
-            onAgent(agent.copy(showRunSummary = it))
-        }
-    }
-}
+// （v3 S4 预算腾挪：AppearanceSection / AccentPaletteRow / ChatDisplaySection
+//   已原样迁往 SettingsV3Sections.kt，此处仅保留 InterfaceTab 的调用点）
 
 @Composable
 private fun NotesSection() {

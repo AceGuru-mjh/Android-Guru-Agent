@@ -364,5 +364,23 @@ data class ToolMetadata(
         @JvmStatic
         fun meta(id: String, block: Builder.() -> Unit = {}): ToolMetadata =
             Builder(id).apply(block).build()
+
+        /**
+         * v3 作用域规范化：把市场 tier / 手改配置里的原始 scope 折叠为
+         * "agent" / "coding" / "all" 三值之一。null、空白与未知值（笔改
+         * mcp_servers.json 或 manifest 的笔误）一律按 "all" 处理——
+         * fail-open：一个拼写错误不应把工具从两个工位同时藏死。注册侧
+         * （McpToolRegistrar / SkillHotReloader）打标前统一过本函数，
+         * 保证 [scope] 恒为合法三值；市场目录侧的可见性仍按原始值精确
+         * 匹配，两侧语义互不越界。
+         */
+        @JvmStatic
+        fun normalizeScope(raw: String?): String {
+            val value = raw?.trim()?.lowercase() ?: return SCOPE_ALL
+            return if (value == "agent" || value == "coding") value else SCOPE_ALL
+        }
+
+        /** v3 作用域常量：与市场 tier / AgentConfig.skillScope 同源。 */
+        const val SCOPE_ALL = "all"
     }
 }

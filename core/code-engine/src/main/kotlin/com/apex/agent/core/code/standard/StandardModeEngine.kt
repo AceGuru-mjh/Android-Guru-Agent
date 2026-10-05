@@ -6,6 +6,7 @@ import com.apex.agent.core.code.CodeConversationMemory
 import com.apex.agent.core.code.CodeEngineFacade
 import com.apex.agent.core.code.CodePrompts
 import com.apex.agent.core.code.RulesProvider
+import com.apex.agent.core.code.subagent.SubAgentSettings
 import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
@@ -104,6 +105,11 @@ class StandardModeEngine(
      * 预算的消费源；提供者缺省或返回 null = 静态 [maxContextTokensConfig] 兜底。
      */
     private val modelInfoProvider: (() -> ModelInfo?)? = null,
+    /**
+     * v3 子代理预算快照源（设置 → 子代理；null = 沿用下方构造基线，测试与
+     * 默认装配路径）。接线后派发器超时/并发/输出上限统一由快照驱动。
+     */
+    private val subAgentSettingsProvider: (() -> SubAgentSettings)? = null,
     /** 子代理运行标记（本实例由 task 工具派生）。 */
     internal val subAgentMode: Boolean = false
 ) : AgentEngine, CodeEngineFacade {
@@ -191,8 +197,9 @@ class StandardModeEngine(
                     subAgentMode = true
                 ).apply { profile = definition }
             },
-            maxConcurrent = subAgentMaxConcurrent,
-            timeoutMs = subAgentTimeoutMs
+            // v3 预算统一源：接线设置层则快照驱动；未接线回落构造基线
+            settingsProvider = subAgentSettingsProvider
+                ?: { SubAgentSettings(maxConcurrent = subAgentMaxConcurrent, timeoutMs = subAgentTimeoutMs) }
         )
 
     // ═══════════════════════ AgentEngine ═══════════════════════
@@ -641,6 +648,12 @@ class StandardModeEngine(
             if (dispatcher == null) {
                 return "task 工具不可用（子代理不能再派发子代理）" to false
             }
+            // v3：custom 自定义类型为深潜线（code_task）专属——标准线画像
+            // 封闭，明确报错引导而不是静默回落 explore（主代理会误判角色在跑）。
+            if (extractJsonString(arguments, "subagent_type") == "custom") {
+                return ("custom 子代理类型当前思考逻辑线暂不支持，请切深潜线（code_task）" +
+                    "或使用内置类型（explore/research/general/reviewer）") to false
+            }
             val request = parseSubAgentRequest(arguments)
                 ?: return ("task 参数解析失败：需要 description 与 prompt 字段" to false)
             report.subAgents++
@@ -998,6 +1011,7 @@ class StandardModeEngine(
             if (subAgentMode) StandardPrompts.generalSubAgent() else StandardPrompts.generalAgent()
         StandardAgentKind.EXPLORE -> StandardPrompts.exploreSubAgent()
         StandardAgentKind.RESEARCH -> StandardPrompts.researchSubAgent()
+        StandardAgentKind.REVIEWER -> StandardPrompts.reviewerSubAgent()
     }
 
     /** token 估算（native 核优先，纯 Kotlin 回退）。 */
@@ -1133,8 +1147,9 @@ class StandardModeEngine(
             val description = extractJsonString(arguments, "description") ?: return null
             val prompt = extractJsonString(arguments, "prompt") ?: return null
             val typeKey = extractJsonString(arguments, "subagent_type") ?: "explore"
-            // 子代理类型：explore / research / general（general = 全工具面通用
-            // 执行者——子代理上下文不能再派发、不能询问，写操作受权限门约束）
+            // 子代理类型：explore / research / general / reviewer（reviewer =
+            // 只读代码评审：分级发现 + 合入结论；general = 全工具面通用执行者
+            // ——子代理上下文不能再派发、不能询问，写操作受权限门约束）
             val kind = StandardAgentKind.fromKey(typeKey)
                 ?.takeIf { it.role == StandardAgentRole.SUBAGENT || it == StandardAgentKind.GENERAL }
                 ?: StandardAgentKind.EXPLORE

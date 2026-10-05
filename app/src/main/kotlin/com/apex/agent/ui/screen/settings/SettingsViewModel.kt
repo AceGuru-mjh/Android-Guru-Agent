@@ -13,6 +13,8 @@ import com.apex.agent.core.llm.ModelsCatalog
 import com.apex.agent.core.llm.ProviderConfig
 import com.apex.agent.core.llm.RemoteModelInfo
 import com.apex.agent.core.tools.hook.HookRegistry
+import com.apex.agent.github.GithubConnectionState
+import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.language.LanguageManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -39,6 +41,9 @@ class SettingsViewModel @Inject constructor(
     private val languageManager: LanguageManager,
     // Issue #165：钩子注册表（设置页启停声明式钩子）
     private val hookRegistry: HookRegistry,
+    // v3 S4：GitHub 连接状态与默认仓库（设置页只读展示 + 仓库编辑；
+    // 真实连接 UI 在 Coding 屏，避免双份）
+    private val githubTokenManager: GithubTokenManager,
     // Issue #164：项目规则状态预计算（默认工作区 AGENTS.md 是否存在）
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
@@ -115,6 +120,23 @@ class SettingsViewModel @Inject constructor(
     // ── 角色 / Agent ───────────────────────────────────────────
     fun updateRoles(block: ModelRoleConfig.() -> ModelRoleConfig) = repo.updateRoles(block)
     fun updateAgentSettings(block: AgentSettings.() -> AgentSettings) = repo.updateAgentSettings(block)
+
+    // ═══ v3 S4：GitHub（设置页 GithubSettingsSection 数据源）═══
+    // 连接状态与默认仓库流直接转发 GithubTokenManager；保存走 suspend 契约
+    // （返回规范化结果串，null = 格式无法识别）。defaultRepo 语义：空串 = 未设置 |
+    // "owner" | "owner/repo"。
+    val githubConnection: StateFlow<GithubConnectionState> = githubTokenManager.connectionState
+    val githubDefaultRepo: StateFlow<String> = githubTokenManager.defaultRepo
+
+    // 规范化保存默认仓库；返回 null 时 UI 显示格式错误提示
+    suspend fun saveGithubDefaultRepo(input: String): String? =
+        githubTokenManager.saveDefaultRepo(input)
+
+    // 清除默认仓库（回到未设置）
+    fun clearGithubDefaultRepo() = githubTokenManager.clearDefaultRepo()
+
+    // 断开 GitHub 连接（与 Coding 屏菜单同一入口）
+    fun disconnectGithub() = githubTokenManager.disconnect()
 
     /**
      * 测试指定模型 Profile 的连接是否可用。

@@ -37,11 +37,17 @@ object ShizukuCommandExecutor {
 
     /**
      * 检查Shizuku服务是否可用（binder是否存活）
+     *
+     * 探测口径：任何失败部「不可用」——包括类加载失败（[LinkageError]：
+     * JVM 单测的 mockable android.jar 静态块抛 Stub!、残缺 classpath、
+     * OEM 异常环境）。探针不应炸穿调用链，调用方按不可用降级选路。
      */
     fun isAvailable(): Boolean {
         return try {
             Shizuku.pingBinder()
         } catch (e: Exception) {
+            false
+        } catch (e: LinkageError) {
             false
         }
     }
@@ -51,10 +57,13 @@ object ShizukuCommandExecutor {
      */
     fun hasPermission(): Boolean {
         return try {
-            if (!Shizuku.pingBinder()) return false
+            // 复用 isAvailable 的全面探测口径（含 LinkageError 兒底）
+            if (!isAvailable()) return false
             if (Shizuku.isPreV11()) return true  // 旧版直接有权限
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         } catch (e: Exception) {
+            false
+        } catch (e: LinkageError) {
             false
         }
     }
@@ -67,7 +76,10 @@ object ShizukuCommandExecutor {
             if (Shizuku.isPreV11()) return
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) return
             Shizuku.requestPermission(requestCode)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // #260：权限请求链路静默失败 = 用户走完引导却不知道授权没发出去
+            android.util.Log.w("ShizukuExecutor", "requestPermission failed: ${e.message}")
+        }
     }
 
     /**

@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -522,7 +523,11 @@ internal fun StreamingResponseBubble(
     // 的 MarkdownText 渲染并接 Lightbox；此参数当前不被本气泡消费。
     onImageClick: (String) -> Unit = {}
 ) {
-    val pulse by rememberInfiniteTransition(label = "stream-cursor").animateFloat(
+    // #262 延迟读取：cursor 透明度动画保留 State，在 graphicsLayer 块内读取 ——
+    // 旧写法 `primary.copy(alpha = pulse)` 在组合期取值，700ms 循环期间整个
+    // StreamingResponseBubble（含 GlassCard 玻璃层）每帧重组，drawWithCache
+    // 缓存被逐帧击穿；改为图层 alpha 后动画只失效这一个 Text 的图层。
+    val pulseState = rememberInfiniteTransition(label = "stream-cursor").animateFloat(
         initialValue = 0.25f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
@@ -626,9 +631,13 @@ internal fun StreamingResponseBubble(
                 }
                 Text(
                     text = "▍",
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = pulse),
+                    color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 2.dp, start = 1.dp)
+                    modifier = Modifier
+                        .padding(top = 2.dp, start = 1.dp)
+                        // 延迟读取点：图层 alpha 与原 color.copy(alpha=pulse) 视觉等效
+                        //（纯色字形上两者逐像素一致）
+                        .graphicsLayer { alpha = pulseState.value }
                 )
             }
         }

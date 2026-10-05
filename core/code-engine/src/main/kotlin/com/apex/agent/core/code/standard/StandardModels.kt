@@ -53,7 +53,10 @@ enum class StandardAgentKind(
     EXPLORE("explore", "探索", StandardAgentRole.SUBAGENT),
 
     /** 调研（子代理）：联网检索，返回带来源结论。 */
-    RESEARCH("research", "调研", StandardAgentRole.SUBAGENT);
+    RESEARCH("research", "调研", StandardAgentRole.SUBAGENT),
+
+    /** 评审（子代理，v3）：只读代码评审，返回分级发现与合入结论。 */
+    REVIEWER("reviewer", "评审", StandardAgentRole.SUBAGENT);
 
     companion object {
         /** 由 task 工具的 subagent_type 解析；未知值返回 null。 */

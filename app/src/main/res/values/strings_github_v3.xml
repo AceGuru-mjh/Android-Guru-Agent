@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ═══ v3 S3 GitHub 集成增强（github_v3_ 前缀，资源名全仓唯一）═══
+     覆盖：连接对话框（Token + 可选 GitHub 地址实时归一化反馈）、
+     已连接下拉菜单的默认仓库信息行。en/zh 1:1 镜像（check_string_mirror）。 -->
+<resources>
+    <!-- ── 连接对话框 ── -->
+    <string name="github_v3_dialog_title">Connect GitHub</string>
+    <string name="github_v3_dialog_help">Create one in GitHub → Settings → Developer settings → Personal access tokens.\nThe repo scope is required.</string>
+    <string name="github_v3_dialog_token_label">ghp_xxxx or github_pat_xxx</string>
+    <string name="github_v3_dialog_token_prefix_error">Token must start with ghp_ or github_pat_</string>
+    <string name="github_v3_dialog_token_invalid">Token verification failed — check permissions or network</string>
+    <string name="github_v3_dialog_repo_label">GitHub address (optional)</string>
+    <string name="github_v3_dialog_repo_placeholder">username, username/repo, or a full link</string>
+    <string name="github_v3_dialog_repo_ok_repo">✓ Recognized: repo %1$s</string>
+    <string name="github_v3_dialog_repo_ok_user">✓ Recognized: user %1$s</string>
+    <string name="github_v3_dialog_repo_invalid">Unrecognized GitHub address — it will be treated as not filled in</string>
+    <string name="github_v3_dialog_validating">Verifying…</string>
+    <string name="github_v3_dialog_connect">Connect</string>
+    <string name="github_v3_dialog_cancel">Cancel</string>
+
+    <!-- ── 已连接下拉菜单 ── -->
+    <string name="github_v3_menu_default_repo">Default repo: %1$s</string>
+    <string name="github_v3_menu_default_repo_unset">Default repo: not set (add it in the connect dialog or Settings)</string>
+</resources>

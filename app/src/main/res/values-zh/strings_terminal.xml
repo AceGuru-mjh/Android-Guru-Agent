@@ -140,6 +140,8 @@
     <string name="term_session_dead_ubuntu">Ubuntu（proot）进程已结束 —— 退出或被系统终止。\n重启会以同一环境重新拉起 bash。</string>
     <string name="term_session_dead_local">Android shell 进程已结束。\n重启将打开新的本地 shell。</string>
     <string name="term_session_restart">重启会话</string>
+    <!-- #223：崩溃恢复 —— 持久化会话以「已中断」（死会话）标签恢复 -->
+    <string name="term_notice_recovered">已恢复上次运行中被中断的 %1$d 个会话 —— 打开会话标签页点「重启会话」即可重建</string>
 
     <!-- E2：活跃会话关闭确认（防误触，会话条 X 钮）-->
     <string name="term_close_confirm_title">关闭此会话？</string>

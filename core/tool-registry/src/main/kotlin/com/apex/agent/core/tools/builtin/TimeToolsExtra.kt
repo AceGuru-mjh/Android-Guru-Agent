@@ -24,108 +24,19 @@ import java.util.Locale
 import kotlin.math.abs
 
 /**
- * `cron_next` — 标准 5 字段 cron 的解析 / 下次运行 / 人类可读解释。
+ * 共享 Vixie-cron 解析核（从 CronTool 抽出的单一实现，app 侧 Loop 调度器复用）。
  *
- * Why: "这个定时任务下次什么时候跑？" 是 agent 处理运维/日历任务的常见问题，
- * 而 LLM 对 cron 语义的"心算"极不可靠（尤其 day-of-month 与 day-of-week 的
- * OR 语义、月末边界、闰年）。本工具实现真正的 Vixie 风格 5 字段解析器 + 下次
- * 运行计算器，保证确定性：
- *
- * - 字段支持 `*`、`* /n` 步进、`a-b` 区间（可带 `/n`）、`a,b,c` 列表、
- *   JAN-DEC / MON-SUN 名称（名称也可用于区间与列表）；
- * - day-of-week 0 与 7 都是 Sunday；
- * - day-of-month 与 day-of-week 同时受限时按标准 cron 的 OR 语义匹配
- *   （`0 0 1 * 1` = 每月 1 号或每个周一）；
- * - 解析错误点名出错的字段（"minute field '65' out of range 0-59"）；
- * - next 计算不是逐分钟暴力扫描：按 month → day → hour → minute 逐级跳进，
- *   单次搜索上限 4 年——超过即判定调度不可达（如 Feb 30）并报错。
- *
- * Operations: `next`（默认，输出 `run 1: <epoch> (<ISO-8601>)` …）、`explain`
- * （1-3 句人类可读描述）、`validate`（"valid" 或带字段的结构化错误）。
+ * 公开面只有 [nextAfter]：解析 + 下次运行搜索一次完成，任何输入畸形都折叠为
+ * null（防御式 IO —— 调用方无需 try/catch）。工具侧（CronTool）需要带字段
+ * 定位的错误信息，所以 parseCron/nextRun/CronSpec 以 internal 暴露给同模块。
  */
-class CronTool : BaseTool(
-    id = "cron_next",
-    name = "Cron Schedule",
-    description = """
-        Standard 5-field cron: parse, next runs, human explanation, validation.
-        Input: {"expression": "30 8 * * MON", "operation": "next",
-                "from": "2024-01-01T00:00:00Z", "count": 3, "zone": "Asia/Shanghai"}
-        Fields: minute(0-59) hour(0-23) day-of-month(1-31) month(1-12|JAN-DEC)
-        day-of-week(0-7|MON-SUN, 0/7=Sunday). Each field supports *, */n, a-b,
-        a-b/n, a,b,c and names. Both day-of-month and day-of-week restricted → OR.
-        Operations: next (default) — the next N runs ("run 1: <epoch> (<iso8601>)");
-        explain — human-readable schedule; validate — "valid" or a field-precise
-        error. from: ISO-8601 or epoch s/ms (default now). Search cap: 4 years
-        (impossible schedules are reported, not looped forever).
-    """.trimIndent(),
-    declaredSchema = toolSchema {
-        string("expression", required = true, description = "5-field cron: minute hour day-of-month month day-of-week")
-        string("operation", description = "next | explain | validate (default next)", enumValues = listOf("next", "explain", "validate"))
-        string("from", description = "Search start time (ISO-8601 or epoch s/ms; default now)")
-        integer("count", description = "Number of next runs for operation=next (default 1, max 20)", defaultValue = 1, minimum = 1.0, maximum = 20.0)
-        string("zone", description = "IANA zone id (default system zone)")
-    }
-) {
-    override fun buildMetadata(): ToolMetadata = ToolMetadata.meta(id) {
-        category(ToolCategory.UTILITY)
-        risk(ToolRisk.LOW)
-        tag("cron", "schedule", "time", "next-run", "validate")
-    }
-
-    override suspend fun executeStructured(arguments: String): ToolResult {
-        val args = when (val parsed = ToolArguments.of(arguments)) {
-            is ToolArguments.ParseOutcome.Ok -> parsed.args
-            is ToolArguments.ParseOutcome.Bad -> return parsed.result
-        }
-        val expression = args.requireString("expression")
-        val operation = args.stringWithDefault("operation", "next")
-        if (operation !in OPERATIONS) {
-            return ToolResult.invalid("operation", "unknown operation '$operation'", "use ${OPERATIONS.joinToString(" | ")}")
-        }
-
-        val spec = try {
-            parseCron(expression)
-        } catch (e: CronParseError) {
-            return ToolResult.invalid(
-                "expression",
-                e.message ?: "invalid cron expression",
-                "5 fields: minute hour day-of-month month day-of-week (e.g. '30 8 * * MON')"
-            )
-        }
-
-        return when (operation) {
-            "validate" -> ToolResult.ok("valid")
-            "explain" -> ToolResult.ok(explain(spec))
-            "next" -> {
-                val zoneArg = args.optionalString("zone")
-                val zone = resolveZone(zoneArg)
-                    ?: return ToolResult.invalid("zone", "unknown time zone '$zoneArg'", "use an IANA id like Asia/Shanghai or an offset like +08:00")
-                val count = args.intWithDefault("count", 1).coerceIn(1, MAX_COUNT)
-                val fromArg = args.optionalString("from")
-                val from: ZonedDateTime = if (fromArg != null) {
-                    val instant = parseLenient(fromArg)
-                        ?: return ToolResult.invalid(
-                            "from",
-                            "cannot parse '$fromArg' as a date/time",
-                            "accepted: ISO-8601 (2024-01-01T00:00:00Z) or epoch seconds/millis"
-                        )
-                    instant.atZone(zone)
-                } else {
-                    ZonedDateTime.now(zone)
-                }
-                nextRuns(spec, from, count, zone, expression)
-            }
-            else -> ToolResult.fail(ToolErrorCode.EXECUTION_FAILED, "unreachable operation $operation")
-        }
-    }
-
-    // ── Parsing ─────────────────────────────────────────────────────────────
+object VixieCron {
 
     /** One parsed cron field: allowed values (bit set) + whether it is restricted. */
     private class CronField(val values: BooleanArray, val restricted: Boolean)
 
     /** All five fields, ready for matching. */
-    private class CronSpec(
+    internal class CronSpec(
         val minutes: BooleanArray, // 60
         val hours: BooleanArray,   // 24
         val doms: BooleanArray,    // 32 (index 1..31)
@@ -135,9 +46,9 @@ class CronTool : BaseTool(
         val dowRestricted: Boolean
     )
 
-    private class CronParseError(message: String) : Exception(message)
+    internal class CronParseError(message: String) : Exception(message)
 
-    private fun parseCron(expression: String): CronSpec {
+    internal fun parseCron(expression: String): CronSpec {
         val fields = expression.trim().split(Regex("\\s+"))
         if (fields.size != 5) {
             throw CronParseError(
@@ -241,7 +152,7 @@ class CronTool : BaseTool(
      * non-matching field forward — month → day → hour → minute — so a typical
      * query touches a handful of candidates. Search window: 4 years.
      */
-    private fun nextRun(spec: CronSpec, start: LocalDateTime): LocalDateTime? {
+    internal fun nextRun(spec: CronSpec, start: LocalDateTime): LocalDateTime? {
         var t = start.truncatedTo(ChronoUnit.MINUTES).plusMinutes(1)
         val limit = t.plusYears(4)
         while (!t.isAfter(limit)) {
@@ -286,11 +197,139 @@ class CronTool : BaseTool(
         return -1
     }
 
-    private fun nextRuns(spec: CronSpec, from: ZonedDateTime, count: Int, zone: ZoneId, expression: String): ToolResult {
+    /**
+     * One-shot convenience（app 侧 Loop 调度器专用公开入口）：解析表达式并计算
+     * start 之后的下一次触发（墙钟语义，时区换算由调用方负责）。
+     * 任何解析失败 / 调度不可达（4 年内无命中）都折叠为 null，绝不抛异常。
+     */
+    fun nextAfter(expression: String, start: LocalDateTime): LocalDateTime? =
+        try {
+            val spec = parseCron(expression)
+            nextRun(spec, start)
+        } catch (e: CronParseError) {
+            null
+        } catch (e: Exception) {
+            null // 防御式：畸形输入任何形状都不上抛
+        }
+
+    private val MONTH_NAMES = mapOf(
+        "JAN" to 1, "FEB" to 2, "MAR" to 3, "APR" to 4, "MAY" to 5, "JUN" to 6,
+        "JUL" to 7, "AUG" to 8, "SEP" to 9, "OCT" to 10, "NOV" to 11, "DEC" to 12
+    )
+    private val DOW_NAMES = mapOf(
+        "MON" to 1, "TUE" to 2, "WED" to 3, "THU" to 4, "FRI" to 5, "SAT" to 6, "SUN" to 7
+    )
+}
+
+/**
+ * `cron_next` — 标准 5 字段 cron 的解析 / 下次运行 / 人类可读解释。
+ *
+ * Why: "这个定时任务下次什么时候跑？" 是 agent 处理运维/日历任务的常见问题，
+ * 而 LLM 对 cron 语义的"心算"极不可靠（尤其 day-of-month 与 day-of-week 的
+ * OR 语义、月末边界、闰年）。本工具实现真正的 Vixie 风格 5 字段解析器 + 下次
+ * 运行计算器，保证确定性：
+ *
+ * - 字段支持 `*`、`* /n` 步进、`a-b` 区间（可带 `/n`）、`a,b,c` 列表、
+ *   JAN-DEC / MON-SUN 名称（名称也可用于区间与列表）；
+ * - day-of-week 0 与 7 都是 Sunday；
+ * - day-of-month 与 day-of-week 同时受限时按标准 cron 的 OR 语义匹配
+ *   （`0 0 1 * 1` = 每月 1 号或每个周一）；
+ * - 解析错误点名出错的字段（"minute field '65' out of range 0-59"）；
+ * - next 计算不是逐分钟暴力扫描：按 month → day → hour → minute 逐级跳进，
+ *   单次搜索上限 4 年——超过即判定调度不可达（如 Feb 30）并报错。
+ *
+ * 解析与搜索的核心实现自本 PR 起抽为同文件顶层 [VixieCron] 单一实现
+ * （app 侧 Loop 循环调度器跨模块复用，绝不复制逻辑）；本类保留
+ * 工具协议层（ToolResult 组装 / explain / lenient 时间解析）。
+ *
+ * Operations: `next`（默认，输出 `run 1: <epoch> (<ISO-8601>)` …）、`explain`
+ * （1-3 句人类可读描述）、`validate`（"valid" 或带字段的结构化错误）。
+ */
+class CronTool : BaseTool(
+    id = "cron_next",
+    name = "Cron Schedule",
+    description = """
+        Standard 5-field cron: parse, next runs, human explanation, validation.
+        Input: {"expression": "30 8 * * MON", "operation": "next",
+                "from": "2024-01-01T00:00:00Z", "count": 3, "zone": "Asia/Shanghai"}
+        Fields: minute(0-59) hour(0-23) day-of-month(1-31) month(1-12|JAN-DEC)
+        day-of-week(0-7|MON-SUN, 0/7=Sunday). Each field supports *, */n, a-b,
+        a-b/n, a,b,c and names. Both day-of-month and day-of-week restricted → OR.
+        Operations: next (default) — the next N runs ("run 1: <epoch> (<iso8601>)");
+        explain — human-readable schedule; validate — "valid" or a field-precise
+        error. from: ISO-8601 or epoch s/ms (default now). Search cap: 4 years
+        (impossible schedules are reported, not looped forever).
+    """.trimIndent(),
+    declaredSchema = toolSchema {
+        string("expression", required = true, description = "5-field cron: minute hour day-of-month month day-of-week")
+        string("operation", description = "next | explain | validate (default next)", enumValues = listOf("next", "explain", "validate"))
+        string("from", description = "Search start time (ISO-8601 or epoch s/ms; default now)")
+        integer("count", description = "Number of next runs for operation=next (default 1, max 20)", defaultValue = 1, minimum = 1.0, maximum = 20.0)
+        string("zone", description = "IANA zone id (default system zone)")
+    }
+) {
+    override fun buildMetadata(): ToolMetadata = ToolMetadata.meta(id) {
+        category(ToolCategory.UTILITY)
+        risk(ToolRisk.LOW)
+        tag("cron", "schedule", "time", "next-run", "validate")
+    }
+
+    override suspend fun executeStructured(arguments: String): ToolResult {
+        val args = when (val parsed = ToolArguments.of(arguments)) {
+            is ToolArguments.ParseOutcome.Ok -> parsed.args
+            is ToolArguments.ParseOutcome.Bad -> return parsed.result
+        }
+        val expression = args.requireString("expression")
+        val operation = args.stringWithDefault("operation", "next")
+        if (operation !in OPERATIONS) {
+            return ToolResult.invalid("operation", "unknown operation '$operation'", "use ${OPERATIONS.joinToString(" | ")}")
+        }
+
+        val spec = try {
+            VixieCron.parseCron(expression)
+        } catch (e: VixieCron.CronParseError) {
+            return ToolResult.invalid(
+                "expression",
+                e.message ?: "invalid cron expression",
+                "5 fields: minute hour day-of-month month day-of-week (e.g. '30 8 * * MON')"
+            )
+        }
+
+        return when (operation) {
+            "validate" -> ToolResult.ok("valid")
+            "explain" -> ToolResult.ok(explain(spec))
+            "next" -> {
+                val zoneArg = args.optionalString("zone")
+                val zone = resolveZone(zoneArg)
+                    ?: return ToolResult.invalid("zone", "unknown time zone '$zoneArg'", "use an IANA id like Asia/Shanghai or an offset like +08:00")
+                val count = args.intWithDefault("count", 1).coerceIn(1, MAX_COUNT)
+                val fromArg = args.optionalString("from")
+                val from: ZonedDateTime = if (fromArg != null) {
+                    val instant = parseLenient(fromArg)
+                        ?: return ToolResult.invalid(
+                            "from",
+                            "cannot parse '$fromArg' as a date/time",
+                            "accepted: ISO-8601 (2024-01-01T00:00:00Z) or epoch seconds/millis"
+                        )
+                    instant.atZone(zone)
+                } else {
+                    ZonedDateTime.now(zone)
+                }
+                nextRuns(spec, from, count, zone, expression)
+            }
+            else -> ToolResult.fail(ToolErrorCode.EXECUTION_FAILED, "unreachable operation $operation")
+        }
+    }
+
+    // ── Parsing core（CronField / CronSpec / parseCron / parseField / nextRun 等）──
+    // 已抽为同文件顶层 VixieCron 单一实现（app 侧 Loop 调度器复用），
+    // 本类经 internal 访问（同模块），不再持有副本。
+
+    private fun nextRuns(spec: VixieCron.CronSpec, from: ZonedDateTime, count: Int, zone: ZoneId, expression: String): ToolResult {
         val runs = mutableListOf<ZonedDateTime>()
         var cursor = from
         repeat(count) {
-            val next = nextRun(spec, cursor.toLocalDateTime())
+            val next = VixieCron.nextRun(spec, cursor.toLocalDateTime())
                 ?: return ToolResult.fail(
                     ToolError(
                         ToolErrorCode.NOT_FOUND,
@@ -312,7 +351,7 @@ class CronTool : BaseTool(
      * Human-readable schedule: "Runs at 08:30 on Monday.",
      * "Runs every 15 minutes during hours 9 through 17 on Monday through Friday."
      */
-    private fun explain(spec: CronSpec): String {
+    private fun explain(spec: VixieCron.CronSpec): String {
         val minutes = (0..59).filter { spec.minutes[it] }
         val hours = (0..23).filter { spec.hours[it] }
         val doms = (1..31).filter { spec.doms[it] }
@@ -341,7 +380,9 @@ class CronTool : BaseTool(
         return if (mPhrase.startsWith("every ")) "$mPhrase during $hPhrase" else "at $mPhrase during $hPhrase"
     }
 
-    private fun calendarClause(spec: CronSpec, doms: List<Int>, months: List<Int>, dows: List<Int>): String? {
+    // 修复注（S5 顺手修）：CronSpec 嵌套于同文件顶层 VixieCron，跨类引用
+    // 必须限定（原为裸 CronSpec —— 编译期 unresolved；静态四门禁不编译故漏检）。
+    private fun calendarClause(spec: VixieCron.CronSpec, doms: List<Int>, months: List<Int>, dows: List<Int>): String? {
         val dayPart: String? = when {
             spec.domRestricted && spec.dowRestricted ->
                 "on ${valuePhrase(doms, 1, 31, "day", "days")} of the month or ${dowPhrase(dows)} (day-of-month and day-of-week are OR-ed)"
@@ -438,13 +479,6 @@ class CronTool : BaseTool(
     private companion object {
         val OPERATIONS = setOf("next", "explain", "validate")
         const val MAX_COUNT = 20
-        val MONTH_NAMES = mapOf(
-            "JAN" to 1, "FEB" to 2, "MAR" to 3, "APR" to 4, "MAY" to 5, "JUN" to 6,
-            "JUL" to 7, "AUG" to 8, "SEP" to 9, "OCT" to 10, "NOV" to 11, "DEC" to 12
-        )
-        val DOW_NAMES = mapOf(
-            "MON" to 1, "TUE" to 2, "WED" to 3, "THU" to 4, "FRI" to 5, "SAT" to 6, "SUN" to 7
-        )
     }
 }
 

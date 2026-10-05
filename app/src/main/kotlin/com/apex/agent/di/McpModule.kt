@@ -121,7 +121,11 @@ object McpModule {
             // 模式）：core 无 logging 依赖，经回调外送到 AppLogger 留痕。
             errorLog = { message ->
                 AppLogger.instance.warn(LogCategory.TOOL, "McpManager", message)
-            }
+            },
+            // v3 S3（G8 令牌桥）：配置 headers/env 值里的 ${GITHUB_TOKEN}
+            // 占位符在连接时经此取真 PAT 填充（官方 github-official 预置与
+            // 用户自建配置通用；真 token 永不进明文配置/落盘）
+            gitHubTokenProvider = { githubTokens.getToken() }
         )
         // ★ 预置内置 MCP 配置（幂等，用户自建同名配置不被动劫持）+ 后台
         // 自动连接。@Provides 副作用模式与 AttachmentModule 触发
@@ -129,6 +133,11 @@ object McpModule {
         // IO scope 里执行，不阻塞注入线程。
         BuiltinGithubMcpBootstrap.ensureAndConnect(manager)
         BuiltinSearchMcpBootstrap.ensureAndConnect(manager)
+        // v3 S3：官方远程 GitHub MCP 预置（https://api.githubcopilot.com/mcp/，
+        // PAT 经 ${GITHUB_TOKEN} 占位符 + 令牌桥注入，真 token 零落盘）——
+        // enabled=false 只安装不启动（用户在市场手动启用），与内置 github
+        // 服务器并存互补（内置=进程内 7 工具；官方=全量 GitHub 工具面）。
+        com.apex.agent.github.mcp.OfficialGithubMcpBootstrap.ensurePreset(manager)
         // v0.2 #150：三台新内置服务器同样幂等预置 + 自动连接（用户禁用后
         // 尊重偏好不再自动连接，与既有两台一致）。
         BuiltinFsMcpBootstrap.ensureAndConnect(manager)

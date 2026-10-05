@@ -222,7 +222,13 @@ class PredictiveAttachmentPreprocessor @Inject constructor(
                     return@withContext cursor.getLong(sizeIdx)
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // #260：大小查询失败降级为 0（进度未知），留痕便于区分「无进度」根因
+            AppLogger.instance.debug(
+                LogCategory.ATTACHMENT, TAG,
+                "queryFileSize failed for $uri (${e::class.simpleName}: ${e.message})"
+            )
+        }
         0L
     }
 

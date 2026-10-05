@@ -236,6 +236,8 @@ object StandardToolSurface {
             appendLine("how to verify). subagent_type:")
             appendLine("- explore = read-only code investigation (returns path:line evidence)")
             appendLine("- research = web-grounded investigation (returns sourced conclusions)")
+            appendLine("- reviewer = read-only code review (severity-graded findings + merge")
+            appendLine("  verdict)")
             appendLine("- general = full-surface autonomous executor for self-contained")
             appendLine("  multi-step tasks")
             appendLine("Launch independent tasks in parallel. The sub-agent's result is")
@@ -255,8 +257,9 @@ object StandardToolSurface {
     /**
      * 合成 task 工具定义（schema 与 [StandardSubAgentRequest] 对齐）。
      *
-     * subagent_type 取值域 = explore / research / general 三种（与
-     * [StandardAgentKind.fromKey] 的解析域一致），描述对齐业界标准
+     * subagent_type 取值域 = explore / research / general / reviewer 四种
+     * （与 [StandardAgentKind.fromKey] 的解析域一致；custom 自定义类型为
+     * 深潜线 code_task 专属，标准线画像封闭），描述对齐业界标准
      * task 工具的用法精华：自包含 prompt / 明确写码或纯调研 /
      * 结果仅主代理可见需自己转述。
      */
@@ -266,9 +269,11 @@ object StandardToolSurface {
             Dispatch an isolated sub-agent to run a self-contained task and
             return its conclusion as this tool's result. The sub-agent has its
             own fresh context — it does NOT see this conversation — its own
-            tool surface and a turn budget. Three types:
+            tool surface and a turn budget. Four types:
             - explore: read-only code investigation; returns path:line evidence.
             - research: web-grounded investigation; returns sourced conclusions.
+            - reviewer: read-only code review of changes; returns severity-graded
+              findings plus a merge verdict.
             - general: full-surface autonomous executor for self-contained
               multi-step tasks (can read, write, edit, and run commands).
 
@@ -299,8 +304,8 @@ object StandardToolSurface {
                 },
                 "subagent_type": {
                   "type": "string",
-                  "enum": ["explore", "research", "general"],
-                  "description": "explore = read-only code investigation, research = web-grounded investigation, general = full-surface autonomous executor (default: explore)"
+                  "enum": ["explore", "research", "general", "reviewer"],
+                  "description": "explore = read-only code investigation, research = web-grounded investigation, reviewer = read-only code review (severity-graded findings + merge verdict), general = full-surface autonomous executor (default: explore)"
                 }
               },
               "required": ["description", "prompt"]

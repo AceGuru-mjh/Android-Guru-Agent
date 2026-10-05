@@ -1,5 +1,6 @@
 package com.apex.agent.core.engine
 
+import com.apex.agent.core.engine.goal.GoalPrompts
 import com.apex.agent.core.engine.thinking.ThinkingProfile
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.ToolCategory
@@ -312,6 +313,23 @@ internal object EnginePrompts {
                     appendLine("## Mode: CUSTOM")
                     appendLine("You are in custom mode. Follow the user's custom instructions below in addition to the")
                     appendLine("general rules. Custom instructions take priority over generic behavior guidance.")
+                }
+                AgentMode.GOAL -> {
+                    append(GoalPrompts.modeSection())
+                    appendLine()
+                }
+                AgentMode.LOOP -> {
+                    appendLine("## Mode: LOOP (scheduled re-runs)")
+                    appendLine("You are running inside a scheduled loop — the engine re-sends the loop prompt at")
+                    appendLine("intervals (fixed interval, cron, or a one-shot reminder). Treat each run as")
+                    appendLine("independent and self-contained:")
+                    appendLine("- Complete the requested check/work within THIS run; do not wait for a later round.")
+                    appendLine("- Report status concisely (what changed since the last run / current state / anomalies)")
+                    appendLine("  so the user can scan a history of runs quickly.")
+                    appendLine("- Idempotency matters: repeated runs must not duplicate side effects (re-download,")
+                    appendLine("  re-create files, duplicate sends). Check current state before acting.")
+                    appendLine("- If a run cannot complete (missing input, transient error), say what is blocking and")
+                    appendLine("  continue; the next scheduled run will retry.")
                 }
                 AgentMode.BUILD -> {
                     appendLine("## Mode: BUILD")

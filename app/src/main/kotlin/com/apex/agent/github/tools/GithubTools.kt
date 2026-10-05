@@ -24,8 +24,9 @@ import kotlinx.serialization.json.*
 //    短句（"获取当前已连接 GitHub 用户的信息"）在 100+ 工具中辨识度极低。
 //    现首行为英文（≤160 字符，一句话功能 + 使用时机），与 github_* 语义对齐。
 // 5. code=null（未连接 GitHub）/401/403 的错误文案升级为可行动引导：告诉
-//    模型应指引到 设置 → 连接器 → GitHub 配置 Token，连接后先调
-//    github_get_user 验证——旧版只说"请先配置 Token"，模型无从引导。
+//    模型应指引到 Coding 屏 GitHub 图标 / 设置 → GitHub 分区连接 Token，
+//    连接后先调 github_get_user 验证——旧版只说"请先配置 Token"，且指向
+//    不存在的 设置 → 连接器 路径（v3 S3 / G6 一并对齐）。
 
 /** 宽容解析工具参数：失败时返回 null（调用方转成带指引的 Error 文本）。 */
 private fun parseArgs(arguments: String): JsonObject? = try {
@@ -48,14 +49,16 @@ private fun githubError(e: GithubApiException): String = buildString {
     append("Error: GitHub API ${e.code ?: "network"}: ${e.message}")
     when (e.code) {
         // code=null = authHeader() 抛出的"未连接"（Token 未配置）——最常见失败。
+        // v3 S3（G6）：指引与真实入口对齐——Coding 屏输入栏 GitHub 图标 /
+        // 设置 → GitHub 分区（旧文案指向不存在的 设置 → 连接器 路径）。
         null -> append(
-            ". GitHub is NOT connected. Tell the user: 打开 设置 → 连接器 → GitHub " +
-                "配置 Personal Access Token（Settings → Connectors → GitHub）。" +
+            ". GitHub is NOT connected. Tell the user: 点击 Coding 屏输入栏的 " +
+                "GitHub 图标录入 Personal Access Token（或在 设置 → GitHub 分区连接），" +
                 "连接后先调用 github_get_user 验证再继续本任务。"
         )
         401 -> append(
             ". Token invalid or expired — ask the user to re-connect GitHub " +
-                "(设置 → 连接器 → GitHub), then verify with github_get_user."
+                "(Coding 屏 GitHub 图标 / 设置 → GitHub), then verify with github_get_user."
         )
         403 -> append(". Rate limited or forbidden — slow down; if it persists the token may lack scope.")
         404 -> append(". Check owner/repo spelling and token access to private repos.")

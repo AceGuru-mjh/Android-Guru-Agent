@@ -206,4 +206,102 @@ class TerminalScrollModelTest {
         m.scrollBy(-TerminalScrollModel.rowsForDelta(fingerDyUp, 20f))
         assertEquals(0, m.topRow) // -2 + 2 = 0（回到底）
     }
+
+    // ─── ensureRowVisible（grid resize 后光标锚定 —— IME 弹出乱跳根治）───
+
+    @Test
+    fun `ensureRowVisible is no-op when row already visible`() {
+        val m = model(viewRows = 10, gridRows = 100)
+        // 贴底时视口 90..99：93 已可见 → 零动作（不偷位置）
+        assertFalse(m.ensureRowVisible(93))
+        assertEquals(0, m.topRow)
+    }
+
+    @Test
+    fun `ensureRowVisible pulls cursor row back from below viewport`() {
+        // 模拟视口拉长后光标落到视口上方之外：贴底推算视口 70..99，光标行 60 →
+        // 最小上滚让它落在视口顶沿
+        val m = model(viewRows = 30, gridRows = 100)
+        assertTrue(m.ensureRowVisible(60))
+        assertEquals(60, m.firstVisibleRow) // 视口 60..89，行 60 可见
+    }
+
+    @Test
+    fun `ensureRowVisible pulls cursor row back from above viewport`() {
+        // 模拟 IME 弹出：视口 10 行贴底（90..99），光标在行 0（提示符贴顶）→
+        // 最小滚动让行 0 落在视口顶沿
+        val m = model(viewRows = 10, gridRows = 100)
+        assertTrue(m.ensureRowVisible(0))
+        assertEquals(0, m.firstVisibleRow) // 视口 0..9，行 0 可见
+        assertFalse(m.isAtBottom) // 已脱离吸底（宿主「跳到最新」浮标联动）
+    }
+
+    @Test
+    fun `ensureRowVisible clamps out-of-range rows into grid`() {
+        val m = model(viewRows = 10, gridRows = 100)
+        // 负数 / 越界行 coerce 进 [0, gridRows) 再求可见
+        assertTrue(m.ensureRowVisible(-5))   // → 0：从 90..99 滚到 0..9
+        assertEquals(0, m.firstVisibleRow)
+        assertTrue(m.ensureRowVisible(Int.MAX_VALUE)) // → 99：从 0..9 滚回 90..99
+        assertEquals(90, m.firstVisibleRow)
+    }
+
+    @Test
+    fun `ensureRowVisible no scroll room is always no-op`() {
+        val m = model(viewRows = 20, gridRows = 10)
+        assertFalse(m.ensureRowVisible(0))
+        assertFalse(m.ensureRowVisible(9))
+        assertEquals(0, m.topRow)
+    }
+
+    @Test
+    fun `ensureRowVisible keeps cursor stable across repeated shrink frames`() {
+        // IME 动画逐帧收缩场景：光标行 0 每帧都必须保持可见且 firstVisibleRow 稳定
+        var m = model(viewRows = 50, gridRows = 50)
+        m.ensureRowVisible(0)
+        for (viewRows in intArrayOf(46, 40, 32, 24, 18, 12)) {
+            m.onGridResized(50.coerceAtLeast(viewRows), viewRows)
+            m.ensureRowVisible(0)
+            assertEquals(0, m.firstVisibleRow)
+        }
+    }
+
+    // ─── onGridResized(anchorRow)：resize 光标锚定集成语义 ───
+
+    @Test
+    fun `onGridResized with anchor keeps cursor visible across shrink frames`() {
+        // IME 弹出逐帧收缩（PTY resize 防抖滞后 —— merged 仍是旧 50 行屏）：
+        // 光标行 0 每帧锚定后必须可见且视口稳定
+        var m = model(viewRows = 50, gridRows = 50)
+        for (viewRows in intArrayOf(46, 40, 32, 24, 18, 12)) {
+            m.onGridResized(50.coerceAtLeast(viewRows), viewRows, anchorRow = 0)
+            assertEquals(0, m.firstVisibleRow)
+        }
+    }
+
+    @Test
+    fun `onGridResized without anchor keeps clamp only semantics`() {
+        val m = model(viewRows = 10, gridRows = 100)
+        m.scrollBy(-50) // first=40
+        m.onGridResized(100, 8)
+        assertEquals(42, m.firstVisibleRow) // 100-8-50：只 clamp，不偷阅读位置
+    }
+
+    @Test
+    fun `onGridResized anchor skipped when reading history with cursor off-screen`() {
+        // 上翻阅读且光标在视口外：锚定必须跳过（不抢阅读位置）
+        val m = model(viewRows = 10, gridRows = 200)
+        m.scrollBy(-100) // first=90..99，光标行 199 不可见
+        m.onGridResized(200, 8, anchorRow = 199)
+        assertEquals(92, m.firstVisibleRow)
+    }
+
+    @Test
+    fun `onGridResized anchor applies when pinned at bottom even if row off-screen`() {
+        // 贴底（IME 弹出的典型前态）即使光标行在视口外也锚定 —— 输入行必须可见
+        val m = model(viewRows = 10, gridRows = 100)
+        assertTrue(m.isAtBottom)
+        m.onGridResized(100, 10, anchorRow = 0)
+        assertEquals(0, m.firstVisibleRow)
+    }
 }

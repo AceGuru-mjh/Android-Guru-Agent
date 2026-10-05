@@ -465,7 +465,15 @@ class TerminalRuntimeImpl(
         val semantics = filtered.mapNotNull { s ->
             sessionManager.assembly(s.id)?.semanticReducer?.snapshot()
         }
-        val globalCursor = semantics.maxOfOrNull { it.session.cursor } ?: 0L
+        // #223：合并恢复的会话视图（Spec §39 —— App 被杀重启后 recover() 装载的
+        // 持久化记录进入会话列表，UI tab / Agent 上下文均可见）。视图状态为
+        // EXITED/BROKEN（只读，绝不伪造存活）；活跃会话 id 优先（recover() 已抬
+        // id 地板，此处过滤是对 id 复用的防御 —— 活跃视图与恢复视图不同时出现）。
+        val liveIds = sessions.asSequence().map { it.id }.toSet()
+        val recovered = (recoveryService?.recoveredSessionsExcluding(liveIds) ?: emptyList())
+            .filter { sessionId == null || it.session.id == sessionId }
+        val all = semantics + recovered
+        val globalCursor = all.maxOfOrNull { it.session.cursor } ?: 0L
         val recent = if (sessionId != null) eventLog.tail(sessionId, recentEvents)
                      else eventLog.let { log -> filtered.flatMap { log.tail(it.id, recentEvents / maxOf(1, filtered.size)) } }
         val recentOut = filtered.joinToString("") { s ->
@@ -474,7 +482,7 @@ class TerminalRuntimeImpl(
         }
         return Result.success(
             SnapshotResult(
-                sessions = semantics, globalCursor = globalCursor,
+                sessions = all, globalCursor = globalCursor,
                 recentEvents = recent, recentOutput = recentOut
             )
         )
@@ -502,6 +510,12 @@ class TerminalRuntimeImpl(
         // PR #54 §4: idempotent — if already closed, return success
         val a = sessionManager.assembly(sessionId)
         if (a == null) {
+            // #223：无 assembly = 恢复视图（进程已死）或早已关闭的会话。同步清理
+            // 持久化记录 + 恢复缓存 —— 否则恢复的死会话关不掉（下次启动 recover()
+            // 又捞回来，僵尸 tab 永生）。delete/forget 对不存在条目均为 no-op，
+            // 幂等语义不变。
+            persistenceStore?.delete(sessionId)
+            recoveryService?.forget(sessionId)
             // Already closed (assembly removed) — return idempotent success
             return Result.success(CloseResult(closed = true, cause = "ALREADY_CLOSED", finalCursor = 0L))
         }
@@ -532,6 +546,9 @@ class TerminalRuntimeImpl(
             // 原路径依赖 collector 收到 SessionClosed 时 autoSave，与 assembly
             // 移除存在竞态，CLOSED 终态可能从未落盘）。
             persistenceStore?.delete(sessionId)
+            // #223：恢复视图缓存同步驱逐 —— 会话 id 与恢复记录撞车时，防止关闭
+            // 活跃会话后旧的恢复视图借尸还魂（重新出现在 snapshot 里）。
+            recoveryService?.forget(sessionId)
         }
         return r.map {
             val cause = when {
@@ -651,8 +668,17 @@ class TerminalRuntimeImpl(
      * Recover persisted sessions on startup (Spec §39).
      * Returns recovered session ids (now visible via snapshot()).
      * PTY fds cannot be reattached in v1; recovered sessions are EXITED/BROKEN (read-only).
+     *
+     * #223：恢复的会话真实进入 snapshot()（UI 会话列表 + Agent 上下文重建）——
+     * 原实现仅返回 id、恢复态从未注册，日志打出 Recovered N 后列表里什么都
+     * 看不到。同时把 SessionManager 的 id 计数器抬过全部恢复 id：新建会话不与
+     * 恢复视图撞车（撞车时活跃视图优先 + 记录被 autoSave 覆盖，恢复条目凭空消失）。
      */
-    override suspend fun recover(): List<Long> = recoveryService?.recover() ?: emptyList()
+    override suspend fun recover(): List<Long> {
+        val ids = recoveryService?.recover() ?: return emptyList()
+        if (ids.isNotEmpty()) sessionManager.ensureIdFloor(ids.max())
+        return ids
+    }
 
     /** Get a recovered session's last-known SemanticState (read-only, from persisted metadata). */
     override suspend fun recoveredSnapshot(sessionId: Long): com.apex.agent.platform.terminal.state.TerminalSemanticState? =

@@ -140,6 +140,8 @@
     <string name="term_session_dead_ubuntu">The Ubuntu (proot) process has ended — exit or killed by the system.\nRestart re-launches bash with the same environment.</string>
     <string name="term_session_dead_local">The Android shell process has ended.\nRestart opens a fresh local shell.</string>
     <string name="term_session_restart">Restart session</string>
+    <!-- #223: crash recovery — persisted sessions restored as interrupted (dead) tabs -->
+    <string name="term_notice_recovered">Recovered %1$d interrupted session(s) from the last run — open a session tab and tap "Restart session" to rebuild</string>
 
     <!-- E2: active session close confirmation (accidental-tap guard, SessionStrip X) -->
     <string name="term_close_confirm_title">Close this session?</string>

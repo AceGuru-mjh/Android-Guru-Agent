@@ -29,6 +29,25 @@ import dev.chrisbanes.haze.HazeTint
  * 明确未实现：Refraction —— 本系统不声明折射位移能力。
  */
 
+/**
+ * Frosted 档（state == null）的材质渲染变体。
+ *
+ * 诚实声明：两种变体都不采样 backdrop —— 它们只在「无背后内容可采」或
+ * 「嵌在 hazeSource 子树内无法采样」的场景里给出高级霜面。
+ */
+enum class GlassFrostMaterial {
+    /** 主题色垂直渐变霜面 —— 既有 Frosted 观感（默认，零额外开销）。 */
+    Gradient,
+
+    /**
+     * Cloudy 真模糊光雾材质：材质层自绘斜向光带纹理，经 Cloudy 位图模糊
+     * （全 API 级别原生 NEON/SIMD CPU）扩散成柔和发光磨砂。
+     * 代价：每个组件一次离屏位图 + 一次 CPU 模糊 —— 只用于低数量高价值
+     * 表面（聊天气泡）；详见 CloudyFrost.kt 性能护栏。
+     */
+    Cloudy
+}
+
 /** 玻璃材质档位 —— Spec §4 规定的七档。 */
 enum class GlassTier { Subtle, Control, Card, Navigation, Floating, Dialog, Strong }
 
@@ -104,6 +123,23 @@ data class GlassStyle(
             tier = GlassTier.Strong, blurRadius = 26.dp, tintAlpha = 0.74f, noiseFactor = 0.14f,
             edgeAlpha = 0.28f, specularAlpha = 0.13f, elevation = 4.dp,
             pressedScale = 1f, scrimAlpha = 0.80f
+        )
+
+        /**
+         * 聊天气泡玻璃：Agent 回复 / 流式 / 思考三气泡专用（配合
+         * GlassFrostMaterial.Cloudy 真模糊材质）。
+         *
+         * 相比 Card 档的差异化调参（设计原则「不同组件不同材质」）：
+         *  - scrim 更透（0.55 → 0.44）：白天乳白霜面更薄，列表背景经
+         *    半透明材质透出 —— 治「一片死白」；
+         *  - blur 加大（14 → 16dp）：光带纹理扩散更柔，磨砂感更细；
+         *  - 镜面/边缘略强：小尺寸表面需要更明确的受光线索立层次。
+         * tier 沿用 Card（档位语义不变，仅参数差异化 —— 七档枚举保持稳定）。
+         */
+        val Bubble = GlassStyle(
+            tier = GlassTier.Card, blurRadius = 16.dp, tintAlpha = 0.50f, noiseFactor = 0.10f,
+            edgeAlpha = 0.20f, specularAlpha = 0.12f, elevation = 2.dp,
+            pressedScale = 1f, scrimAlpha = 0.44f
         )
     }
 }

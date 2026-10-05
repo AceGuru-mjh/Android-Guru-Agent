@@ -62,8 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.component.MarkdownText
-import com.apex.agent.ui.glass.GlassCard
-import com.apex.agent.ui.glass.GlassStyle
+import com.apex.agent.ui.glass.AgentBubbleGlass
 import com.apex.agent.ui.component.MessageAttachmentList
 import com.apex.agent.ui.theme.LocalShowTimestamps
 import kotlinx.coroutines.delay
@@ -326,13 +325,12 @@ internal fun AgentBubble(
             .semantics { liveRegion = LiveRegionMode.Polite },
         horizontalArrangement = Arrangement.Start
     ) {
-        // v5 流式玻璃（用户反馈「流式输出的液态/毛玻璃没做好」）：AI 回复气泡
-        // 从不透明 Surface 换成 GlassCard Frosted 档 —— 上下渐变薄霜 + 边缘光
-        // + 镜面斜扫，与输入栏/工具卡/计划卡同一套玻璃语言。Frosted（state=null）
-        // 无 backdrop 采样：气泡位于 hazeSource（消息列表）内部，Haze 1.4 不支持
-        // 嵌套采样，诚实降级（与展开态工具卡同档）。
-        GlassCard(
-            style = GlassStyle.Card,
+        // v7 气泡玻璃：从 GlassCard Frosted（渐变假霜面，白天「一片死白」）换成
+        // AgentBubbleGlass —— Cloudy 真模糊光雾材质：材质层自绘光带纹理经原生
+        // NEON 位图模糊扩散成柔和受光磨砂，白天 = 乳白底 + 柔和光带（非死白）。
+        // 气泡位于 hazeSource（消息列表）子树内，Haze 1.4 不支持嵌套采样 ——
+        // Cloudy 自体模糊正是为这个场景引入（材质自模糊，不冒充 backdrop 采样）。
+        AgentBubbleGlass(
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             accent = MaterialTheme.colorScheme.primary,
             modifier = Modifier.widthIn(max = 340.dp)
@@ -531,10 +529,9 @@ internal fun StreamingResponseBubble(
         label = "cursor-alpha"
     )
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        // v5 流式玻璃：与完成态 AgentBubble 同款 GlassCard Frosted —— 流式与
-        // 完成瞬间切换无容器跳变（同一 shape/同一玻璃档）。
-        GlassCard(
-            style = GlassStyle.Card,
+        // v7 流式玻璃：与完成态 AgentBubble 同款 AgentBubbleGlass（Cloudy 真模糊
+        // 材质）—— 流式与完成瞬间切换无容器跳变（同一 shape/同一玻璃档）。
+        AgentBubbleGlass(
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             accent = MaterialTheme.colorScheme.primary,
             modifier = Modifier.widthIn(max = 340.dp)
@@ -669,10 +666,9 @@ internal fun ThinkingBubble(
         }.value
     } else 0L
 
-    // v5 流式玻璃：思考气泡同款 GlassCard Frosted（accent=tertiary 与既有
-    // 思考色系一致）；折叠/展开可点击收在内容层，涟漪经玻璃层裁剪不露角。
-    GlassCard(
-        style = GlassStyle.Card,
+    // v7 思考气泡：同款 AgentBubbleGlass（Cloudy 真模糊材质；accent=tertiary
+    // 与既有思考色系一致）；折叠/展开可点击收在内容层，涟漪经玻璃层裁剪不露角。
+    AgentBubbleGlass(
         shape = RoundedCornerShape(12.dp),
         accent = MaterialTheme.colorScheme.tertiary,
         modifier = Modifier

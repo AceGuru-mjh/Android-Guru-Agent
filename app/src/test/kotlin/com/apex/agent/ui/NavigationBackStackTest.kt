@@ -20,7 +20,9 @@ class NavigationBackStackTest {
 
     /** SaverScope 测试替身：全放行（不校验 Bundle 可存性） */
     private object AllowAll : SaverScope {
-        override fun canBeSaved(value: Any): Boolean = true
+        // 接口签名是 Any?（null 也可判定）—— 覆写必须精确匹配，否则整个
+        // object 不是合法 SaverScope，with(AllowAll) 下 save 解析连锁崩塌
+        override fun canBeSaved(value: Any?): Boolean = true
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.apex.agent.core.code.standard
 
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.llm.LlmClient
+import com.apex.agent.core.llm.LlmErrorText
 import com.apex.agent.core.llm.LlmMessage
 import com.apex.agent.core.llm.LlmResponse
 import com.apex.agent.core.llm.LlmStreamChunk
@@ -265,7 +266,10 @@ class StandardModeEngineResilienceTest {
         assertEquals(7, llm.chatRequests.size)
         assertEquals(6, events.filterIsInstance<AgentEvent.LlmRetryScheduled>().size)
         val error = events.filterIsInstance<AgentEvent.Error>().single()
-        assertTrue(error.message.contains("down #6"))
+        // main 侧 #213 UX 净化：Error 事件文案走 LlmErrorText 中文指引
+        //（原始异常文本进日志）；ModelUnavailable 无 cause → 服务不可用指引。
+        // 原始消息仍可在 LlmRetryScheduled 的 reason 轨迹中追溯（末次即 down #6）。
+        assertTrue(error.message.contains(LlmErrorText.SERVICE_UNAVAILABLE))
         // 收口完整（Error 后 Complete 仍发，任务不悬挂）
         assertTrue(events.filterIsInstance<AgentEvent.Complete>().isNotEmpty())
     }

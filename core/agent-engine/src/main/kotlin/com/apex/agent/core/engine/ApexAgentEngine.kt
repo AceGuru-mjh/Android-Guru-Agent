@@ -143,10 +143,9 @@ class ApexAgentEngine(
      */
     internal val resilience: EngineResilienceGuard = EngineResilienceGuard(),
     /**
-     * v3 GOAL 模式协调器：非空且 [AgentConfig.mode] == GOAL 时，每轮纯文本
-     * 收尾前调 [GoalModeCoordinator.onAgentTurn] 快速模型验收——未达标注入
-     * 差距说明续跑，达标/轮次耗尽照常收尾（同 HUMAN_ASSIST/REFLECTION 的
-     * 「模式特化拦截」惯例）。null = 无目标，GOAL 模式退化为 BUILD 行为。
+     * v3 GOAL 模式协调器：GOAL 模式每轮纯文本收尾前调
+     * [GoalModeCoordinator.onAgentTurn] 快速验收——未达标注入差距续跑，
+     * 达标/轮次耗尽照常收尾。null = 无目标，退化为 BUILD 行为。
      */
     private val goalCoordinator: GoalModeCoordinator? = null
 ) : AgentEngine, ConfirmationSink {
@@ -553,9 +552,8 @@ class ApexAgentEngine(
                     totalIterations = maxOf(totalIterations, specIterations)
                 }
                 // REFLECTION / HUMAN_ASSIST / CUSTOM / GOAL（v3）共享 ReAct 主循环：
-                // 行为差异全部由 buildSystemPrompt 注入的 Mode 段落驱动；
-                // REFLECTION 另在最终纯文本轮次触发"生成→评审→修正"循环；
-                // GOAL 在最终纯文本轮次触发快速模型验收（见 executeBuildLoop 内钩子）。
+                // 行为差异全部由 buildSystemPrompt 注入的 Mode 段落驱动；REFLECTION
+                // 触发生成→评审→修正；GOAL 触发快速验收（executeBuildLoop 钩子）。
                 AgentMode.REFLECTION, AgentMode.HUMAN_ASSIST, AgentMode.CUSTOM, AgentMode.GOAL -> {
                     val iter = executeBuildLoop { event ->
                         if (event is AgentEvent.ToolCallComplete) totalToolCalls++
@@ -895,10 +893,9 @@ class ApexAgentEngine(
                     continue
                 }
                 // ═══ 长任务韧性：LLM 瞬时错误退避重试 ═══
-                // 限流/超时/断连/5xx 退避后重试同一轮（不消耗迭代配额）；预算用尽
-                // 或非瞬时错误才抛出交旧错误链路。
-                // P2 修复：Retry 分支补「本轮零输出」前置 —— 旧实现整轮重放
-                // 已流出半截的回答（UI 重复拼接 + 四层重试叠加放大 ~60 请求）。
+                // 退避后重试同一轮（不消耗迭代配额）；预算用尽或非瞬时错误才抛出。
+                // P2：Retry 前置「本轮零输出」——防整轮重放洗出半截回答
+                //（重复拼接 + 四层重试叠加放大 ~60 请求）。
                 val hasPartialOutput = contentBuilder.isNotEmpty() ||
                     reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty()
                 when (val retryDecision = resilience.onLlmFailure(e)) {
@@ -957,13 +954,11 @@ class ApexAgentEngine(
 
                 contentBuilder.isNotEmpty() -> {
                     // ═══ #168 HUMAN_ASSIST 模式：决策点后置检测 ═══
-                    // 模型常不调 ask_user_choice 直接写出对比文本——对响应文本做后置
-                    // 检测：检出决策点 → 挂起等待用户选择 → 回填 User 消息 continue；
-                    // 无决策点/超时取消 → null 照常收尾（安全降级不丢回复）。
+                    // 模型常不调 ask_user_choice 直接写对比文本——后置检测：检出 →
+                    // 挂起等选择 → 回填 continue；无/超时 → null 照常收尾（不丢回复）。
                     // 规则见 assist/DecisionPointDetector.kt；流程见 assist/HumanAssistFlow.kt。
                     if (config.mode == AgentMode.HUMAN_ASSIST) {
-                        // #214：等待超时发 UserInputExpired 关闭挂起对话框；空答复
-                        // 折叠为空串保持「草稿照常收尾」语义。
+                        // #214：超时发 UserInputExpired 关闭挂起对话框；空答复折叠为空串照常收尾。
                         val followUp = HumanAssistFlow(emit) {
                             awaitUserInput { emit(AgentEvent.UserInputExpired) } ?: ""
                         }.interceptResponse(contentBuilder.toString())

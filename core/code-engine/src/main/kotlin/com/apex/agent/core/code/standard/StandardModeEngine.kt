@@ -55,21 +55,14 @@ import kotlinx.coroutines.withTimeout
  *
  * ## 关键决策
  *
- * - **独立循环**：不包装 ApexAgentEngine——标准线有自己的回合语义
- *   （turn = 一次 LLM 请求 + 工具批处理）、自己的系统提示词装配、
- *   自己的权限门与会话压缩；
- * - **事件协议 100% 复用**：发射 [AgentEvent]（IterationStart /
- *   ThinkingChunk / ResponseChunk / ToolCall* / UsageUpdated /
- *   ContextCompressed / UserInputRequired / Plan* / Complete / Aborted /
- *   Error）——CodeStreamSession 胶囊时间轴、LongTaskTracker、
- *   UserQuestionBridge 问答闭环零改动即工作；
- * - **PLAN 档人控门**：规划师画像产出计划 → 解析 [ExecutionPlan] →
- *   PlanAwaitingConfirmation 挂起 → 确认后切构建者画像执行
- *   （复用 VM 的 PlanConfirmationCard）；
- * - **task 工具**：合成定义（[StandardToolSurface.syntheticTaskTool]），
- *   派发 [StandardSubAgentDispatcher] 隔离子代理；
- * - **记忆通道独立**：code_memory_standard（与深潜线的 code_memory
- *   分离——两条思考逻辑各自完整现场，切换不互相污染）。
+ * - **独立循环**：不包装 ApexAgentEngine——自有回合语义（turn = 一次 LLM
+ *   请求 + 工具批处理）、系统提示词装配、权限门与会话压缩；
+ * - **事件协议 100% 复用**：全量 [AgentEvent]——CodeStreamSession /
+ *   LongTaskTracker / UserQuestionBridge 零改动即工作；
+ * - **PLAN 档人控门**：规划师画像 → [ExecutionPlan] → 确认挂起 → 切
+ *   构建者画像（复用 VM 的 PlanConfirmationCard）；
+ * - **task 工具**：合成定义，派发 [StandardSubAgentDispatcher] 隔离子代理；
+ * - **记忆通道独立**：code_memory_standard（与深潜线分离，互不污染）。
  */
 class StandardModeEngine(
     private val runtime: ModelRuntime,
@@ -167,9 +160,8 @@ class StandardModeEngine(
     private var usageCalibration: Float = 1.0f
 
     /**
-     * AgentMode.PLAN 档硬门（与设置层权限模式正交）：档位切换不再改写
-     * 权限模式——「规划阶段零副作用」由 [StandardPermissionEngine.decide]
-     * 的 planGate 参数独立承诺，设置层模式是主权档位。
+     * PLAN 档硬门（与设置层权限模式正交）：「规划阶段零副作用」由
+     * [StandardPermissionEngine.decide] 的 planGate 参数独立承诺。
      */
     @Volatile
     private var agentPlanGate: Boolean = false
@@ -331,10 +323,8 @@ class StandardModeEngine(
 
     /**
      * 回合循环：直到无工具调用 / 预算耗尽 / 中止 / 异常。
-     *
-     * @return PLAN 档且以纯文本收官时的规划文本（**未**发射
-     *         ResponseComplete——由 [handlePlanGate] 决定后续）；
-     *         其余情况返回 null（已正常收尾）
+     * @return PLAN 档纯文本收官时的规划文本（未发射 ResponseComplete，由
+     * [handlePlanGate] 决定后续）；其余返回 null（已正常收尾）
      */
     private suspend fun runTurns(
         emit: suspend (AgentEvent) -> Unit,
@@ -605,12 +595,9 @@ class StandardModeEngine(
     }
 
     /**
-     * ASK → UserInputRequired + 挂起等答案（5 分钟超时 = 拒绝）。
-     *
-     * 应答词表：「允许/allow/yes/y/好/ok/1/执行」= 本次；
-     * 「总是/always/全部允许/session/2」= 本会话总允许；其余非空文本 =
-     * 拒绝但携带用户指示（反馈原文回传模型，模型可改道）；空/超时 = 拒绝。
-     *
+     * ASK → UserInputRequired + 挂起等答案（5 分钟超时 = 拒绝）。应答词表：
+     * 「允许」类 = 本次；「总是」类 = 本会话总允许；其余非空文本 = 拒绝但
+     * 携带用户指示（原文回传模型，可改道）；空/超时 = 拒绝。
      * @return 应答 + 拒绝时的用户指示原文（null = 无反馈）
      */
     private suspend fun askPermission(
@@ -882,10 +869,7 @@ class StandardModeEngine(
         planConfirmationDeferred?.complete(PlanAnswer(confirmed, enabledSteps, order))
     }
 
-    /**
-     * v6 专家模板人设：标准线没有 AgentConfig 人设字段——落进系统提示词
-     * 的专家段（拼装点见 buildSystemPrompt 的 persona 段）。空 = 清除。
-     */
+    /** v6 专家模板人设：无 AgentConfig 人设字段——落进系统提示词专家段（见 buildSystemPrompt persona 段）。空 = 清除。 */
     override fun updateRolePersona(roleDefinition: String, rolePrompt: String?) {
         rolePersona = buildString {
             append("## Coding Role\n")

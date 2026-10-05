@@ -65,6 +65,7 @@ import com.apex.agent.core.engine.UserQuestionBridge
 import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.tools.AskUserChoiceTool
 import com.apex.agent.tools.AskUserTool
+import com.apex.agent.tools.GateDialogStrings
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.tools.ToolAuditLogger
 import com.apex.agent.permission.PermissionModeGate
@@ -239,8 +240,14 @@ object ToolModule {
     @Singleton
     fun provideRiskAwareToolGate(
         gateway: UserQuestionGateway,
-        toolAuditLogger: ToolAuditLogger
-    ): RiskAwareToolGate = RiskAwareToolGate(gateway, toolAuditLogger)
+        toolAuditLogger: ToolAuditLogger,
+        languageManager: com.apex.agent.ui.language.LanguageManager
+    ): RiskAwareToolGate = RiskAwareToolGate(
+        gateway = gateway,
+        audit = toolAuditLogger,
+        // #208：弹窗文案按当前语言取词（默认英文资源 + values-zh 中文）。
+        strings = GateDialogStrings.Res(languageManager)
+    )
 
     /**
      * v1.0 #155：业界标准式权限模式门——模式（BYPASS/DEFAULT/ACCEPT_EDITS/PLAN）
@@ -252,7 +259,8 @@ object ToolModule {
     @Singleton
     fun providePermissionModeGate(
         gateway: UserQuestionGateway,
-        settingsRepository: SettingsRepository
+        settingsRepository: SettingsRepository,
+        languageManager: com.apex.agent.ui.language.LanguageManager
     ): PermissionModeGate = PermissionModeGate(
         gateway = gateway,
         settingsProvider = {
@@ -261,7 +269,9 @@ object ToolModule {
                 mode = agent.permissionMode,
                 rules = agent.permissionRules
             )
-        }
+        },
+        // #208：弹窗文案按当前语言取词（默认英文资源 + values-zh 中文）。
+        strings = GateDialogStrings.Res(languageManager)
     )
 
     /**

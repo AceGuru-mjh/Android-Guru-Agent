@@ -6,6 +6,7 @@ import com.apex.agent.core.engine.UserQuestionGateway
 import com.apex.agent.core.tools.AgentTool
 import com.apex.agent.core.tools.GateDecision
 import com.apex.agent.core.tools.ToolExecutionGate
+import com.apex.agent.tools.GateDialogStrings
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 
@@ -54,11 +55,14 @@ data class PermissionSnapshot(
  * @param gateway 用户询问通道（复用 ask_user_choice 的既有对话框）。
  * @param settingsProvider 每次检查现取权限快照（设置热生效的关键）。
  * @param clock 会话授权时间戳来源（默认系统时钟；测试可注入固定值）。
+ * @param strings 弹窗文案源（#208：默认中文兜底，生产由 DI 注入资源版
+ *   按当前语言取词）。
  */
 class PermissionModeGate(
     private val gateway: UserQuestionGateway,
     private val settingsProvider: () -> PermissionSnapshot,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val strings: GateDialogStrings = GateDialogStrings.DefaultCn
 ) : ToolExecutionGate {
 
     /**
@@ -183,30 +187,30 @@ class PermissionModeGate(
      * 授权问题构造（选项与文案对齐 RiskAwareToolGate）。
      *
      * 参数摘要截 300 字符并压平换行，避免对话框被长 JSON 撑爆。
+     * #208：文案经 [strings] 取词，不再硬编码中文。
      */
     private fun buildQuestion(
         tool: AgentTool,
         arguments: String,
         mode: PermissionMode
     ): AgentQuestion = AgentQuestion(
-        title = "工具执行授权：${tool.id}",
-        description = "当前权限模式：${modeLabel(mode)}，该工具需要你确认后才能执行。\n" +
-            "参数摘要：${arguments.take(300).replace('\n', ' ')}",
+        title = strings.permTitle(tool.id),
+        description = strings.permModeLine(mode) + "\n" + strings.argsLine(arguments),
         options = listOf(
             AgentQuestionOption(
                 id = OPTION_ALLOW_SESSION,
-                label = "本会话允许",
-                description = "本次会话中该工具不再询问"
+                label = strings.allowSessionLabel(),
+                description = strings.allowSessionDesc()
             ),
             AgentQuestionOption(
                 id = OPTION_ALLOW_ONCE,
-                label = "仅允许一次",
-                description = "下次调用将再次询问"
+                label = strings.allowOnceLabel(),
+                description = strings.allowOnceDesc()
             ),
             AgentQuestionOption(
                 id = OPTION_DENY,
-                label = "拒绝",
-                description = "不执行，让 Agent 改用其他方案",
+                label = strings.denyLabel(),
+                description = strings.denyDesc(),
                 recommended = true
             )
         ),
@@ -227,14 +231,6 @@ class PermissionModeGate(
 
     /** 会话授权记忆快照（调试 / 设置界面展示用）。 */
     fun sessionAllowedSnapshot(): Map<String, Long> = sessionAllowed.toMap()
-
-    /** 模式短名（授权对话框文案用，中文）。 */
-    private fun modeLabel(mode: PermissionMode): String = when (mode) {
-        PermissionMode.BYPASS -> "全放行（BYPASS）"
-        PermissionMode.DEFAULT -> "默认（DEFAULT）"
-        PermissionMode.ACCEPT_EDITS -> "接受编辑（ACCEPT_EDITS）"
-        PermissionMode.PLAN -> "只读规划（PLAN）"
-    }
 
     private companion object {
         /** 授权询问超时：对齐 RiskAwareToolGate 的 5 分钟。 */

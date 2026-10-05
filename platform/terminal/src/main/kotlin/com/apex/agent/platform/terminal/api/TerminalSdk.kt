@@ -60,6 +60,9 @@ class TerminalSdk(
 
     override fun getSession(id: SessionId): TerminalSession? {
         // Runtime has no cheap "exists" probe; snapshot(SESSIONS) is the honest read-only path.
+        // T94 线程契约（P60 冻结签名，runBlocking 为契约妥协）：非 suspend 的
+        // 阻塞调用 —— **禁止在主线程调用**（快照含磁盘 IO 时可 ANR）；
+        // 调用方应在 IO dispatcher 或后台线程上访问。
         val sessions = kotlinx.coroutines.runBlocking {
             runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS).getOrNull()?.sessions ?: emptyList()
         }
@@ -69,6 +72,7 @@ class TerminalSdk(
     }
 
     override fun listSessions(): List<SessionSummary> {
+        // T94 线程契约（同 getSession）：非 suspend 阻塞调用，禁止主线程访问。
         val sessions = kotlinx.coroutines.runBlocking {
             runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS).getOrNull()?.sessions ?: emptyList()
         }
@@ -115,6 +119,9 @@ internal class TerminalSessionHandle(
     @Volatile
     private var cachedState: SessionLifecycleState = SessionLifecycleState.CREATED
 
+    // T94 线程契约（P60 冻结签名）：属性 getter 内 runBlocking 是契约妥协 ——
+    // 每次读属性全量 snapshot，**禁止在主线程读 [state]**（含磁盘 IO 时可 ANR）。
+    // 优先改走 suspend 的 snapshot() 路径。
     override val state: SessionLifecycleState
         get() {
             val snapshot = kotlinx.coroutines.runBlocking {
@@ -196,9 +203,9 @@ internal class TerminalSessionHandle(
     }
 
     override suspend fun snapshot(): SessionSnapshot {
-        val snap = kotlinx.coroutines.runBlocking {
-            runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS, sessionId = sessionId).getOrNull()
-        }
+        // T94：suspend 内直调（原 runBlocking 包裹 suspend 调用是教科书级
+        // 反模式 —— runtime.snapshot 本身就是 suspend，直调即可）。
+        val snap = runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS, sessionId = sessionId).getOrNull()
         val s: TerminalSemanticState = snap?.sessions?.firstOrNull { it.session.id == sessionId }
             ?: return closedSnapshot()
         val fg = s.foregroundJob
@@ -299,6 +306,7 @@ internal class JobHandleAdapter(
     private val sid: Long get() = sessionId.value.toLong()
     private val jid: Long get() = id.value.toLong()
 
+    // T94 线程契约（P60 冻结签名）：同 SessionHandle.state —— 禁止主线程读。
     override val state: JobState
         get() = kotlinx.coroutines.runBlocking {
             runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS, sessionId = sid).getOrNull()
@@ -311,9 +319,8 @@ internal class JobHandleAdapter(
         runtime.cancel(sid, jid).map { }
 
     override suspend fun snapshot(): JobSnapshot {
-        val s = kotlinx.coroutines.runBlocking {
-            runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS, sessionId = sid).getOrNull()
-        }
+        // T94：suspend 内直调（同 SessionHandle.snapshot —— 删 runBlocking）。
+        val s = runtime.snapshot(mode = TerminalRuntime.SnapshotMode.SESSIONS, sessionId = sid).getOrNull()
         val j = s?.sessions?.firstOrNull { it.session.id == sid }?.foregroundJob
             ?: return JobSnapshot(
                 id = id, sessionId = sessionId, command = request.command,

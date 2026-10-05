@@ -75,7 +75,20 @@ class TerminalIpcController(
      * T92：回调连续失败剔除阈值（测试可注入以确定性收敛；生产用默认 16 ——
      * 64KB 分片下 ≈ 1MB 输出未送达 = 客户端事实死亡/严重积压）。
      */
-    private val callbackEvictionThreshold: Int = CALLBACK_EVICTION_THRESHOLD
+    private val callbackEvictionThreshold: Int = CALLBACK_EVICTION_THRESHOLD,
+    /**
+     * T94：write/writeText/resize 的 binder 线程预算。同步 AIDL 在同进程
+     * binder 下直接占用调用方线程 —— 无超时的 runBlocking 在 PTY 写入路径
+     * 挂起（writer 协程异常/背压）时会把 binder 线程无限钉死；超时后
+     * runCatching 静默收敛（与旧「永久阻塞」相比是严格改进）。
+     */
+    private val opTimeoutMs: Long = 5_000L,
+    /**
+     * T94：closeSession 的 binder 线程预算 —— close 持全局 session mutex
+     * + HUP→TERM→KILL 串行序列，与冷启动 create(15s) 互斥时可长时间阻塞，
+     * 预算对齐 create。
+     */
+    private val closeTimeoutMs: Long = 15_000L
 ) {
 
     /** AIDL ITerminalCallback 的 Kotlin 镜像（壳层把 binder 代理适配到本接口）。 */
@@ -147,7 +160,11 @@ class TerminalIpcController(
     fun write(sessionId: Long, data: ByteArray) {
         val runtime = runtimeProvider() ?: return
         runCatching {
-            runBlocking { runtime.write(sessionId, owner = InputOwner.USER, kind = TerminalRuntime.WriteKind.RAW, bytes = data) }
+            runBlocking {
+                withTimeout(opTimeoutMs) {
+                    runtime.write(sessionId, owner = InputOwner.USER, kind = TerminalRuntime.WriteKind.RAW, bytes = data)
+                }
+            }
         }
     }
 
@@ -155,21 +172,33 @@ class TerminalIpcController(
     fun writeText(sessionId: Long, text: String) {
         val runtime = runtimeProvider() ?: return
         runCatching {
-            runBlocking { runtime.write(sessionId, owner = InputOwner.USER, kind = TerminalRuntime.WriteKind.RAW, text = text) }
+            runBlocking {
+                withTimeout(opTimeoutMs) {
+                    runtime.write(sessionId, owner = InputOwner.USER, kind = TerminalRuntime.WriteKind.RAW, text = text)
+                }
+            }
         }
     }
 
     fun resize(sessionId: Long, rows: Int, cols: Int) {
         val runtime = runtimeProvider() ?: return
         runCatching {
-            runBlocking { runtime.resize(sessionId, rows.coerceIn(2, 512), cols.coerceIn(2, 1024)) }
+            runBlocking {
+                withTimeout(opTimeoutMs) {
+                    runtime.resize(sessionId, rows.coerceIn(2, 512), cols.coerceIn(2, 1024))
+                }
+            }
         }
     }
 
     fun closeSession(sessionId: Long, force: Boolean) {
         val runtime = runtimeProvider() ?: return
         runCatching {
-            runBlocking { runtime.close(sessionId, force) }
+            runBlocking {
+                withTimeout(closeTimeoutMs) {
+                    runtime.close(sessionId, force)
+                }
+            }
         }
         // 注意：不在此处收割事件收集器 —— SessionClosed 事件尚需经收集器派发
         // onExit（announceExit 收到事件后自会收割）。显式 close 的 onExit 语义
@@ -240,6 +269,10 @@ class TerminalIpcController(
         collectors.putIfAbsent(
             sessionId,
             scope.launch {
+                // T94：dispatchEvent/forwardOutput 为 suspend —— 收集协程直接
+                // 挂起调用 runtime.observe（原实现在协程内 runBlocking，每 64KB
+                // 输出块阻塞一个 Default worker 并新建嵌套事件循环，多会话
+                // 高吞吐下有线程饥饿/死锁风险）。
                 flow.collect { event -> dispatchEvent(runtime, sessionId, event) }
             }
         )
@@ -249,7 +282,7 @@ class TerminalIpcController(
         collectors.remove(sessionId)?.let { runCatching { it.cancel() } }
     }
 
-    private fun dispatchEvent(runtime: TerminalRuntime, sessionId: Long, event: TerminalEvent) {
+    private suspend fun dispatchEvent(runtime: TerminalRuntime, sessionId: Long, event: TerminalEvent) {
         when (event) {
             is TerminalEvent.OutputProduced -> forwardOutput(runtime, sessionId, event)
             is TerminalEvent.ProcessExited ->
@@ -265,7 +298,7 @@ class TerminalIpcController(
         }
     }
 
-    private fun forwardOutput(runtime: TerminalRuntime, sessionId: Long, event: TerminalEvent.OutputProduced) {
+    private suspend fun forwardOutput(runtime: TerminalRuntime, sessionId: Long, event: TerminalEvent.OutputProduced) {
         if (event.byteCount <= 0 || event.endCursor <= event.startCursor) return
         // 游标驱动分段拉取：事件范围可能超单次回调上限 → 按 maxOutputChunkBytes
         // 逐段 observe(RAW) 派发。进度以游标推进为准（不按字节数算术 —— UTF-8
@@ -273,15 +306,15 @@ class TerminalIpcController(
         var cursor = event.startCursor
         while (cursor < event.endCursor) {
             val want = (event.endCursor - cursor).toInt().coerceAtMost(maxOutputChunkBytes)
+            // T94：直接挂起调用 —— 本函数运行在事件收集协程内，runBlocking
+            // 会阻塞 Default worker + 嵌套事件循环（高吞吐多会话时线程饥饿）。
             val result = runCatching {
-                runBlocking {
-                    runtime.observe(
-                        sessionId = sessionId,
-                        mode = TerminalRuntime.ObserveMode.RAW,
-                        afterCursor = cursor,
-                        maxBytes = want
-                    ).getOrNull()
-                }
+                runtime.observe(
+                    sessionId = sessionId,
+                    mode = TerminalRuntime.ObserveMode.RAW,
+                    afterCursor = cursor,
+                    maxBytes = want
+                ).getOrNull()
             }.getOrNull() ?: return
             val raw = result.raw ?: return
             if (raw.isEmpty()) return

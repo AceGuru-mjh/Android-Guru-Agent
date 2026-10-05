@@ -188,7 +188,10 @@ class TerminalViewModel @Inject constructor(
     init {
         // Crash recovery (Spec §39): restore persisted sessions on startup.
         viewModelScope.launch {
-            val recovered = terminalRuntime.recover()
+            // T94：recover 链含 SessionMetadataStore.loadAll（逐文件 readText）
+            // + /proc/<pid> 存在性检查 —— 全是磁盘 IO，包 IO 域避免主线程
+            // StrictMode 违例（与 create/close 链同型修复）。
+            val recovered = withContext(Dispatchers.IO) { terminalRuntime.recover() }
             if (recovered.isNotEmpty()) {
                 Log.i("TerminalVM", "Recovered ${recovered.size} sessions from persistence")
             }
@@ -342,17 +345,24 @@ class TerminalViewModel @Inject constructor(
     /**
      * 确保 mksh rc 就绪并返回注入 env（HOME/ENV/TERM/COLORTERM）。
      *
+     * T94：suspend + withContext(IO) —— ensureShellHome(mkdirs)/isFile/
+     * writeText 全是磁盘 IO，旧实现在 viewModelScope（Main.immediate）直跑
+     * 是 StrictMode 违例（create 链同型问题已修，此路径漏网）。
+     *
      * 失败（磁盘满等）→ 空 map：会话照常创建（回到旧行为 —— 裸提示符），
      * 绝不因 profile 失败拒绝创建 shell。
      */
-    private fun ensureLocalShellProfile(): Map<String, String> = runCatching {
-        val home = com.apex.agent.platform.terminal.profile.GuestShellProfile.ensureShellHome(localShellHome)
-        val rc = java.io.File(home, com.apex.agent.platform.terminal.profile.GuestShellProfile.RC_FILENAME)
-        if (!rc.isFile || rc.length() == 0L) {
-            rc.writeText(com.apex.agent.platform.terminal.profile.GuestShellProfile.generate(android.os.Build.MODEL ?: "android"))
+    private suspend fun ensureLocalShellProfile(): Map<String, String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val home = com.apex.agent.platform.terminal.profile.GuestShellProfile.ensureShellHome(localShellHome)
+                val rc = java.io.File(home, com.apex.agent.platform.terminal.profile.GuestShellProfile.RC_FILENAME)
+                if (!rc.isFile || rc.length() == 0L) {
+                    rc.writeText(com.apex.agent.platform.terminal.profile.GuestShellProfile.generate(android.os.Build.MODEL ?: "android"))
+                }
+                com.apex.agent.platform.terminal.profile.GuestShellProfile.shellEnv(home.absolutePath, rc.absolutePath)
+            }.getOrDefault(emptyMap())
         }
-        com.apex.agent.platform.terminal.profile.GuestShellProfile.shellEnv(home.absolutePath, rc.absolutePath)
-    }.getOrDefault(emptyMap())
 
     private suspend fun createSessionInternal(backendId: String) {
         if (backendId == BACKEND_UBUNTU) {

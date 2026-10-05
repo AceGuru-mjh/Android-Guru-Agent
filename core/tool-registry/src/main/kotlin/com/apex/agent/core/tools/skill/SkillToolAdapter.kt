@@ -54,26 +54,56 @@ class SkillToolAdapter(
 
         var lastOutput = ""
 
-        for (step in steps) {
+        for ((index, step) in steps.withIndex()) {
             // 模板替换：{{var}} 来自 argsMap，{{prev_output}} 来自上一步
             val resolvedArgs = resolveTemplate(step, argsMap, lastOutput)
 
-            lastOutput = try {
+            val stepOutput = try {
                 toolExecutor.execute(step.tool, resolvedArgs)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Rethrow: toolExecutor.execute is a suspend call; CancellationException
                 // must propagate so abort() works through composite skill execution.
                 throw e
             } catch (e: Exception) {
-                return "Error in step '${step.tool}': ${e.message}"
+                return renderStepFailure(stepIndex = index, stepTool = step.tool, total = steps.size,
+                    detail = e.message ?: e::class.simpleName ?: "unknown error",
+                    lastGoodOutput = lastOutput)
             }
 
-            if (lastOutput.startsWith("Error")) {
-                return lastOutput
+            if (stepOutput.startsWith("Error")) {
+                return renderStepFailure(stepIndex = index, stepTool = step.tool, total = steps.size,
+                    detail = stepOutput, lastGoodOutput = lastOutput)
             }
+            lastOutput = stepOutput
         }
 
         return lastOutput
+    }
+
+    /**
+     * 步骤失败渲染（用户规格「skills 出错换种方式继续完成任务」）：
+     * - "Error:" 前缀保持引擎字符串级成败判定的协议；
+     * - 附带失败步骤序号/工具名与最后一段成功输出（截断），模型可从断点
+     *   换路续跑而不是从头再来；
+     * - 明确任务未中止的换路指引（复用与 MCP 一致的 FALLBACK 语义）。
+     */
+    private fun renderStepFailure(
+        stepIndex: Int,
+        stepTool: String,
+        total: Int,
+        detail: String,
+        lastGoodOutput: String
+    ): String = buildString {
+        append("Error: skill '${skillTool.id}' stopped at step ${stepIndex + 1}/$total ('$stepTool'): ")
+        append(detail.take(1200))
+        if (lastGoodOutput.isNotBlank()) {
+            append("\n[Last successful step output (truncated)] ")
+            append(lastGoodOutput.take(500))
+        }
+        append("\n[FALLBACK] The skill pipeline stopped here but the task is NOT aborted - ")
+        append("continue with a different approach: (a) run the remaining steps individually ")
+        append("with the built-in tools, (b) use a different tool for this step, or ")
+        append("(c) fix the root cause above and re-invoke the skill. Do not blindly repeat.")
     }
 
     private fun resolveTemplate(step: SkillStep, args: Map<String, String>, prevOutput: String): String {

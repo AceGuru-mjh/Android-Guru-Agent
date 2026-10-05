@@ -66,20 +66,31 @@ class McpAgentTool(
             result.fold(
                 onSuccess = { r ->
                     when {
-                        r.isError -> "MCP error from '$serverName/${toolDef.name}': ${clamp(r.content)}"
+                        // "Error:" prefix matters: the engine's success
+                        // detection is string-protocol based — a bare
+                        // "MCP error from ..." used to be counted as
+                        // SUCCESS, hiding the failure from the model and
+                        // the recovery prompt entirely.
+                        r.isError -> renderServerError(serverName, toolDef.name, clamp(r.content))
                         else -> clamp(r.content.ifBlank { "(empty result)" })
                     }
                 },
                 onFailure = { e ->
-                    "Error calling MCP tool '$serverName/${toolDef.name}': " +
-                        "${e.message ?: e::class.simpleName}. " +
-                        "If the server disconnected, call mcp_connect('$serverName') and retry."
+                    renderTransportFailure(
+                        serverName = serverName,
+                        toolName = toolDef.name,
+                        detail = e.message ?: e::class.simpleName ?: "unknown error"
+                    )
                 }
             )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            "Error calling MCP tool '$serverName/${toolDef.name}': ${e.message ?: e::class.simpleName}"
+            renderTransportFailure(
+                serverName = serverName,
+                toolName = toolDef.name,
+                detail = e.message ?: e::class.simpleName ?: "unknown error"
+            )
         }
     }
 
@@ -87,8 +98,41 @@ class McpAgentTool(
         if (content.length <= max) content
         else content.take(max) + "\n[MCP result truncated at $MAX_RESULT_CHARS chars]"
 
-    private companion object {
+    internal companion object {
+
         const val MAX_RESULT_CHARS = 16_000
+
+        /**
+         * Server-reported failure (isError=true). "Error:"-prefixed so the
+         * string-protocol success detection classifies it as a failure,
+         * plus change-of-approach guidance: the task is NOT aborted — the
+         * model must pick a different path instead of repeating the call.
+         */
+        fun renderServerError(serverName: String, toolName: String, content: String): String =
+            "Error: MCP server '$serverName/$toolName' reported a failure: $content\n" +
+                FALLBACK_GUIDANCE
+
+        /**
+         * Transport/exception failure (disconnect, timeout, crash).
+         * Same "Error:" protocol + explicit reconnect hint + fallback
+         * guidance.
+         */
+        fun renderTransportFailure(serverName: String, toolName: String, detail: String): String =
+            "Error: MCP tool '$serverName/$toolName' failed: $detail. " +
+                "If the server disconnected, call mcp_connect('$serverName') once and retry.\n" +
+                FALLBACK_GUIDANCE
+
+        /**
+         * The user-spec "MCP tools fail -> try a different approach, the
+         * task continues" contract, spelled out for the model. The engine
+         * loop feeds this back as the tool result; the model reads it and
+         * switches strategy instead of the task dying.
+         */
+        private const val FALLBACK_GUIDANCE =
+            "[FALLBACK] This MCP tool is currently unavailable. The task is NOT aborted - " +
+                "continue with a different approach: (a) use a built-in tool covering the " +
+                "same need, (b) use another connected MCP server (mcp_list), or (c) complete " +
+                "the step manually and state the limitation. Do not repeat this identical call."
     }
 }
 

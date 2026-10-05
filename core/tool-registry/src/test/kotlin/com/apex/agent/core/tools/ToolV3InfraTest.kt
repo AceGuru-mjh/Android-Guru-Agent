@@ -132,12 +132,16 @@ class ToolV3InfraTest {
         assertEquals(0L, ask.timeoutMs)
         assertEquals(0, ask.maxRetries)
 
-        // 3. 开放世界工具 → network 策略（长超时 + 两轮重试）。
+        // 3. 开放世界工具 → agentLadder 阶梯策略（用户规格：2s/5s/10s/…
+        //    160s，下一级达 3 分钟封顶自动停止；长超时不变）。
         val web = resolver.resolve(
             FakeTool("web_fetch", ToolAnnotations.openWorldRead())
         )
-        assertEquals(ToolRunPolicy.network(), web)
-        assertEquals(2, web.maxRetries)
+        assertEquals(ToolRunPolicy.agentLadder(), web)
+        assertEquals(ToolRetrySchedules.AGENT_LADDER_MS.size, web.maxRetries)
+        assertEquals(2_000L, web.retryDelayMs(0))
+        assertEquals(5_000L, web.retryDelayMs(1))
+        assertEquals(10_000L, web.retryDelayMs(2))
 
         // 4. retrySafe 工具 → quickRead。
         val read = resolver.resolve(

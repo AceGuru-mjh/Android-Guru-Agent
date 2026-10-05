@@ -51,10 +51,28 @@ class McpCallTool(
         val result = mcpManager.callTool(server, tool, toolArgs)
         return result.fold(
             onSuccess = { r ->
-                if (r.isError) "❌ MCP tool error: ${r.content}" else r.content
+                // v6 错误协议对齐：isError 也走 "Error:" 前缀（引擎字符串级
+                // 成败判定此前把服务端报错当成功）+ 换路指引（任务不停止）
+                if (r.isError) {
+                    "Error: MCP server '$server/$tool' reported a failure: ${r.content}\n" +
+                        FALLBACK_GUIDANCE
+                } else r.content
             },
-            onFailure = { e -> "❌ MCP call failed: ${e.message}" }
+            onFailure = { e ->
+                "Error: MCP tool '$server/$tool' failed: ${e.message ?: "unknown error"}. " +
+                    "If the server disconnected, call mcp_connect('$server') once and retry.\n" +
+                    FALLBACK_GUIDANCE
+            }
         )
+    }
+
+    private companion object {
+        /** 与 McpAgentTool 一致的换路指引（用户规格：MCP 失败换方式继续任务）。 */
+        private const val FALLBACK_GUIDANCE =
+            "[FALLBACK] This MCP tool is currently unavailable. The task is NOT aborted - " +
+                "continue with a different approach: (a) use a built-in tool covering the " +
+                "same need, (b) use another connected MCP server (mcp_list), or (c) complete " +
+                "the step manually and state the limitation. Do not repeat this identical call."
     }
 }
 

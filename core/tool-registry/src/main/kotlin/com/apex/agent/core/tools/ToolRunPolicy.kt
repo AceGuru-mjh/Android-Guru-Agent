@@ -44,7 +44,14 @@ data class ToolRunPolicy(
     val timeoutMs: Long = 0L,
     val maxRetries: Int = 0,
     val baseRetryDelayMs: Long = 0L,
-    val rateLimitPerMinute: Int? = null
+    val rateLimitPerMinute: Int? = null,
+    /**
+     * Exact retry ladder (ms) — when set, [retryDelayMs] returns the ladder
+     * entry verbatim (deterministic, no jitter) and baseRetryDelayMs is
+     * ignored. Used by [agentLadder] (user spec: 2s/5s/10s/.../160s,
+     * auto-stop once the next step would reach 3 minutes).
+     */
+    val ladderDelays: List<Long>? = null
 ) {
 
     /** Effective attempts including the first one (1 + maxRetries). */
@@ -60,6 +67,13 @@ data class ToolRunPolicy(
      * the same recovering backend.
      */
     fun retryDelayMs(attemptIndex: Int, random: Random = Random.Default): Long {
+        // Ladder mode: exact deterministic entry (user-visible contract is
+        // 2s/5s/10s/... — jittering it would break the observable spec).
+        ladderDelays?.let { ladder ->
+            if (attemptIndex < 0) return 0L
+            return if (attemptIndex < ladder.size) ladder[attemptIndex]
+            else ToolRetrySchedules.LADDER_CAP_MS
+        }
         if (baseRetryDelayMs <= 0) return 0L
         val cappedAttempt = attemptIndex.coerceIn(0, 16)
         val cap = baseRetryDelayMs * (1L shl cappedAttempt)
@@ -86,6 +100,21 @@ data class ToolRunPolicy(
             timeoutMs = 90_000L,
             maxRetries = 2,
             baseRetryDelayMs = 800L,
+            rateLimitPerMinute = 30
+        )
+
+        /**
+         * User-spec ladder retry for network-class transient failures:
+         * 2s/5s/10s/20s/40s/80s/160s — the next step would reach the
+         * 3-minute cap, so the ladder auto-stops there (the task itself
+         * continues via the engine's change-of-approach recovery).
+         * Same table as orchestrator-side RetryPolicy.AGENT_LADDER.
+         */
+        @JvmStatic
+        fun agentLadder(): ToolRunPolicy = ToolRunPolicy(
+            timeoutMs = 90_000L,
+            maxRetries = ToolRetrySchedules.AGENT_LADDER_MS.size,
+            ladderDelays = ToolRetrySchedules.AGENT_LADDER_MS,
             rateLimitPerMinute = 30
         )
 
@@ -133,7 +162,7 @@ class DefaultToolRunPolicyResolver(
 
         val annotations = tool.metadata.annotations
         return when {
-            annotations.openWorldHint -> ToolRunPolicy.network()
+            annotations.openWorldHint -> ToolRunPolicy.agentLadder()
             annotations.retrySafe -> ToolRunPolicy.quickRead()
             else -> ToolRunPolicy.mutating()
         }

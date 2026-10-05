@@ -74,5 +74,12 @@ jobs:
         run: |
           BASE="${PR_BASE:-$PUSH_BEFORE}"
           if [ -z "$BASE" ]; then BASE=$(git rev-parse HEAD~1); fi
-          echo "range: ${BASE}..$(git rev-parse HEAD)"
-          python3 scripts/check_commit_messages.py "$BASE" HEAD
+          # push 事件限定第一父链：分支 merge main 后 push 时，before..after 会
+          # 横跨对侧（第二父）历史 —— main 上任一历史不合规直推提交（如
+          # 379c1bbd）将让此后所有此类 push 永久误伤。对侧提交属于其来源
+          # 分支的既有工作，已由各自 PR 的 base..head 检查覆盖，非本次 push
+          # 新增。PR 事件保持 base..head 全量（恰为 PR 提交，语义不变）。
+          FLAG=""
+          if [ -z "$PR_BASE" ]; then FLAG="--first-parent"; fi
+          echo "range: ${BASE}..$(git rev-parse HEAD) ${FLAG}"
+          python3 scripts/check_commit_messages.py "$BASE" HEAD $FLAG

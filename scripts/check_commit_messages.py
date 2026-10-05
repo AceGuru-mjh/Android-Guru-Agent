@@ -48,9 +48,14 @@ def git(*args: str) -> str:
 
 def main() -> int:
     if len(sys.argv) < 3:
-        print("用法: check_commit_messages.py <base_sha> <head_sha>")
+        print("用法: check_commit_messages.py <base_sha> <head_sha> [--first-parent]")
         return 1
     base, head = sys.argv[1], sys.argv[2]
+    # push 事件限定第一父链：merge commit 拉入的对侧（第二父）提交属于其
+    # 来源分支的既有历史 —— 已由各自 PR 的 base..head 检查覆盖，不属于本次
+    # push 的新工作。否则 main 上任一历史不合规直推提交会让此后所有
+    # 「merge main 后再 push」的分支永久误伤（push before..after 横跨对侧链）。
+    first_parent = "--first-parent" in sys.argv[3:]
 
     if set(base) == {"0"}:  # 新分支首推：只查 HEAD 单提交
         revs = [head]
@@ -60,7 +65,11 @@ def main() -> int:
             # be present locally. In that case, fall back to checking only the HEAD
             # commit instead of crashing with exit status 128.
             git("cat-file", "-e", f"{base}^{{commit}}")
-            revs = git("rev-list", "--no-merges", f"{base}..{head}").split()
+            revs = git(
+                "rev-list", "--no-merges",
+                *("--first-parent",) if first_parent else (),
+                f"{base}..{head}",
+            ).split()
         except subprocess.CalledProcessError:
             print(f"⚠ 提交范围 {base}..{head} 无法解析：base SHA 不在当前 checkout 中，回退为仅检查 HEAD 提交")
             revs = [head]

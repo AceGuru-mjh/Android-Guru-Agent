@@ -10,6 +10,7 @@ import com.apex.agent.core.code.thinking.CodeThinkingLevel
 import com.apex.agent.core.engine.AgentEngine
 import com.apex.agent.core.engine.AgentEvent
 import com.apex.agent.core.engine.AgentMode
+import com.apex.agent.core.engine.EngineResilienceGuard
 import com.apex.agent.core.engine.ExecutionPlan
 import com.apex.agent.core.engine.InputType
 import com.apex.agent.core.engine.UserInput
@@ -338,6 +339,9 @@ class StandardModeEngine(
         var planText: String? = null
         val repeatGuard = RepeatGuard()
 
+        // P1 修复（标准线韧性）：每次运行新建守卫（预算不跨运行泄漏）。
+        val llmResilience = EngineResilienceGuard()
+
         while (isRunning && turn < maxTurns) {
             turn++
             report.turns = turn
@@ -363,12 +367,18 @@ class StandardModeEngine(
                 }
             }
 
-            // ── 流式请求 ──
+            // ── 流式请求（P1 修复：瞬时错误退避重试，助手见 StandardLlmResilience）──
             val contentBuilder = StringBuilder()
             val reasoningBuilder = StringBuilder()
             val toolCallsAccumulator = LinkedHashMap<String, ToolCallAccumulator>()
 
-            try {
+            StandardLlmResilience.run(
+                guard = llmResilience,
+                emit = emit,
+                hasPartialOutput = { contentBuilder.isNotEmpty() ||
+                    reasoningBuilder.isNotEmpty() || toolCallsAccumulator.isNotEmpty() },
+                appendInterruptNote = { contentBuilder.append("\n\n[请求中断：$it]") }
+            ) {
                 runtime.chatStream(
                     context = LlmRequestContext.primary(
                         if (subAgentMode) "standard_subagent_loop" else "standard_loop"
@@ -376,40 +386,33 @@ class StandardModeEngine(
                     messages = messages,
                     tools = toolPlan
                 ).collect { chunk ->
-                    chunk.content?.let {
-                        contentBuilder.append(it)
-                        emit(AgentEvent.ResponseChunk(it))
-                    }
-                    chunk.reasoningContent?.let {
-                        reasoningBuilder.append(it)
-                        emit(AgentEvent.ThinkingChunk(it))
-                    }
-                    chunk.usage?.let { usage ->
-                        report.promptTokens += usage.promptTokens
-                        report.completionTokens += usage.completionTokens
-                        calibrate(usage.promptTokens, messages)
-                        emit(
-                            AgentEvent.UsageUpdated(
-                                usage.promptTokens, usage.completionTokens, usage.totalTokens
-                            )
-                        )
-                    }
-                    for (tc in chunk.toolCalls) {
-                        val key = if (tc.index >= 0) "_idx_${tc.index}" else tc.id
-                        if (key.isBlank()) continue
-                        val acc = toolCallsAccumulator.getOrPut(key) {
-                            ToolCallAccumulator(tc.id.ifBlank { key }, tc.name)
+                        chunk.content?.let {
+                            contentBuilder.append(it)
+                            emit(AgentEvent.ResponseChunk(it))
                         }
-                        acc.append(tc.name, tc.arguments)
+                        chunk.reasoningContent?.let {
+                            reasoningBuilder.append(it)
+                            emit(AgentEvent.ThinkingChunk(it))
+                        }
+                        chunk.usage?.let { usage ->
+                            report.promptTokens += usage.promptTokens
+                            report.completionTokens += usage.completionTokens
+                            calibrate(usage.promptTokens, messages)
+                            emit(
+                                AgentEvent.UsageUpdated(
+                                    usage.promptTokens, usage.completionTokens, usage.totalTokens
+                                )
+                            )
+                        }
+                        for (tc in chunk.toolCalls) {
+                            val key = if (tc.index >= 0) "_idx_${tc.index}" else tc.id
+                            if (key.isBlank()) continue
+                            val acc = toolCallsAccumulator.getOrPut(key) {
+                                ToolCallAccumulator(tc.id.ifBlank { key }, tc.name)
+                            }
+                            acc.append(tc.name, tc.arguments)
+                        }
                     }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // 传输层异常：本轮无任何输出 → 上抛（Error 事件由 execute 收口）；
-                // 已有部分输出 → 追加失败说明后按无工具调用收尾（诚实部分结果）。
-                if (contentBuilder.isEmpty() && toolCallsAccumulator.isEmpty()) throw e
-                contentBuilder.append("\n\n[请求中断：${e.message}]")
             }
 
             val assistantText = contentBuilder.toString().trim()

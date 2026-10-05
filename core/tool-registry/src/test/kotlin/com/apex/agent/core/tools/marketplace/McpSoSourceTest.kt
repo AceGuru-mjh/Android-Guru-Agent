@@ -1,6 +1,12 @@
 package com.apex.agent.core.tools.marketplace
 
 import com.apex.agent.core.tools.mcp.McpTransport
+import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -198,5 +204,40 @@ class McpSoSourceTest {
     fun `parseConfigEntry fails clearly on invalid json or no entries`() {
         assertTrue(McpSoSource.parseConfigEntry("not json", "x").isFailure)
         assertTrue(McpSoSource.parseConfigEntry("""{"mcpServers": {}}""", "x").isFailure)
+    }
+
+    // ═══ listServers 错误契约（手写 fake OkHttp 拦截器，不联网）═══
+
+    /** fake：拦截器直接回构造响应，无网络（仓库约定无 mock 框架）。 */
+    private fun fakeHttpClient(code: Int, body: String): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(code)
+                    .message("fake")
+                    .body(body.toResponseBody("text/html".toMediaType()))
+                    .build()
+            }
+            .build()
+
+    @Test
+    fun `listServers with http 200 empty directory page returns success empty list`() = runBlocking {
+        // P2-2：目录总数恰为 60 整数倍时，翻页会拿到 HTTP 200 的空目录页 ——
+        // 空页是合法末页（success + 空列表，由调用方置 hasMore=false），
+        // 不能误报「页面结构已变更」把末翻页变成错误提示
+        val source = McpSoSource(fakeHttpClient(200, "<html><body>目录尽头，无卡片</body></html>"))
+        val result = source.listServers(page = 3)
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().isEmpty())
+    }
+
+    @Test
+    fun `listServers with http error still returns failure`() = runBlocking {
+        // 空页语义只针对 HTTP 200 —— 非 2xx 仍是真错误（failure 分支保留）
+        val source = McpSoSource(fakeHttpClient(503, "service unavailable"))
+        val result = source.listServers(page = 1)
+        assertTrue(result.isFailure)
     }
 }

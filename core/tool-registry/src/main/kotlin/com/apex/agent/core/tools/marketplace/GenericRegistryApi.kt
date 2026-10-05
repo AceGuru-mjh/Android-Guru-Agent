@@ -299,7 +299,7 @@ data class RegistryPackage(
     val envVarNames: List<String>,
     val requiredEnvVarNames: List<String>,
     /** npx 运行时旗标（`-y` / `--yes` 这类；[RegistryServer.toMcpServerConfig]
-     * 拼进包名前，与内置 -y 去重）。 */
+     * 白名单过滤后拼进包名前，与内置 -y 去重 —— 白名单外旗标丢弃防供应链注入）。 */
     val runtimeArguments: List<String>,
     /** 包体参数（`--allowed-directories` 这类；需要用户补值，不自动拼——
      * 由安装器在成功文案里点名，引导到「已安装管理 → 编辑」补齐）。 */
@@ -356,9 +356,10 @@ data class RegistryServer(
      *
      * - REMOTE：url + 传输映射（sse → SSE，否则 HTTP），headers 原样保留
      *   模板值（占位符需用户在「编辑」里补真值）；
-     * - NPM：`npx -y [runtimeArguments…] {identifier}` + runInSandbox=true
-     *   （Android 宿主无 node，必须路由 PRoot 沙箱；安装器先真实 npm
-     *   install 预热）。包体参数（packageArguments）需用户补值，不自动拼。
+     * - NPM：`npx -y [白名单后的 runtimeArguments…] {identifier}@{version}` +
+     *   runInSandbox=true（Android 宿主无 node，必须路由 PRoot 沙箱；安装器先
+     *   真实 npm install 预热；version 空则不带 @ 后缀）。包体参数
+     *   （packageArguments）需用户补值，不自动拼。
      */
     fun toMcpServerConfig(): McpServerConfig? = when (installKind) {
         InstallKind.REMOTE -> {
@@ -379,11 +380,20 @@ data class RegistryServer(
                 command = "npx",
                 args = buildList {
                     add("-y")
-                    // registry 声明的 npx 运行时旗标（与内置 -y 去重）
+                    // P2-3：registry 声明的运行时旗标走白名单 —— 黑名单挡不住
+                    // --node-options=… 这类供应链注入；白名单外旗标静默丢弃
+                    // （本层无日志通道，行为由单测钉死）
                     pkg.runtimeArguments.forEach { arg ->
-                        if (arg != "-y" && arg != "--yes") add(arg)
+                        if (arg != "-y" && arg != "--yes" && isAllowedRuntimeArg(arg)) {
+                            add(arg)
+                        }
                     }
-                    add(pkg.identifier)
+                    // P2-6：版本锁定 —— npx 默认拉 latest，上游发新版可能引入
+                    // 未审计变更；带 @version 固定到目录页看到的版本
+                    add(
+                        if (pkg.version.isBlank()) pkg.identifier
+                        else "${pkg.identifier}@${pkg.version}"
+                    )
                 },
                 runInSandbox = true,
                 enabled = false
@@ -391,4 +401,16 @@ data class RegistryServer(
         }
         InstallKind.UNSUPPORTED -> null
     }
+
+    /**
+     * P2-3：runtimeArguments 白名单 —— registry 数据来自 npm registry 等
+     * 第三方发布源，任意旗标透传给 npx 等于把执行面交给上游
+     * （--node-options=… 可注入任意 V8 旗标）。只放行：确认类
+     * （-y / --yes）、调用与包定位旗标（--call / --package 前缀）、
+     * -p 简写族、以及不含 - 前缀的位置参数（路径 / 包名）；其余一律丢弃。
+     */
+    private fun isAllowedRuntimeArg(arg: String): Boolean =
+        arg == "-y" || arg == "--yes" ||
+            arg.startsWith("--call") || arg.startsWith("--package") ||
+            arg.startsWith("-p") || !arg.startsWith("-")
 }

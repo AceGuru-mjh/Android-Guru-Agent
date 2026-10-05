@@ -65,8 +65,8 @@ class McpSoSource(
     }
 
     /**
-     * 拉取目录某一页（60 条/页）。[page] 从 1 起；返回条目数 < 60 即最后一页
-     * （调用方据此置 hasMore=false）。
+     * 拉取目录某一页（60 条/页）。[page] 从 1 起；末页（含翻到整数倍页
+     * 边界后的空页）返回 success + 空列表，由调用方据此置 hasMore=false。
      */
     suspend fun listServers(
         page: Int = 1,
@@ -76,12 +76,10 @@ class McpSoSource(
         val url = "$BASE_URL/servers?page=$page&sort=${sort.param}"
         val html = fetchHtml(url)
             ?: return@withContext Result.failure(Exception(unavailableMessage()))
-        val entries = parseServerListHtml(html)
-        if (entries.isEmpty()) {
-            // 结构变更（改版/挑战页）会解析出 0 条 —— 明确报错而不是静默空目录
-            return@withContext Result.failure(Exception("mcp.so 目录解析为空（页面结构可能已变更）"))
-        }
-        Result.success(entries)
+        // P2-2：HTTP 200 但解析出 0 条是合法末页（总条数恰为 60 的整数倍时，
+        // 最后一翻会拿到空目录页）——返回空列表交由调用方收起「加载更多」；
+        // 连接失败 / 非 2xx 仍走上面的 failure 分支报真错误。
+        Result.success(parseServerListHtml(html))
     }
 
     /**

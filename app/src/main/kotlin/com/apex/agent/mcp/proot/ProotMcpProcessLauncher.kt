@@ -54,9 +54,10 @@ private const val TAG = "ProotMcp"
  *
  * ## bind 语义
  * - **持久化 home**：终端页 GuestUserHome 的同一 host 目录（`<filesDir>/linux/home`，
- *   由 rootfsDir 的兄弟目录推导）bind 到 guest `/root` —— 终端与 MCP 共享同一
- *   个 home，npx 缓存、npm 全局配置互通；目录不存在（终端从未初始化）时诚实
- *   跳过，guest `/root` 落回 rootfs 内部目录，MCP 依然可跑。
+ *   由 rootfsDir 上推两级到 filesDir 再拼相对路径推导）bind 到 guest `/root`
+ *   —— 终端与 MCP 共享同一个 home，npx 缓存、npm 全局配置互通；目录不存在
+ *   （终端从未初始化）时诚实跳过，guest `/root` 落回 rootfs 内部目录，MCP
+ *   依然可跑。
  * - **系统级 bind**：`/proc` `/dev` `/sys`（复用 [SystemBindProfile.STANDARD]，
  *   proot-distro 语义 —— node/python 的熵源、子进程枚举在 guest 内真实可用；
  *   host 侧不存在的路径会被其诚实过滤）。
@@ -300,9 +301,16 @@ class ProotMcpProcessLauncher(
 
     /** 持久化 home bind：与终端会话共享同一 host 目录；不存在时诚实跳过。 */
     private fun persistentHomeBind(): Pair<String, String>? {
-        // rootfsDir 是 <filesDir>/rootfs/ubuntu —— 兄弟目录推导与 app
-        // TerminalModule 的 provideGuestUserHome 布局约定一致。
-        val filesDir = rootfsDir.parentFile ?: return null
+        // P1 修复（home bind 路径推导错误）：rootfsDir 是
+        // `<filesDir>/rootfs/ubuntu`（TerminalModule 的 rootfsBaseDir）——
+        // 持久化 home 在 `<filesDir>/linux/home`（与 GuestUserHome 的
+        // app TerminalModule provideGuestUserHome 布局约定一致），需要上跳
+        // **两级**到 filesDir。旧实现只跳一级（得到
+        // `<filesDir>/rootfs/linux/home`，该目录永不存在），持久化 home bind
+        // 被静默跳过 —— KDoc 承诺的「终端与 MCP 共享同一 home、npx 缓存
+        // 互通」全部落空；guest HOME 落进 rootfs 版本目录内，rootfs 换版本时
+        // memory.json / npm 缓存 / .npmrc 全部丢失。
+        val filesDir = rootfsDir.parentFile?.parentFile ?: return null
         val home = File(filesDir, PERSISTENT_HOME_RELATIVE_PATH)
         return if (home.isDirectory) home.absolutePath to GuestUserHome.GUEST_PATH else null
     }
@@ -346,6 +354,11 @@ private class ProotProcessAdapter(private val process: Process) : McpProcessHand
 
     private val stderrTail = StringBuilder()
     private val stderrTee = LineTeeInputStream()
+
+    // P3（pid 上报）说明：java.lang.Process.pid() 是 JDK 9+ API，Android 的
+    // compileSdk classpath 不暴露（CI :app:compileDebugKotlin 实测 Unresolved）；
+    // 反射读取又被仓库质量门禁禁止 —— 按接口契约回退 null（「无法获取时
+    // null」），宿主 JvmProcessLauncher（纯 JVM 模块）仍上报真实 pid。
 
     /** stderr 尾部快照（诊断用；最多 4KB 环形缓冲）。 */
     fun recentStderr(): String = synchronized(stderrTail) { stderrTail.toString() }

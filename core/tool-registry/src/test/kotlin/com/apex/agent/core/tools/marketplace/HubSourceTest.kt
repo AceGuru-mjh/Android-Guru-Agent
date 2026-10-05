@@ -108,6 +108,26 @@ class HubSourceTest {
     }
 
     @Test
+    fun `duplicate entries are deduped to protect lazy column keys`() {
+        // P2-1：上游 index.json 出现重复条目时，不去重会让消费点 LazyColumn 的
+        // key = it.key 抛 IllegalArgumentException 直接崩市场页 —— 按 key
+        // 去重且保留首见条目
+        val skillBody = """
+        {"skills": [
+            {"id": "dup", "name": "第一份", "file": "skills/dup.json"},
+            {"id": "dup", "name": "第二份", "file": "skills/dup.json"},
+            {"id": "unique", "file": "skills/unique.json"}
+        ]}
+        """.trimIndent()
+
+        val skills = HubSource.parseSkillIndex(skillBody).getOrThrow()
+        assertEquals(2, skills.size)
+        // 保留首见条目（distinctBy 语义），键唯一
+        assertEquals("第一份", skills[0].name)
+        assertEquals(skills.size, skills.map { it.key }.toSet().size)
+    }
+
+    @Test
     fun `skill entry scope visibility follows market tier semantics`() {
         val agentOnly = HubSource.HubSkillEntry(id = "a", name = "A", file = "skills/a.json", scope = "agent")
         val codingOnly = HubSource.HubSkillEntry(id = "c", name = "C", file = "skills/c.json", scope = "coding")
@@ -194,6 +214,16 @@ class HubSourceTest {
         assertEquals(1, result.getOrThrow().size)
 
         assertTrue(HubSource.parseMcpIndex("garbage").isFailure)
+    }
+
+    @Test
+    fun `mcp index dedupes repeated server names for lazy column keys`() {
+        // P2-1：消费点（MarketBrowseMcpTab）列表 key 为 "hub-" + name ——
+        // 上游重复 name 的条目不去重会撞重复 key 崩溃，按 name 去重
+        val body = """{"servers": [{"name": "fs"}, {"name": "fs"}, {"name": "wiki"}]}"""
+        val servers = HubSource.parseMcpIndex(body).getOrThrow()
+        assertEquals(2, servers.size)
+        assertEquals(listOf("fs", "wiki"), servers.map { it.name })
     }
 
     @Test

@@ -237,20 +237,30 @@ class HubSource(
         fun skillManifestUrl(entry: HubSkillEntry): String =
             "$SKILL_HUB_RAW_BASE/${entry.file}"
 
-        /** 技能目录 index.json 文本 → 条目列表（坏条目跳过，整体损坏转 failure）。 */
+        /** 技能目录 index.json 文本 → 条目列表（坏条目跳过，整体损坏转 failure；
+         * 上游重复条目按 key 去重 —— LazyColumn 的 key = it.key 不容重复，
+         * 不去重会直接抛 IllegalArgumentException 崩市场页）。 */
         fun parseSkillIndex(body: String): Result<List<HubSkillEntry>> = try {
             val root = json.parseToJsonElement(body).jsonObject
             val raw = root["skills"]?.jsonArray ?: emptyList()
-            Result.success(raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseSkillEntry) })
+            Result.success(
+                raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseSkillEntry) }
+                    .distinctBy { it.key }
+            )
         } catch (e: Exception) {
             Result.failure(Exception("技能仓库目录解析失败: ${e.message}"))
         }
 
-        /** MCP 目录 index.json 文本 → 条目列表（坏条目跳过，整体损坏转 failure）。 */
+        /** MCP 目录 index.json 文本 → 条目列表（坏条目跳过，整体损坏转 failure；
+         * 重复条目按 name 去重 —— 消费点列表 key 为 "hub-" + name，
+         * 不去重会撞 LazyColumn 重复 key 崩溃）。 */
         fun parseMcpIndex(body: String): Result<List<HubMcpEntry>> = try {
             val root = json.parseToJsonElement(body).jsonObject
             val raw = root["servers"]?.jsonArray ?: emptyList()
-            Result.success(raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseMcpEntry) })
+            Result.success(
+                raw.mapNotNull { el -> (el as? JsonObject)?.let(::parseMcpEntry) }
+                    .distinctBy { it.name }
+            )
         } catch (e: Exception) {
             Result.failure(Exception("MCP 仓库目录解析失败: ${e.message}"))
         }

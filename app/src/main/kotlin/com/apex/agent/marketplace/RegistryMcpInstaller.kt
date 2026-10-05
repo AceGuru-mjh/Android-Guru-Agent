@@ -13,7 +13,7 @@ import javax.inject.Singleton
  *
  * 把 Registry 条目（官方 Registry / PulseMCP 同构）安装为 MCP 配置的
  * 收口点。核心升级：**npm 形态不再只落 JSON 配置**——先在 PRoot
- * Ubuntu 沙箱里真实执行 `npm install -g {identifier}` 预热（绕开
+ * Ubuntu 沙箱里真实执行 `npm install -g {identifier}@{version}` 预热（绕开
  * `npx -y` 首次冷启动撞 180s 握手超时的问题，Issue #163），配置写入
  * 失败时回滚沙箱卸载，不留半残状态。
  *
@@ -22,7 +22,7 @@ import javax.inject.Singleton
  *   headers 原样保留模板值（占位符需用户在「编辑」里补真值）；
  * - **NPM**：`packages[]` 有 npm+stdio 包 → ① rootfs 门禁（未装则引导
  *   terminal.ubuntu.install）② 沙箱 `npm install -g`（5 分钟超时，
- *   npm 下载耗时真实存在）③ 写 `npx -y {identifier}` 沙箱 STDIO 配置
+ *   npm 下载耗时真实存在）③ 写 `npx -y {identifier}@{version}` 沙箱 STDIO 配置
  *   ④ 写入失败 → 回滚 `npm uninstall -g`；
  * - **UNSUPPORTED**：pypi / mcpb / oci / nuget / 非 stdio npm 包 →
  *   明确报错引导按仓库 README 手动安装，不装残配置。
@@ -100,8 +100,13 @@ class RegistryMcpInstaller @Inject constructor(
         }
 
         // ① 沙箱真实 npm install -g（预下载，绕开 npx 冷启动超时）
+        // P2 修复（版本锁定）：npm 预热与启动配置（npx -y identifier@version，
+        // 见 GenericRegistryApi.toMcpServerConfig）同版本 —— 旧实现预热装
+        // latest 而启动拉指定版本（或反之），「免冷启动」承诺漂移：次日上游
+        // 发新版后预热失效，重新掉回 180s 冷启动窗口。
+        val pinnedIdentifier = if (pkg.version.isBlank()) pkg.identifier else "${pkg.identifier}@${pkg.version}"
         val install = sandboxRunner.run(
-            command = listOf("npm", "install", "-g", pkg.identifier),
+            command = listOf("npm", "install", "-g", pinnedIdentifier),
             timeoutMs = NPM_INSTALL_TIMEOUT_MS
         )
         if (!install.success) {
@@ -146,7 +151,7 @@ class RegistryMcpInstaller @Inject constructor(
         }
         return Result.success(
             buildString {
-                append("已安装 MCP 服务器：${config.name}（npm 包 ${pkg.identifier} 已预装进沙箱，启动免冷启动）")
+                append("已安装 MCP 服务器：${config.name}（npm 包 $pinnedIdentifier 已预装进沙箱，启动免冷启动）")
                 if (pkg.requiredEnvVarNames.isNotEmpty()) {
                     append("；启动前需在「已安装管理 → 编辑」补齐环境变量：")
                     append(pkg.requiredEnvVarNames.joinToString("、"))

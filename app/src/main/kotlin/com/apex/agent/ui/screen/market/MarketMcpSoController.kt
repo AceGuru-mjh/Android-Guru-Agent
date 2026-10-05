@@ -69,8 +69,10 @@ class MarketMcpSoController @Inject constructor(
                     _uiState.update {
                         it.copy(
                             servers = entries,
-                            // 不足一页（60 条）即末页
-                            hasMore = entries.size >= PAGE_SIZE,
+                            // 空目录页（首页即末页）或不足一页（60 条）均末页；
+                            // P2-2：空页是合法末页，不再被上游误报为错误
+                            hasMore = if (entries.isEmpty()) false
+                                else entries.size >= PAGE_SIZE,
                             nextPage = 2
                         )
                     }
@@ -98,7 +100,11 @@ class MarketMcpSoController @Inject constructor(
                         val fresh = entries.filter { it.slug !in existing }
                         state.copy(
                             servers = state.servers + fresh,
-                            hasMore = entries.size >= PAGE_SIZE,
+                            // P2-2：翻到整数倍页边界后下一页是空目录页 ——
+                            // 空且 success 即末页（hasMore=false），不再误报错误；
+                            // 非空页保持整页（60 条）判定
+                            hasMore = if (entries.isEmpty()) false
+                                else entries.size >= PAGE_SIZE,
                             nextPage = page + 1
                         )
                     }

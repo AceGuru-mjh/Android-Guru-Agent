@@ -35,22 +35,30 @@ import kotlinx.coroutines.withContext
  * —— 旧版只有手动「连接」才弹进度，添加失败时用户只看到一句抽象报错。
  */
 fun MarketViewModel.addMcpServer(config: McpServerConfig) {
+    // P1 修复（双击锁前置）：入口**同步**置位（launch 之前）—— 旧实现
+    // 在协程内部 addServer 成功后才置 mcpConnecting，两个连点协程都能
+    // 通过彼此的检查窗口，同名 addServer 互相覆盖（#206 声称修复但
+    // 未修住）。同步置位后，重组间隙的第二次点击（无论入口在哪个
+    // 调用方）都会看到已置位的标志而被拦截。
+    if (_uiState.value.mcpConnecting != null) return
+    val name = config.name.trim()
+    _uiState.update { it.copy(mcpConnecting = name) }
     viewModelScope.launch {
-        val name = config.name.trim()
-        // #197 市场分级：从当前分级带入作用域（Agent 市场添加的归 agent 工位，
-        // Coding 市场添加的归 coding 工位；导入/编辑可改）。
-        val tierScope = _uiState.value.tier.name.lowercase()
-        val scoped = if (config.scope == "all" && config.transport != McpTransport.BUILTIN) {
-            config.copy(name = name, scope = tierScope)
-        } else {
-            config.copy(name = name)
-        }
-        mcpManager.addServer(scoped).fold(
+        try {
+            // #197 市场分级：从当前分级带入作用域（Agent 市场添加的归 agent 工位，
+            // Coding 市场添加的归 coding 工位；导入/编辑可改）。
+            val tierScope = _uiState.value.tier.name.lowercase()
+            val scoped = if (config.scope == "all" && config.transport != McpTransport.BUILTIN) {
+                config.copy(name = name, scope = tierScope)
+            } else {
+                config.copy(name = name)
+            }
+            mcpManager.addServer(scoped).fold(
                 onSuccess = {
                     // P2：连接结果不再被吞 —— 添加后立即连接失败（URL 错/命令不存在）时
                     // 用户只看到「已添加」成功提示，错误静默丢失。fold 进同一条 snackbar。
                     // #205：连接过程有真实启动事件弹窗（环境/spawn/握手/stderr）。
-                    _uiState.update { it.copy(mcpConnecting = name, mcpStartup = McpStartupUi(serverName = name)) }
+                    _uiState.update { it.copy(mcpStartup = McpStartupUi(serverName = name)) }
                     val connectMsg = mcpManager.connect(name, startupListenerFor(name)).fold(
                         onSuccess = { languageManager.getString(R.string.market_mcp_added).format(name) },
                         onFailure = {
@@ -68,13 +76,20 @@ fun MarketViewModel.addMcpServer(config: McpServerConfig) {
                         }
                     }
                     message(connectMsg)
-                    _uiState.update { it.copy(mcpConnecting = null) }
                     refresh()
                 },
-            onFailure = {
-                message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                onFailure = {
+                    message(languageManager.getString(R.string.market_add_failed).format(it.message ?: ""))
+                }
+            )
+        } finally {
+            // P1 修复：无论成功/失败/取消，入口同步置位的锁都在此复位 ——
+            // 旧实现的 onFailure 分支不清理（虽未置位，但调用方（目录安装）
+            // 的入口锁会泄漏），双击锁一但失效就永久失效。
+            _uiState.update { s ->
+                if (s.mcpConnecting == name) s.copy(mcpConnecting = null) else s
             }
-        )
+        }
     }
 }
 /**

@@ -18,14 +18,17 @@ import kotlinx.serialization.json.jsonPrimitive
  * - 自动截断 + 提示如何获取更多
  * - 工作目录记忆：命令以纯 `cd <dir>` 结尾且执行成功时，后续命令以新目录为
  *   起始目录（静态解析最后一个 cd 段；`cd -` / 变量路径不做记忆）
- * - 超时保护
+ * - 超时保护（timeout 参数真实生效：P1 修复 —— 旧实现 schema 声明了
+ *   timeout 参数却从不读取，模型显式传 `"timeout": 120` 时仍在 30s
+ *   默认值被杀，长命令（编译/安装/构建）全部误判失败，连环重试推高
+ *   任务失败率。现在参数透传到权限通道，钳位 [MIN_TIMEOUT_SECONDS]..[MAX_TIMEOUT_SECONDS]）
  * - 错误输出分离
  *
  * 权限通道（自动选最高可用）：Root(`su -c`) > Shizuku(ADB 级 uid=2000) >
  * 普通shell(仅 app 沙箱)。命令真实执行，失败如实返回退出码与输出。
  */
 class ShellExecuteTool(
-    private val executor: suspend (String) -> String
+    private val executor: suspend (command: String, timeoutSec: Int) -> String
 ) : StreamingAgentTool {
 
     override val id = "shell_execute"
@@ -58,7 +61,7 @@ class ShellExecuteTool(
                 "command": {"type": "string", "description": "Shell command to execute"},
                 "max_lines": {"type": "integer", "description": "Max output lines (default 50)"},
                 "max_chars": {"type": "integer", "description": "Max output chars (default 3000)"},
-                "timeout": {"type": "integer", "description": "Timeout seconds (default 30)"}
+                "timeout": {"type": "integer", "description": "Timeout in seconds, clamped to 5..600 (default 30). Long builds/installs should raise this"}
             },
             "required": ["command"]
         }
@@ -71,10 +74,16 @@ class ShellExecuteTool(
                 ?: return "Error: 'command' required"
             val maxLines = json["max_lines"]?.jsonPrimitive?.intOrNull ?: 50
             val maxChars = json["max_chars"]?.jsonPrimitive?.intOrNull ?: 3000
+            // P1 修复（timeout 死参数）：schema 承诺可调超时却从不读取 ——
+            // 模型按自己的参数预期等待，实际 30s 必杀。现在真实透传，
+            // 钳位到 [MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS]（与
+            // terminal.exec 的 1s..600ms 口径对齐为秒级 5..600）。
+            val timeoutSec = (json["timeout"]?.jsonPrimitive?.intOrNull ?: DEFAULT_TIMEOUT_SECONDS)
+                .coerceIn(MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS)
 
             if (command.isBlank()) return "Error: Empty command"
 
-            var result = executor(command)
+            var result = executor(command, timeoutSec)
 
             if (result.isBlank()) return "✅ Command completed (no output)"
 
@@ -144,5 +153,16 @@ class ShellExecuteTool(
             emit(ToolStreamEvent.Output(result))
             emit(ToolStreamEvent.Complete(result))
         }
+    }
+
+    companion object {
+        /** 默认超时（秒）——与 schema 声明一致。 */
+        const val DEFAULT_TIMEOUT_SECONDS = 30
+
+        /** 超时下限（秒）：过短的超时连 spawn 都完不成，只产出噪声错误。 */
+        const val MIN_TIMEOUT_SECONDS = 5
+
+        /** 超时上限（秒）：与 terminal.exec 的 600s 上限对齐。 */
+        const val MAX_TIMEOUT_SECONDS = 600
     }
 }

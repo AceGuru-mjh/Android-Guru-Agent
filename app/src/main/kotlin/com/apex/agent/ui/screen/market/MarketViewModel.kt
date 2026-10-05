@@ -344,10 +344,28 @@ class MarketViewModel @Inject constructor(
     private suspend fun awaitInstallConfirmation(
         preview: com.apex.agent.marketplace.MarketInstallManager.ManifestPreview
     ): Boolean {
+        // P2 修复（并发覆盖）：两个不同源的安装并发到达 gate 时，第二次赋值
+        // 会覆盖第一个 deferred（永不完成 → 协程永久挂起 + 泄漏）。先按
+        // 「取消」结算旧的（对话框互斥，同时只应有一个预览）。
+        pendingInstallDecision?.let { old ->
+            runCatching { old.complete(false) }
+        }
         val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
         pendingInstallDecision = deferred
         _uiState.update { it.copy(installPreview = preview) }
-        return deferred.await()
+        // P1 修复（gate 永久挂起）：无超时克星 —— 预览对话框被任何路径抹掉
+        //（见 refresh 的 installPreview 保留修复）后，没有任何代码会 complete
+        // 这个 deferred，安装协程永久挂起、安装按钮永久禁用。60s 兜底：
+        // 超时视为用户未确认，走取消分支收尾（对话框若仍在，用户仍可点
+        // 确认 —— 那时 pending 已清理，confirm/dismiss 是幂等 no-op）。
+        val confirmed = kotlinx.coroutines.withTimeoutOrNull(INSTALL_CONFIRM_TIMEOUT_MS) {
+            deferred.await()
+        } ?: false
+        if (pendingInstallDecision === deferred) {
+            pendingInstallDecision = null
+            _uiState.update { it.copy(installPreview = null) }
+        }
+        return confirmed
     }
 
     /** 用户在安装预览对话框点「确认安装」。 */
@@ -362,6 +380,19 @@ class MarketViewModel @Inject constructor(
         pendingInstallDecision?.complete(false)
         pendingInstallDecision = null
         _uiState.update { it.copy(installPreview = null) }
+    }
+
+    /**
+     * P1/P2 修复（VM 销毁时的门禁收尾）：挂起在 gate 上的安装协程随
+     * viewModelScope 取消而终结，但单例控制器（Hub 等）自持 scope 的
+     * 安装协程不会 —— 不清理 gate 会让它们的 busy 标志永不复位（安装
+     * 按钮永久禁用，MarketHubController.installSkill 守卫直接 return）。
+     */
+    override fun onCleared() {
+        pendingInstallDecision?.let { runCatching { it.complete(false) } }
+        pendingInstallDecision = null
+        installManager.installConfirmGate = null
+        super.onCleared()
     }
 
     /** 全量刷新（IO 线程）：技能/MCP/连接器/插件快照 + cs-mem 健康数据。保留集成源列表避免安装后列表闪失。 */
@@ -410,7 +441,13 @@ class MarketViewModel @Inject constructor(
                 detailState = state.detailState,
                 detailLoading = state.detailLoading,
                 busy = state.busy,
-                lastMessage = state.lastMessage
+                lastMessage = state.lastMessage,
+                // P1 修复（gate 死锁）：installPreview 也必须跨 refresh 保留 ——
+                // 任何后台安装完成/连接完成触发的 refresh 会把预览对话框抹掉，
+                // 但 gate 的 deferred 没人 complete → 安装协程永久挂起、
+                // busy/clawHubInstallingSlug/Hub 的 installingSkillId 永不复位
+                // → 全部安装按钮永久禁用（无恢复手段，只能重启 App）。
+                installPreview = state.installPreview
             ) }
         }
     }
@@ -1003,5 +1040,11 @@ class MarketViewModel @Inject constructor(
     companion object {
         /** #206「未分类」过滤哨兵（与真实域 key 不撞车的哨兵值）。 */
         const val UNCATEGORIZED_FILTER = "__uncategorized__"
+
+        /**
+         * P1 修复（gate 永久挂起）：安装确认等待的兜底超时 —— 对话框被
+         * 任何路径抹掉时，安装协程最多挂起这么久后按「未确认」收尾。
+         */
+        const val INSTALL_CONFIRM_TIMEOUT_MS = 60_000L
     }
 }

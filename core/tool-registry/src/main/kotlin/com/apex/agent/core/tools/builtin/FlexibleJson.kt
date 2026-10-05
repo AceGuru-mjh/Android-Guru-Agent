@@ -100,10 +100,3 @@ internal fun ToolArguments.flexibleObject(name: String): JsonObject {
         )
     }
 }
-
-/**
- * Render a [JsonElement] back to compact text — the inverse of
- * [flexibleElement] for tools that forward a structured argument into a
- * downstream string-protocol call (e.g. `shortcut_run` → compiled tool).
- */
-internal fun renderCompact(element: JsonElement): String = element.toString()

@@ -88,16 +88,6 @@ class SkillDirectoryWatcher(
         job?.cancel()
     }
 
-    /**
-     * 立即对账一次（手动触发 / 测试入口；与轮询共用同一协调逻辑）。
-     * 返回本次协调报告。
-     */
-    suspend fun rescanNow(): SkillDirSyncReport {
-        val report = registry.reconcileDirectory()
-        baseline = fingerprint()
-        return report
-    }
-
     private suspend fun pollOnce() {
         val fp = fingerprint() ?: return
         val last = baseline

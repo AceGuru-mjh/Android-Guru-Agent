@@ -15,7 +15,6 @@
     <string name="code_todo_progress">Tasks %1$d/%2$d</string>
 
     <!-- Message stream / input -->
-    <string name="code_working">Working…</string>
     <string name="code_input_hint">Describe a coding task…</string>
     <string name="code_input_hint_no_api">Model API not configured — open Settings to add one…</string>
     <string name="code_api_missing_got_it">Got it</string>
@@ -195,8 +194,6 @@
     <string name="code_stream_detail_grep_empty">No hits captured</string>
     <string name="code_stream_detail_terminal_title">Terminal output</string>
     <string name="code_stream_detail_output_title">Tool output</string>
-    <string name="code_stream_run_streaming">Running · capsule timeline</string>
-    <string name="code_stream_run_idle">Describe a coding task to start the capsule timeline</string>
     <!-- ═══ Thinking tier selector v2: short tier names + capsule labels ═══ -->
     <string name="code_thinking_chip">Thinking · %1$s</string>
     <string name="code_thinking_short_none">Off</string>

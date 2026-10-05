@@ -103,12 +103,6 @@ class ToolEnvironmentState {
         return entry.value
     }
 
-    /** True only when the flag is explicitly true and not expired. */
-    fun isSet(flag: String): Boolean = get(flag) == true
-
-    /** Explicitly false — the one state that makes gating deny. */
-    fun isExplicitlyUnset(flag: String): Boolean = get(flag) == false
-
     /** Remove one flag (back to unknown). */
     fun clear(flag: String) {
         flags.remove(flag)

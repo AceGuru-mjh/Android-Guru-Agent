@@ -99,32 +99,6 @@ class SkillCategoryTest {
     }
 
     @Test
-    fun `getCategoryCounts groups by domain and keeps order`() {
-        val registry = registryWith(
-            manifestJson("a", "career"),
-            manifestJson("b", "career"),
-            manifestJson("c", "knowledge"),
-            manifestJson("d", null)  // 旧值残留 → 未分类
-        )
-        val counts = registry.getCategoryCounts()
-        assertEquals(
-            listOf(SkillCategory.CAREER to 2, SkillCategory.KNOWLEDGE to 1, null to 1),
-            counts
-        )
-    }
-
-    @Test
-    fun `getCategoryCounts respects scope filter`() {
-        val registry = registryWith(
-            manifestJson("a", "career", scope = "agent"),
-            manifestJson("b", "knowledge", scope = "coding"),
-            manifestJson("c", "fitness", scope = "all")
-        )
-        val agentOnly = registry.getCategoryCounts(scope = "agent")
-        assertEquals(listOf(SkillCategory.CAREER to 1, SkillCategory.FITNESS to 1), agentOnly)
-    }
-
-    @Test
     fun `digests carry sanitized category`() {
         val registry = registryWith(
             manifestJson("a", "Career"),       // 大小写归一

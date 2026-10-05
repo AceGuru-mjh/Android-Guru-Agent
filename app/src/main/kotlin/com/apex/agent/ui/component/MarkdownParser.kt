@@ -52,8 +52,6 @@ private val LINK_REGEX = Regex("(?<!\\!)\\[([^\\]]+)\\]\\((https?://[^)\\s]+)\\)
 private val IMAGE_LINE_REGEX = Regex("^!\\[([^\\]]*)\\]\\(([^)\\s]+)\\)$")
 // <video src="url"> 标签：自闭合 / 未闭合（流式）/ 完整 </video> 三种形态
 private val VIDEO_TAG_REGEX = Regex("^<video\\s+[^>]*?src=\"([^\"]+)\"[^>]*/?>.*$")
-// 裸 URL 单独成行
-private val BARE_URL_REGEX = Regex("^(https?://\\S+)$")
 // 视频扩展名（含带 query 参数的 OSS 签名 URL）或 data:video URI
 private val VIDEO_URL_REGEX = Regex("\\.(mp4|webm|mov|mkv|avi|m3u8)(\\?[^\\s]*)?$", RegexOption.IGNORE_CASE)
 

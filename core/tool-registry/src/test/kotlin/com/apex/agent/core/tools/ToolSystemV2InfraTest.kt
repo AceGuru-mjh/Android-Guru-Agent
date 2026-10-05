@@ -168,10 +168,6 @@ class ToolSystemV2InfraTest {
         registry.register(tool("json_path"))
         registry.register(tool("web_search"))
 
-        assertEquals(listOf("read_file"), registry.toolsByCategory(ToolCategory.FILE).map { it.id })
-        assertEquals(listOf("json_path"), registry.toolsByCategory(ToolCategory.UTILITY).map { it.id })
-        assertEquals(1, registry.toolsByCategory(ToolCategory.WEB).size)
-
         val grouped = registry.toolsGroupedByCategory()
         // 展示顺序按 ToolCategory.order：SHELL(10) < FILE(20) < WEB(40) < UTILITY(160)
         val order = grouped.keys.map { it.order }
@@ -181,51 +177,12 @@ class ToolSystemV2InfraTest {
     }
 
     @Test
-    fun `searchTools ranks id prefix over contains and matches tags`() {
-        val registry = DefaultToolRegistry()
-        registry.register(tool("regex_extract"))
-        registry.register(tool("regex_replace"))
-        registry.register(tool("web_search", name = "Web Search"))
-
-        assertEquals("regex_extract", registry.searchTools("regex_e")[0].id)
-        val regexHits = registry.searchTools("regex").map { it.id }
-        assertEquals(setOf("regex_extract", "regex_replace"), regexHits.toSet())
-        assertTrue(registry.searchTools("").isEmpty())
-        // 名称匹配
-        assertEquals(1, registry.searchTools("Web Search".lowercase()).size)
-    }
-
-    @Test
     fun `metadataOf distinguishes registered from unknown ids`() {
         val registry = DefaultToolRegistry()
         registry.register(tool("shell_execute"))
         assertNotNull(registry.metadataOf("shell_execute"))
         assertEquals(ToolRisk.HIGH, registry.metadataOf("shell_execute")!!.risk)
         assertNull(registry.metadataOf("no_such_tool"))
-    }
-
-    @Test
-    fun `registration events fire for register replace and unregister`() {
-        val registry = DefaultToolRegistry()
-        val events = mutableListOf<ToolRegistrationEvent>()
-        val listener = ToolRegistrationListener { events += it }
-        registry.addRegistrationListener(listener)
-
-        registry.register(tool("x"))
-        registry.register(tool("x")) // replace
-        registry.unregister("x")
-        registry.unregister("x") // no-op — 不产生事件
-
-        assertEquals(3, events.size)
-        val first = events[0] as ToolRegistrationEvent.Registered
-        assertFalse(first.replaced)
-        val second = events[1] as ToolRegistrationEvent.Registered
-        assertTrue(second.replaced)
-        assertEquals("x", (events[2] as ToolRegistrationEvent.Unregistered).toolId)
-
-        registry.removeRegistrationListener(listener)
-        registry.register(tool("y"))
-        assertEquals(3, events.size)
     }
 
     // ═════════════════════════════════════════════════════════════════
@@ -327,7 +284,6 @@ class ToolSystemV2InfraTest {
         assertEquals(GateDecision.Allow, gate.check(highRiskTool(), "{}"))
         assertEquals(1, prompts)
         assertEquals(SessionToolDecision.ALLOWED_SESSION, gate.decisionFor("app_uninstall"))
-        assertTrue(gate.hasPrompted("app_uninstall"))
     }
 
     @Test

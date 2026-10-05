@@ -63,12 +63,6 @@
     <string name="market_skills_search_hint">搜索技能 / 标签 / 描述（支持模糊匹配）</string>
     <string name="market_skills_suggestions">你是不是要找：</string>
     <string name="market_cat_all">全部</string>
-    <string name="market_cat_file">文件</string>
-    <string name="market_cat_web">网络</string>
-    <string name="market_cat_browser">浏览器</string>
-    <string name="market_cat_memory">记忆</string>
-    <string name="market_cat_system">系统</string>
-    <string name="market_cat_utility">工具</string>
 
     <!-- ═══ 市场 · Skills · ClawHub 仓库 ═══ -->
     <string name="market_clawhub_search_hint">搜索 ClawHub 技能（如 web search / pdf）</string>
@@ -208,13 +202,7 @@
     <string name="market_github_fetch_install">获取并安装</string>
 
     <!-- ═══ 对话框 · 依赖图 ═══ -->
-    <string name="market_depgraph_title">依赖图</string>
-    <string name="market_depgraph_subtitle">%1$d 节点 · %2$d 边</string>
-    <string name="market_depgraph_healthy">健康</string>
-    <string name="market_depgraph_unhealthy">不健康</string>
-    <string name="market_depgraph_cycles">⚠ 检测到 %1$d 个循环依赖：</string>
     <string name="market_depgraph_missing">⚠ 缺失依赖 %1$d 个：</string>
-    <string name="market_depgraph_topo">拓扑序（被依赖者在前）：</string>
 
     <!-- ═══ 对话框 · manifest 干运行预览 ═══ -->
     <string name="market_dryrun_confirm">确认安装</string>

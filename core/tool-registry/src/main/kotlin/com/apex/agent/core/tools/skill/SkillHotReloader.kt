@@ -165,15 +165,7 @@ class SkillHotReloader(
         synchronized(syncLock) { syncLocked() }
     }
 
-    /**
-     * 当前由技能贡献、且确实还在注册表里的工具 id 快照（诊断用）。
-     * 被「已被占用」防线跳过的 id 不会出现在结果里——它并非技能注册的。
-     */
-    fun registeredSkillToolIds(): Set<String> = synchronized(syncLock) {
-        skillOwnedIds.filterTo(LinkedHashSet()) { toolRegistry.getTool(it) != null }
-    }
-
-    // ── 内部实现：以下方法全部要求持有 [syncLock] ──────────────────
+        // ── 内部实现：以下方法全部要求持有 [syncLock] ──────────────────
 
     /**
      * 遗留快照吸收（只在首次 start 时执行一次）。

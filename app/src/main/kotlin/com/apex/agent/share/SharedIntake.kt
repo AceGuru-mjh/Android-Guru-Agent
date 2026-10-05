@@ -1,11 +1,9 @@
 package com.apex.agent.share
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.apex.agent.core.logging.AppLogger
 import com.apex.agent.core.logging.LogCategory
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,9 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
  *   单条分享（KDoc 如实记录边界，不静默吞数据）。
  */
 @Singleton
-class SharedIntake @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
+class SharedIntake @Inject constructor() {
 
     /** 一次分享投递的载荷：纯文本 / 单张图片 / 二者兼有。 */
     data class Payload(

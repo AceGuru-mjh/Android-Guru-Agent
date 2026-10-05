@@ -153,10 +153,6 @@ class ToolPermissionManager(
 
     /** Snapshot of all recorded decisions (UI/debug). */
     fun snapshot(): Map<String, SessionToolDecision> = decisions.toMap()
-
-    /** True when the user has been asked about this tool this session. */
-    fun hasPrompted(toolId: String): Boolean =
-        decisions[toolId] != null && decisions[toolId] != SessionToolDecision.UNDECIDED
 }
 
 /**

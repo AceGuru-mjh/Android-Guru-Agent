@@ -227,15 +227,11 @@
     <string name="settings_role_note">角色映射已保存；真正的多 client 路由由 Agent 引擎后续接入。</string>
 
     <!-- About -->
-    <string name="settings_about_title">关于</string>
-    <string name="settings_about_subtitle">版本 / 开源组件 / 仓库</string>
     <string name="settings_about_version">版本</string>
     <string name="settings_about_package">应用包名</string>
     <string name="settings_about_build_type">构建类型</string>
-    <string name="settings_about_components">开源组件</string>
     <string name="settings_about_components_list">Jetpack Compose · Hilt (Dagger) · Room · OkHttp · kotlinx.serialization · kotlinx.coroutines · Coil · Shizuku API · WorkManager · androidx.security · Haze (Liquid Glass) · Vico (图表) · EasyFloat</string>
     <string name="settings_about_no_browser">未找到可打开链接的应用</string>
-    <string name="settings_about_view_repo">查看 GitHub 仓库</string>
     <string name="settings_about_star">请给我项目来一个 Star，谢谢！</string>
     <string name="settings_about_credits">本项目大量架构受益于开源社区（Termux、proot、Operit 等），致敬所有贡献者。</string>
     <!-- 更新检查（读取发布仓库 version.json） -->
@@ -258,12 +254,10 @@
     <string name="settings_about_update_ms">%1$d 毫秒</string>
     <string name="settings_about_update_fastest">最快</string>
     <string name="settings_about_update_unreachable">不通</string>
-    <string name="settings_about_update_downloading">下载中… %1$d%%</string>
     <string name="settings_about_update_download_started">已开始下载：%1$s</string>
     <string name="settings_about_update_enqueue_failed">无法发起下载（系统下载服务不可用）</string>
     <string name="settings_about_update_verify_failed_title">校验失败</string>
     <string name="settings_about_update_verify_failed_body">%1$s 的 SHA-256 指纹不匹配，文件已损坏；请换一个下载源重试</string>
-    <string name="settings_about_update_patch_done_title">补丁已就绪</string>
     <string name="settings_about_update_patch_done_saved">保存位置：%1$s</string>
     <string name="settings_about_update_apk_done_title">安装包已就绪</string>
     <string name="settings_about_update_apk_done_body">v%1$s 已下载并通过校验（%2$s）。点击「立即安装」后，系统将弹出安装确认</string>

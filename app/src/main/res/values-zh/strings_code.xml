@@ -15,7 +15,6 @@
     <string name="code_todo_progress">任务 %1$d/%2$d</string>
 
     <!-- 消息流 / 输入 -->
-    <string name="code_working">执行中…</string>
     <string name="code_input_hint">描述一个编码任务…</string>
     <string name="code_input_hint_no_api">模型 API 未配置——请到抽屉「设置」页添加…</string>
     <string name="code_api_missing_got_it">知道了</string>
@@ -195,8 +194,6 @@
     <string name="code_stream_detail_grep_empty">未捕获到命中结果</string>
     <string name="code_stream_detail_terminal_title">终端输出</string>
     <string name="code_stream_detail_output_title">工具输出</string>
-    <string name="code_stream_run_streaming">运行中 · 胶囊时间轴</string>
-    <string name="code_stream_run_idle">描述一个编码任务，开启胶囊时间轴</string>
     <!-- ═══ 思考档位选择器 v2：短档名 + 胶囊标签 ═══ -->
     <string name="code_thinking_chip">思考 · %1$s</string>
     <string name="code_thinking_short_none">无</string>

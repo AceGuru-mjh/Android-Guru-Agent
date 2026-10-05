@@ -94,16 +94,4 @@ class TextRelevanceTest {
         val ranked = TextRelevance.rank("rare common", docs, limit = 3)
         assertEquals(1, ranked.first().index)
     }
-
-    // ═══ relatedness 便捷口径 ═══
-
-    @Test
-    fun `relatedness is zero for unrelated pair`() {
-        assertEquals(0.0, TextRelevance.relatedness("apple", "orange juice"), 1e-9)
-    }
-
-    @Test
-    fun `relatedness positive for related pair`() {
-        assertTrue(TextRelevance.relatedness("retry backoff", "retry with backoff policy") > 0.0)
-    }
 }

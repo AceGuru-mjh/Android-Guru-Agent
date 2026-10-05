@@ -8,9 +8,6 @@ import com.apex.agent.core.engine.compression.HybridCompressor
 import com.apex.agent.core.engine.compression.ToolOutputTruncator
 import com.apex.agent.core.engine.goal.FastModelGoalVerifier
 import com.apex.agent.core.engine.goal.GoalModeCoordinator
-import com.apex.agent.core.engine.orchestrator.DefaultTaskOrchestrator
-import com.apex.agent.core.engine.orchestrator.TaskOrchestrator
-import com.apex.agent.core.engine.orchestrator.TaskOrchestratorConfig
 import com.apex.agent.core.engine.task.AgentTask
 import com.apex.agent.core.engine.task.FileTaskStore
 import com.apex.agent.core.engine.task.TaskConfigSnapshot
@@ -220,31 +217,6 @@ object AgentModule {
         )
     }
 
-    /**
-     * A68.1 — Task Execution Orchestrator.
-     *
-     * Wraps the same [ApexAgentEngine] instance (so BUILD mode runs the
-     * orchestrator's own state-machine-driven loop, while PLAN/SPEC/REFLECTION
-     * modes delegate to the wrapped engine). Exposes [TaskOrchestrator.state]
-     * and [TaskOrchestrator.progress] StateFlows for UI / telemetry consumers.
-     *
-     * NOTE: the existing [provideAgentEngine] binding is unchanged — callers
-     * that inject [AgentEngine] directly (e.g. [com.apex.agent.ui.screen.agent.AgentChatViewModel])
-     * keep working exactly as before. To use the orchestrator, inject
-     * [TaskOrchestrator] instead. The two bindings share the same underlying
-     * [ApexAgentEngine] via the @Singleton-scoped delegate, so there's no
-     * duplicate engine instance.
-     */
-    // ═══════════════════════════════════════════════════════════════
-    // T76 — Agent Task Runtime（长任务执行体系，D-2 方案 B 叠加层）
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * T76 — 文件式任务存储（D-1：原子写 + 损坏隔离 + schema v1）。
-     *
-     * 布局 `filesDir/taskstore/<taskId>.json`；FileTaskStore 零 Android
-     * 依赖（纯 java.io），此处仅注入目录。
-     */
     @Provides
     @Singleton
     fun provideTaskStore(@ApplicationContext context: Context): TaskStore {
@@ -297,44 +269,6 @@ object AgentModule {
             },
             contextInjector = { content -> apex?.injectSystemContext(content) },
             tagsSetter = { taskId, stepId -> apex?.setLlmExecutionTags(taskId, stepId) }
-        )
-    }
-
-    @Provides
-    @Singleton
-    fun provideTaskOrchestrator(
-        agentEngine: AgentEngine,
-        llmClient: LlmClient,
-        toolRegistry: ToolRegistry,
-        toolExecutor: ToolExecutor,
-        config: AgentConfig,
-        memory: ConversationMemory,
-        memoryObserver: ExecutionMemoryObserver,
-        privilegeInfoProvider: PrivilegeInfoProvider,
-        contextCompressor: ContextCompressor,
-        // T72：注入多模型运行时，BUILD 循环按角色路由
-        modelRuntime: ModelRuntime,
-        // v4：与 AgentEngine 共享会话激活存储（tool_open 激活对两条执行路径同时生效）
-        toolActivation: ToolActivationStore
-    ): TaskOrchestrator {
-        return DefaultTaskOrchestrator(
-            llmClient = llmClient,
-            toolExecutor = toolExecutor,
-            toolRegistry = toolRegistry,
-            agentConfig = config,
-            initialOrchestratorConfig = TaskOrchestratorConfig.DEFAULT,
-            // Delegate non-BUILD modes to the existing ApexAgentEngine.
-            // agentEngine is @Singleton so this is the same instance every call.
-            delegate = agentEngine,
-            memory = memory,
-            memoryObserver = memoryObserver,
-            privilegeInfoProvider = privilegeInfoProvider,
-            modelRuntime = modelRuntime,
-            // P7：编排器与 AgentEngine 共享同一上下文压缩链路（HybridCompressor），
-            // 使经编排器执行的长任务同样具备三级压缩（截断/滑窗/LLM摘要），
-            // 修复"编排器路径工具输出无界增长"的上下文窗口风险。
-            contextCompressor = contextCompressor,
-            toolActivation = toolActivation
         )
     }
 }

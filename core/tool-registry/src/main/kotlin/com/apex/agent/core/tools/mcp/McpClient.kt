@@ -385,69 +385,6 @@ class McpClient(
     }
 
     /**
-     * 获取资源列表
-     */
-    suspend fun listResources(): Result<List<McpResource>> = withContext(Dispatchers.IO) {
-        try {
-            val request = McpRequest(
-                jsonrpc = "2.0",
-                id = requestId.incrementAndGet(),
-                method = "resources/list",
-                params = buildJsonObject {}
-            )
-
-            val response = sendRequest(request)
-            val resources = response?.get("result")?.jsonObject
-                ?.get("resources")?.jsonArray ?: JsonArray(emptyList())
-
-            val resourceList = resources.map { resJson ->
-                val obj = resJson.jsonObject
-                McpResource(
-                    uri = obj["uri"]?.jsonPrimitive?.content ?: "",
-                    name = obj["name"]?.jsonPrimitive?.content ?: "",
-                    description = obj["description"]?.jsonPrimitive?.contentOrNull ?: "",
-                    mimeType = obj["mimeType"]?.jsonPrimitive?.contentOrNull ?: ""
-                )
-            }
-
-            Result.success(resourceList)
-        } catch (e: CancellationException) {
-            // 全仓纪律：协程取消必须继续抛出（不得折叠成 Result.failure）。
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * 读取资源
-     */
-    suspend fun readResource(uri: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val request = McpRequest(
-                jsonrpc = "2.0",
-                id = requestId.incrementAndGet(),
-                method = "resources/read",
-                params = buildJsonObject { put("uri", uri) }
-            )
-
-            val response = sendRequest(request)
-            val contents = response?.get("result")?.jsonObject
-                ?.get("contents")?.jsonArray
-
-            val text = contents?.firstOrNull()?.jsonObject
-                ?.get("text")?.jsonPrimitive?.content ?: ""
-
-            Result.success(text)
-        } catch (e: CancellationException) {
-            // 全仓纪律：协程取消必须继续抛出（不得折叠成 Result.failure）。
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
      * 关闭连接
      */
     fun shutdown() {
@@ -458,7 +395,6 @@ class McpClient(
     }
 
     fun isInitialized(): Boolean = initialized
-    fun getCapabilities(): McpCapabilities? = serverCapabilities
 
     /** STDIO 子进程是否仍存活（尚未创建，或 HTTP 传输，均视为存活）。 */
     fun isTransportAlive(): Boolean = !createdTransport || transport.isHealthy()
@@ -650,9 +586,3 @@ data class McpToolResult(
     val isError: Boolean = false
 )
 
-data class McpResource(
-    val uri: String,
-    val name: String,
-    val description: String = "",
-    val mimeType: String = ""
-)

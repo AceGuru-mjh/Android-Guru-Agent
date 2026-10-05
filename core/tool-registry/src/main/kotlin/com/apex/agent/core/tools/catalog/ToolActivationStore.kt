@@ -53,18 +53,6 @@ class ToolActivationStore(
         return changed
     }
 
-    /** Deactivate a tool id (no-op when absent). */
-    fun deactivate(toolId: String) {
-        val changed = synchronized(this) {
-            if (toolId in active) {
-                active.remove(toolId)
-                insertionOrder.remove(toolId)
-                true
-            } else false
-        }
-        if (changed) publish()
-    }
-
     /** Current activated ids (insertion order preserved). */
     fun snapshot(): Set<String> = synchronized(this) { insertionOrder.toSet() }
 

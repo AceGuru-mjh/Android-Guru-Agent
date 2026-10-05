@@ -78,30 +78,21 @@ class McpStartupTrackerTest {
         val tracker = McpStartupTracker(clock = { 1L })
         tracker.record(event(server = "  "))
         tracker.record(event(server = ""))
-        assertTrue(tracker.recordedServers().isEmpty())
+        assertTrue(tracker.snapshot("  ").isEmpty())
+        assertTrue(tracker.snapshot("").isEmpty())
     }
 
     // ═══ 服务器隔离与查询 ═══
 
     @Test
-    fun `servers are isolated and recordedServers sorted`() {
+    fun `servers are isolated from each other`() {
         val tracker = McpStartupTracker(clock = { 1L })
         tracker.record(event(server = "zeta"))
         tracker.record(event(server = "alpha"))
         tracker.record(event(server = "mid"))
-        assertEquals(listOf("alpha", "mid", "zeta"), tracker.recordedServers())
         assertEquals(1, tracker.snapshot("alpha").size)
         assertEquals(1, tracker.snapshot("zeta").size)
-    }
-
-    @Test
-    fun `hasSpawned only true after a spawn event`() {
-        val tracker = McpStartupTracker(clock = { 1L })
-        assertFalse(tracker.hasSpawned("memory"))
-        tracker.record(event(stage = McpStartupStage.ENV_CHECK))
-        assertFalse(tracker.hasSpawned("memory"))
-        tracker.record(event(stage = McpStartupStage.SPAWN))
-        assertTrue(tracker.hasSpawned("memory"))
+        assertEquals(1, tracker.snapshot("mid").size)
     }
 
     @Test

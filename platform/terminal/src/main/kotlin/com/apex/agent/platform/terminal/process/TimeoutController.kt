@@ -51,7 +51,13 @@ class TimeoutController(
     fun startTimeout(sessionId: Long, jobId: Long, timeoutMs: Long, onTimeout: () -> Unit) {
         cancelTimeout(jobId)  // replace any existing timer
         if (timeoutMs <= 0) return
-        timers[jobId] = TimerEntry(sessionId, scope.launch {
+        // T94：闭包经 AtomicReference 拿到自己的 Job —— finally 里条件移除。
+        // 原实现无条件 timers.remove(jobId)：同 jobId 重挂定时器时
+        // （start→cancel→start 序列），旧 timer 的 finally 异步执行可能误删
+        // 【新】条目，新定时器脱管、cancelTimeout 失效（SIGTERM/SIGKILL 在
+        // job 完成后仍发出）。
+        val selfRef = java.util.concurrent.atomic.AtomicReference<Job?>()
+        val job = scope.launch {
             try {
                 delay(timeoutMs)
                 // Phase 1: graceful SIGTERM（发给进程组 —— native kill(-PGID)）
@@ -62,9 +68,15 @@ class TimeoutController(
                 inputManager.sendSignal(sessionId, InputOwner.SYSTEM, UnixSignal.SIGKILL, jobId)
                 onTimeout()
             } finally {
-                timers.remove(jobId)
+                // 仅当 map 里仍是本 timer 时才移除（重挂后旧 timer 的清理不误删
+                // 新条目）。get()=null 防御：极小概率协程在 set 之前就跑完
+                // finally —— 此刻条目尚未登记，无操作（登记后成为无害残留，
+                // cancelTimeout/重挂可清）。
+                selfRef.get()?.let { timers.remove(jobId, TimerEntry(sessionId, it)) }
             }
-        })
+        }
+        selfRef.set(job)
+        timers[jobId] = TimerEntry(sessionId, job)
     }
 
     /** Cancel a timeout timer (e.g. job exited normally before timeout). */

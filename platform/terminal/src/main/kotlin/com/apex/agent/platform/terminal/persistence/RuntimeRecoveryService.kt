@@ -215,8 +215,16 @@ class RuntimeRecoveryService(
                         val jobs = liveJobsProvider(session.id)
                         val events = recentEventsProvider(session.id)
                         store.save(session = session, jobs = jobs, recentEvents = events)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // 取消必须穿透：外层 scope cancel 时 autoSaveJob 要能真正退出
+                        throw e
                     } catch (e: Exception) {
-                        // 单 session 保存失败不杀循环（下一周期重试）。
+                        // #260：单 session 保存失败不杀循环（下一周期重试），
+                        // 但崩溃恢复链路静默失败 = 恢复功能形同虚设且不可诊断
+                        android.util.Log.w(
+                            "RuntimeRecovery",
+                            "autoSave session ${session.id} failed: ${e.message}"
+                        )
                     }
                 }
             }

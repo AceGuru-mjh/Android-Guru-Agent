@@ -66,8 +66,11 @@ class DefaultPrivilegeManager @Inject constructor(
                 _shizukuAvailable.value = checkShizuku()
                 PrivilegeDetector.invalidateCache()
             }
-        } catch (_: Exception) {
-            // Shizuku 未安装/未初始化：StateFlow 保持 false，executeShell 走 Root/NONE 路径
+        } catch (e: Exception) {
+            // Shizuku 未安装/未初始化：StateFlow 保持 false，executeShell 走 Root/NONE 路径。
+            // #260：debug 级留痕区分「未安装」（ClassNotFoundException 类）与
+            // 「已安装但监听注册崩了」—— 后者是选路异常，需要现场诊断。
+            android.util.Log.d("PrivilegeManager", "Shizuku binder watch unavailable: ${e::class.simpleName}: ${e.message}")
         }
     }
 

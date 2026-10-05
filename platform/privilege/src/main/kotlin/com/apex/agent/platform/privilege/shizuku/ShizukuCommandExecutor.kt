@@ -76,7 +76,10 @@ object ShizukuCommandExecutor {
             if (Shizuku.isPreV11()) return
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) return
             Shizuku.requestPermission(requestCode)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // #260：权限请求链路静默失败 = 用户走完引导却不知道授权没发出去
+            android.util.Log.w("ShizukuExecutor", "requestPermission failed: ${e.message}")
+        }
     }
 
     /**

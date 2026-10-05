@@ -242,7 +242,8 @@ class StandardModeEngine(
             emit(AgentEvent.Aborted)
             throw e
         } catch (t: Throwable) {
-            report.errorMessage = t.message ?: t::class.simpleName ?: "unknown error"
+            // #213 残留：错误文案走 LlmErrorText（中文指引+截断摘要；全文已落日志）
+            report.errorMessage = com.apex.agent.core.llm.LlmErrorText.userMessage(t)
             emit(AgentEvent.Error(report.errorMessage ?: "unknown error", recoverable = false))
             emit(
                 AgentEvent.Complete(
@@ -295,7 +296,7 @@ class StandardModeEngine(
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            report.errorMessage = t.message
+            report.errorMessage = com.apex.agent.core.llm.LlmErrorText.userMessage(t) // #213 同款净化
         } finally {
             isRunning = false
         }

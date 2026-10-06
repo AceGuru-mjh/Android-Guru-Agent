@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- #275 编译门禁修复：manifest 引用的 mipmap/ic_launcher 从未存在（res/ 只有 values/），
+     AAPT 直接失败。改用全 API 兼容的 vector drawable 方案（minSdk 24 支持 vector +
+     渐变填充），避免为预览工具工程手维护多密度 PNG。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 深色基底 -->
+    <path
+        android:fillColor="#0F1218"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- 对角霓虹渐变（与主 App 的 Neon 语义呼应） -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="108"
+                android:endY="0"
+                android:startX="0"
+                android:startY="108"
+                android:type="linear">
+                <item
+                    android:color="#FF10B981"
+                    android:offset="0.0" />
+                <item
+                    android:color="#332DD4BF"
+                    android:offset="0.55" />
+                <item
+                    android:color="#00F59E0B"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Foundry "F" 字标 -->
+    <path
+        android:fillColor="#F5F7FA"
+        android:pathData="M40,28h30v10h-19v11h16v10h-16v21h-11z" />
+
+    <!-- 熔炉火花点缀 -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M70,68a5,5 0 1,0 10,0a5,5 0 1,0 -10,0z" />
+</vector>

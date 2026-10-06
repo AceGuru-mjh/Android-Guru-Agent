@@ -556,6 +556,13 @@
     <string name="common_done">Done</string>
 
     <!-- ═══ About screen (drawer bottom entry, v1.4.3+) ═══ -->
+    <string name="about_section_highlights">Highlights in this build</string>
+    <string name="about_highlight_1">Smart update pipeline: jump straight to the latest version from up to 10 versions behind with one small patch</string>
+    <string name="about_highlight_2">Long-task export: share any run as a JSON archive or a readable Markdown report</string>
+    <string name="about_highlight_3">Chat memory you control: auto-capture can be turned off in Settings, and every memory is viewable and deletable</string>
+    <string name="about_highlight_4">Usage dashboard now estimates cost per model from public list prices</string>
+    <string name="about_easter_egg_toast">🎉 You found the fireworks!</string>
+    <string name="about_highlights_hint">Tap the robot at the bottom of this page five times</string>
     <string name="about_section_build">Version &amp; build</string>
     <string name="about_section_update">Software updates</string>
     <string name="about_section_features">Feature tour</string>

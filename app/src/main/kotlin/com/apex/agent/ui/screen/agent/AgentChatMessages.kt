@@ -113,9 +113,13 @@ internal fun AgentMessageItem(
         )
         is AgentUiMessage.ToolCall -> {
             // HTML 产物检测：成功写入 .html 的调用给卡头挂「预览」钮（一次解析，按卡缓存）。
-            val htmlPath = remember(message.id, message.success) {
-                HtmlArtifactDetector.extractHtmlPath(message.toolName, message.args)
-                    ?.let { vm.resolveHtmlPreviewPath(it) }
+            val htmlPath = remember(message.id, message.success, message.output) {
+                // #188：成功调用的输出也纳入扫描（写确认句式优先）——
+                // 脚本内部写出的 .html 也能挂预览钮
+                HtmlArtifactDetector.extractHtmlPath(
+                    message.toolName, message.args,
+                    message.output.takeIf { message.success }
+                )?.let { vm.resolveHtmlPreviewPath(it) }
             }
             ToolCallCard(
                 toolCall = message,

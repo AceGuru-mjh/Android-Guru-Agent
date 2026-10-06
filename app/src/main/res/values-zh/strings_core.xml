@@ -556,6 +556,13 @@
     <string name="common_done">完成</string>
 
     <!-- ═══ 关于页（抽屉底部入口，v1.4.3+）═══ -->
+    <string name="about_section_highlights">本版亮点</string>
+    <string name="about_highlight_1">智能更新链路：跨十个版本内一步直达，只下一次小补丁</string>
+    <string name="about_highlight_2">长任务导出：任意运行记录可分享为 JSON 存档或 Markdown 报告</string>
+    <string name="about_highlight_3">聊天记忆你做主：设置里可关自动摄取，每条记忆可查可删</string>
+    <string name="about_highlight_4">用量仪表盘新增按模型牌价的费用估算</string>
+    <string name="about_easter_egg_toast">🎉 你找到了烟花彩蛋！</string>
+    <string name="about_highlights_hint">连点本页底部的机器人图标五次试试</string>
     <string name="about_section_build">版本与构建</string>
     <string name="about_section_update">软件更新</string>
     <string name="about_section_features">功能一览</string>

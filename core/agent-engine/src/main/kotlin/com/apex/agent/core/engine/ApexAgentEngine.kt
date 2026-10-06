@@ -268,17 +268,13 @@ class ApexAgentEngine(
      * #169：Boolean → [PlanDecision]（可携带步骤勾选/重排）。internal 供
      * plan/PlanExecutionSupport.kt 扩展注册与清理（同模块拆分模式）。
      * Reset to a fresh [CompletableDeferred] every time a new plan is awaiting confirmation.
-     *
-     * @Volatile（#214 同型）：注册写在引擎协程，complete 读在 UI/测试线程——
-     * 跨挂起点的可见性依赖此标记（ARM 弱内存序下尤甚）。
+     * @Volatile（#214 同型）：引擎协程写、UI/测试线程读，跨挂起点可见性依赖此标记。
      */
     @Volatile
     internal var planConfirmationDeferred: CompletableDeferred<PlanDecision>? = null
 
-    /**
-     * Channel for the UI to deliver spec-confirmation decisions back to the engine
-     * while [executeSpecMode] is suspended on [awaitSpecConfirmation].
-     */
+    /** UI 回投 SPEC 确认（[executeSpecMode] 挂在 [awaitSpecConfirmation] 时）。@Volatile 同 plan 通道。 */
+    @Volatile
     internal var specConfirmationDeferred: CompletableDeferred<Boolean>? = null
 
     /**

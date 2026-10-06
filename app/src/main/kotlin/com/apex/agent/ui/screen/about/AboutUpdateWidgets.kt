@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -14,12 +15,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.SystemUpdateAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -409,4 +415,174 @@ internal fun HotFlowProgress(flow: HotUpdateEngine.State) {
             else -> Unit
         }
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// v1.4.8 本地更新包常驻区（关于页任何状态都展示）
+// ═════════════════════════════════════════════════════════════════════════════
+// 用户反馈：「补丁合成的 APK 装完后在关于页消失，得去 MT 管理器找」。
+// 现常驻列出 Download/ApexAgent/ 下所有 APK（合成包 + 全量包），用户随时
+// 可一键安装/删除，无需离开 App。
+
+/**
+ * 本地更新包常驻区。无 APK 时折叠为空（不占视觉），有 APK 时显示清单 +
+ * 每个文件的版本/种类/体积/安装/删除按钮。清单为空时返回 Unit（不渲染）。
+ */
+@Composable
+internal fun LocalApkInventorySection(
+    entries: List<LocalApkEntry>,
+    onInstall: (LocalApkEntry) -> Unit,
+    onDelete: (LocalApkEntry) -> Unit
+) {
+    if (entries.isEmpty()) return
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.55f)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Outlined.Download,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    stringResource(R.string.about_update_local_inventory_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Surface(
+                    shape = RoundedCornerShape(5.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                ) {
+                    Text(
+                        "${entries.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.about_update_local_inventory_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+            // 列表区（高度上限避免过长挤压状态主体）
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                entries.forEachIndexed { index, entry ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                        )
+                    }
+                    LocalApkRow(
+                        entry,
+                        onInstall = { onInstall(entry) },
+                        onDelete = { onDelete(entry) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 单行本地 APK：版本号 + 种类徽章 + 体积 + 安装/删除按钮。 */
+@Composable
+private fun LocalApkRow(
+    entry: LocalApkEntry,
+    onInstall: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    "v${entry.versionLabel}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                ) {
+                    Text(
+                        localApkKindLabel(entry.kind),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                    )
+                }
+            }
+            Text(
+                formatMbLocal(entry.sizeBytes),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                fontFamily = FontFamily.Monospace
+            )
+            Text(
+                entry.file.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f),
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        OutlinedButton(
+            onClick = onInstall,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 10.dp, vertical = 4.dp
+            )
+        ) {
+            Icon(
+                Icons.Outlined.SystemUpdateAlt,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.about_update_local_install))
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Outlined.DeleteOutline,
+                contentDescription = stringResource(R.string.about_update_local_delete),
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/** MB 体积格式化（与 AboutUpdatePanel.formatMb 同构，避免跨文件可见性放大）。 */
+private fun formatMbLocal(bytes: Long): String {
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 100) "%.0f MB".format(mb)
+    else if (mb >= 10) "%.1f MB".format(mb)
+    else "%.2f MB".format(mb)
 }

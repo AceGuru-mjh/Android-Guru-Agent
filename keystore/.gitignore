@@ -1,0 +1,5 @@
+# 排除 keystore 备份文件（凭据变更时 generate_release_keystore.sh 自动生成的 .bak）
+*.bak
+*.bak.*
+# 临时文件
+*.tmp

@@ -15,6 +15,42 @@ android {
     namespace = "com.apex.agent"
     compileSdk = 35
 
+    // ═══ 固定发布签名 keystore（v1.4.8 签名漂移根因修复）══════════════════════
+    //
+    // 背景：v1.4.7 及之前 release 用 signingConfigs.getByName("debug") ——
+    // debug.keystore 是机器本地的（~/.android/debug.keystore），CI runner 与
+    // 开发者本机必然不同 → 增量更新（VCDIFF 合成）的 APK 字节级保留源 APK
+    // 签名块，但远端新版是 CI debug key 签的 → 覆盖安装必报
+    // INSTALL_FAILED_UPDATE_INCOMPATIBLE（签名冲突）。本地构建/分叉构建
+    // 用户更是永远装不上增量合成的 APK。
+    //
+    // 修法：发布签名固定为一份入库的 keystore（scripts/generate_release_keystore.sh
+    // 生成，凭据 name=meng411722 / key=meng411722），CI 与本地构建共用同一份 →
+    // 签名指纹恒定 → 增量合成 APK 与已装 APK 签名一致，覆盖安装无冲突。
+    //
+    // 个人项目经 GitHub Releases 侧载分发（非 Play Store），入库 keystore 是
+    // 开源 Android 应用的标准做法（Termux / F-Droid 同款）。逃生门：环境变量
+    // APEX_KEYSTORE_FILE / APEX_KEYSTORE_PASSWORD / APEX_KEY_ALIAS /
+    // APEX_KEY_PASSWORD 可覆盖路径（CI secret 注入场景）。
+    signingConfigs {
+        create("release") {
+            val keystoreFile = (project.findProperty("apexKeystoreFile") as String?)
+                ?: System.getenv("APEX_KEYSTORE_FILE")
+                ?: rootProject.file("keystore/apex-release.jks").absolutePath
+            storeFile = file(keystoreFile)
+            storePassword = (project.findProperty("apexKeystorePassword") as String?)
+                ?: System.getenv("APEX_KEYSTORE_PASSWORD") ?: "meng411722"
+            keyAlias = (project.findProperty("apexKeyAlias") as String?)
+                ?: System.getenv("APEX_KEY_ALIAS") ?: "meng411722"
+            keyPassword = (project.findProperty("apexKeyPassword") as String?)
+                ?: System.getenv("APEX_KEY_PASSWORD") ?: "meng411722"
+            // 启用 v1/v2/v3 签名方案（v2 是 Android 7+ 覆盖安装首选，v1 兼容旧机）
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.apex.agent"
         minSdk = 26
@@ -37,6 +73,11 @@ android {
         // v1.4.2：双仓库发布架构升级 —— PR 合并即自动发版（release.yml push main 触发）。
         // CI 通过 -PapexVersionName / -PapexVersionCode 注入最终版本（版本号冲突时
         // 自动追加构建序号，如 1.4.2.1，并自动递增 versionCode）；本地构建走源码值。
+        // v1.4.8：签名漂移根因修复 —— 发布签名固定为入库 keystore（凭据
+        // name=meng411722 / key=meng411722），CI 与本地构建签名指纹恒定 → 增量
+        // 合成 APK 与已装 APK 签名一致，覆盖安装无冲突；本地 APK 常驻关于页
+        // （不再随 UpToDate/版本切换自动清理）；installApk 复制内部 cache 再
+        // 授权，修复 MIUI/EMUI「未找到 SD 储存卡」。
         // v1.4.7：热更新体系（data-only 版本零安装热载 / 签名预检 / CI 热更包 /
         // 发布仓库应急热修通道，见 docs/hot-update-pipeline.md）。
         // v1.4.6：聊天输入 v5 —— 技能 chip 内联输入框（多选/去重/可删）/ 流式玻璃
@@ -82,8 +123,11 @@ android {
     }
 
     buildTypes {
-        // 发布 APK 以 debug 密钥签名 —— 个人项目无正式 keystore 时保证产物可直接安装；
-        // 引入正式签名时替换为 signingConfigs 引用 + 环境变量注入。
+        // 发布 APK 以**固定 release keystore**签名（v1.4.8 签名漂移根因修复）：
+        // v1.4.7 及之前用 debug 签名（机器本地 → CI/本地/分叉必然不同），导致
+        // 增量更新合成的 APK 覆盖安装时报签名冲突。现统一用入库的
+        // keystore/apex-release.jks（凭据见 signingConfigs.release），CI 与本地
+        // 构建签名指纹恒定 → 增量合成 APK 与已装 APK 签名一致，覆盖安装无冲突。
         //
         // 【不使用代码混淆】本 APK 明确不做 R8/ProGuard 混淆与资源缩减：
         //  - 持久化大量依赖 kotlinx.serialization 的字段名（ModelProfile / ProviderConfig /
@@ -94,7 +138,17 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+        }
+        // debug 构建也用 release 签名 —— 让本地构建的 APK 可覆盖安装 CI 发布版
+        // （签名一致 → 不再 INSTALL_FAILED_UPDATE_INCOMPATIBLE），开发者本地
+        // 构建直装真机即可与 CI 产物互换覆盖。如需纯调试签名可加 -PapexDebugSign
+        // 逃生门（见 signingConfigs 上方属性覆盖）。
+        debug {
+            // 仅当显式传 -PapexDebugSign=true 时回退到 debug 签名（开发调试隔离场景）
+            if ((project.findProperty("apexDebugSign") as String?) != "true") {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

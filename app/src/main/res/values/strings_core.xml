@@ -619,6 +619,15 @@
     <string name="about_update_hot_fail_unpack">package corrupted</string>
     <string name="about_update_hot_fail_apply">apply failed</string>
     <string name="about_update_hot_applied_note">Data layer hot-updated to v%1$s (no reinstall)</string>
+    <!-- v1.4.8 本地更新包常驻区 -->
+    <string name="about_update_local_inventory_title">Local update packages</string>
+    <string name="about_update_local_inventory_hint">Patched / downloaded APKs in Download/ApexAgent — install or delete anytime, no file manager needed</string>
+    <string name="about_update_local_kind_patched">patched</string>
+    <string name="about_update_local_kind_full_arm64">full · arm64</string>
+    <string name="about_update_local_kind_full_universal">full · universal</string>
+    <string name="about_update_local_kind_unknown">apk</string>
+    <string name="about_update_local_install">Install</string>
+    <string name="about_update_local_delete">Delete</string>
     <string name="about_feature_agent_title">Agent chat</string>
     <string name="about_feature_agent_desc">All-in-one AI assistant with multi-level thinking, tool calling and skills</string>
     <string name="about_feature_coding_title">Coding mode</string>

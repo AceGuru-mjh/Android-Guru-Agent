@@ -374,10 +374,12 @@ jobs:
       - name: "Extract signing certificate digest (signature pre-flight)"
         run: |
           set -euo pipefail
-          # v1.4.7 客户端签名预检数据源：发布 APK 签名证书 SHA-256 指纹。
-          # App 端比对本地指纹（UpdateCenter.localSigningCertSha256）—— 不一致
-          # = 增量/全量覆盖安装必报签名冲突（debug 密钥签名时代本地构建/分叉
-          # 构建的必然场景），UI 提前劝导热更/卸载重装，不再下载几百 MB 后撞墙。
+          # v1.4.8 起发布 APK 用**固定入库 keystore**（keystore/apex-release.jks，
+          # 凭据 name=meng411722 / key=meng411722）签名 —— CI 与本地构建签名指纹
+          # 恒定，增量更新合成的 APK 与已装 APK 签名一致，覆盖安装无冲突。
+          # 本步骤提取证书 SHA-256 指纹注入 version.json.signingCertSha256，供
+          # App 端签名预检（UpdateCenter.signatureMismatch）—— 客户端比对本地
+          # 指纹，不一致时（旧版/分叉构建）提前劝导热更/卸载重装。
           APK=$(ls dist/*-arm64-*.apk | head -1)
           CERT_SHA=""
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)

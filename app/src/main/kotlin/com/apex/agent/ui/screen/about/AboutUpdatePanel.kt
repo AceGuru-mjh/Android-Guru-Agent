@@ -178,34 +178,80 @@ internal fun UpdatePanel() {
     val availableManifest = (updateState as? UpdateUiState.Done)
         ?.result?.let { it as? UpdateCheckResult.Available }?.latest
     val checkSettled = updateState is UpdateUiState.Done
+
+    // ── v1.4.8 本地 APK 清单（常驻 —— 不再随 UpToDate/版本切换自动清理）──
+    // 用户反馈：「补丁合成的 APK 装完后再进关于页就消失了，去 MT 管理器找麻烦」。
+    // 根因：旧逻辑 UpToDate 时删所有 -patched.apk + 有更新时删非目标版本合成包，
+    // 把用户辛苦合成的 APK 清掉了。
+    // 修法：停止自动删 -patched.apk（只删 chain-step 中间件）；本地 APK 清单常驻
+    // 关于页，无论更新检查状态如何，用户都能随时找到已下载/合成的 APK 一键安装。
+    var localApks by remember { mutableStateOf<List<LocalApkEntry>>(emptyList()) }
+
+    /** 扫描 Download/ApexAgent/ 下所有 .apk（排除 chain-step 中间件），按修改时间倒序。 */
+    suspend fun scanLocalApks() {
+        withContext(Dispatchers.IO) {
+            val entries = downloader.workDirectory().listFiles()
+                ?.filter { it.isFile && it.extension == "apk" && !it.name.contains("chain-step") }
+                ?.map { file ->
+                    val versionLabel = extractVersionLabel(file.name)
+                    val kind = when {
+                        file.name.endsWith("-patched.apk") -> LocalApkKind.PATCHED
+                        file.name.contains("universal") -> LocalApkKind.FULL_UNIVERSAL
+                        file.name.contains("arm64") -> LocalApkKind.FULL_ARM64
+                        else -> LocalApkKind.UNKNOWN
+                    }
+                    LocalApkEntry(file, file.length(), kind, versionLabel, file.lastModified())
+                }
+                ?.sortedByDescending { it.lastModified }
+                ?: emptyList()
+            localApks = entries
+        }
+    }
+
+    // 进入页面 + 每秒轮询刷新（流水线下载/合成时清单实时更新）
+    LaunchedEffect(Unit) {
+        scanLocalApks()
+        while (true) {
+            delay(2000)
+            scanLocalApks()
+        }
+    }
+
     LaunchedEffect(availableManifest?.versionCode, checkSettled) {
         val manifest = availableManifest
         if (manifest == null) {
+            // UpToDate 时**不再删 -patched.apk**（v1.4.8 持久化修复）——
+            // 用户装完补丁 APK 后版本追平会判 UpToDate，旧逻辑把合成包清了，
+            // 用户想重装只能去 MT 管理器翻。现保留所有合成包，由「本地更新包」
+            // 区常驻展示 + 用户手动删。
             if (checkSettled &&
                 (updateState as UpdateUiState.Done).result is UpdateCheckResult.UpToDate
             ) {
                 withContext(Dispatchers.IO) {
                     downloader.workDirectory().listFiles()?.forEach { stale ->
                         val name = stale.name
-                        if (name.startsWith("ApexAgent-v") && name.endsWith("-patched.apk")) {
+                        // 只删 chain-step 中间件（流水线临时产物，永远可重生成）
+                        if (name.startsWith("ApexAgent-chain-step")) {
                             runCatching { stale.delete() }
                         }
                     }
                 }
+                scanLocalApks()
             }
             return@LaunchedEffect
         }
         if (!center.patchEngine.isRunning) {
             withContext(Dispatchers.IO) {
-                // 陈旧合成产物（非目标版本的 -patched.apk）——引擎产物而非
-                // DownloadManager 托管文件，引擎空闲时清理安全
+                // 只删 chain-step 中间件 —— **保留所有 -patched.apk**（用户辛苦
+                // 合成的，即使版本 != 远端最新也保留，用户可能想给别人装或留档）
                 downloader.workDirectory().listFiles()?.forEach { stale ->
                     val name = stale.name
-                    if (name.startsWith("ApexAgent-v") && name.endsWith("-patched.apk") &&
-                        name != "ApexAgent-v${manifest.versionName}-patched.apk"
-                    ) runCatching { stale.delete() }
+                    if (name.startsWith("ApexAgent-chain-step")) {
+                        runCatching { stale.delete() }
+                    }
                 }
             }
+            scanLocalApks()
         }
         val asset = checker.preferredAsset(manifest)
         val patchFile = center.patchEngine.readyApkFor(manifest)
@@ -215,7 +261,9 @@ internal fun UpdatePanel() {
         readyPatch = if (patchOk) {
             PatchUpdateEngine.State.Ready(patchFile, asset?.sizeBytes ?: patchFile.length())
         } else {
-            if (patchFile.exists()) {
+            // 指纹不符的合成包：仅当远端已确认是目标版本时才删（坏文件，
+            // 留着也是坏的）；版本不匹配（用户已装新版但旧合成包还在）则保留
+            if (patchFile.exists() && patchFile.name == "ApexAgent-v${manifest.versionName}-patched.apk") {
                 withContext(Dispatchers.IO) { runCatching { patchFile.delete() } }
             }
             null
@@ -225,6 +273,7 @@ internal fun UpdatePanel() {
             fullFile.exists() && downloader.verifySha256(fullFile, asset.sha256)
         }
         readyFull = if (fullOk) fullFile else null
+        scanLocalApks()
     }
 
     // ── 下载完成广播：校验 SHA-256 → 弹「立即安装」确认框 ──────────────
@@ -427,6 +476,21 @@ internal fun UpdatePanel() {
                     UpdateUiState.Idle -> Unit
                 }
             }
+
+            // ═══ v1.4.8 本地更新包常驻区 ══════════════════════════════════════
+            // 用户反馈：「补丁合成的 APK 装完后在关于页消失，得去 MT 管理器找」。
+            // 现常驻列出 Download/ApexAgent/ 下所有 APK（合成包 + 全量包），
+            // 任何状态下都可见可装可删 —— 不再依赖「就绪重入口」的条件复活。
+            LocalApkInventorySection(
+                entries = localApks,
+                onInstall = { entry -> installNow(entry.file) },
+                onDelete = { entry ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) { runCatching { entry.file.delete() } }
+                        scanLocalApks()
+                    }
+                }
+            )
 
             // ── 状态主体 ──────────────────────────────────────────────────────
             when (val state = updateState) {
@@ -1002,4 +1066,51 @@ internal fun hotFailLabel(kind: HotUpdateEngine.FailKind): String = when (kind) 
     HotUpdateEngine.FailKind.VERIFY -> stringResource(R.string.about_update_hot_fail_verify)
     HotUpdateEngine.FailKind.UNPACK -> stringResource(R.string.about_update_hot_fail_unpack)
     HotUpdateEngine.FailKind.APPLY -> stringResource(R.string.about_update_hot_fail_apply)
+}
+
+// ═══ v1.4.8 本地 APK 清单模型（关于页常驻区）══════════════════════════════════
+// 用户反馈：「补丁合成的 APK 装完后再进关于页就消失了」。
+// 现关于页常驻列出 Download/ApexAgent/ 下所有 APK（合成包 + 全量包），
+// 用户随时可一键安装/删除，无需 MT 管理器。
+
+/** 本地 APK 种类。 */
+enum class LocalApkKind { PATCHED, FULL_ARM64, FULL_UNIVERSAL, UNKNOWN }
+
+/** 本地 APK 清单条目。 */
+internal data class LocalApkEntry(
+    val file: File,
+    val sizeBytes: Long,
+    val kind: LocalApkKind,
+    /** 从文件名解析的版本号（解析失败则取文件名）。 */
+    val versionLabel: String,
+    val lastModified: Long
+)
+
+/**
+ * 从 APK 文件名解析版本号：
+ * - `ApexAgent-v1.4.8-patched.apk` → `1.4.8`
+ * - `ApexAgent-v1.4.8-arm64-release.apk` → `1.4.8`
+ * - 其他 → 文件名去扩展名
+ */
+internal fun extractVersionLabel(fileName: String): String {
+    // 形如 `ApexAgent-v<X>-...apk`：取 `v` 之后到第一个非版本字符
+    val prefix = "ApexAgent-v"
+    return if (fileName.startsWith(prefix)) {
+        val afterPrefix = fileName.removePrefix(prefix)
+        val versionEnd = afterPrefix.indexOfFirst { !it.isDigit() && it != '.' }
+        if (versionEnd > 0) afterPrefix.substring(0, versionEnd) else afterPrefix.removeSuffix(".apk")
+    } else {
+        fileName.removeSuffix(".apk")
+    }
+}
+
+/**
+ * 本地 APK 种类的本地化标签（internal —— AboutUpdateWidgets 的 LocalApkRow 跨文件调用）。
+ */
+@Composable
+internal fun localApkKindLabel(kind: LocalApkKind): String = when (kind) {
+    LocalApkKind.PATCHED -> stringResource(R.string.about_update_local_kind_patched)
+    LocalApkKind.FULL_ARM64 -> stringResource(R.string.about_update_local_kind_full_arm64)
+    LocalApkKind.FULL_UNIVERSAL -> stringResource(R.string.about_update_local_kind_full_universal)
+    LocalApkKind.UNKNOWN -> stringResource(R.string.about_update_local_kind_unknown)
 }

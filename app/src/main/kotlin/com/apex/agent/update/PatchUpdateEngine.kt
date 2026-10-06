@@ -341,8 +341,15 @@ class PatchUpdateEngine(
     }
 
     /**
-     * 清理旧中间产物：链式合成临时件 / 非目标版本合成包 / **链外**旧补丁
-     * （当前链内的 .vcdiff 保留 —— 断点续传资产，成功后由流水线尾部回收）。
+     * 清理旧中间产物：链式合成临时件 / **链外**旧补丁。
+     *
+     * v1.4.8 持久化修复：**不再删 -patched.apk**（用户辛苦合成的产物）。旧逻辑
+     * 开工时删所有 `ApexAgent-v*-patched.apk`，导致用户上次合成的 APK 在启动
+     * 新一轮增量时被清 —— 用户想重装只能去 MT 管理器翻。现保留所有合成包，
+     * 由关于页「本地更新包」常驻区展示 + 用户手动删。空间不足时空间预检会
+     * 提前劝导全量（不会因保留合成包而失败）。
+     *
+     * 当前链内的 .vcdiff 保留 —— 断点续传资产，成功后由流水线尾部回收。
      */
     private fun cleanStaleIntermediates(chain: PatchIndex.Chain) {
         val chainFiles = chain.steps.map { it.url.substringAfterLast('/') }.toHashSet()
@@ -350,7 +357,6 @@ class PatchUpdateEngine(
         for (file in files) {
             val name = file.name
             val stale = name.startsWith("ApexAgent-chain-step") ||
-                (name.startsWith("ApexAgent-v") && name.endsWith("-patched.apk")) ||
                 (name.endsWith(".vcdiff") && name !in chainFiles)
             if (stale) runCatching { file.delete() }
         }

@@ -619,6 +619,15 @@
     <string name="about_update_hot_fail_unpack">热更包损坏</string>
     <string name="about_update_hot_fail_apply">应用失败</string>
     <string name="about_update_hot_applied_note">数据层已热更至 v%1$s（无需重装）</string>
+    <!-- v1.4.8 本地更新包常驻区 -->
+    <string name="about_update_local_inventory_title">本地更新包</string>
+    <string name="about_update_local_inventory_hint">Download/ApexAgent 目录下已合成/下载的 APK —— 随时可安装或删除，无需 MT 管理器</string>
+    <string name="about_update_local_kind_patched">增量合成</string>
+    <string name="about_update_local_kind_full_arm64">全量 · arm64</string>
+    <string name="about_update_local_kind_full_universal">全量 · universal</string>
+    <string name="about_update_local_kind_unknown">安装包</string>
+    <string name="about_update_local_install">安装</string>
+    <string name="about_update_local_delete">删除</string>
     <string name="about_feature_agent_title">Agent 对话</string>
     <string name="about_feature_agent_desc">全能 AI 助手：多档思考、工具调用与技能生态</string>
     <string name="about_feature_coding_title">Coding 模式</string>

@@ -171,3 +171,61 @@ python3 scripts/test_check_commit_messages.py   # 范围解析回归
 - **门禁不能误报到没法用。** 宁可少查一项，也别让维护者养成忽略红灯的习惯。
 - 合并冲突消解 `run:` / `with:` / `env:` 等 YAML 字面块时，**逐行核对行首缩进** —— 丢空格是
   这类块最常见的手滑，且失败形态是「静默」而非「报错」。
+
+---
+
+## 6. 附录：PR #328 过渡修复的取证记录与合并消解（2026-10-06 补）
+
+> #329 提出后、合并前，仓库先行落地了 #328（`fix/guard-rails-yaml-recovery`）作为
+> 过渡修复。两案并存导致 #329 与 main 冲突，本节记录 #328 的独有取证与两案的
+> 合并消解结论，供后来者对照。
+
+### 6.1 误伤阶段的完整运行记录（来自 #328 取证）
+
+| 运行 ID | 时间 (UTC) | 分支 | 失败 job | 实际原因 |
+|---|---|---|---|---|
+| `37262432150` | 04:11 | `fix/comprehensive-reliability-sweep` | Commit Message Convention | main 历史提交被圈入 |
+| `37268919124` | 05:41 | `fix/coding-toolname-400-resilience` | 同上 | 同上 |
+| `37268977717` | 05:42 | `feat/agent-reply-cloudy-glass` | 同上 | 同上 |
+| `37268982282` | 05:42 | `feat/expert-brand-icons-drawer-templates` | 同上 | 同上 |
+| `37284509508` | 08:34 | **main** | 同上 | 同上 |
+| `37286167686` | 08:50 | `feat/agent-reply-cloudy-glass` | 同上 | 同上 |
+| `37286172536` | 08:50 | `feat/expert-brand-icons-drawer-templates` | 同上 | 同上 |
+| `37286175496` | 08:50 | `fix/coding-toolname-400-resilience` | 同上 | 同上 |
+| `37286178709` | 08:50 | `fix/issue-sweep-2-about-polish` | 同上 | 同上 |
+| `37291332108` | 09:38 | `fix/terminal-engine-lifecycle-snapshot-parity` | 同上 | 同上 |
+
+瘫痪阶段：`37308294288`（12:15，PR #325 分支）、`37309631600`（12:27，**main**，
+`5fe7cca9` 合并后）—— run 摘要只留一句 "likely failed because of a workflow file
+issue"，四联检查静默停摆。
+
+### 6.2 两案对比与消解决定
+
+| 维度 | #328（过渡） | #329（本 PR，最终采纳） |
+|---|---|---|
+| YAML 自检位置 | `guard-rails.yml` 内新增 `workflow-yaml-selfcheck` job | 独立 `quality-gate.yml` + `scripts/check_workflow_yaml.py` |
+| 能否守住 guard-rails.yml 自身 | ❌ **结构性不能** —— GitHub 拒绝的是整个文件，自检随文件一起消失（本报告 §3.1） | ✅ 独立文件互为守卫 |
+| `379c1bbd` 处理 | SHA 豁免名单（兜底直跑路径） | 范围语义修正后所有正常路径天然不可见，**不引入豁免名单**（§3.4） |
+| 范围解析 | 保留 workflow shell 内（含 merge-base 回退 + `--first-parent`） | 全部下沉 `check_commit_messages.py`，`--event/--base/--ref/--before/--target/--upstream` 显式参数 + 10 拓扑回归 |
+| 每次触发 job 数 | 5 个（含内联自检） | 4 个（自检移走，见下） |
+
+**合并消解**：
+- 保留 #328 的缩进回补（两案等价，#329 侧一致）；
+- 撤销 #328 的 `workflow-yaml-selfcheck` 内联 job —— 与 quality-gate.yml 的独立
+  门禁重复触发，纯冗余消费（每次 push/PR 少跑一个 job），且它守不住自己所在的
+  文件，属于「结构性无效 + 冗余」双重问题；
+- 撤销 #328 的豁免名单 —— 本 PR 的范围语义（分支 push 用 merge-base、main 合并
+  用 `P1..P2` 落地语义）使 `379c1bbd` 在全部正常路径不可见（§3.4 论证：豁免是
+  掩盖而非修复）；
+- 采纳 #329 的脚本化范围解析与回归用例（本地 `test_check_commit_messages.py`
+  10/10 通过）。
+
+### 6.3 触发去重（随本合并一并落地）
+
+事故排查中发现：三个常驻 workflow（`ci` / `guard-rails` / `quality-gate`）的
+`push` 触发分支含 `feat/**, refactor/**, fix/**`，而 PR 分支推送同时命中
+`push` 与 `pull_request` 两类事件（并发键 `refs/heads/*` 与 `refs/pull/*/merge`
+不同、互不取消）—— **每次 PR 更新全部 workflow 双倍运行**（近 60 次运行中 16 组
+重复）。修复：`push` 只保留 `main`（合并落地终验），PR 分支由 `pull_request`
+事件在 merge ref 上覆盖（语义更准）。无 PR 的裸分支推送不再触发 CI —— 本仓库
+所有变更均走 PR 流程，无覆盖损失。

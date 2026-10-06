@@ -1,0 +1,326 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# patch-backfill.yml — 增量补丁补洞工作流（存量断链修复 / 窗口加深）
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# 为什么需要它：release.yml 只在**发新版时**为当时的基底窗口出补丁 —— 历史
+# 发布上留下的补丁洞（基底窗口曾只有 3、Releases API 顺序异常导致相邻版
+# 被跳过、rootfs 大改触发 60% 体积守卫丢弃）会**永久留在索引里**：洞的
+# 下游版本出边为零 → 该版本用户解析不出补丁链 → 只能回退 300~900MB 全量。
+#
+# 本工作流对指定 release（默认最新版）**就地补齐**缺失的基底补丁：
+#   • 基底选取与 release.yml 同源：语义版本降序（sort -rV）窗口，绝不
+#     信任 Releases API 返回顺序（历史教训：v1.4.7.10 曾被 API 排到
+#     第 7 位，v1.4.7.11 发布时窗口 {9,8,7} 跳过它 → 该版本断链）；
+#   • 幂等：patches.json 已有 (variant, fromTag, toTag) 边且资产在
+#     Release 上存在 → 跳过；只补缺失的；
+#   • 同源约束：60% 体积守卫与 release.yml 一致（补丁 > 60% 新包 =
+#     增量无意义，不出）；xdelta3 -S lzma 同参数；
+#   • 产物直接上传到目标 Release 资产 + patches.json 累积更新提交到
+#     发布仓库 main（过 validate-manifests 门禁）。
+#
+# 触发：workflow_dispatch（手动）。公开仓库 Actions 分钟免费 —— 一次性
+# 修复存量断链（v1.4.4.7 / v1.4.7.10 等版本用户）无需发新版，这些版本的
+# 客户端（v1.4.5+ 已内置补丁链解析）下次检查更新即自动拿到直达补丁。
+#
+# 与 release.yml 的分工：
+#   release.yml        —— 新版本发布时出补丁（前向覆盖）
+#   patch-backfill.yml —— 历史版本补洞（存量修复），不动 version.json
+# ═════════════════════════════════════════════════════════════════════════════
+name: Patch Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: '目标 tag（留空 = 最新 release）'
+        required: false
+        default: ''
+      bases:
+        description: '补齐的基底窗口大小（语义序前 N 个版本）'
+        required: false
+        default: '10'
+      force:
+        description: '强制重生成（即使索引已有该边）'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # 与发布流水线互斥：backfill 上传资产 + 提交 patches.json，
+  # 与 release.yml 并发会互相踩（资产覆盖 / 索引互相覆盖）
+  group: release-pipeline
+  cancel-in-progress: false
+
+env:
+  RELEASE_REPO: AceGuru-mjh/Android-Guru-Agent-Release
+  DEV_REPO: AceGuru-mjh/Android-Guru-Agent
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    name: Backfill patches → ${{ inputs.target_tag || 'latest' }}
+    runs-on: ubuntu-latest
+    # 10 基底 × 双变体的历史 APK 下载 + xdelta3：公开仓库分钟免费，充裕优先
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Verify release credentials (fail fast)
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_REPO_TOKEN secret 未配置（Settings → Secrets and variables → Actions）"
+            exit 1
+          fi
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token $RELEASE_TOKEN" \
+            "https://api.github.com/repos/${RELEASE_REPO}")
+          if [ "$CODE" != "200" ]; then
+            echo "::error::TOKEN 无法访问 ${RELEASE_REPO}（HTTP $CODE）"
+            exit 1
+          fi
+          echo "✅ RELEASE_REPO_TOKEN 可访问发布仓库 ${RELEASE_REPO}"
+
+      - name: Resolve target tag
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          INPUT_TAG: ${{ inputs.target_tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+            gh api "repos/${RELEASE_REPO}/releases/tags/${TAG}" >/dev/null 2>&1 \
+              || { echo "::error::${TAG} 在 ${RELEASE_REPO} 上不存在"; exit 1; }
+          else
+            TAG=$(gh api "repos/${RELEASE_REPO}/releases/latest" --jq .tag_name)
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "🎯 目标 release：${TAG}"
+
+      - name: Download target APKs
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          for VARIANT in arm64 universal; do
+            gh release download "$TAG" --repo "$RELEASE_REPO" \
+              --pattern "*-${VARIANT}-*.apk" --dir target/ --clobber >/dev/null 2>&1 || true
+            APK=$(ls target/*-${VARIANT}-*.apk 2>/dev/null | head -1 || true)
+            [ -n "$APK" ] || { echo "::error::${TAG} 缺 ${VARIANT} 资产 —— 无法作为补丁目标"; exit 1; }
+            echo "✅ ${VARIANT}: $(basename "$APK")"
+          done
+
+      - name: Fetch existing patch index
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if EXISTING=$(gh api "repos/${RELEASE_REPO}/contents/patches.json?ref=main" \
+              --jq '.content' 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null); then
+            echo "$EXISTING" > patches.json
+            echo "📥 现有索引：$(echo "$EXISTING" | jq '.patches | length') 条"
+          else
+            echo '{"patches": []}' > patches.json
+            echo "🆕 无现有 patches.json —— 从空索引开始"
+          fi
+
+      - name: Generate missing patches (semantic base window)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+          BASES: ${{ inputs.bases || '10' }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq xdelta3 >/dev/null
+          # ── 基底窗口：语义版本降序（与修复后的 release.yml 同源逻辑）──
+          # 绝不信 Releases API 返回顺序 —— 它按 release 对象创建时间排，
+          # 实测会把 v1.4.7.10 排到 v1.4.7.5 之后（本次断链事故根因）。
+          list_base_tags() {
+            gh api "repos/$1/releases?per_page=100" --jq '.[].tag_name' 2>/dev/null \
+              | grep -E '^v[0-9]+(\.[0-9]+)+$' | grep -v "^${TAG}$" \
+              | sort -rV | head -"$BASES" || true
+          }
+          BASES_LIST=$(list_base_tags "$RELEASE_REPO")
+          if [ -z "$BASES_LIST" ]; then
+            echo "⚠️ 未找到历史 release —— 无可补基底"
+            exit 0
+          fi
+          echo "🔗 基底窗口（${TAG} 的语义序前 $(echo "$BASES_LIST" | wc -l) 个）："
+          echo "$BASES_LIST" | sed 's/^/    - /'
+          mkdir -p prev dist meta
+          : > meta/backfill_meta.tsv
+          for BASE in $BASES_LIST; do
+            for VARIANT in arm64 universal; do
+              TARGET_APK=$(ls target/*-${VARIANT}-*.apk | head -1)
+              PATCH_NAME="patch_${VARIANT}_${BASE}_to_${TAG}.vcdiff"
+              # 幂等守卫：索引已有该边且未强制 → 跳过
+              HAS_EDGE=$(jq -r --arg v "$VARIANT" --arg f "$BASE" --arg t "$TAG" \
+                '([.patches[] | select(.variant==$v and .fromTag==$f and .toTag==$t)] | length) > 0' \
+                patches.json)
+              if [ "$HAS_EDGE" = "true" ] && [ "$FORCE" != "true" ]; then
+                echo "⏭️  ${BASE} → ${TAG}（${VARIANT}）索引已有 —— 跳过"
+                continue
+              fi
+              # 下载基底包 → 出补丁 → 立即删基底（磁盘峰值控制）
+              rm -f prev/*.apk
+              gh release download "$BASE" --repo "$RELEASE_REPO" \
+                --pattern "*-${VARIANT}-*.apk" --dir prev/ --clobber >/dev/null 2>&1 || true
+              BASE_APK=$(ls prev/*-${VARIANT}-*.apk 2>/dev/null | head -1 || true)
+              if [ -z "$BASE_APK" ]; then
+                echo "⚠️ ${BASE} 无 ${VARIANT} 资产 —— 跳过该补丁"
+                continue
+              fi
+              echo "⚙️  xdelta3: ${BASE_APK} + ${TARGET_APK} → ${PATCH_NAME}"
+              if ! xdelta3 -e -f -S lzma -s "$BASE_APK" "$TARGET_APK" "dist/${PATCH_NAME}"; then
+                echo "⚠️ -S lzma 不可用（${VARIANT}）—— 回退无二级压缩"
+                if ! xdelta3 -e -f -s "$BASE_APK" "$TARGET_APK" "dist/${PATCH_NAME}"; then
+                  echo "⚠️ xdelta3 失败（${VARIANT}）—— 跳过该补丁"
+                  rm -f "dist/${PATCH_NAME}"
+                  continue
+                fi
+              fi
+              # 体积守卫（与 release.yml 同阈值）：> 60% 新包即无意义
+              NEW_SIZE=$(stat -c%s "$TARGET_APK")
+              PATCH_SIZE=$(stat -c%s "dist/${PATCH_NAME}")
+              if (( PATCH_SIZE * 10 > NEW_SIZE * 6 )); then
+                echo "🗑️  补丁 ${PATCH_SIZE}B > 60% 新包 ${NEW_SIZE}B —— 丢弃（增量无意义）"
+                rm -f "dist/${PATCH_NAME}"
+                continue
+              fi
+              echo -n "${VARIANT}|${BASE}|${PATCH_NAME}" >> meta/backfill_meta.tsv
+              echo "" >> meta/backfill_meta.tsv
+              echo "✅ ${PATCH_NAME} — $((PATCH_SIZE / 1024 / 1024)) MB（$((PATCH_SIZE * 100 / NEW_SIZE))% of ${VARIANT}）"
+            done
+          done
+          rm -rf prev
+          if [ -s meta/backfill_meta.tsv ]; then
+            {
+              echo "### 🔧 补洞结果（→ ${TAG}）"
+              echo ""
+              while IFS='|' read -r VARIANT FROM NAME; do
+                echo "- \`${NAME}\` — $(( $(stat -c%s "dist/${NAME}") / 1024 / 1024 )) MB"
+              done < meta/backfill_meta.tsv
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ℹ️ 窗口内无缺失补丁 —— 索引已完整"
+          fi
+
+      - name: Upload patches to target release
+        if: hashFiles('dist/*.vcdiff') != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # --clobber：强制重生成模式下覆盖同名旧资产
+          gh release upload "$TAG" dist/*.vcdiff --repo "$RELEASE_REPO" --clobber
+          echo "✅ 已上传 $(ls dist/*.vcdiff | wc -l) 个补丁到 ${TAG}"
+
+      - name: Update patches.json (cumulative index)
+        if: hashFiles('dist/*.vcdiff') != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import datetime, hashlib, json, os
+
+          tag, repo = os.environ["TAG"], os.environ["RELEASE_REPO"]
+          index = json.load(open("patches.json", encoding="utf-8"))
+          patches = index.get("patches", [])
+
+          base = f"https://github.com/{repo}/releases/download/{tag}"
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          added = 0
+          with open("meta/backfill_meta.tsv") as f:
+              for line in f:
+                  line = line.strip()
+                  if not line:
+                      continue
+                  variant, from_tag, fname = line.split("|")
+                  # 双重幂等：同 (variant, fromTag, toTag) 只留最新一条
+                  patches = [p for p in patches if not (
+                      p.get("variant") == variant and
+                      p.get("fromTag") == from_tag and
+                      p.get("toTag") == tag
+                  )]
+                  patches.append({
+                      "variant": variant,
+                      "fromTag": from_tag,
+                      "toTag": tag,
+                      "url": f"{base}/{fname}",
+                      "sizeBytes": os.path.getsize(f"dist/{fname}"),
+                      "sha256": sha256(f"dist/{fname}"),
+                  })
+                  added += 1
+
+          # latestTag 保持与 version.json.tag 一致（validate-manifests 门禁）：
+          # backfill 只对已有 release 补洞，不引入新版本号
+          index = {
+              "generatedAt": datetime.datetime.now(datetime.timezone.utc)
+                  .strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "latestTag": index.get("latestTag") or tag,
+              "patches": patches,
+          }
+          with open("dist/patches.json", "w", encoding="utf-8") as f:
+              json.dump(index, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          print(f"📦 patches.json：共 {len(patches)} 条（本次补入 {added}）")
+          PYEOF
+
+      - name: Commit patches.json to release repo main
+        if: hashFiles('dist/*.vcdiff') != ''
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 \
+            "https://x-access-token:${RELEASE_TOKEN}@github.com/${RELEASE_REPO}.git" relrepo
+          cp dist/patches.json relrepo/patches.json
+          cd relrepo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add patches.json
+          # 空提交守卫：无变更（重复运行且无新增）不推
+          if git diff --cached --quiet; then
+            echo "ℹ️ patches.json 无变更 —— 无需提交"
+          else
+            git commit -m "chore: patch backfill → ${TAG}（语义窗口补洞）"
+            git push origin main
+            echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/patches.json 已更新"
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          {
+            echo "### 🩹 补洞工作流"
+            echo ""
+            echo "- 目标: **${TAG}**"
+            if [ -s meta/backfill_meta.tsv ]; then
+              echo "- 补入补丁: **$(wc -l < meta/backfill_meta.tsv) 个**（已上传 Release + 更新索引）"
+              echo "- 受益版本: 窗口内所有此前断链的版本（检查更新即自动直达）"
+            else
+              echo "- 结果: 窗口内无缺失补丁（索引已完整）"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

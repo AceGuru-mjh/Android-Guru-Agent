@@ -209,8 +209,9 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.skip != 'true'
     runs-on: ubuntu-latest
-    # 双构建（universal + arm64 各一次 assembleRelease）+ 补丁生成，比 apk.yml 更宽裕
-    timeout-minutes: 90
+    # 双构建 + 10 基底多补丁生成（每基底需下载历史 APK + xdelta3），
+    # 公开仓库 Actions 分钟免费 —— 充裕超时优先于失败重跑
+    timeout-minutes: 150
     permissions:
       # 本仓库 Release 镜像发布需要写权限（默认 GITHUB_TOKEN）；
       # 跨仓库（发布仓库）写操作仍全部走 PAT（RELEASE_REPO_TOKEN）
@@ -243,7 +244,6 @@ jobs:
       - name: Configure pre-installed Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          # AGP 8.7.3 默认需要 NDK 27.0.12077973，runner 自带 27.3.x
           # AGP 8.7.3 默认需要 NDK 27.0.12077973。sdkmanager 偶发半截安装
           #（目录在、source.properties 缺失 → CXX1101 硬失败，2026-10-05 run
           # 37327280591 实测：pull_request run 翻车而同 SHA 的 push run 通过，
@@ -251,6 +251,7 @@ jobs:
           #   1) 完整性校验先行：已完好则零开销跳过；
           #   2) sdkmanager 安装后校验，坏了立即清掉重试；
           #   3) 仍失败 → dl.google.com 官方 zip 直下兜底（免许可/免鉴权/稳定）。
+          #   绝不静默留下损坏目录 —— 那比没有更糟（AGP 按版本号命中坏目录）。
           NDK_VER="27.0.12077973"
           NDK_DIR="$ANDROID_HOME/ndk/$NDK_VER"
           if [ -f "$NDK_DIR/source.properties" ]; then
@@ -515,27 +516,33 @@ jobs:
             echo "- 签名冲突用户（本地/分叉构建）可持续乘此通道追平数据层，无需重装"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: "Generate xdelta3 patches (multi-base: recent releases → this release)"
+      - name: "Generate xdelta3 patches (multi-base: semantic window → this release)"
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq xdelta3 >/dev/null
-          # ── 多基底补丁（v1.4.5：跨任意版本一步直达）────────────────────────
-          # 旧方案只对「上一版」出补丁 —— 用户隔两个版本就要走 N 段链式合成
-          #（下载量 ×N、合成耗时 ×N）。本方案对最近 PATCH_BASES 个版本各出
-          # 一份单跳补丁：窗口内任意版本 → 本版一步到位（rootfs 不变时补丁
-          # 体积与相邻版相当，~16MB 级）。窗口外的老版本仍可用 patches.json
-          # 的链式路径（多基底边让链也大幅缩短），再老就回退全量包。
-          # 正则兼容自动构建序号版（v1.4.2.1）—— 连续合并 PR 未改版本号时，
-          # 基底可能是 4 段 tag。
-          PATCH_BASES="${PATCH_BASES:-3}"
+          # ── 多基底补丁（v1.4.8：跨十个版本内一步直达）────────────────────
+          # 对最近 PATCH_BASES 个版本各出一份单跳补丁：窗口内任意版本 →
+          # 本版一步到位（rootfs 不变时补丁体积与相邻版相当，~16MB 级）。
+          # 窗口外的老版本仍可用 patches.json 的链式路径，再老就回退全量包。
+          #
+          # ⚠️ 历史教训（本次修复的根因）：基底选取曾依赖 Releases API 的
+          # 返回顺序，而该顺序不保证语义版本序 —— 实测 v1.4.7.10 出现在
+          # 列表第 7 位，导致 v1.4.7.11 发布时基底窗口（当时取前 3）跳过
+          # 了相邻版本 v1.4.7.10，其出边为零 → 该版本用户永久断链（只能
+          # 全量）。现在改为拉全量后 sort -rV 语义降序，相邻版本永远在窗口
+          # 首位；正则兼容任意多段 tag（自动构建序号版 v1.4.2.1 / 五段
+          # 极端情形），公开仓库 Actions 分钟免费 —— 窗口从 3 扩到 10。
+          PATCH_BASES="${PATCH_BASES:-10}"
           list_base_tags() {
             local repo="$1"
-            gh api "repos/$repo/releases?per_page=60" --jq '.[].tag_name' 2>/dev/null \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' | grep -v "^${TAG}$" \
-              | head -"$PATCH_BASES" || true
+            # 语义版本降序（sort -rV）：v1.4.7.10 > v1.4.7.9 > v1.4.7 ——
+            # 绝不信 API 返回顺序（它按 release 对象创建时间而非版本号排）
+            gh api "repos/$repo/releases?per_page=100" --jq '.[].tag_name' 2>/dev/null \
+              | grep -E '^v[0-9]+(\.[0-9]+)+$' | grep -v "^${TAG}$" \
+              | sort -rV | head -"$PATCH_BASES" || true
           }
           BASES=$(list_base_tags "$RELEASE_REPO")
           BASE_SRC="${RELEASE_REPO}"

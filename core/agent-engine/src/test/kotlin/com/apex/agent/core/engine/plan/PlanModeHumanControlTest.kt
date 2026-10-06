@@ -24,8 +24,9 @@ import org.junit.Test
  * 旧两参签名（legacy PlanDecision）→ 全量执行。
  *
  * 时序要点（同 LlmContextTagIntegrationTest）：引擎**先 emit
- * PlanAwaitingConfirmation 再创建 deferred**，事件驱动提交必须让出一拍，
- * 否则 complete 落空 → awaitPlanConfirmationDecision 挂到 5 分钟超时。
+ * PlanAwaitingConfirmation 再创建 deferred**，事件驱动提交必须等
+ * deferred 注册（轮询 internal 字段），否则 complete 落空 →
+ * awaitPlanConfirmationDecision 挂到 5 分钟超时。
  */
 class PlanModeHumanControlTest {
 
@@ -36,6 +37,23 @@ class PlanModeHumanControlTest {
             {"index":2,"description":"s2"}],
          "estimated_tool_calls":3,"risk_level":"low","reasoning":"r"}
     """.trimIndent()
+
+    /**
+     * 等 deferred 注册后再提交（替代盲等 150ms）——同模块可见 internal 字段。
+     * CI 高负载下协程被饿超过固定延迟时，旧实现会在 deferred 创建前提交 →
+     * 确认被丢弃 → 5 分钟挂起（与 LlmContextTagIntegrationTest 同源竞态）。
+     */
+    private suspend fun awaitPlanConfirmationReady(
+        engine: ApexAgentEngine,
+        timeoutMs: Long = 10_000
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (engine.planConfirmationDeferred == null &&
+            System.currentTimeMillis() < deadline
+        ) {
+            delay(20)
+        }
+    }
 
     private fun awaitCondition(timeoutMs: Long = 15_000, cond: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -72,9 +90,9 @@ class PlanModeHumanControlTest {
             engine.execute(UserInput.text("计划任务")).collect { event ->
                 events.add(event)
                 if (event is AgentEvent.PlanAwaitingConfirmation) {
-                    // 让出一拍保证 deferred 已注册，再提交「启用 s0/s2、声明顺序」
+                    // 等 deferred 注册后提交「启用 s0/s2、声明顺序」
                     launch(Dispatchers.Default) {
-                        delay(150)
+                        awaitPlanConfirmationReady(engine)
                         engine.submitPlanConfirmation(true, enabledSteps = listOf(0, 2), order = null)
                     }
                 }
@@ -126,7 +144,7 @@ class PlanModeHumanControlTest {
                 events.add(event)
                 if (event is AgentEvent.PlanAwaitingConfirmation) {
                     launch(Dispatchers.Default) {
-                        delay(150)
+                        awaitPlanConfirmationReady(engine)
                         engine.submitPlanConfirmation(true) // 旧签名（ConfirmationSink 兼容路径）
                     }
                 }
@@ -162,7 +180,7 @@ class PlanModeHumanControlTest {
                 events.add(event)
                 if (event is AgentEvent.PlanAwaitingConfirmation) {
                     launch(Dispatchers.Default) {
-                        delay(150)
+                        awaitPlanConfirmationReady(engine)
                         engine.submitPlanConfirmation(false, enabledSteps = listOf(0), order = null)
                     }
                 }

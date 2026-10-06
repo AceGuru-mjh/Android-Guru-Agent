@@ -1,7 +1,6 @@
 package com.apex.agent.tools
 
 import android.Manifest
-import android.app.AlarmClock
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ContentResolver
@@ -10,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.telephony.SmsManager

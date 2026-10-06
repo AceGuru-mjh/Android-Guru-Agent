@@ -118,7 +118,8 @@ internal fun AgentMessageItem(
                 // 脚本内部写出的 .html 也能挂预览钮
                 HtmlArtifactDetector.extractHtmlPath(
                     message.toolName, message.args,
-                    message.output.takeIf { message.success }
+                    // success 为 Boolean?（进行中调用为 null）——takeIf 谓词需非空 Boolean
+                    message.output.takeIf { message.success == true }
                 )?.let { vm.resolveHtmlPreviewPath(it) }
             }
             ToolCallCard(

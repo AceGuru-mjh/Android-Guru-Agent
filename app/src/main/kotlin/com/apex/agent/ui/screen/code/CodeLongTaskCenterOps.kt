@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.code
 
+import android.content.Context
 import android.widget.Toast
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.core.code.longtask.LongTaskCopyOptions
@@ -198,4 +199,28 @@ fun CodeViewModel.startFromTemplate(key: String) {
     _uiState.update { it.copy(todos = codeTodoTool.snapshot()) }
     closeLongTaskCenter()
     sendMessage(record.goal)
+}
+
+/**
+ * 导出长任务记录（#184：JSON + Markdown 双格式落盘 → 系统分享面板）。
+ *
+ * CodeScreen 的 onExport 回调消费；导出/落盘 IO 在 Dispatchers.IO，
+ * 分享面板与失败 Toast 回主线程（viewModelScope 默认 Main）。
+ * 落盘失败返回 null → Toast 兜底（LongTaskExporter 内部已留痕）。
+ */
+fun CodeViewModel.exportLongTask(context: Context, id: String) {
+    viewModelScope.launch {
+        val record = withContext(Dispatchers.IO) { longTaskStore.get(id) }
+        if (record == null) {
+            showError("任务记录不存在")
+            return@launch
+        }
+        val result = withContext(Dispatchers.IO) { LongTaskExporter.export(context, record) }
+        when {
+            result == null ->
+                Toast.makeText(context, "导出失败，请重试", Toast.LENGTH_SHORT).show()
+            !LongTaskExporter.share(context, result) ->
+                Toast.makeText(context, "分享面板拉起失败", Toast.LENGTH_SHORT).show()
+        }
+    }
 }

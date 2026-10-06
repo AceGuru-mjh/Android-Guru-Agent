@@ -498,7 +498,7 @@ class AlarmSetTool(
  * 或上传到外部服务。
  *
  * 参数：
- * - mime_type (optional, default "*/*"): 文件类型过滤
+ * - mime_type (optional, default 所有类型(通配)): 文件类型过滤
  * - allow_multiple (optional, default false): 允许多选
  *
  * 风险 MEDIUM（用户主动选文件，但启动 Activity 涉及 UI 交互）。
@@ -517,7 +517,7 @@ class FilePickTool(
         http_request (multipart upload) or copied to workspace via shell.
 
         Parameters:
-        - mime_type (optional, default "*/*"): MIME filter, e.g. "image/*" or "application/pdf"
+        - mime_type (optional, default 所有类型(通配)): MIME filter, e.g. "image/*" or "application/pdf"
         - allow_multiple (optional, default false): allow multi-select
 
         Examples:

@@ -65,7 +65,11 @@ class AgentSetupHost(
 
     override suspend fun apply(patch: AgentSettingsPatch): Boolean = withContext(Dispatchers.IO) {
         try {
-            settingsRepository.updateAgentSettings { current ->
+            // 修复：updateAgentSettings 的形参是扩展接收者 lambda
+            //（AgentSettings.() -> AgentSettings）—— 先快照再以纯 copy 返回，
+            // 与既有调用点（SettingsScreen 等）同一模式
+            val current = settingsRepository.agentSettings.value
+            settingsRepository.updateAgentSettings {
                 current.copy(
                     defaultMode = patch.defaultMode ?: current.defaultMode,
                     thinkLevel = patch.thinkLevel ?: current.thinkLevel,

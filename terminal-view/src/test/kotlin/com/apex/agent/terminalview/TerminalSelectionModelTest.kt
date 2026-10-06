@@ -1,6 +1,8 @@
 package com.apex.agent.terminalview
 
 import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
+import com.apex.agent.terminalemulator.RenderRuns
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -16,8 +18,8 @@ class TerminalSelectionModelTest {
 
     private val sel = TerminalSelectionModel()
 
-    private fun cells(vararg texts: String, wide: Boolean = false): List<RenderCell> =
-        texts.map { RenderCell(it, 0L, 0L, if (wide) RenderCell.FLAG_WIDE else 0) }
+    private fun cells(vararg texts: String, wide: Boolean = false): List<RenderRun> =
+        RenderRuns.deriveRow(texts.map { RenderCell(it, 0L, 0L, if (wide) RenderCell.FLAG_WIDE else 0) })
 
     // ─── 起选 / 规范化 ───
 
@@ -113,10 +115,12 @@ class TerminalSelectionModelTest {
     fun `wide char is carried whole when selection starts mid cell`() {
         // 列 1 是宽字符「中」的起始列（占 1..2），从列 2（字符中间）起选也整字带出；
         // 区间 [2,4) 再带出其后的窄字符 b
-        val row = listOf(
-            RenderCell("a", 0L, 0L, 0),
-            RenderCell("中", 0L, 0L, RenderCell.FLAG_WIDE),
-            RenderCell("b", 0L, 0L, 0)
+        val row = RenderRuns.deriveRow(
+            listOf(
+                RenderCell("a", 0L, 0L, 0),
+                RenderCell("中", 0L, 0L, RenderCell.FLAG_WIDE),
+                RenderCell("b", 0L, 0L, 0)
+            )
         )
         sel.start(0, 2)
         sel.extend(0, 4)
@@ -125,10 +129,12 @@ class TerminalSelectionModelTest {
 
     @Test
     fun `half open interval excludes column at end`() {
-        val row = listOf(
-            RenderCell("a", 0L, 0L, 0),
-            RenderCell("中", 0L, 0L, RenderCell.FLAG_WIDE),
-            RenderCell("b", 0L, 0L, 0)
+        val row = RenderRuns.deriveRow(
+            listOf(
+                RenderCell("a", 0L, 0L, 0),
+                RenderCell("中", 0L, 0L, RenderCell.FLAG_WIDE),
+                RenderCell("b", 0L, 0L, 0)
+            )
         )
         // [2,3)：只覆盖宽字符右半 → 只带出「中」
         sel.start(0, 2)

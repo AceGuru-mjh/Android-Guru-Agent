@@ -158,5 +158,17 @@ data class TerminalRenderSnapshot(
      *（真实 resize 由宿主量算后回灌 [TerminalCore.resize]）。null = 无待处理请求。
      * 消费方式：读快照（peek，不清除）或 [TerminalCore.drainResizeRequest]（消费式）。
      */
-    val requestedResize: Pair<Int, Int>? = null
+    val requestedResize: Pair<Int, Int>? = null,
+    /**
+     * T95（渲染 fastpath）：[lines] 的 run 投影 —— 风格一致的连续 cell 段
+     * （合并键 fg/bg/flags/link，语义见 [RenderRun]）。null = 生产方未提供
+     * （消费方经 [RenderRuns.deriveRows] 懒派生兜底）。
+     *
+     * native 引擎：C++ 折叠直出（[runScrollback] 同），**惰性逐行解码** ——
+     * [lines] 为空列表，UI 直接消费本字段；JVM 单测/CI 回退引擎（TerminalCore）
+     * 与 [lines] 同时填充（derive 派生，双投影逐位一致）。
+     */
+    val runLines: List<List<RenderRun>>? = null,
+    /** [scrollback] 的 run 投影（语义/生产方契约同 [runLines]）。 */
+    val runScrollback: List<List<RenderRun>>? = null
 )

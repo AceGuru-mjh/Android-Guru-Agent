@@ -15,6 +15,16 @@
 | `src/main/cpp/vt-native/CMakeLists.txt` | `CMakeLists.txt` (library build script) |
 | `src/main/kotlin/.../NativeVtCore.kt` | `kotlin/.../NativeVtCore.kt` (adapted: real imports, no `@file:JvmName`, no finalize) |
 
+**Host-maintained additions (NOT vendored — rule-2 territory, like the Kotlin glue):**
+
+| Path | Role |
+|---|---|
+| `CMakeLists.txt` (module level) | AGP entry + `target_sources(vt_native …)` wiring below |
+| `src/main/cpp/fastpath/` | T95 render fast path: run-collapse of the engine's public `FlatSnapshot` (one flat int array per JNI hand-off) + its JNI binding, compiled into the SAME `libvt_native.so` |
+
+These consume only the upstream **public API** (`apex/vt/vt_engine.h`) and never
+modify the vendored tree — the byte-identical rule is preserved by construction.
+
 **Not** vendored: `tests/` (370 host tests: 129 v0.1 parity + 241 v0.2 foundation; fuzz + benchmark) and
 `.github/workflows/` — they run in the upstream repo's CI on every push.
 

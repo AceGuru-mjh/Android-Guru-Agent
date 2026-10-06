@@ -6,7 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.Shader
-import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
 import kotlin.math.abs
 
@@ -144,8 +144,8 @@ class TerminalCanvasRenderer {
 
     /** 一帧的完整输入（View 组装；全部只读）。 */
     data class RenderFrame(
-        /** 合并网格行（scrollback+屏，快照代内不变）。 */
-        val rows: List<List<RenderCell>>,
+        /** 合并网格 run 行（scrollback+屏，快照代内不变；T95 run 投影直供）。 */
+        val rows: List<List<RenderRun>>,
         val snapshot: TerminalRenderSnapshot,
         val grid: TerminalTextGrid,
         val scroll: TerminalScrollModel,
@@ -203,9 +203,9 @@ class TerminalCanvasRenderer {
         var cursorDrawn = false
 
         for (row in range) {
-            val cells = frame.rows.getOrNull(row) ?: continue
+            val rowRuns = frame.rows.getOrNull(row) ?: continue
             val rowTop = originY + (row - firstVis) * cellH
-            val runs = runsFor(row, cells, frame)
+            val runs = runsFor(row, rowRuns, frame)
             val rowBottom = rowTop + cellH
             val rowId = rowIdBase + row
 
@@ -219,7 +219,7 @@ class TerminalCanvasRenderer {
             }
 
             // 2) 选区高亮（在文本之下 —— 文字保持原色，与旧渲染器视觉一致）
-            drawSelectionForRow(canvas, frame, row, rowId, cells, rowTop, rowBottom)
+            drawSelectionForRow(canvas, frame, row, rowId, rowRuns, rowTop, rowBottom)
 
             // 3) 文本（fake bold/skew + 列对齐校正 + 逐 run drawText）
             drawRowText(canvas, frame, runs, rowTop, cellH)
@@ -249,26 +249,11 @@ class TerminalCanvasRenderer {
         }
     }
 
-    private fun runsFor(row: Int, cells: List<RenderCell>, frame: RenderFrame): List<TerminalRowRun.CellRun> {
+    private fun runsFor(row: Int, rowRuns: List<RenderRun>, frame: RenderFrame): List<TerminalRowRun.CellRun> {
         runCache[row]?.let { return it }
-        val palette = frame.palette
-        val n = cells.size
-        val fg = IntArray(n)
-        val bg = IntArray(n)
-        val mono = frame.settings.monochrome
-        for (i in 0 until n) {
-            val c = cells[i]
-            if (mono) {
-                // 单色模式：颜色全默认，仅保留字形/下划线语义（旧渲染器 monochrome 同款）
-                fg[i] = palette.foreground
-                bg[i] = palette.background
-            } else {
-                val (f, b) = palette.resolveCell(c.fg, c.bg, c.flags)
-                fg[i] = f
-                bg[i] = b
-            }
-        }
-        val runs = TerminalRowRun.collapse(cells, fg, bg)
+        // T95：折叠已在引擎侧完成 —— 这里只做 per-run 调色板解析（run 内
+        // fg/bg/flags 恒定，与旧 per-cell 解析逐位同值）。
+        val runs = TerminalRowRun.fromRuns(rowRuns, frame.palette, frame.settings.monochrome)
         if (runCache.size < RUN_CACHE_MAX_ROWS) runCache[row] = runs
         return runs
     }
@@ -309,8 +294,8 @@ class TerminalCanvasRenderer {
         forcedColor: Int?
     ) {
         // 属性派生（fake bold/skewX —— 度量与绘制同源，T90）
-        val bold = run.flags and RenderCell.FLAG_BOLD != 0
-        val italic = run.flags and RenderCell.FLAG_ITALIC != 0
+        val bold = run.flags and RenderRun.FLAG_BOLD != 0
+        val italic = run.flags and RenderRun.FLAG_ITALIC != 0
         textPaint.typeface = normalTypeface
         textPaint.isFakeBoldText = bold
         textPaint.textSkewX = if (italic) ITALIC_SKEW else 0f
@@ -347,8 +332,8 @@ class TerminalCanvasRenderer {
         val strikeY = rowTop + (rowBottom - rowTop) * 0.5f
         val ox = frame.grid.originX
         for (run in runs) {
-            val underline = run.flags and RenderCell.FLAG_UNDERLINE != 0
-            val strike = run.flags and RenderCell.FLAG_STRIKE != 0
+            val underline = run.flags and RenderRun.FLAG_UNDERLINE != 0
+            val strike = run.flags and RenderRun.FLAG_STRIKE != 0
             val linkUnderline = run.link != 0 && frame.settings.drawLinkUnderline
             if (!underline && !strike && !linkUnderline) continue
             val x0 = ox + run.colStart * cellWidthPx
@@ -376,7 +361,7 @@ class TerminalCanvasRenderer {
         frame: RenderFrame,
         row: Int,
         rowId: Long,
-        cells: List<RenderCell>,
+        rowRuns: List<RenderRun>,
         rowTop: Float,
         rowBottom: Float
     ) {
@@ -386,7 +371,7 @@ class TerminalCanvasRenderer {
         val fromCol = if (rowId == start.rowId) start.col else 0
         val toCol = if (rowId == end.rowId) end.col else Int.MAX_VALUE
         val viewW = frame.viewWidthPx.toFloat()
-        val xRange = frame.grid.selectionXRange(cells, fromCol, toCol)
+        val xRange = frame.grid.selectionXRange(rowRuns, fromCol, toCol)
         val x0: Float
         val x1: Float
         if (xRange != null) {
@@ -394,7 +379,7 @@ class TerminalCanvasRenderer {
             x1 = xRange.second.coerceIn(0f, viewW)
         } else {
             // toCol 超出行长（整行选）→ 从 fromCol 画到行尾/视口右沿
-            x0 = frame.grid.columnX(cells, fromCol).coerceIn(0f, viewW)
+            x0 = frame.grid.columnX(rowRuns, fromCol).coerceIn(0f, viewW)
             x1 = viewW
         }
         if (x1 <= x0) return
@@ -431,9 +416,9 @@ class TerminalCanvasRenderer {
         if (frame.selectionActive) return false
         val cursorRowMerged = snap.scrollback.size + snap.cursorRow
         if (cursorRowMerged != row) return false
-        val rowCells = frame.rows.getOrNull(row) ?: return false
+        val rowRuns = frame.rows.getOrNull(row) ?: return false
         if (row < 0 || row >= frame.rows.size) return false
-        val x = frame.grid.cursorPixelX(rowCells, snap.cursorCol)
+        val x = frame.grid.cursorPixelX(rowRuns, snap.cursorCol)
         val effectiveAlpha = when {
             !frame.focused -> 0.5f              // 失焦：常亮淡显（不闪烁）
             !frame.blinkOn -> 0.25f             // 闪烁灭相位

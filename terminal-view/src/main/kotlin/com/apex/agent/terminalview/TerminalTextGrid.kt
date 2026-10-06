@@ -1,6 +1,6 @@
 package com.apex.agent.terminalview
 
-import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
 import kotlin.math.abs
 
 /**
@@ -53,17 +53,16 @@ class TerminalTextGrid(
 
     /**
      * 行内列号 → 像素 x（**视口坐标**，已含 [originX]）。宽字符（FLAG_WIDE）占
-     * 2 列 —— **以渲染列表步进**，与旧渲染器 `columnX` 同式；col 超出列表长度后
+     * 2 列 —— T95：以渲染 run（colStart/colSpan）步进；col 超出行内容后
      * 按 1 列步进（VT 列号 > 渲染列数时的兜底，防越界负偏移）。
      */
-    fun columnX(cells: List<RenderCell>, col: Int): Float {
+    fun columnX(runs: List<RenderRun>, col: Int): Float {
         var x = originX
         var i = 0
         var remaining = col
-        while (i < cells.size && remaining > 0) {
-            val wide = cells[i].flags and RenderCell.FLAG_WIDE != 0
-            val advance = if (wide) 2 else 1
-            if (remaining < advance) break // 指在宽字符中间：取其左沿
+        while (i < runs.size && remaining > 0) {
+            val advance = runs[i].colSpan
+            if (remaining < advance) break // 指 run 中间：左沿 + 余量（与旧 cell 版线性等价）
             x += cellWidthPx * advance
             remaining -= advance
             i++
@@ -74,32 +73,33 @@ class TerminalTextGrid(
 
     /**
      * 像素 x → 行内列号（**视口坐标输入**，内部减 [originX]；VT 列语义：宽字符
-     * 落点取它自己的起始列）。返回值可能 == cells 总列数（点击行尾右侧）。
+     * 落点取它自己的起始列）。返回值可能 == 行总列数（点击行尾右侧）。
      */
-    fun columnAt(cells: List<RenderCell>, x: Float): Int {
-        if (x <= originX || cells.isEmpty()) return 0
+    fun columnAt(runs: List<RenderRun>, x: Float): Int {
+        if (x <= originX || runs.isEmpty()) return 0
         var px = originX
         var i = 0
-        while (i < cells.size) {
-            val wide = cells[i].flags and RenderCell.FLAG_WIDE != 0
-            px += cellWidthPx * (if (wide) 2 else 1)
-            if (x < px) return columnOfIndex(cells, i)
+        while (i < runs.size) {
+            px += cellWidthPx * runs[i].colSpan
+            if (x < px) return runs[i].colStart
             i++
         }
         // 行尾右侧：按空列数延伸（视口列数上限）
         val beyond = ((x - px) / cellWidthPx).toInt().coerceAtLeast(0)
-        return columnOfIndex(cells, cells.size) + beyond
+        return totalSpan(runs) + beyond
     }
 
-    /** 渲染列表下标 → VT 列号（宽字符占 2 列累计）。 */
-    fun columnOfIndex(cells: List<RenderCell>, index: Int): Int {
-        var col = 0
-        var i = 0
-        while (i < index && i < cells.size) {
-            col += if (cells[i].flags and RenderCell.FLAG_WIDE != 0) 2 else 1
-            i++
-        }
-        return col
+    /** 渲染 run 下标 → VT 列号（等价旧 cell 版 columnOfIndex：前缀列数和）。 */
+    fun columnOfRunIndex(runs: List<RenderRun>, index: Int): Int {
+        if (index <= 0) return 0
+        if (index >= runs.size) return totalSpan(runs)
+        return runs[index].colStart
+    }
+
+    /** 一行占用的总 VT 列数（尾 run 右沿；空行 0）。 */
+    fun totalSpan(runs: List<RenderRun>): Int {
+        val last = runs.lastOrNull() ?: return 0
+        return last.colStart + last.colSpan
     }
 
     /** 像素 y → 行号（视口坐标输入；向下取整，clamp 到 [0, maxRow]）。 */
@@ -107,23 +107,23 @@ class TerminalTextGrid(
         ((y - originY) / cellHeightPx).toInt().coerceIn(0, maxRow.coerceAtLeast(0))
 
     /** 光标像素 x（行内 VT 列 → 宽字符步进；与旧 `CursorOverlay` 同式）。 */
-    fun cursorPixelX(cursorRowCells: List<RenderCell>, cursorCol: Int): Float =
-        columnX(cursorRowCells, cursorCol)
+    fun cursorPixelX(cursorRowRuns: List<RenderRun>, cursorCol: Int): Float =
+        columnX(cursorRowRuns, cursorCol)
 
     /**
      * 一行的选区矩形（fromCol/toCol 为 VT 列语义，左闭右开；输出视口坐标）。
      *
      * @return (x0, x1) —— x1 ≥ x0；空区间返回 null。
      */
-    fun selectionXRange(cells: List<RenderCell>, fromCol: Int, toCol: Int): Pair<Float, Float>? {
+    fun selectionXRange(runs: List<RenderRun>, fromCol: Int, toCol: Int): Pair<Float, Float>? {
         if (toCol <= fromCol) return null
-        val x0 = columnX(cells, fromCol)
-        val x1 = columnX(cells, toCol)
+        val x0 = columnX(runs, fromCol)
+        val x1 = columnX(runs, toCol)
         return if (x1 > x0) x0 to x1 else null
     }
 
     /** 行内像素 x 是否命中某列的「链接热区」（列起止矩形）。 */
-    fun hitTestColumn(cells: List<RenderCell>, x: Float): Int = columnAt(cells, x)
+    fun hitTestColumn(runs: List<RenderRun>, x: Float): Int = columnAt(runs, x)
 
     /** 滚动条几何：返回 (thumbTopY, thumbHeightPx, trackHeightPx)；无滚动量 → null。 */
     fun scrollbarGeometry(

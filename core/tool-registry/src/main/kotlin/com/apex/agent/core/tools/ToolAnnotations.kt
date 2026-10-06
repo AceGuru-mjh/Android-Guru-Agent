@@ -169,6 +169,10 @@ data class ToolAnnotations(
                 toolId == "time" || toolId == "image_info" ||
                 toolId == "context_recap" || toolId == "context_search" ||
                 toolId == "session_stats" ||
+                // v5：agent 自省 / 通讯录 / 日历 读类（只读，sensitiveAction 由
+                // 工具自身显式声明覆盖）。
+                toolId == "agent_setting_get" || toolId == "agent_profile_list" ||
+                toolId == "agent_role_list" || toolId == "agent_mode_preset_list" ||
                 toolId.startsWith("memory_") ||
                 toolId.startsWith("terminal.linux.status") ||
                 toolId.startsWith("terminal.ubuntu.status") ||
@@ -197,6 +201,11 @@ data class ToolAnnotations(
             // ── Idempotent overwrite writes ──
             toolId == "write_file" || toolId == "download_file" ||
                 toolId == "app_launch" || toolId == "app_install" ||
+                // v5：通知发布 / 角色激活 / 设置应用 / 预设选择 / provider key 写入
+                // 均为覆盖式幂等写（同参数重放不产生新状态）。
+                toolId == "notification_post" || toolId == "agent_role_activate" ||
+                toolId == "agent_setting_set" || toolId == "agent_profile_set_default" ||
+                toolId == "agent_mode_preset_select" || toolId == "agent_provider_set_key" ||
                 toolId.startsWith("terminal.write") ||
                 toolId.startsWith("terminal.resize") -> idempotentWrite()
 

@@ -299,6 +299,14 @@ data class ToolMetadata(
                 id.startsWith("get_time") || id.startsWith("logcat") ||
                 id.startsWith("screenshot") -> ToolCategory.SYSTEM
 
+            // v5：联系人 / 短信 / 日历 / 闹钟 / 通知 —— 设备级系统交互。
+            id.startsWith("contact_") || id.startsWith("sms_") ||
+                id.startsWith("calendar_") || id.startsWith("alarm_") ||
+                id.startsWith("notification_post") -> ToolCategory.SYSTEM
+
+            // v5：agent 自主设置 —— 配置自管。
+            id.startsWith("agent_") -> ToolCategory.AGENT
+
             // #167 金库工具族：密钥存取与盲投递。
             id.startsWith("vault_") -> ToolCategory.SECURITY
 
@@ -339,6 +347,13 @@ data class ToolMetadata(
                 id.startsWith("uninstall") ||
                 id.startsWith("move_") -> ToolRisk.HIGH
 
+            // v5：HIGH 风险——
+            //   app_install_apk / app_download_install：安装外部 APK（系统状态变化 + 来源不可控）
+            //   agent_provider_set_key：写入 API Key（凭据）
+            //   sms_send：发送短信（费用 + 第三方通信）
+            id.startsWith("app_install_apk") || id.startsWith("app_download_install") ||
+                id == "agent_provider_set_key" || id == "sms_send" -> ToolRisk.HIGH
+
             // Mutating but recoverable / sandbox-scoped operations → MEDIUM.
             // #167：金库写入（覆写式）与盲投递（剪贴板/终端/HTTP 副作用）。
             id.startsWith("vault_save") || id.startsWith("vault_paste") ||
@@ -350,6 +365,13 @@ data class ToolMetadata(
                 id.startsWith("mcp_") || id.startsWith("skill_") ||
                 id.startsWith("github_") && (id.contains("write") || id.contains("create")) ||
                 id.startsWith("plugin") -> ToolRisk.MEDIUM
+
+            // v5：MEDIUM 风险——agent 设置写入、profile/role/preset 修改、
+            // 闹钟、文件选择、拍照、通知发布均涉及用户感官或运行时行为变化。
+            id.startsWith("agent_setting_set") || id.startsWith("agent_profile_set") ||
+                id.startsWith("agent_role_activate") || id.startsWith("agent_mode_preset_select") ||
+                id == "alarm_set" || id == "file_pick" || id == "image_capture" ||
+                id == "notification_post" -> ToolRisk.MEDIUM
 
             else -> when (category) {
                 ToolCategory.SHELL -> ToolRisk.HIGH

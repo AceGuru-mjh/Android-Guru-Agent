@@ -42,6 +42,18 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- ═══ v5 增强工具集：agent 自主能力扩展 ═══ -->
+    <!-- contact_search：读取通讯录（dangerous 权限，运行时弹窗授权） -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- sms_send：发送短信（dangerous 权限，运行时弹窗授权 + 风险门会话确认） -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- calendar_event_list：读取日历（dangerous 权限，运行时弹窗授权） -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- image_capture：拍照（dangerous 权限，运行时弹窗授权） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- alarm_set：经 AlarmClock.ACTION_SET_ALARM 设置闹钟（normal 权限，自动授权） -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
     <!-- #E-⑮：多级返回（收键盘 → 收菜单 → 退出）依赖 KeyEvent 派发路径
          （TerminalView.onKeyPreIme）；预测性返回会绕过它直接预览“退出
          app”。本 app 钉 targetSdk 28（侧载红线）本就不受 Android 16 默认
@@ -109,6 +121,18 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- v5 APK 安装结果接收器：app_install_apk / app_download_install
+             工具触发 PackageInstaller.commit 后，系统会广播 install 结果到本
+             receiver；STATUS_PENDING_USER_ACTION 时本 receiver 负责启动系统
+             安装确认 UI。导出=false（仅本应用 / 系统能投递）。 -->
+        <receiver
+            android:name="com.apex.agent.tools.ApkInstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.apex.agent.action.INSTALL_RESULT" />
             </intent-filter>
         </receiver>
 

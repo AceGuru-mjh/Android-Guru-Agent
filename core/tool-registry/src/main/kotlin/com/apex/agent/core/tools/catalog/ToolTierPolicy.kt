@@ -95,7 +95,13 @@ object ToolTierPolicy {
         // capability_report：权限/环境/工具/技能/MCP 一键自省（遇 permission
         // denied 或「我能做 X 吗」类问题时先自省再行动，不猜不弃）；
         // market_search：官方技能+MCP 市场检索（「没装的能力一步之遥」）。
-        "capability_report", "market_search"
+        "capability_report", "market_search",
+
+        // ── v5：agent 自主设置（让 agent 自查/自调自身配置）──
+        // agent_setting_get 入 CORE：模型应在每次会话开始就知道当前运行配置
+        // （避免"我不知道我能调多少迭代上限"的盲调）；agent_setting_set 与
+        // profile/role/preset 操作为 CATALOG（不必要时不全量入请求体）。
+        "agent_setting_get",
     )
 
     /** @return true when [toolId] belongs to the always-exposed CORE set. */

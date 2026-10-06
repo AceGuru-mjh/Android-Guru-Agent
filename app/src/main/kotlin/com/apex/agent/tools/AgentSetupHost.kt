@@ -164,14 +164,14 @@ suspend fun SettingsRepository.activateRoleAsync(role: String, profileId: String
         try {
             val exists = profiles.value.any { it.id == profileId }
             if (!exists) return@withContext false
-            updateRoles { current ->
+            updateRoles {
                 when (role) {
-                    "primary" -> current.copy(primaryProfileId = profileId)
-                    "vision" -> current.copy(visionProfileId = profileId)
-                    "reasoning" -> current.copy(reasoningProfileId = profileId)
-                    "fast" -> current.copy(fastProfileId = profileId)
-                    "summary" -> current.copy(summaryProfileId = profileId)
-                    else -> current
+                    "primary" -> copy(primaryProfileId = profileId)
+                    "vision" -> copy(visionProfileId = profileId)
+                    "reasoning" -> copy(reasoningProfileId = profileId)
+                    "fast" -> copy(fastProfileId = profileId)
+                    "summary" -> copy(summaryProfileId = profileId)
+                    else -> this
                 }
             }
             true
@@ -229,13 +229,13 @@ suspend fun SettingsRepository.selectModePresetAsync(presetId: String): Boolean 
         try {
             // 空串 = 清除
             if (presetId.isBlank()) {
-                updateAgentSettings { it.copy(selectedModePresetId = "") }
+                updateAgentSettings { copy(selectedModePresetId = "") }
                 return@withContext true
             }
             // 校验：必须是内置或用户预设 id
             val all = listModePresetSummaries()
             if (all.none { it.id == presetId }) return@withContext false
-            updateAgentSettings { it.copy(selectedModePresetId = presetId) }
+            updateAgentSettings { copy(selectedModePresetId = presetId) }
             true
         } catch (_: Throwable) {
             false

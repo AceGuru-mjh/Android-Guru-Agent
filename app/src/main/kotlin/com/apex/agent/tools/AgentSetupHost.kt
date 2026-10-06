@@ -168,7 +168,9 @@ suspend fun SettingsRepository.activateRoleAsync(role: String, profileId: String
         try {
             val exists = profiles.value.any { it.id == profileId }
             if (!exists) return@withContext false
-            updateRoles { current ->
+            // 修复：updateRoles 形参是扩展接收者 lambda —— 快照后纯 when 返回
+            val current = roles.value
+            updateRoles {
                 when (role) {
                     "primary" -> current.copy(primaryProfileId = profileId)
                     "vision" -> current.copy(visionProfileId = profileId)
@@ -233,13 +235,13 @@ suspend fun SettingsRepository.selectModePresetAsync(presetId: String): Boolean 
         try {
             // 空串 = 清除
             if (presetId.isBlank()) {
-                updateAgentSettings { it.copy(selectedModePresetId = "") }
+                updateAgentSettings { copy(selectedModePresetId = "") }
                 return@withContext true
             }
             // 校验：必须是内置或用户预设 id
             val all = listModePresetSummaries()
             if (all.none { it.id == presetId }) return@withContext false
-            updateAgentSettings { it.copy(selectedModePresetId = presetId) }
+            updateAgentSettings { copy(selectedModePresetId = presetId) }
             true
         } catch (_: Throwable) {
             false

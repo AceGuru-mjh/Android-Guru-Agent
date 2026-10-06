@@ -65,42 +65,38 @@ class AgentSetupHost(
 
     override suspend fun apply(patch: AgentSettingsPatch): Boolean = withContext(Dispatchers.IO) {
         try {
-            // 修复：updateAgentSettings 的形参是扩展接收者 lambda
-            //（AgentSettings.() -> AgentSettings）—— 先快照再以纯 copy 返回，
-            // 与既有调用点（SettingsScreen 等）同一模式
-            val current = settingsRepository.agentSettings.value
             settingsRepository.updateAgentSettings {
-                current.copy(
-                    defaultMode = patch.defaultMode ?: current.defaultMode,
-                    thinkLevel = patch.thinkLevel ?: current.thinkLevel,
-                    thinkingLevelOverride = patch.thinkingLevelOverride ?: current.thinkingLevelOverride,
-                    forceDeepThinking = patch.forceDeepThinking ?: current.forceDeepThinking,
-                    codeThinkingLogic = patch.codeThinkingLogic ?: current.codeThinkingLogic,
-                    codeThinkingLevel = patch.codeThinkingLevel ?: current.codeThinkingLevel,
-                    codeExecutionMode = patch.codeExecutionMode ?: current.codeExecutionMode,
-                    maxIterations = patch.maxIterations ?: current.maxIterations,
-                    keepAlive = patch.keepAlive ?: current.keepAlive,
-                    autoRetry = patch.autoRetry ?: current.autoRetry,
-                    maxRetryPerAction = patch.maxRetryPerAction ?: current.maxRetryPerAction,
-                    loopDetection = patch.loopDetection ?: current.loopDetection,
-                    loopDetectionWindow = patch.loopDetectionWindow ?: current.loopDetectionWindow,
-                    sameActionThreshold = patch.sameActionThreshold ?: current.sameActionThreshold,
-                    autoRecovery = patch.autoRecovery ?: current.autoRecovery,
-                    parallelToolExecution = patch.parallelToolExecution ?: current.parallelToolExecution,
-                    taskCompletionNotify = patch.taskCompletionNotify ?: current.taskCompletionNotify,
-                    maxContextTokens = patch.maxContextTokens ?: current.maxContextTokens,
-                    compressionThreshold = patch.compressionThreshold ?: current.compressionThreshold,
-                    preserveRecentTurns = patch.preserveRecentTurns ?: current.preserveRecentTurns,
-                    maxToolOutputLength = patch.maxToolOutputLength ?: current.maxToolOutputLength,
-                    reflectionRounds = patch.reflectionRounds ?: current.reflectionRounds,
-                    selectedModePresetId = patch.selectedModePresetId ?: current.selectedModePresetId,
-                    themeMode = patch.themeMode ?: current.themeMode,
-                    accentPalette = patch.accentPalette ?: current.accentPalette,
-                    fontScale = patch.fontScale ?: current.fontScale,
-                    showTimestamps = patch.showTimestamps ?: current.showTimestamps,
-                    language = patch.language ?: current.language,
-                    sendKeyBehavior = patch.sendKeyBehavior ?: current.sendKeyBehavior,
-                    showRunSummary = patch.showRunSummary ?: current.showRunSummary
+                copy(
+                    defaultMode = patch.defaultMode ?: defaultMode,
+                    thinkLevel = patch.thinkLevel ?: thinkLevel,
+                    thinkingLevelOverride = patch.thinkingLevelOverride ?: thinkingLevelOverride,
+                    forceDeepThinking = patch.forceDeepThinking ?: forceDeepThinking,
+                    codeThinkingLogic = patch.codeThinkingLogic ?: codeThinkingLogic,
+                    codeThinkingLevel = patch.codeThinkingLevel ?: codeThinkingLevel,
+                    codeExecutionMode = patch.codeExecutionMode ?: codeExecutionMode,
+                    maxIterations = patch.maxIterations ?: maxIterations,
+                    keepAlive = patch.keepAlive ?: keepAlive,
+                    autoRetry = patch.autoRetry ?: autoRetry,
+                    maxRetryPerAction = patch.maxRetryPerAction ?: maxRetryPerAction,
+                    loopDetection = patch.loopDetection ?: loopDetection,
+                    loopDetectionWindow = patch.loopDetectionWindow ?: loopDetectionWindow,
+                    sameActionThreshold = patch.sameActionThreshold ?: sameActionThreshold,
+                    autoRecovery = patch.autoRecovery ?: autoRecovery,
+                    parallelToolExecution = patch.parallelToolExecution ?: parallelToolExecution,
+                    taskCompletionNotify = patch.taskCompletionNotify ?: taskCompletionNotify,
+                    maxContextTokens = patch.maxContextTokens ?: maxContextTokens,
+                    compressionThreshold = patch.compressionThreshold ?: compressionThreshold,
+                    preserveRecentTurns = patch.preserveRecentTurns ?: preserveRecentTurns,
+                    maxToolOutputLength = patch.maxToolOutputLength ?: maxToolOutputLength,
+                    reflectionRounds = patch.reflectionRounds ?: reflectionRounds,
+                    selectedModePresetId = patch.selectedModePresetId ?: selectedModePresetId,
+                    themeMode = patch.themeMode ?: themeMode,
+                    accentPalette = patch.accentPalette ?: accentPalette,
+                    fontScale = patch.fontScale ?: fontScale,
+                    showTimestamps = patch.showTimestamps ?: showTimestamps,
+                    language = patch.language ?: language,
+                    sendKeyBehavior = patch.sendKeyBehavior ?: sendKeyBehavior,
+                    showRunSummary = patch.showRunSummary ?: showRunSummary
                 )
             }
             true
@@ -168,16 +164,14 @@ suspend fun SettingsRepository.activateRoleAsync(role: String, profileId: String
         try {
             val exists = profiles.value.any { it.id == profileId }
             if (!exists) return@withContext false
-            // 修复：updateRoles 形参是扩展接收者 lambda —— 快照后纯 when 返回
-            val current = roles.value
             updateRoles {
                 when (role) {
-                    "primary" -> current.copy(primaryProfileId = profileId)
-                    "vision" -> current.copy(visionProfileId = profileId)
-                    "reasoning" -> current.copy(reasoningProfileId = profileId)
-                    "fast" -> current.copy(fastProfileId = profileId)
-                    "summary" -> current.copy(summaryProfileId = profileId)
-                    else -> current
+                    "primary" -> copy(primaryProfileId = profileId)
+                    "vision" -> copy(visionProfileId = profileId)
+                    "reasoning" -> copy(reasoningProfileId = profileId)
+                    "fast" -> copy(fastProfileId = profileId)
+                    "summary" -> copy(summaryProfileId = profileId)
+                    else -> this
                 }
             }
             true

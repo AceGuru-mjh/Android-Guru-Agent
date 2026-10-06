@@ -694,3 +694,34 @@ jobs:
                 body,
               });
             }
+
+  # ── #275：ComposeFoundry 独立工程编译门禁 ──────────────────────────────
+  # 仓库内嵌的 ComposeFoundry 是独立 Gradle 工程（AGP 8.2.2 / Kotlin 1.9.22，
+  # 与主工程版本不同，不能 include 进 settings.gradle）—— 此前从未被 CI 构建，
+  # 损坏无人知晓（「门禁/统计口径悬空」）。本 job 用其自身插件版本独立编译：
+  # 行数/质量门禁（find-based）早已覆盖其源码，这里补上编译验证。
+  # 一次缓存复用 Gradle 8.2（与主工程 8.10 缓存键隔离）。
+  foundry-build:
+    name: ComposeFoundry compile gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle 8.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Build ComposeFoundry (compile gate)
+        run: |
+          cd ComposeFoundry
+          gradle :app:assembleDebug --no-daemon --stacktrace
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          echo "✅ ComposeFoundry 构建通过：$APK（$(du -m "$APK" | cut -f1) MB）"

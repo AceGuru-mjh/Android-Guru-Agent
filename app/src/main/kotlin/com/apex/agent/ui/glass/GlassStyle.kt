@@ -202,6 +202,8 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
             frostLift = scheme.surfaceContainerHighest.copy(
                 alpha = style.scrimAlpha * 0.6f + style.specularAlpha * 0.8f
             ),
+            // #269 豁免说明：玻璃体系的白高光（specular/edge/frostLift）是物理语义
+            // —— 光照在玻璃上的镜面反射就是白色，与主题明暗无关（刻意设计，非漏网）。
             edgeTop = Color.White.copy(alpha = style.edgeAlpha),
             edgeBottom = Color.White.copy(alpha = style.edgeAlpha * 0.22f),
             specular = Color.White.copy(alpha = style.specularAlpha),

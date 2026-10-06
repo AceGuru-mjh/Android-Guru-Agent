@@ -39,6 +39,9 @@
     <string name="usage_completion_label">Completion</string>
 
     <!-- ═══ Model usage breakdown ═══ -->
+    <string name="usage_cost_estimated">Est. cost %1$s</string>
+    <string name="usage_cost_note">Estimated from public list prices (input/output rates differ per model); channel discounts and taxes not included</string>
+    <string name="usage_cost_unknown">no price listed</string>
     <string name="usage_models_title">By model</string>
     <string name="usage_models_hint">Share of all-time tokens per model</string>
     <string name="usage_models_empty">No model usage recorded yet</string>

@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -476,30 +477,29 @@ private fun StaticBackdropCanvas(modifier: Modifier, mode: GlassLabMode) {
         textMeasurer.measure(text = GridRowText, style = rowStyle)
     }
 
+    // #323：渐变笔刷只随（主题, 模式）变化 —— 提升到 remember，
+    // Canvas 每帧重绘零分配（旧实现 draw 内逐帧 Brush.verticalGradient×2）
+    val nightGradient = remember(scheme) {
+        Brush.verticalGradient(colors = listOf(scheme.surfaceVariant, scheme.background))
+    }
+    val dayGradient = remember(scheme) {
+        Brush.verticalGradient(
+            0f to Color.White,
+            0.55f to scheme.background,
+            0.80f to scheme.surfaceContainerHigh.copy(alpha = 0.75f),
+            1f to scheme.primaryContainer.copy(alpha = 0.45f)
+        )
+    }
+
     Canvas(modifier = modifier) {
-        // 1. 渐变底
+        // 1. 渐变底（笔刷已 remember，绘制期零分配）
         if (mode == GlassLabMode.NIGHT) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(scheme.surfaceVariant, scheme.background),
-                    startY = 0f,
-                    endY = size.height
-                )
-            )
+            drawRect(brush = nightGradient)
         } else {
             // 白天天空渐变 v3：白 → 背景灰 → 冷灰衬底 → 薄荷 tint。
             // 0.80 深色衬底段是关键新增：验证区底部有「深色可透」，
             // 白霜玻璃压上去才有明度差（原三段全浅色，玻璃毫无透射对比）
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to Color.White,
-                    0.55f to scheme.background,
-                    0.80f to scheme.surfaceContainerHigh.copy(alpha = 0.75f),
-                    1f to scheme.primaryContainer.copy(alpha = 0.45f),
-                    startY = 0f,
-                    endY = size.height
-                )
-            )
+            drawRect(brush = dayGradient)
         }
 
         // 2. 细网格 —— 模糊真伪一照便知
@@ -648,6 +648,36 @@ private fun GlowCanvas(modifier: Modifier, mode: GlassLabMode) {
         label = "glow_tertiary"
     )
 
+    // #323：blob 色（白天模式向 onSurface 混 30%）提升到组合层 ——
+    // 颜色只随主题变化，逐帧 lerp×3 是 draw 期分配残留的根因之一
+    val blobPrimary = lerp(scheme.primary, scheme.onSurface, 0.30f)
+    val blobSecondary = lerp(scheme.secondary, scheme.onSurface, 0.30f)
+    val blobTertiary = lerp(scheme.tertiary, scheme.onSurface, 0.30f)
+
+    // #323：径向渐变笔刷按「零点为心」静态构建一次，逐帧仅 translate
+    // 到光斑当前位置 —— 每帧零 Brush 分配（旧实现逐帧 Brush.radialGradient×3）
+    val blobBrushA = remember(blobPrimary) {
+        Brush.radialGradient(
+            colors = listOf(blobPrimary.copy(alpha = 0.22f), Color.Transparent),
+            center = Offset.Zero,
+            radius = 1f
+        )
+    }
+    val blobBrushB = remember(blobSecondary) {
+        Brush.radialGradient(
+            colors = listOf(blobSecondary.copy(alpha = 0.19f), Color.Transparent),
+            center = Offset.Zero,
+            radius = 1f
+        )
+    }
+    val blobBrushC = remember(blobTertiary) {
+        Brush.radialGradient(
+            colors = listOf(blobTertiary.copy(alpha = 0.16f), Color.Transparent),
+            center = Offset.Zero,
+            radius = 1f
+        )
+    }
+
     Canvas(modifier = modifier) {
         if (mode == GlassLabMode.NIGHT) {
             // 双霓虹光斑 —— 主色 / 三级色，慢速环游，叠加在静态层之上
@@ -678,52 +708,31 @@ private fun GlowCanvas(modifier: Modifier, mode: GlassLabMode) {
             val angleA = phaseA * 2f * PI.toFloat()
             val angleB = phaseB * 2f * PI.toFloat() + 2.1f
             val angleC = phaseC * 2f * PI.toFloat() + 4.2f
-            val blobPrimary = lerp(scheme.primary, scheme.onSurface, 0.30f)
-            val blobSecondary = lerp(scheme.secondary, scheme.onSurface, 0.30f)
-            val blobTertiary = lerp(scheme.tertiary, scheme.onSurface, 0.30f)
 
             val centerA = Offset(
                 x = size.width * (0.5f + 0.32f * sin(angleA)),
                 y = size.height * (0.40f + 0.26f * cos(angleA))
             )
             val radiusA = 130.dp.toPx()
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(blobPrimary.copy(alpha = 0.22f), Color.Transparent),
-                    center = centerA,
-                    radius = radiusA
-                ),
-                radius = radiusA,
-                center = centerA
-            )
+            translate(centerA.x, centerA.y) {
+                drawCircle(brush = blobBrushA, radius = radiusA, center = Offset.Zero)
+            }
             val centerB = Offset(
                 x = size.width * (0.5f + 0.36f * cos(angleB)),
                 y = size.height * (0.58f + 0.28f * sin(angleB))
             )
             val radiusB = 100.dp.toPx()
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(blobSecondary.copy(alpha = 0.19f), Color.Transparent),
-                    center = centerB,
-                    radius = radiusB
-                ),
-                radius = radiusB,
-                center = centerB
-            )
+            translate(centerB.x, centerB.y) {
+                drawCircle(brush = blobBrushB, radius = radiusB, center = Offset.Zero)
+            }
             val centerC = Offset(
                 x = size.width * (0.5f + 0.30f * sin(angleC + 1.3f)),
                 y = size.height * (0.50f + 0.32f * cos(angleC))
             )
             val radiusC = 90.dp.toPx()
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(blobTertiary.copy(alpha = 0.16f), Color.Transparent),
-                    center = centerC,
-                    radius = radiusC
-                ),
-                radius = radiusC,
-                center = centerC
-            )
+            translate(centerC.x, centerC.y) {
+                drawCircle(brush = blobBrushC, radius = radiusC, center = Offset.Zero)
+            }
         }
     }
 }

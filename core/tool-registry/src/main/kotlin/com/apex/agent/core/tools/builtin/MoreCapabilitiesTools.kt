@@ -517,7 +517,7 @@ class FilePickTool(
         http_request (multipart upload) or copied to workspace via shell.
 
         Parameters:
-        - mime_type (optional, default "*/*"): MIME filter, e.g. "image/*" or "application/pdf"
+        - mime_type (optional, default 所有类型(通配)): MIME filter, e.g. "image/*" or "application/pdf"
         - allow_multiple (optional, default false): allow multi-select
 
         Examples:

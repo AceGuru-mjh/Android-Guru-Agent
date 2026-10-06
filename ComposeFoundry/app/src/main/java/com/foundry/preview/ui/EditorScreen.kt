@@ -27,8 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.foundry.preview.engine.Diagnostic
-import com.foundry.preview.engine.DiagnosticLevel
+import com.foundry.preview.dsl.Diagnostic
+import com.foundry.preview.dsl.DiagnosticLevel
 import com.foundry.preview.engine.DiagnosticsEngine
 import com.foundry.preview.state.FoundryViewModel
 

@@ -126,6 +126,9 @@
     <string name="code_longtask_todos_header">Todo snapshot</string>
     <string name="code_longtask_checkpoints_fmt">Checkpoints x%1$d (every 5 iters / 60s)</string>
     <string name="code_longtask_error_label">Error: </string>
+    <string name="code_longtask_export">Export / share</string>
+    <string name="code_longtask_export_missing">Record not found (may have been deleted)</string>
+    <string name="code_longtask_export_failed">Export or share failed — please retry</string>
     <string name="code_longtask_copy">Copy task</string>
     <string name="code_longtask_relaunch">Rerun</string>
     <string name="code_longtask_compare">Diff vs last</string>

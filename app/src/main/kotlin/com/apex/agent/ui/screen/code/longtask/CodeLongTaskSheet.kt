@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -118,7 +119,8 @@ fun CodeLongTaskSheet(
     onResume: (id: String, checkpointId: String?) -> Unit,
     onDelete: (id: String) -> Unit,
     onCompareWithParent: (id: String) -> Unit,
-    onStartTemplate: (key: String) -> Unit
+    onStartTemplate: (key: String) -> Unit,
+    onExport: (id: String) -> Unit = { _ -> }
 ) {
     if (!visible) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -186,7 +188,8 @@ fun CodeLongTaskSheet(
                     onRelaunch = onRelaunch,
                     onResume = onResume,
                     onDelete = onDelete,
-                    onCompareWithParent = onCompareWithParent
+                    onCompareWithParent = onCompareWithParent,
+                    onExport = onExport
                 )
             }
         }
@@ -205,7 +208,8 @@ private fun TaskTab(
     onRelaunch: (id: String) -> Unit,
     onResume: (id: String, checkpointId: String?) -> Unit,
     onDelete: (id: String) -> Unit,
-    onCompareWithParent: (id: String) -> Unit
+    onCompareWithParent: (id: String) -> Unit,
+    onExport: (id: String) -> Unit
 ) {
     // 状态过滤行（折叠到非空时才展示，减噪音）
     if (records.isNotEmpty()) {
@@ -268,6 +272,7 @@ private fun TaskTab(
             items(filtered, key = { it.id }) { record ->
                 LongTaskRecordCard(
                     record = record,
+                    onExport = onExport,
                     onCopy = onCopy,
                     onRelaunch = onRelaunch,
                     onResume = onResume,
@@ -295,7 +300,8 @@ private fun LongTaskRecordCard(
     onRelaunch: (id: String) -> Unit,
     onResume: (id: String, checkpointId: String?) -> Unit,
     onDelete: (id: String) -> Unit,
-    onCompareWithParent: (id: String) -> Unit
+    onCompareWithParent: (id: String) -> Unit,
+    onExport: (id: String) -> Unit
 ) {
     var expanded by remember(record.id) { mutableStateOf(false) }
     var showCopyDialog by remember(record.id) { mutableStateOf(false) }
@@ -396,6 +402,12 @@ private fun LongTaskRecordCard(
                         Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.code_longtask_copy))
+                    }
+                    // #184：导出/分享（JSON 原样 + Markdown 运行报告双格式）
+                    TextButton(onClick = { onExport(record.id) }) {
+                        Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.code_longtask_export))
                     }
                     TextButton(onClick = { onRelaunch(record.id) }) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))

@@ -39,11 +39,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -151,35 +154,40 @@ private fun ConicBorderCard() {
                 .pointerInput(Unit) {
                     detectTapGestures { pulses += 1 }
                 }
-                .drawWithContent {
-                    drawContent()
-                    val shift = angle.value / 360f
-                    if (shift <= 0f) return@drawWithContent
+                // #323：outline 与 sweep 笔刷经 drawWithCache 只随尺寸重建；
+                // 旋转改走 DrawScope.rotate（旧实现逐帧重建 outline + 停靠点
+                // 排序 + sweepGradient 三连分配，色标回绕保护逻辑随之退役）
+                .drawWithCache {
                     val outline = cardShape.createOutline(
                         size = size,
                         layoutDirection = layoutDirection,
                         density = this
                     )
-                    // 色标轮转：停靠点 = 原位 + shift，越界回绕后按位置排序
-                    //（sweep gradient 要求停靠点升序；同位同色透明停靠点不产生硬边。
-                    // 浮点回绕保护：p 极小时推离 0 锚点，避免与透明锚同位硬边）
-                    val stops = buildList {
-                        add(0f to Color.Transparent)
-                        listOf(
+                    // #323：sweepGradient(vararg colorStops, center = ...) ——色标对
+                    // 走 vararg 展开，center 用命名参数（CacheDrawScope 无 center
+                    // 成员，只有 Size.center 扩展）。
+                    val brush = Brush.sweepGradient(
+                        *arrayOf(
+                            0f to Color.Transparent,
                             0.24f to scheme.primary.copy(alpha = 0.90f),
                             0.50f to Color.Transparent,
-                            0.74f to scheme.tertiary.copy(alpha = 0.60f)
-                        ).forEach { (pos, color) ->
-                            val p = (pos + shift) % 1f
-                            add((if (p < 0.002f) 0.002f else p) to color)
-                        }
-                        add(1f to Color.Transparent)
-                    }.sortedBy { it.first }.toTypedArray()
-                    drawOutline(
-                        outline = outline,
-                        brush = Brush.sweepGradient(*stops, center = center),
-                        style = Stroke(width = 2.dp.toPx())
+                            0.74f to scheme.tertiary.copy(alpha = 0.60f),
+                            1f to Color.Transparent
+                        ),
+                        center = size.center
                     )
+                    onDrawWithContent {
+                        drawContent()
+                        val deg = angle.value
+                        if (deg <= 0f) return@onDrawWithContent
+                        rotate(degrees = deg, pivot = center) {
+                            drawOutline(
+                                outline = outline,
+                                brush = brush,
+                                style = Stroke(width = 2.dp.toPx())
+                            )
+                        }
+                    }
                 }
         ) {
             GlassSurface(

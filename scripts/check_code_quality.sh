@@ -24,7 +24,9 @@
 #     the browser kit re-introduced 2 in September before that — this gate
 #     keeps it at 0. Comment lines are skipped (docs may show the pattern).
 #
-#  4. AUDIT empty catch blocks — reported (not gated): swallowing errors
+#  4. GATE empty catch blocks — swallowing errors silently is now a hard
+#     failure (#260)：防御式 IO 纪律要求「异常折叠 + 留痕」，空 catch 连留痕都没有；
+#     注释行（* 或 // 开头）豁免 —— KDoc 引述旧实现不算违规
 #     silently is sometimes correct (best-effort logging) but should be
 #     visible in review.
 #
@@ -106,12 +108,28 @@ else
     echo "✅ GATE 3 — no bare collectAsState() in main sources (all lifecycle-aware)"
 fi
 
-# ── Audit: empty catch blocks (report-only) ────────────────────────────────
+# ── GATE 4: empty catch blocks（#260：普查升级为拦截）───────────────────────
 EMPTY_CATCH_COUNT=0
+EMPTY_CATCH_HITS=""
 if [ -n "$MAIN_KT_LIST" ]; then
-    EMPTY_CATCH_COUNT=$(printf '%s\n' "$MAIN_KT_LIST" \
+    # 注释行豁免：KDoc/行注释里引述旧实现（如「旧实现 catch(_){}」）不算违规。
+    EMPTY_CATCH_HITS=$(printf '%s\n' "$MAIN_KT_LIST" \
         | xargs grep -nE 'catch \([a-zA-Z. :]+\) \{ *\}' 2>/dev/null \
-        | wc -l || true)
+        | grep -vE ':[0-9]+:[[:space:]]*(\*|//)' \
+        || true)
+    EMPTY_CATCH_COUNT=$(printf '%s\n' "$EMPTY_CATCH_HITS" | grep -c . || true)
+fi
+
+if [ "$EMPTY_CATCH_COUNT" -gt 0 ]; then
+    echo "❌ GATE 4 — empty catch blocks in main sources: $EMPTY_CATCH_COUNT"
+    echo ""
+    echo "$EMPTY_CATCH_HITS"
+    echo ""
+    echo "   Fix: 防御式 IO 纪律 —— 异常至少要留痕（AppLogger / errorLog 回调）或"
+    echo "   以注释说明为何可安全吞掉；CancellationException 必须重抛。"
+    FAIL=1
+else
+    echo "✅ GATE 4 — no empty catch blocks in main sources"
 fi
 
 TODO_COUNT=0
@@ -121,7 +139,6 @@ if [ -n "$MAIN_KT_LIST" ]; then
         | wc -l || true)
 fi
 
-echo "📋 AUDIT — empty catch blocks in main sources: $EMPTY_CATCH_COUNT (review-only, not gated)"
 echo "📋 AUDIT — TODO/FIXME/XXX markers in main sources: $TODO_COUNT (review-only, not gated)"
 
 {
@@ -133,7 +150,7 @@ echo "📋 AUDIT — TODO/FIXME/XXX markers in main sources: $TODO_COUNT (review
     echo "| Reflective dispatch (\`javaClass.getMethod\`) | $([ -z "$REFLECT_HITS" ] && echo '✅ none' || echo '❌ found') |"
     echo "| \`printStackTrace()\` in main sources | $([ -z "$STACK_HITS" ] && echo '✅ none' || echo '❌ found') |"
     echo "| Bare \`collectAsState()\` in main sources | $([ -z "$BARE_COLLECT_HITS" ] && echo '✅ none' || echo '❌ found') |"
-    echo "| Empty catch blocks (audit-only) | $EMPTY_CATCH_COUNT |"
+    echo "| Empty catch blocks (GATE 4, #260) | $([ "$EMPTY_CATCH_COUNT" -eq 0 ] && echo '✅ none' || echo "❌ $EMPTY_CATCH_COUNT") |"
     echo "| TODO/FIXME markers (audit-only) | $TODO_COUNT |"
 } >> "$SUMMARY_FILE" 2>/dev/null || true
 

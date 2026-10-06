@@ -9,6 +9,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.Code
@@ -61,6 +64,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -133,6 +137,20 @@ fun AboutScreen() {
     val noBrowserHint = stringResource(R.string.settings_about_no_browser)
     val open: (String) -> Unit = { url -> openUrl(context, url, noBrowserHint) }
 
+    // ═══ 彩蛋（v1.4.8 美化）：连点页脚机器人 5 次 → 粒子烟花 ═══
+    // 触发键每次自增（同键多次触发也能重放）；toast 与烟花同发。
+    var fireworksTrigger by remember { mutableStateOf(0) }
+    var logoTaps by remember { mutableStateOf(0) }
+    val eggToast = stringResource(R.string.about_easter_egg_toast)
+    fun tapLogo() {
+        logoTaps++
+        if (logoTaps >= 5) {
+            logoTaps = 0
+            fireworksTrigger++
+            Toast.makeText(context, eggToast, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Hero 可见性门控：页面非 lazy 滚动，滚出视口后无限动画仍在逐帧
     // invalidate + 重录（含 haze 模糊重采样）——CPU 空转。Hero 滚出
     // 视口 1.5 倍高度后切静态降级帧，滚回自动恢复
@@ -143,6 +161,7 @@ fun AboutScreen() {
         derivedStateOf { scrollState.value < heroGatePx }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -152,11 +171,14 @@ fun AboutScreen() {
     ) {
         AboutHero(animated = heroVisible)
 
+        // ── 本版亮点（v1.4.8 美化：进页第一眼的价值摘要，先于更新面板）──
+        AboutSectionContainer(index = 1) { HighlightsCard() }
+
         // ── 软件更新（增量补丁 + 高速节点镜像）──
-        AboutSectionContainer(index = 1) { UpdatePanel() }
+        AboutSectionContainer(index = 8) { UpdatePanel() }
 
         // ── 版本与构建 ──
-        AboutSectionContainer(index = 2) {
+        AboutSectionContainer(index = 8) {
             AboutSectionCard(
                 title = stringResource(R.string.about_section_build),
                 icon = Icons.Outlined.Info
@@ -177,7 +199,7 @@ fun AboutScreen() {
         }
 
         // ── 功能一览（三色强调轮转：primary → tertiary → secondary）──
-        AboutSectionContainer(index = 3) {
+        AboutSectionContainer(index = 8) {
             AboutSectionCard(
                 title = stringResource(R.string.about_section_features),
                 icon = Icons.Outlined.Widgets
@@ -226,12 +248,12 @@ fun AboutScreen() {
         }
 
         // ── 技术栈（依赖清单 → 等宽徽章墙）──
-        AboutSectionContainer(index = 4) {
+        AboutSectionContainer(index = 8) {
             TechStackCard()
         }
 
         // ── 相关链接 ──
-        AboutSectionContainer(index = 5) {
+        AboutSectionContainer(index = 8) {
             AboutSectionCard(
                 title = stringResource(R.string.about_section_links),
                 icon = Icons.Outlined.OpenInNew
@@ -258,23 +280,25 @@ fun AboutScreen() {
         }
 
         // ── Star 引导 ──
-        AboutSectionContainer(index = 6) {
+        AboutSectionContainer(index = 8) {
             StarCard(onOpen = { open(REPO_URL) })
         }
 
         // ── 致谢 + 页脚 ──
-        AboutSectionContainer(index = 7) {
+        AboutSectionContainer(index = 8) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // 低透明度 Logo 水印：页脚的轻量收束
+                // 低透明度 Logo 水印：页脚的轻量收束（连点 5 次 = 烟花彩蛋）
                 Icon(
                     Icons.Default.SmartToy,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.about_highlights_hint),
                     tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable(onClick = { tapLogo() })
                 )
                 Text(
                     stringResource(R.string.settings_about_credits),
@@ -289,8 +313,19 @@ fun AboutScreen() {
                     color = MaterialTheme.colorScheme.outline.copy(alpha = 0.8f),
                     textAlign = TextAlign.Center
                 )
+                // 彩蛋提示（低透明度，可发现的线索）
+                Text(
+                    stringResource(R.string.about_highlights_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center
+                )
             }
         }
+    }
+
+    // ═══ 彩蛋烟花层：全屏 Canvas，不拦截触摸（点击穿透继续可用）═══
+    FireworksOverlay(trigger = fireworksTrigger)
     }
 }
 
@@ -918,5 +953,133 @@ internal fun openUrl(context: android.content.Context, url: String, noBrowserHin
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }.onFailure {
         Toast.makeText(context, noBrowserHint, Toast.LENGTH_SHORT).show()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  v1.4.8 美化新增：本版亮点卡 + 彩蛋烟花层
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 本版亮点卡 —— 进页第一眼的价值摘要（先于更新面板）。
+ *
+ * 版本徽章（等宽字）+ 四条亮点（三色强调轮转的圆点 + 一句话）；
+ * 亮点文案是「发版 PR 更新 strings」的轻量惯例（与仓库既有
+ * strings 演进纪律一致），无远端依赖、离线可读。
+ */
+@Composable
+private fun HighlightsCard() {
+    val scheme = MaterialTheme.colorScheme
+    val accents = listOf(scheme.primary, scheme.tertiary, scheme.secondary)
+    val highlights = listOf(
+        R.string.about_highlight_1,
+        R.string.about_highlight_2,
+        R.string.about_highlight_3,
+        R.string.about_highlight_4
+    )
+    AboutSectionCard(
+        title = stringResource(R.string.about_section_highlights),
+        icon = Icons.Outlined.AutoAwesome
+    ) {
+        // 版本徽章行：发丝分隔线上方的当前版本胶囊
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = scheme.primary.copy(alpha = 0.12f)
+        ) {
+            Text(
+                "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = scheme.primary,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        highlights.forEachIndexed { i, res ->
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(vertical = 3.dp)
+            ) {
+                // 亮点圆点：三色强调轮转（与功能卡同一节奏）
+                Box(
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .size(7.dp)
+                        .drawBehind {
+                            drawCircle(color = accents[i % accents.size])
+                        }
+                )
+                Text(
+                    stringResource(res),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 彩蛋烟花层 —— trigger 自增触发一轮 ~1.9s 的粒子庆祝。
+ *
+ * 实现纪律（与 Hero 同款）：
+ * - 粒子表按 trigger 键 remember（每次触发换一批随机初速/色相），
+ *   动画相位走 Animatable 单值驱动 Canvas 重绘 —— 零逐帧重组；
+ * - 72 粒 × 径向爆散 + 重力下坠 + 尾段淡出；色相取主题三强调色
+ *   + StarAmber 旋转，深浅主题下都醒目；
+ * - 播放结束自动隐藏（progress >= 1 不再绘制，层不可见也不拦截
+ *   触摸 —— 指针穿透，页面照常可用）。
+ */
+@Composable
+private fun FireworksOverlay(trigger: Int) {
+    if (trigger <= 0) return
+    val scheme = MaterialTheme.colorScheme
+    val palette = remember(scheme) {
+        listOf(scheme.primary, scheme.tertiary, scheme.secondary, StarAmber)
+    }
+    // 粒子表：角度/初速/半径抖动/色相序号 —— trigger 变化即换一批
+    val particles = remember(trigger) {
+        List(72) { i ->
+            val angle = (i / 72f) * 2f * PI.toFloat() + (i % 7) * 0.13f
+            val speed = 0.55f + (i % 11) / 17f  // 0.55..1.08 归一速度
+            Triple(angle, speed, i and 3)
+        }
+    }
+    val progress = remember(trigger) { Animatable(0f) }
+    LaunchedEffect(trigger) {
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(durationMillis = 1900, easing = LinearEasing))
+    }
+    if (progress.value >= 1f) return
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val t = progress.value
+        // 中心 = 画面中上三分之一（烟花在视野里而非边角）
+        val cx = size.width / 2f
+        val cy = size.height / 3.2f
+        val maxR = size.minDimension * 0.52f
+        // 淡出：前 70% 满亮，尾段线性衰减
+        val alpha = when {
+            t < 0.7f -> 1f
+            else -> 1f - (t - 0.7f) / 0.3f
+        }
+        for ((angle, speed, colorIdx) in particles) {
+            // 出膛快、后段减速（ease-out 轨迹）+ 轻微重力下坠
+            val eased = 1f - (1f - t).let { it * it }
+            val r = maxR * speed * eased
+            val gravity = 36f * t * t
+            val x = cx + r * cos(angle)
+            val y = cy + r * sin(angle) + gravity
+            // 粒子大小随速度差异化，尾段缩小
+            val radius = (4.5f - speed * 2.2f) * (1f - t * 0.4f) * density
+            drawCircle(
+                color = palette[colorIdx].copy(alpha = alpha.coerceIn(0f, 1f)),
+                radius = radius.coerceAtLeast(1.2f * density),
+                center = Offset(x, y)
+            )
+        }
     }
 }

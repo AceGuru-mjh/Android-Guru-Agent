@@ -56,7 +56,11 @@ data class UsageModelStat(
     val totalTokens: Long,
     val requests: Int,
     /** 占全库总 token 的比例（0..1；全库为空时为 0）。 */
-    val share: Float
+    val share: Float,
+    /** 输入侧 token 累计（#221 费用估算：输入/输出费率不同）。 */
+    val promptTokens: Long = 0L,
+    /** 输出侧 token 累计。 */
+    val completionTokens: Long = 0L
 )
 
 /** 汇总指标 —— [UsageLedger.totals] 的返回单元。 */
@@ -283,14 +287,17 @@ class UsageLedger @Inject constructor(
         val snapshot = snapshot()
         if (snapshot.isEmpty()) return emptyList()
         var grandTotal = 0L
-        // value = [totalTokens, requests] —— longArrayOf 避免为每个模型建装箱累加器
+        // value = [totalTokens, requests, promptTokens, completionTokens]
+        // —— longArrayOf 避免为每个模型建装箱累加器（#221：拆输入/输出供费率估算）
         val byModel = LinkedHashMap<String, LongArray>()
         for (rec in snapshot) {
             grandTotal += rec.totalTokens
             val cur = byModel[rec.modelId]
             byModel[rec.modelId] = longArrayOf(
                 (cur?.get(0) ?: 0L) + rec.totalTokens,
-                (cur?.get(1) ?: 0L) + 1L
+                (cur?.get(1) ?: 0L) + 1L,
+                (cur?.get(2) ?: 0L) + rec.promptTokens,
+                (cur?.get(3) ?: 0L) + rec.completionTokens
             )
         }
         return byModel.map { (modelId, acc) ->
@@ -298,7 +305,9 @@ class UsageLedger @Inject constructor(
                 modelId = modelId,
                 totalTokens = acc[0],
                 requests = acc[1].toInt(),
-                share = if (grandTotal > 0) acc[0].toFloat() / grandTotal else 0f
+                share = if (grandTotal > 0) acc[0].toFloat() / grandTotal else 0f,
+                promptTokens = acc[2],
+                completionTokens = acc[3]
             )
         }.sortedByDescending { it.totalTokens }
     }

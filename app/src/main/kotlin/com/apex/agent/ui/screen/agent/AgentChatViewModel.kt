@@ -344,6 +344,11 @@ class AgentChatViewModel @Inject constructor(
         }
     }
 
+    /** #237：关掉通知权限回收引导条（点击「去开启」跳转后 / 用户忽略）。 */
+    fun dismissNotifPermissionHint() {
+        _uiState.update { it.copy(notifPermissionHint = false) }
+    }
+
     /**
      * One-shot signal emitted when a slash command needs the user to complete
      * the GitHub connection flow before it can execute (currently only

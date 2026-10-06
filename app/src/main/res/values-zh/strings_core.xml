@@ -556,6 +556,13 @@
     <string name="common_done">完成</string>
 
     <!-- ═══ 关于页（抽屉底部入口，v1.4.3+）═══ -->
+    <string name="about_section_highlights">本版亮点</string>
+    <string name="about_highlight_1">智能更新链路：跨十个版本内一步直达，只下一次小补丁</string>
+    <string name="about_highlight_2">长任务导出：任意运行记录可分享为 JSON 存档或 Markdown 报告</string>
+    <string name="about_highlight_3">聊天记忆你做主：设置里可关自动摄取，每条记忆可查可删</string>
+    <string name="about_highlight_4">用量仪表盘新增按模型牌价的费用估算</string>
+    <string name="about_easter_egg_toast">🎉 你找到了烟花彩蛋！</string>
+    <string name="about_highlights_hint">连点本页底部的机器人图标五次试试</string>
     <string name="about_section_build">版本与构建</string>
     <string name="about_section_update">软件更新</string>
     <string name="about_section_features">功能一览</string>
@@ -635,6 +642,14 @@
     <!-- ═══ v1.4.4 #4：任务完成通知设置 ═══ -->
     <string name="settings_task_notify_title">任务完成通知</string>
     <string name="settings_task_notify_desc">App 在后台时任务跑完发送系统通知（前台使用时不打扰）</string>
+    <!-- #218 记忆摄取开关：标题/描述/隐私告知 -->
+    <string name="settings_memory_capture_title">聊天记忆自动摄取</string>
+    <string name="settings_memory_capture_desc">自动从对话中沉淀关于你的稳定事实，并在后续对话中召回参考。关闭后不再新增任何记忆 —— 已有记忆可在记忆页查看或删除</string>
+    <string name="memory_capture_privacy_notice">对话内容在本机处理以构建你的画像（事实 / 近况 / 里程碑）。可在设置 → Agent 中关闭自动摄取，也可随时在此删除任何一条记忆。</string>
+    <!-- #237 通知权限回收引导 -->
+    <string name="notif_permission_hint_title">后台通知未送达</string>
+    <string name="notif_permission_hint_body">系统通知权限已关闭，后台任务完成的提醒被静默丢弃。开启通知后才能收到。</string>
+    <string name="notif_permission_hint_action">去开启通知</string>
 
     <!-- ═══ #208：权限 / 风险门弹窗文案（GateDialogStrings.Res）═══ -->
     <string name="gate_perm_title_fmt">工具执行授权：%1$s</string>

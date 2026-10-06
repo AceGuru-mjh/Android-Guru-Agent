@@ -556,6 +556,13 @@
     <string name="common_done">Done</string>
 
     <!-- ═══ About screen (drawer bottom entry, v1.4.3+) ═══ -->
+    <string name="about_section_highlights">Highlights in this build</string>
+    <string name="about_highlight_1">Smart update pipeline: jump straight to the latest version from up to 10 versions behind with one small patch</string>
+    <string name="about_highlight_2">Long-task export: share any run as a JSON archive or a readable Markdown report</string>
+    <string name="about_highlight_3">Chat memory you control: auto-capture can be turned off in Settings, and every memory is viewable and deletable</string>
+    <string name="about_highlight_4">Usage dashboard now estimates cost per model from public list prices</string>
+    <string name="about_easter_egg_toast">🎉 You found the fireworks!</string>
+    <string name="about_highlights_hint">Tap the robot at the bottom of this page five times</string>
     <string name="about_section_build">Version &amp; build</string>
     <string name="about_section_update">Software updates</string>
     <string name="about_section_features">Feature tour</string>
@@ -635,6 +642,14 @@
     <!-- ═══ v1.4.4 #4: task completion notification settings ═══ -->
     <string name="settings_task_notify_title">Task completion notification</string>
     <string name="settings_task_notify_desc">Notify when a task finishes while the app is in background (silenced in foreground)</string>
+    <!-- #218 记忆摄取开关：标题/描述/隐私告知 -->
+    <string name="settings_memory_capture_title">Chat memory auto-capture</string>
+    <string name="settings_memory_capture_desc">Automatically distill stable facts about you from conversations and recall them in later chats. Turn off to stop any new capture — existing memories can be viewed or deleted on the Memory page</string>
+    <string name="memory_capture_privacy_notice">Conversations are processed on-device to build your profile (facts / recent state / milestones). You can turn auto-capture off in Settings → Agent, and delete any memory here at any time.</string>
+    <!-- #237 通知权限回收引导 -->
+    <string name="notif_permission_hint_title">Background notifications not delivered</string>
+    <string name="notif_permission_hint_body">System notification permission is off, so background task-completion alerts were silently dropped. Enable notifications to get them.</string>
+    <string name="notif_permission_hint_action">Open notification settings</string>
 
     <!-- ═══ #208: permission / risk gate dialog strings (GateDialogStrings.Res) ═══ -->
     <string name="gate_perm_title_fmt">Tool authorization: %1$s</string>

@@ -74,7 +74,8 @@ class AppDownloadInstallToolTest {
         val installer = FakeApkInstaller()
         val tool = AppInstallApkTool(installer)
         val fakeFile = File(tempDir, "not-an-apk.txt").apply {
-            writeText("this is not an APK")
+            // 修复：填充须超过 MIN_APK_BYTES(4KB)，否则先命中体积检查分支
+            writeText("this is not an APK".repeat(600))
         }
         val result = tool.execute("""{"path": "${fakeFile.absolutePath}"}""")
         assertTrue("should fail: $result", result.startsWith("Error"))

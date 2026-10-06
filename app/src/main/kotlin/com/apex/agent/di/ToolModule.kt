@@ -999,6 +999,17 @@ object ToolModule {
         registry.register(SafeAgentTool(ImageInfoTool { path -> AndroidImageIo.info(path) }))
         registry.register(SafeAgentTool(ImageConvertTool { request -> AndroidImageIo.convert(request) }))
 
+        // ═══ 14e/f/g. v5 — Agent 自主设置 + 下载安装 APK + 更多能力（共 18 工具）═══
+        // 注册体拆至 [ToolModuleV5Registration.kt]（SRP 预算：本文件已逼近 1200 行
+        // 上限）。设计文档：[docs/v5-capability-enhancement.md]。
+        registerV5EnhancementTools(
+            registry = registry,
+            context = context,
+            httpClient = httpClient,
+            downloadDir = downloadDir,
+            settingsRepository = settingsRepository
+        )
+
         // ═══ 主执行器（v3：环境门+风险门 → 校验 → 限流 → 熔断 → 超时/重试 → 追踪）═══
         // 所有工具调用统一过门：环境前置不满足/用户拒绝在执行前拦截；参数违规
         // 同样前置拦截；成败/耗时/逐调用 span 全部入账。

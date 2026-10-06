@@ -21,4 +21,6 @@ dependencies {
     // Unit testing (pure-JVM src/test)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    // v5 测试下载/安装工具链所需（AppDownloadInstallToolTest）
+    testImplementation(libs.mockwebserver)
 }

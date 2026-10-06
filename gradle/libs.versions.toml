@@ -85,6 +85,8 @@ serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serializ
 
 # Network
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+# MockWebServer — v5 测试下载/安装工具链所需（仅 testImplementation）
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 
 # Delta update —— VCDIFF 补丁的 LZMA(.xz) 二级压缩段解码
 xz = { group = "org.tukaani", name = "xz", version.ref = "xz" }

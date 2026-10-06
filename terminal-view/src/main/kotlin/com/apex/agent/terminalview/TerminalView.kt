@@ -19,7 +19,8 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 import com.apex.agent.terminalemulator.KeyModifiers
-import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
+import com.apex.agent.terminalemulator.RenderRuns
 import com.apex.agent.terminalemulator.TerminalKey
 import com.apex.agent.terminalemulator.TerminalMouseEventType
 import com.apex.agent.terminalemulator.TerminalRenderSnapshot
@@ -80,7 +81,7 @@ class TerminalView @JvmOverloads constructor(
     @Volatile
     private var pendingPalette: TerminalPalette? = null
     private var snapshot: TerminalRenderSnapshot? = null
-    private var mergedRows: List<List<RenderCell>> = emptyList()
+    private var runRows: List<List<RenderRun>> = emptyList()
     private var rowIdBase: Long = 0L
 
     /** 渲染代际 id：快照换代 / 换肤 / 换字号都递增（run 缓存的失效键）。 */
@@ -275,9 +276,9 @@ class TerminalView @JvmOverloads constructor(
 
     /** 全选（可见网格全行 —— 从首行到末行）。 */
     fun selectAll() {
-        if (mergedRows.isEmpty()) return
+        if (runRows.isEmpty()) return
         selectionModel.start(rowIdBase, 0)
-        selectionModel.extend(rowIdBase + mergedRows.size - 1, Int.MAX_VALUE / 4)
+        selectionModel.extend(rowIdBase + runRows.size - 1, Int.MAX_VALUE / 4)
         notifySelectionChanged(currentSelectedText())
         invalidate()
     }
@@ -359,7 +360,7 @@ class TerminalView @JvmOverloads constructor(
         if (s === null) {
             if (snapshot === null) return
             snapshot = null
-            mergedRows = emptyList()
+            runRows = emptyList()
             invalidate()
             return
         }
@@ -372,7 +373,8 @@ class TerminalView @JvmOverloads constructor(
 
         snapshot = s
         frameId++
-        mergedRows = s.scrollback + s.lines
+        runRows = (s.runScrollback ?: RenderRuns.deriveRows(s.scrollback)) + // T95：run 直供（未填时派生）
+            (s.runLines ?: RenderRuns.deriveRows(s.lines))
         rowIdBase = s.scrollbackBase - s.scrollback.size
         effectivePalette = deriveDynamicPalette(s, settings.palette)
 
@@ -381,7 +383,7 @@ class TerminalView @JvmOverloads constructor(
             notifySelectionChanged(null)
         }
 
-        scrollModel.updateGridRows(mergedRows.size)
+        scrollModel.updateGridRows(runRows.size)
         if (s.scrollbackBase < previousBase) {
             // 引擎 reset（RIS/新会话）→ 快照代际重置：贴底重来
             scrollModel.snapToBottom()
@@ -393,7 +395,7 @@ class TerminalView @JvmOverloads constructor(
                 notifySelectionChanged(null)
             }
         } else {
-            scrollModel.onContentGrew(mergedRows.size - oldGridRows, wasAtBottom)
+            scrollModel.onContentGrew(runRows.size - oldGridRows, wasAtBottom)
         }
         notifyScrollChanged()
 
@@ -432,7 +434,7 @@ class TerminalView @JvmOverloads constructor(
 
     /** 网格几何推送（含光标锚定，语义见 TerminalScrollModel.onGridResized）+ PTY resize 防抖通知。 */
     private fun scheduleResizeNotify() {
-        if (scrollModel.onGridResized(mergedRows.size.coerceAtLeast(grid.viewRows), grid.viewRows, cursorAnchorRow())) {
+        if (scrollModel.onGridResized(runRows.size.coerceAtLeast(grid.viewRows), grid.viewRows, cursorAnchorRow())) {
             notifyScrollChanged()
         }
         resizeRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -460,7 +462,7 @@ class TerminalView @JvmOverloads constructor(
 
     /** 光标合并网格行（无快照/空网格 → null）—— resize 锚定用。 */
     private fun cursorAnchorRow(): Int? = snapshot?.let { s ->
-        mergedRows.takeIf { it.isNotEmpty() }
+        runRows.takeIf { it.isNotEmpty() }
             ?.let { (s.scrollback.size + s.cursorRow).coerceIn(0, it.size - 1) }
     }
 
@@ -488,7 +490,7 @@ class TerminalView @JvmOverloads constructor(
 
     private fun drawFrame(canvas: Canvas, snap: TerminalRenderSnapshot) {
         val frame = TerminalCanvasRenderer.RenderFrame(
-            rows = mergedRows,
+            rows = runRows,
             snapshot = snap,
             grid = grid,
             scroll = scrollModel,
@@ -842,10 +844,9 @@ class TerminalView @JvmOverloads constructor(
         }
         // 2) OSC 8 链接优先（点击即打开，不拉键盘）
         cellAt(x, y)?.let { (row, col) ->
-            val cells = mergedRows.getOrNull(row)
-            val cell = cells?.getOrNull(col)
-            if (cell != null && cell.link != 0) {
-                snap.linkTable[cell.link]?.let { uri ->
+            val link = RenderRuns.runAtCol(runRows.getOrNull(row) ?: return@let, col)?.link ?: 0
+            if (link != 0) {
+                snap.linkTable[link]?.let { uri ->
                     client?.onTerminalLinkOpen(uri)
                     return
                 }
@@ -887,8 +888,8 @@ class TerminalView @JvmOverloads constructor(
     private fun wordSelectionAt(x: Float, y: Float): Pair<Pair<Int, Int>, Pair<Int, Int>>? {
         val at = cellAt(x, y) ?: return null
         val (row, col) = at
-        val cells = mergedRows.getOrNull(row) ?: return null
-        val span = TerminalWordGeometry.wordSpanAt(cells, col) { idx, text ->
+        val runs = runRows.getOrNull(row) ?: return null
+        val span = TerminalWordGeometry.wordSpanAt(runs, col) { idx, text ->
             selectionModel.expandToWord(rowIdBase + row, idx, text)
         } ?: return null
         return (row to span.first) to (row to span.second)
@@ -1017,20 +1018,20 @@ class TerminalView @JvmOverloads constructor(
 
     /** 像素 → (合并网格行, VT 列)。 */
     private fun cellAt(x: Float, y: Float): Pair<Int, Int>? {
-        if (mergedRows.isEmpty() || cellHeightPx <= 0f) return null
-        val viewRow = grid.rowAt(y - bounceOffsetPx, mergedRows.size - 1)
+        if (runRows.isEmpty() || cellHeightPx <= 0f) return null
+        val viewRow = grid.rowAt(y - bounceOffsetPx, runRows.size - 1)
         val mergedRow = scrollModel.firstVisibleRow + viewRow
-        if (mergedRow < 0 || mergedRow >= mergedRows.size) return null
-        val cells = mergedRows[mergedRow]
-        return mergedRow to grid.columnAt(cells, x.coerceIn(0f, grid.widthPx))
+        if (mergedRow < 0 || mergedRow >= runRows.size) return null
+        val runs = runRows[mergedRow]
+        return mergedRow to grid.columnAt(runs, x.coerceIn(0f, grid.widthPx))
     }
 
     /** 命中词文本（URL 自动识别；几何在 [TerminalWordGeometry]）。 */
     private fun wordTextAt(row: Int, col: Int): String? {
-        val cells = mergedRows.getOrNull(row) ?: return null
-        val text = TerminalWordGeometry.textAt(cells)
+        val runs = runRows.getOrNull(row) ?: return null
+        val text = TerminalWordGeometry.textAt(runs)
         if (text.isEmpty()) return null
-        val charIdx = TerminalWordGeometry.charIndexOfCol(cells, col).coerceAtMost(text.length - 1)
+        val charIdx = TerminalWordGeometry.charIndexOfCol(runs, col).coerceAtMost(text.length - 1)
         val (ws, we) = selectionModel.expandToWord(0, charIdx, text)
         if (we <= ws) return null
         return text.substring(ws.coerceIn(0, text.length), we.coerceIn(0, text.length))
@@ -1040,7 +1041,7 @@ class TerminalView @JvmOverloads constructor(
         if (!selectionModel.active) return null
         return selectionModel.selectedText { rowId ->
             val idx = (rowId - rowIdBase).toInt()
-            mergedRows.getOrNull(idx)
+            runRows.getOrNull(idx)
         }
     }
 

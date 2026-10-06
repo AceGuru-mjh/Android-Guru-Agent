@@ -1,6 +1,6 @@
 package com.apex.agent.terminalview
 
-import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
 
 /**
  * T88（2-a）：跨快照稳定的选区模型（纯 JVM）。
@@ -124,12 +124,17 @@ class TerminalSelectionModel {
 
     /**
      * 提取选中文本（多行以 `\n` 连接；行尾空白修剪 —— 复制 `ls` 彩色输出不会带
-     * 一串尾随空格）。宽字符按 cell 原样带出；HIDDEN cell 以空格参与。
+     * 一串尾随空格）。宽字符整字带出；HIDDEN 已在 run 文本中替换为空格。
      *
-     * @param rowProvider 行id → 该行渲染 cell 列表（越界/null = 行已淘汰，跳过）
+     * T95：入参改为 run 行（[rowProvider]）；区间切割按 run 的列几何推算
+     *（窄 run 1 字符 1 列、宽 run 1 字符 2 列；跨边界宽字符整字带出 ——
+     * 与旧 cell 版同款「区间交集即整字」语义）。组合符 + 段内部分选为
+     * 近似（组合符折叠在 run 文本内，列↔字符映射按主字符宽度推算）。
+     *
+     * @param rowProvider 行id → 该行渲染 run 列表（越界/null = 行已淘汰，跳过）
      * @return null = 无选区/全淘汰
      */
-    fun selectedText(rowProvider: (Long) -> List<RenderCell>?): String? {
+    fun selectedText(rowProvider: (Long) -> List<RenderRun>?): String? {
         val n = normalized() ?: return null
         val (start, end) = n
         if (start.rowId > end.rowId) return null
@@ -137,15 +142,15 @@ class TerminalSelectionModel {
         var any = false
         var row = start.rowId
         while (row <= end.rowId) {
-            val cells = rowProvider(row)
-            if (cells != null) {
+            val runs = rowProvider(row)
+            if (runs != null) {
                 // 分隔符只落在「两个存活行」之间 —— 头部/中段被淘汰的行不产生
                 // 空行（复制 `x` 得 "x" 而非 "\n\n\nx"）
                 if (any) sb.append('\n')
                 any = true
                 val from = if (row == start.rowId) start.col else 0
-                val to = if (row == end.rowId) end.col else cells.size
-                appendCells(sb, cells, from, to)
+                val to = if (row == end.rowId) end.col else totalCols(runs)
+                appendRuns(sb, runs, from, to)
             }
             row++
             if (row - start.rowId > MAX_ROWS_EXTRACT) break // 防御：异常输入不无限循环
@@ -154,24 +159,37 @@ class TerminalSelectionModel {
         return sb.toString().trimEnd(' ', '\u00A0')
     }
 
-    /** 列区间内 cell 文本拼接（VT 列语义：宽字符 2 列，起止可落在宽字符中间 ——
-     * 落中间时整字符带出）。 */
-    private fun appendCells(sb: StringBuilder, cells: List<RenderCell>, fromCol: Int, toCol: Int) {
+    /** 一行 run 的总 VT 列数。 */
+    private fun totalCols(runs: List<RenderRun>): Int {
+        val last = runs.lastOrNull() ?: return 0
+        return last.colStart + last.colSpan
+    }
+
+    /** 列区间内 run 文本拼接（VT 列语义：宽字符 2 列，区间与字符列区间
+     * 有交集即整字带出 —— 与旧 cell 版同款；HIDDEN 已是空格）。 */
+    private fun appendRuns(sb: StringBuilder, runs: List<RenderRun>, fromCol: Int, toCol: Int) {
         if (toCol <= fromCol) return
-        var col = 0
-        var i = 0
-        while (i < cells.size) {
-            val cell = cells[i]
-            val span = if (cell.flags and RenderCell.FLAG_WIDE != 0) 2 else 1
-            val cellStart = col
-            val cellEnd = col + span
-            // 命中判定：区间 [fromCol, toCol) 与该 cell 列区间有交集，或该 cell
-            // 横跨区间边界（从字符中间起选也带出整个字符 —— Termux 同款）
-            if (cellEnd > fromCol && cellStart < toCol) {
-                sb.append(if (cell.flags and RenderCell.FLAG_HIDDEN != 0) ' ' else cell.text)
+        for (run in runs) {
+            val runStart = run.colStart
+            val runEnd = run.colStart + run.colSpan
+            if (runEnd <= fromCol || runStart >= toCol || run.colSpan <= 0) continue
+            val wide = run.flags and RenderRun.FLAG_WIDE != 0
+            val textLen = run.text.length
+            if (!wide && run.colSpan == textLen) {
+                // 纯窄无组合：精确按列切割
+                val lo = (fromCol - runStart).coerceIn(0, textLen)
+                val hi = (toCol - runStart).coerceIn(0, textLen)
+                if (hi > lo) sb.append(run.text, lo, hi)
+            } else {
+                // 宽 run（或带组合）：字符列区间 [2k, 2k+2) 与 [from, to) 有交集
+                // 即整字带出；窄带组合退化为主字符近似。
+                val cells = if (wide) run.colSpan / 2 else textLen
+                for (k in 0 until cells) {
+                    val cs = if (wide) runStart + k * 2 else runStart + k
+                    val ce = cs + (if (wide) 2 else 1)
+                    if (ce > fromCol && cs < toCol && k < textLen) sb.append(run.text[k])
+                }
             }
-            col = cellEnd
-            i++
         }
     }
 

@@ -1,9 +1,10 @@
 package com.apex.agent.terminalview
 
 import com.apex.agent.terminalemulator.RenderCell
+import com.apex.agent.terminalemulator.RenderRun
+import com.apex.agent.terminalemulator.RenderRuns
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,6 +15,9 @@ import org.junit.Test
  *
  * 全部纯数字断言（不依赖 Paint/Canvas）—— 这是把「CJK 光标漂移」类 bug 锁死
  * 在 CI 的那层测试。
+ *
+ * T95：几何入参改为 run 行 —— fixture 以 [RenderRuns.deriveRow] 从 cell 行派生
+ *（同生产管线；同风格邻格合并、宽字符独立成段）。
  */
 class TerminalTextGridTest {
 
@@ -27,6 +31,8 @@ class TerminalTextGridTest {
 
     private fun cell(text: String, wide: Boolean = false) =
         RenderCell(text, 0L, 0L, if (wide) RenderCell.FLAG_WIDE else 0)
+
+    private fun row(vararg cells: RenderCell): List<RenderRun> = RenderRuns.deriveRow(cells.toList())
 
     // ─── compute / clamp ───
 
@@ -94,94 +100,96 @@ class TerminalTextGridTest {
 
     @Test
     fun `columnX steps one cell width per column`() {
-        val cells = listOf(cell("a"), cell("b"), cell("c"))
-        assertEquals(0f, grid.columnX(cells, 0), 0.01f)
-        assertEquals(10f, grid.columnX(cells, 1), 0.01f)
-        assertEquals(30f, grid.columnX(cells, 3), 0.01f)
+        val runs = row(cell("a"), cell("b"), cell("c"))
+        assertEquals(0f, grid.columnX(runs, 0), 0.01f)
+        assertEquals(10f, grid.columnX(runs, 1), 0.01f)
+        assertEquals(30f, grid.columnX(runs, 3), 0.01f)
     }
 
     @Test
     fun `columnX steps two cell widths for wide chars`() {
-        val cells = listOf(cell("中", wide = true), cell("b"))
-        assertEquals(0f, grid.columnX(cells, 0), 0.01f)
-        assertEquals(20f, grid.columnX(cells, 2), 0.01f) // 宽字符后 VT 列 2
-        assertEquals(30f, grid.columnX(cells, 3), 0.01f)
+        val runs = row(cell("中", wide = true), cell("b"))
+        assertEquals(0f, grid.columnX(runs, 0), 0.01f)
+        assertEquals(20f, grid.columnX(runs, 2), 0.01f) // 宽字符后 VT 列 2
+        assertEquals(30f, grid.columnX(runs, 3), 0.01f)
     }
 
     @Test
     fun `columnX beyond row length continues one column per cell`() {
-        val cells = listOf(cell("a"))
-        assertEquals(60f, grid.columnX(cells, 6), 0.01f) // 1 实体列 + 5 空列
+        val runs = row(cell("a"))
+        assertEquals(60f, grid.columnX(runs, 6), 0.01f) // 1 实体列 + 5 空列
     }
 
     @Test
     fun `columnX mid wide char returns its second column start`() {
         // VT 列 1 = 「中」的右半起始（宽字符占 0..1 列 = 0..20px，列 1 → 10px）
-        val cells = listOf(cell("中", wide = true), cell("b"))
-        assertEquals(10f, grid.columnX(cells, 1), 0.01f)
+        val runs = row(cell("中", wide = true), cell("b"))
+        assertEquals(10f, grid.columnX(runs, 1), 0.01f)
     }
 
     @Test
     fun `columnAt returns wide char start column when hit`() {
-        val cells = listOf(cell("a"), cell("中", wide = true), cell("b"))
-        assertEquals(0, grid.columnAt(cells, 0f))
-        assertEquals(0, grid.columnAt(cells, 9.9f)) // 命中 a
-        assertEquals(1, grid.columnAt(cells, 15f)) // 「中」中段 → 起始列 1
-        assertEquals(1, grid.columnAt(cells, 29f)) // 仍在「中」右半（10..30px）
-        assertEquals(3, grid.columnAt(cells, 35f)) // b 起始列 3
+        val runs = row(cell("a"), cell("中", wide = true), cell("b"))
+        assertEquals(0, grid.columnAt(runs, 0f))
+        assertEquals(0, grid.columnAt(runs, 9.9f)) // 命中 a
+        assertEquals(1, grid.columnAt(runs, 15f)) // 「中」中段 → 起始列 1
+        assertEquals(1, grid.columnAt(runs, 29f)) // 仍在「中」右半（10..30px）
+        assertEquals(3, grid.columnAt(runs, 35f)) // b 起始列 3
     }
 
     @Test
     fun `columnAt extends past row end with blank columns`() {
-        val cells = listOf(cell("a"), cell("b"))
-        assertEquals(2, grid.columnAt(cells, 25f))
-        assertEquals(4, grid.columnAt(cells, 49f))
+        val runs = row(cell("a"), cell("b"))
+        assertEquals(2, grid.columnAt(runs, 25f))
+        assertEquals(4, grid.columnAt(runs, 49f))
     }
 
     @Test
     fun `columnAt degenerate inputs map to zero`() {
         assertEquals(0, grid.columnAt(emptyList(), 100f))
-        assertEquals(0, grid.columnAt(listOf(cell("a")), 0f))
-        assertEquals(0, grid.columnAt(listOf(cell("a")), -5f))
+        assertEquals(0, grid.columnAt(row(cell("a")), 0f))
+        assertEquals(0, grid.columnAt(row(cell("a")), -5f))
     }
 
     @Test
-    fun `columnOfIndex accumulates vt columns with wide as two`() {
-        val cells = listOf(cell("a"), cell("中", wide = true), cell("b"))
-        assertEquals(0, grid.columnOfIndex(cells, 0))
-        assertEquals(1, grid.columnOfIndex(cells, 1))
-        assertEquals(3, grid.columnOfIndex(cells, 2))
-        assertEquals(4, grid.columnOfIndex(cells, 3)) // 越界下标按现有累计
+    fun `columnOfRunIndex accumulates vt columns with wide as two`() {
+        val runs = row(cell("a"), cell("中", wide = true), cell("b"))
+        assertEquals(0, grid.columnOfRunIndex(runs, 0))
+        assertEquals(1, grid.columnOfRunIndex(runs, 1))
+        assertEquals(3, grid.columnOfRunIndex(runs, 2))
+        assertEquals(4, grid.columnOfRunIndex(runs, 3)) // 越界下标按现有累计
+        assertEquals(4, grid.totalSpan(runs))
+        assertEquals(0, grid.totalSpan(emptyList()))
     }
 
     @Test
     fun `cursorPixelX delegates to columnX semantics`() {
-        val cells = listOf(cell("中", wide = true), cell("$"))
-        assertEquals(20f, grid.cursorPixelX(cells, 2), 0.01f)
-        assertEquals(30f, grid.cursorPixelX(cells, 3), 0.01f)
+        val runs = row(cell("中", wide = true), cell("$"))
+        assertEquals(20f, grid.cursorPixelX(runs, 2), 0.01f)
+        assertEquals(30f, grid.cursorPixelX(runs, 3), 0.01f)
     }
 
     // ─── 选区矩形 ───
 
     @Test
     fun `selectionXRange is half open and wide aware`() {
-        val cells = listOf(cell("a"), cell("中", wide = true), cell("b"))
-        val r = grid.selectionXRange(cells, 1, 4)!! // 选「中」+「b」
+        val runs = row(cell("a"), cell("中", wide = true), cell("b"))
+        val r = grid.selectionXRange(runs, 1, 4)!! // 选「中」+「b」
         assertEquals(10f, r.first, 0.01f)
         assertEquals(40f, r.second, 0.01f)
     }
 
     @Test
     fun `selectionXRange null on empty interval`() {
-        val cells = listOf(cell("a"))
-        assertNull(grid.selectionXRange(cells, 2, 2))
-        assertNull(grid.selectionXRange(cells, 3, 2))
+        val runs = row(cell("a"))
+        assertNull(grid.selectionXRange(runs, 2, 2))
+        assertNull(grid.selectionXRange(runs, 3, 2))
     }
 
     @Test
     fun `selectionXRange whole row from zero to full span`() {
-        val cells = listOf(cell("a"), cell("b"))
-        val r = grid.selectionXRange(cells, 0, 2)!!
+        val runs = row(cell("a"), cell("b"))
+        val r = grid.selectionXRange(runs, 0, 2)!!
         assertEquals(0f, r.first, 0.01f)
         assertEquals(20f, r.second, 0.01f)
     }
@@ -219,9 +227,9 @@ class TerminalTextGridTest {
 
     @Test
     fun `hitTestColumn matches columnAt`() {
-        val cells = listOf(cell("中", wide = true), cell("b"))
-        assertEquals(grid.columnAt(cells, 21f), grid.hitTestColumn(cells, 21f))
-        assertEquals(grid.columnAt(cells, 25f), grid.hitTestColumn(cells, 25f))
+        val runs = row(cell("中", wide = true), cell("b"))
+        assertEquals(grid.columnAt(runs, 21f), grid.hitTestColumn(runs, 21f))
+        assertEquals(grid.columnAt(runs, 25f), grid.hitTestColumn(runs, 25f))
     }
 
     // ─── slop ───
@@ -263,15 +271,15 @@ class TerminalTextGridTest {
         assertEquals(1f, g.rowTopY(0), 0.01f)
         assertEquals(21f, g.rowTopY(1), 0.01f)
         assertEquals(61f, g.rowBottomY(2), 0.01f)
-        assertEquals(2.5f, g.columnX(listOf(cell("a")), 0), 0.01f)
-        assertEquals(12.5f, g.columnX(listOf(cell("a")), 1), 0.01f)
+        assertEquals(2.5f, g.columnX(row(cell("a")), 0), 0.01f)
+        assertEquals(12.5f, g.columnX(row(cell("a")), 1), 0.01f)
         // 视口→内容：输入减 origin（往返恒等）
         assertEquals(1, g.rowAt(25f, 99))
         assertEquals(0, g.rowAt(20.9f, 99))
-        assertEquals(0, g.columnAt(listOf(cell("a")), 3f))
-        assertEquals(1, g.columnAt(listOf(cell("a")), 12.5f))
+        assertEquals(0, g.columnAt(row(cell("a")), 3f))
+        assertEquals(1, g.columnAt(row(cell("a")), 12.5f))
         // 光标 x 含 origin（与 columnX 同源）
-        assertEquals(2.5f, g.cursorPixelX(listOf(cell("a")), 0), 0.01f)
+        assertEquals(2.5f, g.cursorPixelX(row(cell("a")), 0), 0.01f)
     }
 
     @Test

@@ -898,7 +898,11 @@ class TerminalCore(
             dynamicBackground = dynamicColors.background?.let { RenderRowMapper.colorArgb(it) },
             dynamicCursorColor = dynamicColors.cursor?.let { RenderRowMapper.colorArgb(it) },
             guestCwd = guestCwd,
-            requestedResize = resizeRequest
+            requestedResize = resizeRequest,
+            // T95：run 投影（Kotlin 引擎路径与 cell 投影同帧派生 —— 合并语义与
+            // native fastpath（vt_runs.cpp）逐位一致，UI 消费方零引擎感知）。
+            runLines = RenderRuns.deriveRows(visible),
+            runScrollback = RenderRuns.deriveRows(sb)
         )
     }
 

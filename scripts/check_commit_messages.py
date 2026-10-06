@@ -29,6 +29,26 @@ HEADER = re.compile(
 )
 KEYWORDS_HINT = "——"
 
+# 历史豁免名单（SHA 前缀 → 理由）。
+# 背景（2026-10-05 事故报告 docs/ci/guard-rails-commit-range-incident.md）：
+# main 上存在一条英文提交 379c1bbd（修复本脚本的 base 缺失回退），推送时未过
+# push 侧检查。旧版 push 范围（before..after）会把 main 对侧历史圈进校验，
+# 导致此后所有「merge main 后再 push」的分支被这条历史提交永久误伤。
+# 修复：push 侧改用 merge-base + --first-parent（只看分支独有提交，不再看
+# 对侧历史）。豁免名单是**最后防线** —— 防止绕过 workflow 直跑脚本（本地/
+# 回退命令）或意外把该 SHA 圈进范围时再次整车误伤；只豁免这一条历史
+# 事实，不豁免任何新提交。
+EXEMPT_SHA_PREFIXES = {
+    "379c1bbd": "main 历史直推（英文信息）—— 见 guard-rails-commit-range-incident.md",
+}
+
+
+def exempt_reason(sha: str) -> str | None:
+    for prefix, reason in EXEMPT_SHA_PREFIXES.items():
+        if sha.startswith(prefix):
+            return reason
+    return None
+
 
 def git(*args: str) -> str:
     result = subprocess.run(
@@ -50,6 +70,12 @@ def main() -> int:
     if len(sys.argv) < 3:
         print("用法: check_commit_messages.py <base_sha> <head_sha> [--first-parent]")
         return 1
+    # 参数校验：未知 flag 直接拒绝 —— 防止误传的 token（如 shell 引号事故产生的
+    # `HEAD]`）被当成 base/head 静默吞掉。
+    unknown = [a for a in sys.argv[3:] if a != "--first-parent"]
+    if unknown:
+        print(f"未知参数: {unknown}（仅支持 --first-parent）")
+        return 2
     base, head = sys.argv[1], sys.argv[2]
     # push 事件限定第一父链：merge commit 拉入的对侧（第二父）提交属于其
     # 来源分支的既有历史 —— 已由各自 PR 的 base..head 检查覆盖，不属于本次
@@ -74,6 +100,15 @@ def main() -> int:
             print(f"⚠ 提交范围 {base}..{head} 无法解析：base SHA 不在当前 checkout 中，回退为仅检查 HEAD 提交")
             revs = [head]
 
+    # head 自身不可解析（参数误传/浅 checkout 边界）：诚实报错退出，
+    # 绝不静默放行（放行 = 把"查不了"伪装成"通过了"）。
+    for sha in revs:
+        try:
+            git("cat-file", "-e", f"{sha}^{{commit}}")
+        except subprocess.CalledProcessError:
+            print(f"✗ 无法解析提交 {sha}：不在当前 checkout 中，无法校验 —— 请拉全历史后重试")
+            return 2
+
     if not revs:
         print("✓ 提交规范检查通过：范围内没有新增提交")
         return 0
@@ -82,6 +117,10 @@ def main() -> int:
     warnings: list[str] = []
 
     for sha in revs:
+        reason = exempt_reason(sha)
+        if reason is not None:
+            print(f"  ⤼ 豁免历史提交 {sha[:10]}（{reason}）")
+            continue
         subject = git("log", "-1", "--format=%s", sha).strip()
         m = HEADER.match(subject)
         if not m:

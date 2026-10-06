@@ -21,8 +21,11 @@ name: Quality Gate
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  # 触发去重（2026-10-06）：PR 分支推送会同时命中 push 与 pull_request 事件
+  # （并发键不同互不取消）→ 每次 PR 更新全部 workflow 双倍运行。PR 分支由
+  # pull_request 在 merge ref 上覆盖（语义更准）；push 只保留 main 落地终验。
   push:
-    branches: [main, 'feat/**', 'refactor/**', 'fix/**']
+    branches: [main]
   pull_request:
     branches: [main, 'feat/**']
   workflow_dispatch:

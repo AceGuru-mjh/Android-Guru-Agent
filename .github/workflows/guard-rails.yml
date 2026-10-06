@@ -21,9 +21,15 @@ name: Guard Rails
 # 修改本文件后请本地跑 `python3 scripts/check_workflow_yaml.py` 自检。
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 触发去重（2026-10-06）：PR 分支的 push 与 pull_request 事件会各触发一次
+# 本 workflow（并发键 refs/heads/* 与 refs/pull/*/merge 不同，互不取消）——
+# 每次 PR 更新双倍消耗。PR 分支推送由 pull_request 事件在 merge ref 上覆盖
+# （语义更准：含与 main 的合并结果）；push 只保留 main（直推/合并落地后的
+# 终验，走脚本内 P1..P2 落地语义）。无 PR 的裸分支推送不再跑 CI —— 本仓库
+# 所有变更均走 PR 流程，无覆盖损失。
 on:
   push:
-    branches: [main, 'feat/**', 'refactor/**', 'fix/**']
+    branches: [main]
   pull_request:
     branches: [main, 'feat/**']
 

@@ -1,11 +1,16 @@
 name: CI
 
 on:
+  # 触发去重（2026-10-06，docs/ci/guard-rails-commit-range-incident.md §6.3）：
+  # 原先 push 含 feat/fix/refactor 分支 —— PR 分支推送同时命中 push 与
+  # pull_request 两类事件（并发键 refs/heads/* 与 refs/pull/*/merge 不同、
+  # 互不取消），每次 PR 更新 CI+QG+GuardRails 全部双倍运行（近 60 次运行中
+  # 16 组重复，重型 job（app-compile ~11min / build-apk）翻倍最伤）。PR 分支
+  # 由 pull_request 事件在 merge ref 上覆盖 —— 语义更准（含与 main 的合并
+  # 结果，正是合并后要面对的树）；push 只保留 main 落地终验。无 PR 的裸
+  # 分支推送不再触发 CI：本仓库所有变更均走 PR 流程，无覆盖损失。
   push:
-    # push 全量跑（main/feat/fix/refactor）—— 与 quality-gate.yml 的 push 白名单
-    # 对齐：每个 PR 分支 push 后 Checks 含 push+PR 双份完整检查，消除
-    # fix/** 分支只被 QG 覆盖、CI 仅靠 PR 事件的不对称。
-    branches: [main, 'feat/**', 'refactor/**', 'fix/**']
+    branches: [main]
   pull_request:
     branches: [main, 'feat/**']
   workflow_dispatch: {}

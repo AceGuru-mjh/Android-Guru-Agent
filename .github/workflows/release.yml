@@ -244,9 +244,42 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           # AGP 8.7.3 默认需要 NDK 27.0.12077973，runner 自带 27.3.x
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
-          yes | $ANDROID_HOME/tools/bin/sdkmanager "ndk;27.0.12077973" >/dev/null 2>&1 || \
-          echo "⚠️ Could not install NDK 27.0.12077973, will try with pre-installed"
+          # AGP 8.7.3 默认需要 NDK 27.0.12077973。sdkmanager 偶发半截安装
+          #（目录在、source.properties 缺失 → CXX1101 硬失败，2026-10-05 run
+          # 37327280591 实测：pull_request run 翻车而同 SHA 的 push run 通过，
+          # 纯 runner 环境差异）。三重防线（与 apk.yml / #330 对齐）：
+          #   1) 完整性校验先行：已完好则零开销跳过；
+          #   2) sdkmanager 安装后校验，坏了立即清掉重试；
+          #   3) 仍失败 → dl.google.com 官方 zip 直下兜底（免许可/免鉴权/稳定）。
+          NDK_VER="27.0.12077973"
+          NDK_DIR="$ANDROID_HOME/ndk/$NDK_VER"
+          if [ -f "$NDK_DIR/source.properties" ]; then
+            echo "✅ NDK $NDK_VER 已就绪（缓存命中）"
+          else
+            rm -rf "$NDK_DIR"
+            NDK_OK=0
+            for ATTEMPT in 1 2; do
+              if yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+                  --install "ndk;$NDK_VER" >/dev/null 2>&1 && \
+                 [ -f "$NDK_DIR/source.properties" ]; then
+                NDK_OK=1; break
+              fi
+              rm -rf "$NDK_DIR"
+              sleep 5
+            done
+            if [ "$NDK_OK" != "1" ]; then
+              echo "⚠️ sdkmanager 安装 NDK 失败 —— dl.google.com 官方 zip 直下兜底"
+              rm -rf "$NDK_DIR" /tmp/ndk-r27.zip /tmp/ndk-extract
+              curl -sfL --retry 3 -o /tmp/ndk-r27.zip \
+                "https://dl.google.com/android/repository/android-ndk-r27-linux.zip"
+              unzip -q /tmp/ndk-r27.zip -d /tmp/ndk-extract
+              mkdir -p "$ANDROID_HOME/ndk"
+              mv /tmp/ndk-extract/android-ndk-r27 "$NDK_DIR"
+            fi
+            [ -f "$NDK_DIR/source.properties" ] \
+              && echo "✅ NDK $NDK_VER 就绪" \
+              || { echo "::error::NDK $NDK_VER 安装失败（sdkmanager 与直下均不可用）"; exit 1; }
+          fi
           ls "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No NDK pre-installed"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 

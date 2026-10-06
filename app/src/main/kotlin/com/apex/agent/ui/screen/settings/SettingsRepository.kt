@@ -510,6 +510,16 @@ data class AgentSettings(
      */
     val taskCompletionNotify: Boolean = true,
 
+    /**
+     * #218：聊天记忆自动摄取总开关（默认开，保持既有行为）。
+     *
+     * 关闭后：对话内容不再自动沉淀到画像/近况/里程碑（含 LLM 蒸馏与
+     * 启发式捕获），召回注入同步静默 —— 已有记忆不受影响，可在记忆页
+     * 查看/删除。cs-mem UI 轨迹记忆（无障碍）不受此开关管辖（那是
+     * 运行时操作轨迹，另一条链路）。
+     */
+    val chatMemoryCapture: Boolean = true,
+
     // ── 上下文压缩（对应 AgentConfig，重启应用/新会话后生效）──
     // Issue #222：本字段不再是水位条/压缩门的直接分母 —— 生效值改为当前默认
     // 模型 Profile 的 contextWindow（ModelProfile.effectiveContextWindow，切换

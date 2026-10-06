@@ -114,6 +114,8 @@ fun CodeScreen(
     viewModel: CodeViewModel,
     slashMenuProvider: SlashMenuProvider = rememberSlashMenuProvider()
 ) {
+    // #184：长任务导出需要 applicationContext（落盘 + 分享；VM 非 AndroidViewModel）
+    val context = androidx.compose.ui.platform.LocalContext.current
     // E4（#2-c P1-6）：主状态流对齐全仓 117 处先例换 lifecycle 版 —— 后台/不可见
     // 期间停收集（StateFlow 无参重载语义与 collectAsState 一致，初始值取 value）。
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -454,7 +456,8 @@ fun CodeScreen(
         onResume = viewModel::resumeTask,
         onDelete = viewModel::deleteLongTask,
         onCompareWithParent = viewModel::compareWithParent,
-        onStartTemplate = viewModel::startFromTemplate
+        onStartTemplate = viewModel::startFromTemplate,
+        onExport = { id -> viewModel.exportLongTask(context, id) }
     )
 }
 

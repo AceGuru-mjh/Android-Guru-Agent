@@ -9,6 +9,7 @@ import com.apex.agent.platform.csmem.prune.UiTreePruner
 import com.apex.agent.platform.csmem.session.CsMemSessionManager
 import com.apex.agent.platform.privilege.PrivilegeManager
 import com.apex.agent.platform.privilege.accessibility.ApexAccessibilityService
+import com.apex.agent.ui.screen.settings.SettingsRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,13 +31,21 @@ import javax.inject.Singleton
  *
  * 所有调用委托给 CS-Mem 组件，其自身已在无障碍未开启等情况下静默跳过，
  * 因此此处无需额外吞异常（但保留防御性 try-catch 以防万一阻断 Agent 主流程）。
+ *
+ * ── #218 记忆摄取开关 ──
+ *
+ * [chatMemoryCapture]（设置页可关）门控聊天记忆的双向链路：关闭时
+ * [recallChatMemory] 返回 null（不再注入提示词）、[onConversationTurn]
+ * 直接返回（不再沉淀新记忆）——敏感对话不落盘由用户自主控制。设置读取
+ * 从 StateFlow 快照拿值（无挂起，门控零开销）。
  */
 @Singleton
 class CsMemSessionObserver @Inject constructor(
     private val sessionManager: CsMemSessionManager,
     private val bypassEngine: BypassExecutionEngine,
     private val privilegeManager: PrivilegeManager,
-    private val chatMemoryPipeline: ChatMemoryPipeline
+    private val chatMemoryPipeline: ChatMemoryPipeline,
+    private val settingsRepository: SettingsRepository
 ) : ExecutionMemoryObserver {
 
     override suspend fun onTaskStart(goal: String, appPackage: String?) {
@@ -66,13 +75,17 @@ class CsMemSessionObserver @Inject constructor(
         }
     }.getOrElse { BypassOutcome.NotAttempted }
 
-    /** 聊天长期记忆召回：pipeline 内部已防御式（失败 → null），不阻断主对话。 */
+    /** 聊天长期记忆召回：pipeline 内部已防御式（失败 → null），不阻断主对话。
+     * #218：设置里关掉记忆摄取时同步静默召回（已有记忆不再注入）。 */
     override suspend fun recallChatMemory(userText: String): String? {
+        if (!settingsRepository.agentSettings.value.chatMemoryCapture) return null
         return chatMemoryPipeline.recall(userText)
     }
 
-    /** 对话内容自动沉淀：启发式同步捕获 + 节拍 LLM 蒸馏（pipeline 内部转后台）。 */
+    /** 对话内容自动沉淀：启发式同步捕获 + 节拍 LLM 蒸馏（pipeline 内部转后台）。
+     * #218：设置里关掉记忆摄取时直接返回（新对话不再落盘）。 */
     override suspend fun onConversationTurn(userText: String, assistantText: String) {
+        if (!settingsRepository.agentSettings.value.chatMemoryCapture) return
         chatMemoryPipeline.onTurn(userText, assistantText)
     }
 }

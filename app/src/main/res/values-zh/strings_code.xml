@@ -126,6 +126,9 @@
     <string name="code_longtask_todos_header">todo 快照</string>
     <string name="code_longtask_checkpoints_fmt">检查点 x%1$d（每 5 轮 / 60s）</string>
     <string name="code_longtask_error_label">错误：</string>
+    <string name="code_longtask_export">导出 / 分享</string>
+    <string name="code_longtask_export_missing">记录不存在（可能已被删除）</string>
+    <string name="code_longtask_export_failed">导出或分享失败，请重试</string>
     <string name="code_longtask_copy">复制任务</string>
     <string name="code_longtask_relaunch">重跑</string>
     <string name="code_longtask_compare">对比上次</string>

@@ -42,7 +42,12 @@ data class AgentChatUiState(
     val sessionTotalTokens: Long = 0,
     /** S2：当前会话激活的 Loop 循环（null = 无循环；独立于 mode 存活——
      *    切走 LOOP 模式不停止循环，状态卡仍显示，轮次照常记账）。 */
-    val activeLoop: LoopConfig? = null
+    val activeLoop: LoopConfig? = null,
+    /**
+     * #237：通知权限被拒回收引导 —— 后台任务完成时设置开着但系统通知权限
+     * 被拒（通知被静默丢弃），置 true 由聊天页顶部弹「去开启」引导条；
+     * 用户点击跳系统通知设置或关闭引导后复位（不持久化，会话内一次性）。 */
+    val notifPermissionHint: Boolean = false
 )
 
 /**

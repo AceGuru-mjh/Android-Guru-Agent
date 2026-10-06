@@ -804,6 +804,11 @@ private fun AgentSection(agent: AgentSettings, onUpdate: (AgentSettings) -> Unit
             description = stringResource(R.string.settings_task_notify_desc)) {
             onUpdate(agent.copy(taskCompletionNotify = it))
         }
+        // #218：聊天记忆自动摄取（关闭 = 新对话不落盘 + 召回静默；已有记忆去记忆页管理）。
+        SwitchRow(stringResource(R.string.settings_memory_capture_title), agent.chatMemoryCapture,
+            description = stringResource(R.string.settings_memory_capture_desc)) {
+            onUpdate(agent.copy(chatMemoryCapture = it))
+        }
         SliderRow("Reflection Rounds", agent.reflectionRounds.toFloat(), 1f..3f, 2,
             description = stringResource(R.string.settings_reflection_rounds_desc),
             onValueChange = { onUpdate(agent.copy(reflectionRounds = it.toInt())) },

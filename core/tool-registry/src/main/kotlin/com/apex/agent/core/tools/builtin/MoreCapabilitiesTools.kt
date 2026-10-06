@@ -498,7 +498,7 @@ class AlarmSetTool(
  * 或上传到外部服务。
  *
  * 参数：
- * - mime_type (optional, default 所有类型(通配)): 文件类型过滤
+ * - mime_type (optional, 默认全部类型): MIME 过滤，可传类型前缀（如 image、application/pdf）
  * - allow_multiple (optional, default false): 允许多选
  *
  * 风险 MEDIUM（用户主动选文件，但启动 Activity 涉及 UI 交互）。

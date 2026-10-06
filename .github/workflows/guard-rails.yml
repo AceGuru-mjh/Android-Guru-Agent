@@ -12,11 +12,24 @@ name: Guard Rails
 #     （公开仓库凭证裸奔是 P0 事故）
 #   • Commit Convention     —— `类型(范围): 摘要 —— 关键词` 纪律
 #     （AGENTS.md 要求；类型前缀强制，关键词尾段建议）
+#
+# ── 本 workflow 的可用性由谁守护 ──────────────────────────────────────────────
+# 2026-10-05：这里的一行注释丢了行首缩进 → YAML 截断 → GitHub **静默禁用整个
+# 文件**，四联检查一起停摆且无人察觉（详见 docs/ci/guard-rails-commit-range-incident.md）。
+# GitHub 拒绝的是「整个文件」，所以守护它的门禁**不能**住在本文件里 ——
+# 那会跟着一起消失。结构校验由 quality-gate.yml 的独立 job 承担。
+# 修改本文件后请本地跑 `python3 scripts/check_workflow_yaml.py` 自检。
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 触发去重（2026-10-06）：PR 分支的 push 与 pull_request 事件会各触发一次
+# 本 workflow（并发键 refs/heads/* 与 refs/pull/*/merge 不同，互不取消）——
+# 每次 PR 更新双倍消耗。PR 分支推送由 pull_request 事件在 merge ref 上覆盖
+# （语义更准：含与 main 的合并结果）；push 只保留 main（直推/合并落地后的
+# 终验，走脚本内 P1..P2 落地语义）。无 PR 的裸分支推送不再跑 CI —— 本仓库
+# 所有变更均走 PR 流程，无覆盖损失。
 on:
   push:
-    branches: [main, 'feat/**', 'refactor/**', 'fix/**']
+    branches: [main]
   pull_request:
     branches: [main, 'feat/**']
 
@@ -28,41 +41,6 @@ permissions:
   contents: read
 
 jobs:
-  workflow-yaml-selfcheck:
-    name: Workflow YAML Self-Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Parse every workflow file (PyYAML strict)
-        run: |
-          # 事故教训（2026-10-05）：guard-rails.yml 的 run 字面块曾因一行注释
-          # 丢失行首缩进而被截断 —— GitHub 整个 workflow 静默失效（四联检查
-          # 全部瘫痪，run 报 "workflow file issue"），而没有任何门禁发现。
-          # 本步骤把「workflow 文件自身可解析」变成显式门禁：任何 .github/
-          # workflows 下的 YAML 解析失败都会带行号报错并阻断合并。
-          python3 - <<'PY'
-          import glob, subprocess, sys
-          try:
-              import yaml
-          except ImportError:
-              subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "pyyaml"], check=True)
-              import yaml
-          bad = []
-          for f in sorted(glob.glob('.github/workflows/*.yml') + glob.glob('.github/workflows/*.yaml')):
-              try:
-                  yaml.safe_load(open(f, encoding='utf-8'))
-                  print(f"OK  {f}")
-              except Exception as e:
-                  bad.append(f"{f}: {e}")
-          if bad:
-              print("\nBROKEN WORKFLOW FILES:")
-              for b in bad:
-                  print(" -", b)
-              sys.exit(1)
-          print(f"All workflow files parse cleanly")
-          PY
-
   i18n-mirror:
     name: i18n String Mirror (values vs values-zh)
     runs-on: ubuntu-latest
@@ -104,30 +82,18 @@ jobs:
           ref: "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: "Commit message convention check (type(scope): subject / keywords)"
         env:
+          IS_PR: "${{ github.event_name == 'pull_request' }}"
           PR_BASE: "${{ github.event.pull_request.base.sha }}"
           PUSH_BEFORE: "${{ github.event.before }}"
+          PUSH_REF: "${{ github.ref_name }}"
+        # 范围解析全部下沉到 scripts/check_commit_messages.py（原写在本块 shell
+        # 里，无法单测，且漏了 main 的 merge commit 落地路径 —— 见该脚本注释）。
+        # 回归用例见 scripts/test_check_commit_messages.py。
         run: |
-          BASE="${PR_BASE:-$PUSH_BEFORE}"
-          if [ -z "$BASE" ]; then BASE=$(git rev-parse HEAD~1); fi
-          # push 事件范围校正（main 侧 ca61b1c3）：分支合并 main 后，PUSH_BEFORE..HEAD
-          # 会把 main 的历史提交圈进校验范围（main 上存在历史遗留的不合规提交时，
-          # 所有 merge main 的分支全部误伤）。非 main 分支的 push 改用与 origin/main
-          # 的 merge-base 作为 BASE —— 只校验分支独有提交，与 pull_request 事件
-          # 的 base.sha..head 语义对齐；main 自身的 push 保持 before..after 语义。
-          if [ -z "$PR_BASE" ] && [ "${GITHUB_REF_NAME:-}" != "main" ] \
-            && git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
-            MB=$(git merge-base HEAD origin/main) || MB=""
-            if [ -n "$MB" ]; then
-              echo "push-range recalculated via merge-base with origin/main: $MB"
-              BASE="$MB"
-            fi
+          if [ "$IS_PR" = "true" ]; then
+            python3 scripts/check_commit_messages.py --event pull_request --base "$PR_BASE"
+          else
+            python3 scripts/check_commit_messages.py --event push \
+              --ref "$PUSH_REF" --before "$PUSH_BEFORE" \
+              --target main --upstream origin/main
           fi
-          # push 事件限定第一父链（PR 325 本体）：分支自带 merge 提交（如 merge
-          # main）时，BASE..HEAD 会横跨对侧（第二父）历史 —— main 上任一历史不合规
-          # 直推提交（如 379c1bbd）将让这类 push 永久误伤。对侧提交属于其来源分支
-          # 的既有工作，已由各自 PR 的 base..head 检查覆盖，非本次 push 新增。
-          # PR 事件保持 base..head 全量（恰为 PR 提交，语义不变）。
-          FLAG=""
-          if [ -z "$PR_BASE" ]; then FLAG="--first-parent"; fi
-          echo "range: ${BASE}..$(git rev-parse HEAD) ${FLAG}"
-          python3 scripts/check_commit_messages.py "$BASE" HEAD $FLAG

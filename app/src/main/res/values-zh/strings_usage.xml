@@ -39,6 +39,9 @@
     <string name="usage_completion_label">输出</string>
 
     <!-- ═══ 模型用量分解 ═══ -->
+    <string name="usage_cost_estimated">费用估算 %1$s</string>
+    <string name="usage_cost_note">按公开牌价估算（输入/输出费率分档），不含渠道折扣与税费</string>
+    <string name="usage_cost_unknown">未收录费率</string>
     <string name="usage_models_title">模型用量分解</string>
     <string name="usage_models_hint">各模型占累计消耗的比例</string>
     <string name="usage_models_empty">暂无模型用量记录</string>

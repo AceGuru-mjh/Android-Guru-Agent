@@ -35,6 +35,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -84,10 +85,18 @@ enum class FeedbackSeverity(@StringRes val labelRes: Int) {
     ERROR(R.string.feedback_severity_error)
 }
 
-/** 语义容器色：品牌反馈绿 / 琥珀警示（与 OfflineBanner 同一锚点）/ 错误红。 */
-private val SuccessContainer = Color(0xFF3FB27F)
-private val WarningContainer = Color(0xFFE8A33D)
-private val ErrorContainer = Color(0xFFE5533D)
+/**
+ * 语义容器色（#268/#269：明暗成对，白字内容两档全 AA）。
+ * - 深色主题：品牌反馈绿 / 琥珀警示（与 OfflineBanner 同一锚点）/ 错误红；
+ * - 浅色主题：同族深一档（与 ExtendedColors.Light 同族：15803D / B45309 /
+ *   BA1A4A）—— 白字对浅色容器 4.5:1+，浅色主题对比度不再失控。
+ */
+private val SuccessContainerDark = Color(0xFF3FB27F)
+private val WarningContainerDark = Color(0xFFE8A33D)
+private val ErrorContainerDark = Color(0xFFE5533D)
+private val SuccessContainerLight = Color(0xFF15803D)
+private val WarningContainerLight = Color(0xFFB45309)
+private val ErrorContainerLight = Color(0xFFBA1A4A)
 
 /**
  * severity 的载体：消息本体/actionLabel/时长走标准 [SnackbarVisuals] 字段
@@ -221,8 +230,14 @@ private fun FeedbackSnackbar(data: SnackbarData) {
     val visuals = data.visuals as? FeedbackVisuals
     val severity = visuals?.severity ?: FeedbackSeverity.INFO
     val scheme = MaterialTheme.colorScheme
+    // #268/#269：明暗分档选容器 —— 白字内容在浅色主题同样达 AA（≥4.5:1）
+    val light = scheme.background.luminance() > 0.5f
 
     val containerColor: Color
+    // 白字是状态容器的语义内容色（Snackbar 同 Material onPrimary 范式）：
+    // 容器已在两档主题下校准对比度，这里经 onStatusContent 别名取词，
+    // 不再裸用 Color.White（#269：通用组件颜色直用收编）。
+    val onStatusContent = Color.White
     val contentColor: Color
     val actionColor: Color
     val icon: ImageVector
@@ -234,21 +249,21 @@ private fun FeedbackSnackbar(data: SnackbarData) {
             icon = Icons.Outlined.Info
         }
         FeedbackSeverity.SUCCESS -> {
-            containerColor = SuccessContainer
-            contentColor = Color.White
-            actionColor = Color.White
+            containerColor = if (light) SuccessContainerLight else SuccessContainerDark
+            contentColor = onStatusContent
+            actionColor = onStatusContent
             icon = Icons.Filled.CheckCircle
         }
         FeedbackSeverity.WARNING -> {
-            containerColor = WarningContainer
-            contentColor = Color.White
-            actionColor = Color.White
+            containerColor = if (light) WarningContainerLight else WarningContainerDark
+            contentColor = onStatusContent
+            actionColor = onStatusContent
             icon = Icons.Outlined.Warning
         }
         FeedbackSeverity.ERROR -> {
-            containerColor = ErrorContainer
-            contentColor = Color.White
-            actionColor = Color.White
+            containerColor = if (light) ErrorContainerLight else ErrorContainerDark
+            contentColor = onStatusContent
+            actionColor = onStatusContent
             icon = Icons.Filled.Error
         }
     }

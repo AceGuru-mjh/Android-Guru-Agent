@@ -93,6 +93,7 @@ fun ImageLightbox(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // #269 豁免说明：全屏看图的黑色遮罩是刻意设计（影棚暗房语义，跨主题恒黑）
                 .background(Color.Black.copy(alpha = 0.95f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },

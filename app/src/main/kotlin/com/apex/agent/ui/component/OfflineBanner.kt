@@ -20,13 +20,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
 
-/** 琥珀警示色 —— 与 FeedbackSeverity.WARNING 容器色同一视觉锚点。 */
-private val AmberWarning = Color(0xFFE8A33D)
+/**
+ * 琥珀警示容器色（#268/#269：明暗成对）—— 与 FeedbackSeverity.WARNING
+ * 同一视觉锚点；浅色主题换深琥珀（B45309，白字 5.0:1），对比度不再失控。
+ */
+private val AmberWarningDark = Color(0xFFE8A33D)
+private val AmberWarningLight = Color(0xFFB45309)
 
 /**
  * ═══ 离线横幅 ═══
@@ -55,10 +60,13 @@ fun OfflineBanner(
         exit = shrinkVertically() + fadeOut(),
         modifier = modifier
     ) {
+        // #268/#269：明暗分档容器 + 语义内容色（白字两档全 AA）
+        val light = MaterialTheme.colorScheme.background.luminance() > 0.5f
+        val onWarning = Color.White
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = AmberWarning,
-            contentColor = Color.White
+            color = if (light) AmberWarningLight else AmberWarningDark,
+            contentColor = onWarning
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -69,21 +77,21 @@ fun OfflineBanner(
                     imageVector = Icons.Outlined.WifiOff,
                     // 无障碍完整描述：横幅语义对 TalkBack 可见（不依赖文字颜色对比）
                     contentDescription = stringResource(R.string.net_banner_icon_desc),
-                    tint = Color.White,
+                    tint = onWarning,
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = stringResource(R.string.net_banner_offline),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
-                    color = Color.White,
+                    color = onWarning,
                     modifier = Modifier.weight(1f)
                 )
                 if (kindLabel != null) {
                     Text(
                         text = kindLabel,
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.85f)
+                        color = onWarning.copy(alpha = 0.85f)
                     )
                 }
             }

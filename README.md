@@ -888,9 +888,9 @@ chmod +x gradlew
 > （arm64 / universal 两个变体；**PR 合并进 main 即自动构建发布**，无需打 tag）。
 > 已装用户可在 App「设置 → 关于 → 检查更新」直接升级 —— 支持增量补丁
 > （~14MB vs 全量 300MB+）与高速节点/镜像加速下载；补丁下载后**应用内自动
-> 合成新版本并拉起安装**（纯 Kotlin VCDIFF 解码器，零命令行），跨任意多个
-> 小版本自动按 [patches.json](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/blob/main/patches.json)
-> 补丁链逐段升级。
+> 合成新版本并拉起安装**（纯 Kotlin VCDIFF 解码器，零命令行），跨十个
+> 小版本内自动按 [patches.json](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/blob/main/patches.json)
+> 直达补丁一步升级，更早版本链式逐段升级。
 > 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
 > `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
 

@@ -50,7 +50,7 @@ import com.apex.agent.core.llm.ReasoningEffort
 import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassStyle
-import dev.chrisbanes.haze.HazeState
+import com.kyant.backdrop.Backdrop
 
 // ═══ 思考控制（双级 · RikkaHub 式）═══
 
@@ -207,7 +207,7 @@ private fun reasoningEffortLabelShort(effort: ReasoningEffort): String = when (e
 /**
  * 工具/权限门的结构化提问卡（Agent 屏历史形态 + Coding 屏 v6 玻璃接线）。
  *
- * [glassState]：悬浮栈与时间轴 hazeSource 互为兄弟时传入 —— 提问卡从
+ * [backdrop]：悬浮栈与时间轴 layerBackdrop 源互为兄弟时传入 —— 提问卡从
  * GlassCard 获得真实 backdrop 采样（白天模式乳白磨砂而非实色 ElevatedCard）；
  * null 时保持原 ElevatedCard 形态（Agent 屏历史调用零变更）。
  */
@@ -216,11 +216,11 @@ internal fun QuestionCard(
     question: AgentQuestion,
     onAnswer: (List<String>, String?) -> Unit,
     onCancel: () -> Unit,
-    glassState: HazeState? = null
+    backdrop: Backdrop? = null
 ) {
-    if (glassState != null) {
+    if (backdrop != null) {
         GlassCard(
-            state = glassState,
+            backdrop = backdrop,
             style = GlassStyle.Card,
             shape = RoundedCornerShape(12.dp),
             accent = MaterialTheme.colorScheme.secondary,

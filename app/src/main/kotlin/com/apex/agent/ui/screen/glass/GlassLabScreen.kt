@@ -75,8 +75,10 @@ import com.apex.agent.ui.glass.GlassIconButton
 import com.apex.agent.ui.glass.GlassShapes
 import com.apex.agent.ui.glass.GlassStyle
 import com.apex.agent.ui.theme.ApexTheme
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -91,14 +93,16 @@ import kotlin.math.sin
  *  - Backdrop 采样验证区：可拖动玻璃片 + 网格 + 文字 + 漂移光斑，
  *    证明 backdrop 采样的是实时内容而非静态贴图；
  *  - 交互状态 / 档位阶梯 / 工具卡状态 / 输入聚焦：材质分级与状态驱动；
- *  - 玻璃对话框：HazeDialog 跨窗口采样验证区内容；
- *  - 诚实验收清单：运行时逐项核对能力声明 —— Refraction 未实现即红字示警。
+ *  - 玻璃对话框：Ambient 材质面板（Dialog 独立窗口采不到主窗口源，
+ *    跨窗口采样已随 Haze 迁移移除）；
+ *  - 诚实验收清单：运行时逐项核对能力声明 —— lens 折射按 API 级如实示警
+ *    （33+ PASS / 以下 FALLBACK），无等效能力的项如实标注已移除。
  *    （以上共享小节在 [GlassLabSections.kt]，SRP 行数预算拆分）
  *
  * ## v2：夜间 / 白天 双实验室
  * 单页拆成两个独立实验室（顶部切换）：
  *  - **夜间模式**：强制深色主题 —— 近黑基底 + 霓虹光斑，验证玻璃在
- *    暗环境下的"发光材质"表现（HazeTint 提亮 + 主色浸染）；
+ *    暗环境下的"发光材质"表现（tint 霜面提亮 + 主色浸染）；
  *  - **白天模式**：强制浅色主题 —— 白霜玻璃 v3：三段天空渐变压入冷灰
  *    深色衬底、暗线+亮线的浮雕细网、明暗成对柔光带、加深 tint 光斑 ——
  *    玻璃靠「透射与明暗差」立质感，不靠灰边硬描。
@@ -191,8 +195,11 @@ private fun LabModeSwitcher(mode: GlassLabMode, onSelect: (GlassLabMode) -> Unit
 /** 实验室主体 —— 处于强制主题内，页面底色随模式走专属渐变。 */
 @Composable
 private fun GlassLabContent(mode: GlassLabMode) {
-    // 全页唯一 HazeState：验证区背景源与对话框跨窗口采样共用同一份
-    val backdropState = remember { HazeState() }
+    // 全页唯一页面级 LayerBackdrop（kyant0 采样源）：BackdropZone 验证区的
+    // 真实源。样品陈列馆各区自带独立源 —— kyant0 的采样基于 GraphicsLayer
+    // 单层录制，一个 LayerBackdrop 只承载一个源区域（Haze 多区共享同一
+    // state 的语义不存在）；对话框已改为 Ambient 面板，不再跨窗口采样。
+    val backdropState = rememberLayerBackdrop()
     var showDialog by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
 
@@ -223,12 +230,13 @@ private fun GlassLabContent(mode: GlassLabMode) {
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         LabHeader(mode)
-        // v1.4.3：顶阶动态（流光边框/镜面扫掠/呼吸光晕）—— 页头之后首个区块
+        // v1.4.3：顶阶动态（流光边框/呼吸光晕；镜面扫掠已随 kyant0 迁移退役）
+        // —— 页头之后首个区块
         DynamicsSection()
         BackdropZone(state = backdropState, mode = mode)
-        SamplesSection(state = backdropState, mode = mode)
-        // v7：Cloudy 真模糊材质样本（agent 回复气泡同款，白天/夜间自动跟随主题）
-        CloudyFrostSection()
+        SamplesSection(mode = mode)
+        // kyant0：Ambient 材质对照样本（agent 回复气泡同款，白天/夜间自动跟随主题）
+        AmbientMaterialSection()
         if (mode == GlassLabMode.DAY) {
             DaylightRefinementSection()
         }
@@ -241,8 +249,9 @@ private fun GlassLabContent(mode: GlassLabMode) {
     }
 
     if (showDialog) {
+        // 对话框面板走 Ambient 材质（backdrop = null）—— Dialog 独立窗口采不到
+        // 主窗口 LayerBackdrop，跨窗口采样已随 Haze 移除，故不再传采样源。
         LabGlassDialog(
-            state = backdropState,
             onDismiss = { showDialog = false }
         )
     }
@@ -255,7 +264,7 @@ private fun GlassLabContent(mode: GlassLabMode) {
 @Composable
 private fun LabHeader(mode: GlassLabMode) {
     val subtitle = if (mode == GlassLabMode.NIGHT) {
-        "夜间实验室：近黑基底上的发光玻璃 —— HazeTint 提亮 + 主色浸染，" +
+        "夜间实验室：近黑基底上的发光玻璃 —— tint 霜面提亮 + 主色浸染，" +
             "霓虹光斑验证实时采样。终端与页面背景本身不是玻璃，不做冒充。"
     } else {
         "白天实验室：白基底上的乳白霜面玻璃 —— 冷灰衬底 + 浮雕细网 + 明暗成对光带，" +
@@ -307,11 +316,13 @@ private fun LabHeader(mode: GlassLabMode) {
 
 // ═══════════════════════════════════════════════════════════════
 //  Backdrop 采样验证区 —— 本页核心
-//  haze 源与玻璃叠加件必须是同一 Box 下的兄弟节点，绝不能嵌进源子树
+//  layerBackdrop 源把验证区内容录制进 GraphicsLayer，玻璃叠加件为其
+//  同层兄弟节点（kyant0 支持任意同布局树源 —— Haze 时代的嵌套限制
+//  不复存在，本区沿用兄弟叠加的经典布局）
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
-private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
+private fun BackdropZone(state: LayerBackdrop, mode: GlassLabMode) {
     var zoneSize by remember { mutableStateOf(IntSize.Zero) }
     // 按压演示反馈：材质验收页的按钮职能是「按下去看玻璃变化」—— 触觉反馈让按压
     // 有真实回响（原空 onClick 会让用户怀疑按钮失效）。
@@ -341,25 +352,26 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
             )
             .onSizeChanged { coordinates -> zoneSize = coordinates }
     ) {
-        // ── haze 源：静态层（渐变底 / 网格 / 文字，尺寸或主题变化才重绘）
-        //    + 光斑层（每帧仅 2-3 个圆）。分层后动画帧绘制调用极少，
-        //    光斑以低透明度叠加在静态内容之上 —— 灯光漫射语义，采样层不变。 ──
+        // ── 采样源（layerBackdrop 录制进 GraphicsLayer）：静态层（渐变底 /
+        //    网格 / 文字，尺寸或主题变化才重绘）+ 光斑层（每帧仅 2-3 个圆）。
+        //    分层后动画帧绘制调用极少，光斑以低透明度叠加在静态内容之上
+        //    —— 灯光漫射语义，采样层不变。 ──
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(state)
+                .layerBackdrop(state)
         ) {
             StaticBackdropCanvas(modifier = Modifier.fillMaxSize(), mode = mode)
             GlowCanvas(modifier = Modifier.fillMaxSize(), mode = mode)
         }
 
-        // ── 可拖动玻璃片：与 haze 源同层叠加，位置随手势累积 ──
+        // ── 可拖动玻璃片：与采样源同层叠加，位置随手势累积 ──
         DraggableGlassChip(
             state = state,
             zoneSize = zoneSize
         )
 
-        // ── 底部悬浮件组：全部接同一个 HazeState ──
+        // ── 底部悬浮件组：全部接同一个 LayerBackdrop ──
         Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -370,31 +382,31 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
             GlassButton(
                 text = "玻璃按钮",
                 onClick = pressFeedback,
-                state = state
+                backdrop = state
             )
             GlassIconButton(
                 icon = Icons.Default.BlurOn,
                 // #280：硬编码中文收编 R.string（原 "采样验证图标按钮"）
                 contentDescription = stringResource(R.string.glasslab_cd_icon_button),
                 onClick = pressFeedback,
-                state = state
+                backdrop = state
             )
             GlassFloatingButton(
                 icon = Icons.Default.PlayArrow,
                 // #280：硬编码中文收编 R.string（原 "采样验证悬浮球"）
                 contentDescription = stringResource(R.string.glasslab_cd_floating_button),
                 onClick = pressFeedback,
-                state = state,
+                backdrop = state,
                 accent = MaterialTheme.colorScheme.primary
             )
         }
 
-        // ── 右上角引擎徽标：运行时判定本设备模糊实现（真 blur 还是 scrim 兜底） ──
+        // ── 右上角引擎徽标：运行时判定本设备模糊实现（真 blur 还是 Frosted 霜面兜底） ──
         GlassBadge(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp),
-            state = state,
+            backdrop = state,
             accent = if (Build.VERSION.SDK_INT >= 31) {
                 MaterialTheme.colorScheme.primary
             } else {
@@ -419,7 +431,7 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
                 text = if (Build.VERSION.SDK_INT >= 31) {
                     "RenderEffect GPU 模糊（API 31+）"
                 } else {
-                    "API ${Build.VERSION.SDK_INT} · scrim 兜底"
+                    "API ${Build.VERSION.SDK_INT} · Frosted 霜面兜底"
                 },
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
@@ -432,7 +444,7 @@ private fun BackdropZone(state: HazeState, mode: GlassLabMode) {
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(12.dp),
-            state = state,
+            backdrop = state,
             accent = MaterialTheme.colorScheme.primary
         ) {
             Icon(
@@ -743,7 +755,7 @@ private fun GlowCanvas(modifier: Modifier, mode: GlassLabMode) {
  * —— 采样必须跟随位置实时更新，这是比光斑更强的逐帧验证信号。
  */
 @Composable
-private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
+private fun DraggableGlassChip(state: Backdrop, zoneSize: IntSize) {
     var chipOffset by remember { mutableStateOf(Offset.Zero) }
 
     GlassCard(
@@ -774,7 +786,7 @@ private fun DraggableGlassChip(state: HazeState, zoneSize: IntSize) {
                     )
                 }
             },
-        state = state,
+        backdrop = state,
         style = GlassStyle.Floating,
         shape = GlassShapes.card
     ) {

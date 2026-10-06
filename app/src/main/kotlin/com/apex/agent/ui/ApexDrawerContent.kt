@@ -47,8 +47,8 @@ import com.apex.agent.github.GithubTokenManager
 import com.apex.agent.ui.glass.GlassNavigationItem
 import com.apex.agent.ui.screen.agent.AgentChatViewModel
 import androidx.hilt.navigation.compose.hiltViewModel
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /**
  * ═══════════════════════════════════════════════════════════════
@@ -59,7 +59,8 @@ import dev.chrisbanes.haze.hazeSource
  *  - Drawer 本体不整面玻璃化 —— 玻璃只落在每个 Navigation Item 上；
  *  - 每项保留品牌层级：霓虹指示条 + 圆形图标井 + 文字；
  *  - Normal 非常轻 / Selected 提亮 / Pressed 短暂高光；
- *  - 结构：氛围背景 = hazeSource —— 导航项悬浮其上做真实 backdrop 采样。
+ *  - 结构：氛围背景 = layerBackdrop 采样源 —— 导航项悬浮其上做真实
+ *    backdrop 采样（GPU blur + lens 折射）。
  */
 @Composable
 fun ApexDrawerContent(
@@ -73,7 +74,7 @@ fun ApexDrawerContent(
     // 抽屉重组风暴掉（抽屉关闭时也保持组合，照样重组）
     val badges by agentVm.drawerBadges.collectAsStateWithLifecycle()
     val githubState by tokenManager.connectionState.collectAsStateWithLifecycle()
-    val glassState = remember { HazeState() }
+    val drawerBackdrop = rememberLayerBackdrop()
 
     ModalDrawerSheet(
         modifier = Modifier.width(288.dp),
@@ -84,7 +85,7 @@ fun ApexDrawerContent(
             DrawerAuroraBackdrop(
                 modifier = Modifier
                     .fillMaxSize()
-                    .hazeSource(glassState)
+                    .layerBackdrop(drawerBackdrop)
             )
             Column(
                 modifier = Modifier.fillMaxSize()
@@ -197,7 +198,7 @@ fun ApexDrawerContent(
                             label = stringResource(dest.labelRes),
                             selected = currentDestination == dest,
                             onClick = { onDestinationSelected(dest) },
-                            state = glassState,
+                            backdrop = drawerBackdrop,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -219,7 +220,7 @@ fun ApexDrawerContent(
                     label = stringResource(DrawerDestination.About.labelRes),
                     selected = currentDestination == DrawerDestination.About,
                     onClick = { onDestinationSelected(DrawerDestination.About) },
-                    state = glassState,
+                    backdrop = drawerBackdrop,
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
 

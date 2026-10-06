@@ -36,7 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
 import com.apex.agent.ui.glass.TerminalGlassSurface
-import dev.chrisbanes.haze.HazeState
+import com.kyant.backdrop.Backdrop
 
 /**
  * # Code Terminal Panel — 终端面板（规格书：终端日志 + 独立锚定）
@@ -51,8 +51,8 @@ import dev.chrisbanes.haze.HazeState
  *
  * ## v6 玻璃接入 + 尾窗瘦身
  *
- * - [glassState]：悬浮栈与时间轴 hazeSource 互为兄弟 —— 传入即经
- *   TerminalGlassSurface 获得 Haze 真实 backdrop 采样（恒定深色玻璃
+ * - [backdrop]：悬浮栈与时间轴 layerBackdrop 源互为兄弟 —— 传入即经
+ *   TerminalGlassSurface 获得 kyant0 真实 backdrop 采样（恒定深色玻璃
  *   材质，白天模式也是深色磨砂而非实心黑板）；null = 深色霜面兜底。
  * - 尾窗高度 260 → 168dp：悬浮栈总高「流水 UI 太大」反馈的主诉项。
  */
@@ -63,14 +63,14 @@ internal fun CodeTerminalPanel(
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
     modifier: Modifier = Modifier,
-    glassState: HazeState? = null
+    backdrop: Backdrop? = null
 ) {
     // 滚动状态提升到折叠开关之外：折叠（正文离开组合）不丢滚动位置
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
 
     TerminalGlassSurface(
-        state = glassState,
+        backdrop = backdrop,
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp)

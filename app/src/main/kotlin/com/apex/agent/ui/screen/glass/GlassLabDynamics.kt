@@ -7,7 +7,6 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -23,9 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Lens
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
@@ -60,60 +56,40 @@ import com.apex.agent.ui.glass.GlassSurface
 
 /**
  * ═══════════════════════════════════════════════════════════════
- *  顶阶动态 —— v1.4.5 动效预算重构（Pro Dynamics v2）
+ *  顶阶动态 —— v1.4.5 动效预算重构（Pro Dynamics v2 · kyant0 迁移版）
  * ═══════════════════════════════════════════════════════════════
  *
- * 对标顶级产品动态语言的三件套（全部实时绘制，逐帧可验证）：
+ * 对标顶级产品动态语言的两件套（全部实时绘制，逐帧可验证）：
  *  1. **流光边框**：锥形渐变描边沿轮廓流动 —— 进入卡片 / 点击触发单圈，
  *     空闲时静止；**色标轮转替代画布旋转**：outline 几何固定不转，
  *     圆角矩形拐角不再出现旋转描边撕裂（原 rotate + sweep 的经典接缝坑）；
- *  2. **镜面扫掠**：全 section 共享同一扫掠时钟（多卡同屏相位一致，
- *     不再各跑各的光带互相打架）；光带经 GlassSurface.specularSweep
- *     绘制在材质之上、文字之下 —— 扫过正文时不再洗白文字；
- *     浅色主题光带用 primary 染色（纯白光带在白霜底上是白上白，看不见）；
- *  3. **呼吸光晕**：唯一保留的常驻律动 —— 浅色主题用「加深 tint 光晕 +
+ *  2. **呼吸光晕**：唯一保留的常驻律动 —— 浅色主题用「加深 tint 光晕 +
  *     tint 细环」双线索（细环在白底上清晰可读且不发灰；单纯拉高
  *     光晕透明度只会得到灰蒙蒙的脏边）。
  *
+ * 退役记录：**镜面扫掠**（原第 2 件）依赖旧 GlassSurface 的扫掠参数 ——
+ * kyant0 引擎的边缘受光（Highlight）是常驻材质语言，无需扫掠光带
+ * 补光，该参数与共享扫掠时钟已随迁移一并移除（多卡同屏相位同步的
+ * 问题随之不复存在）。
+ *
  * 动效预算（Motion Budget）：
  *  - 同屏常驻循环动画 ≤ 1 —— 呼吸光晕是本区唯一的 ambient 律动；
- *  - 流光边框 / 镜面扫掠均为事件驱动（进入 / 点击触发），空闲零动画成本；
- *  - 三件套同开也不再互相轰炸：常驻的只有呼吸，其余按需播放。
+ *  - 流光边框为事件驱动（进入 / 点击触发），空闲零动画成本；
+ *  - 两件套同开也不再互相轰炸：常驻的只有呼吸，其余按需播放。
  *
  * 诚实声明（延续本实验室原则）：
- *  - 边框/扫掠/光晕均为单图层 Canvas 级绘制，无折射位移（Refraction 仍未实现）；
+ *  - 边框/光晕均为单图层 Canvas 级绘制（GlassSurface 本体的 lens 折射由
+ *    kyant0 在 API 33+ 提供，与本动态层无关）；
  *  - 动画值以 State<Float> 传入 draw 作用域读取 —— 子树零逐帧重组。
  */
 @Composable
 internal fun DynamicsSection() {
     SectionHeader(
         title = "顶阶动态 · Pro Dynamics",
-        hint = "三件套动态语言 —— 动效预算内运行：流光/扫掠事件触发，呼吸为唯一常驻律动"
-    )
-
-    // ═══ 共享扫掠时钟 ═══
-    // 全 section 唯一的扫掠相位源：多张卡同屏传同一个 State，
-    // 相位完全一致 —— 修复原「每卡独立 rememberInfiniteTransition」
-    // 各自起播导致的光带错乱（视觉混乱源）。
-    val sweepClock = rememberInfiniteTransition(label = "shared_specular_sweep")
-    val sweepPhase = sweepClock.animateFloat(
-        initialValue = -0.4f,
-        targetValue = 1.4f,
-        // keyframes 实现「扫完即停」：前 4200ms 扫掠，后 1600ms 停在卡外
-        animationSpec = infiniteRepeatable(
-            animation = keyframes {
-                durationMillis = 5800 // 4200 扫 + 1600 停
-                (-0.4f) at 0 with FastOutSlowInEasing
-                1.4f at 4200
-                1.4f at 5800
-            },
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shared_sweep_phase"
+        hint = "两件套动态语言 —— 动效预算内运行：流光事件触发，呼吸为唯一常驻律动（镜面扫掠已随 kyant0 迁移退役）"
     )
 
     ConicBorderCard()
-    SpecularSweepCard(sweepPhase)
     BreathingOrbsRow()
 }
 
@@ -226,64 +202,11 @@ private fun ConicBorderCard() {
     }
 }
 
-// ── 2. 镜面扫掠 ──────────────────────────────────────────────────────────────
-
-/**
- * 周期性斜向光带：4.2s 扫过 + 1.6s 真停顿，相位来自共享时钟。
- *
- * v1.4.5 重构：
- *  - 相位由 [DynamicsSection] 统一供给 —— 多卡同屏完全同步；
- *  - 光带不再画在 drawWithContent 的内容之上（旧版会洗白文字），
- *    而是经 [GlassSurface.specularSweep] 绘制在材质之上、文字之下；
- *  - 光带颜色随主题派生：浅色 = primary 染色光带（白底可辨不脏），
- *    深色 = 白色高光。
- */
-@Composable
-private fun SpecularSweepCard(sweepPhase: State<Float>) {
-    val cardShape = RoundedCornerShape(16.dp)
-
-    DynamicsFrame(label = "镜面扫掠 · Specular Sweep", icon = Icons.Filled.BlurOn) {
-        GlassSurface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(96.dp),
-            style = GlassStyle.Card,
-            shape = cardShape,
-            specularSweep = sweepPhase
-        ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Lens,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Column {
-                    Text(
-                        "光带掠过卡面",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "多卡共享时钟同步扫掠 —— 光带在文字层下，浅色主题 primary 染色",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ── 3. 呼吸光晕 ──────────────────────────────────────────────────────────────
+// ── 2. 呼吸光晕 ──────────────────────────────────────────────────────────────
 
 /**
  * 三枚相位错开 1/3 周期的玻璃球：光环半径与亮度同步脉动。
- * 本组是三件套中唯一的常驻律动（动效预算：同屏常驻循环 ≤ 1）。
+ * 本组是两件套中唯一的常驻律动（动效预算：同屏常驻循环 ≤ 1）。
  */
 @Composable
 private fun BreathingOrbsRow() {

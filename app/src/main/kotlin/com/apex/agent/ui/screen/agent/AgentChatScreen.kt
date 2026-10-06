@@ -88,8 +88,8 @@ import com.apex.agent.ui.component.rememberSlashMenuProvider
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassFloatingButton
 import com.apex.agent.ui.glass.GlassStyle
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.launch
 
@@ -120,9 +120,10 @@ fun AgentChatScreen(
     val context = LocalContext.current
     val scrollScope = rememberCoroutineScope()
 
-    // ═══ Liquid Glass：消息列表 = 采样源；悬浮输入栏 / FAB / 加载条 = 玻璃件 ═══
-    // Spec §5/§8/§10：输入栏与悬浮操作悬浮于内容之上，真实 backdrop 采样 + 模糊。
-    val glassState = remember { HazeState() }
+    // ═══ Liquid Glass（kyant0/backdrop）：消息列表 = 采样源；悬浮输入栏 / FAB = 玻璃件 ═══
+    // Spec §5/§8/§10：输入栏与悬浮操作悬浮于内容之上，真实 backdrop 采样 +
+    // GPU blur + lens 折射（API 31+/33+；低于 31 自动 Frosted 降级）。
+    val listBackdrop = rememberLayerBackdrop()
 
     // ═══ "小大脑"菜单状态收集（#197：小圆环工具菜单已迁至 Coding 屏）═══
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
@@ -403,7 +404,9 @@ fun AgentChatScreen(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(glassState)
+                // 消息列表 = 采样源：layerBackdrop 把列表内容录进 GraphicsLayer，
+                // 悬浮输入栏 / FAB 经 drawBackdrop 采样 + blur + lens 折射。
+                .layerBackdrop(listBackdrop)
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp + composerInsetDp)
@@ -537,7 +540,7 @@ fun AgentChatScreen(
                                 }
                             }
                         },
-                        state = glassState,
+                        backdrop = listBackdrop,
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -624,7 +627,7 @@ fun AgentChatScreen(
                 // v5：输入框换 SkillChipInputField（技能 chip 内联），IME 行为
                 // 兜底（焦点/按下显式 show + requestApplyInsets）随组件移植。
                 GlassCard(
-                    state = glassState,
+                    backdrop = listBackdrop,
                     style = GlassStyle.Floating,
                     // 精修延续：底部输入面板顶部双角圆角（原矩形硬边 + 矩形阴影）
                     shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),

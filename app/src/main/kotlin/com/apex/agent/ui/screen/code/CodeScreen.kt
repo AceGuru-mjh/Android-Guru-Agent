@@ -98,7 +98,8 @@ import com.apex.agent.ui.screen.code.stream.CodeTerminalPanel
 import com.apex.agent.ui.screen.code.stream.CodeToolDetailSheet
 import com.apex.agent.ui.glass.GlassCard
 import com.apex.agent.ui.glass.GlassStyle
-import dev.chrisbanes.haze.HazeState
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 /**
  * # Code Screen — Coding 模式主屏（与 Agent 聊天屏同级别）
@@ -207,13 +208,13 @@ fun CodeScreen(
             )
         }
 
-        // ═══ v5 玻璃悬浮层重构（Agent 屏同款 overlay 模式）═══
-        // 时间轴 = 玻璃采样源（hazeSource）；底部栈（终端尾窗/提问卡/错误条/
+        // ═══ v5 玻璃悬浮层重构（Agent 屏同款 overlay 模式；kyant0/backdrop 引擎）═══
+        // 时间轴 = 玻璃采样源（layerBackdrop）；底部栈（终端尾窗/提问卡/错误条/
         // 模式行/输入栏）悬浮于时间轴之上 —— 输入栏 GlassCard(Floating) 从
-        // 时间轴获得真实 backdrop 采样（此前 Coding 屏零玻璃：死色输入条 +
-        // 流式结论裸铺在背景上）。lowerStackInsetPx 动态测量悬浮栈高度，
+        // 时间轴获得真实 backdrop 采样 + blur + lens 折射（此前 Coding 屏零玻璃：
+        // 死色输入条 + 流式结论裸铺在背景上）。lowerStackInsetPx 动态测量悬浮栈高度，
         // 时间轴 contentPadding 补偿，最后一条不被遮挡。
-        val glassState = remember { HazeState() }
+        val streamBackdrop = rememberLayerBackdrop()
         var lowerStackInsetPx by remember { mutableIntStateOf(0) }
         val lowerStackInsetDp = with(LocalDensity.current) { lowerStackInsetPx.toDp() }
         Box(modifier = Modifier.weight(1f)) {
@@ -221,7 +222,7 @@ fun CodeScreen(
                 snapshot = state.stream,
                 isStreaming = state.isRunning,
                 bottomInset = lowerStackInsetDp,
-                hazeState = glassState,
+                backdrop = streamBackdrop,
                 onToolClick = { call -> selectedToolCallId = call.id }
             )
 
@@ -239,7 +240,7 @@ fun CodeScreen(
                         activeCommand = state.stream.activeTerminalCallId,
                         collapsed = terminalCollapsed,
                         onToggleCollapse = { terminalCollapsed = !terminalCollapsed },
-                        glassState = glassState
+                        backdrop = streamBackdrop
                     )
                 }
 
@@ -252,7 +253,7 @@ fun CodeScreen(
                             viewModel.answerAgentQuestion(optionIds, customText)
                         },
                         onCancel = viewModel::cancelAgentQuestion,
-                        glassState = glassState
+                        backdrop = streamBackdrop
                     )
                 }
 
@@ -262,7 +263,7 @@ fun CodeScreen(
                     // accent=error 保错误语义在玻璃材质上仍可辨。
                     ErrorBar(
                         message = err,
-                        glassState = glassState,
+                        backdrop = streamBackdrop,
                         onRetry = if (state.errorRetriable && !state.isRunning) viewModel::retryLastRun else null,
                         onDismiss = viewModel::dismissError
                     )
@@ -329,7 +330,7 @@ fun CodeScreen(
                     onAddPendingCommand = { viewModel.addPendingCommand(it) },
                     pendingCommands = pendingCommands,
                     onChipsChange = { viewModel.setPendingCommands(it) },
-                    glassState = glassState,
+                    backdrop = streamBackdrop,
                     githubTokenManager = viewModel.githubTokenManager,
                     toolkit = toolkit,
                     toolkitState = ToolkitUiState(
@@ -730,15 +731,15 @@ private fun CodeInputBar(
     onAddPendingCommand: (PendingPipelineCommand) -> Unit,
     pendingCommands: List<PendingPipelineCommand>,
     onChipsChange: (List<PendingPipelineCommand>) -> Unit,
-    glassState: HazeState,
+    backdrop: Backdrop,
     githubTokenManager: com.apex.agent.github.GithubTokenManager,
     toolkit: com.apex.agent.ui.screen.agent.toolkit.ChatToolkitStore,
     toolkitState: ToolkitUiState
 ) {
     // ═══ v5 玻璃输入栏（Agent 屏同款）：Floating 档 + 顶部双角圆角，悬浮栈
-    // 布局使本卡悬浮于时间轴之上 → glassState 采样获得真实 backdrop。═══
+    // 布局使本卡悬浮于时间轴之上 → backdrop 采样获得真实玻璃材质。═══
     GlassCard(
-        state = glassState,
+        backdrop = backdrop,
         style = GlassStyle.Floating,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         modifier = Modifier.fillMaxWidth()
@@ -952,12 +953,12 @@ private fun ApiMissingFloatingNotice(
 @Composable
 private fun ErrorBar(
     message: String,
-    glassState: HazeState?,
+    backdrop: Backdrop?,
     onRetry: (() -> Unit)?,
     onDismiss: () -> Unit
 ) {
     GlassCard(
-        state = glassState,
+        backdrop = backdrop,
         style = GlassStyle.Floating,
         shape = RoundedCornerShape(12.dp),
         accent = MaterialTheme.colorScheme.error,

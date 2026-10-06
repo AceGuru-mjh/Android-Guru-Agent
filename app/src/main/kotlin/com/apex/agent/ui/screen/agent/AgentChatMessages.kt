@@ -331,11 +331,10 @@ internal fun AgentBubble(
             .semantics { liveRegion = LiveRegionMode.Polite },
         horizontalArrangement = Arrangement.Start
     ) {
-        // v7 气泡玻璃：从 GlassCard Frosted（渐变假霜面，白天「一片死白」）换成
-        // AgentBubbleGlass —— Cloudy 真模糊光雾材质：材质层自绘光带纹理经原生
-        // NEON 位图模糊扩散成柔和受光磨砂，白天 = 乳白底 + 柔和光带（非死白）。
-        // 气泡位于 hazeSource（消息列表）子树内，Haze 1.4 不支持嵌套采样 ——
-        // Cloudy 自体模糊正是为这个场景引入（材质自模糊，不冒充 backdrop 采样）。
+        // v8 气泡玻璃：kyant0/backdrop 引擎 —— Ambient 档（程序化材质源经
+        // GPU blur + lens 折射；API < 31 自动降级 Frosted 霜面）。气泡在列表内、
+        // 背后只有平面底色，无真实内容可采样 —— 不冒充 Backdrop 档；
+        // Cloudy 时代的 CPU 位图模糊（流式掉帧尖峰）已随迁移移除。
         AgentBubbleGlass(
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             accent = MaterialTheme.colorScheme.primary,
@@ -539,8 +538,9 @@ internal fun StreamingResponseBubble(
         label = "cursor-alpha"
     )
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        // v7 流式玻璃：与完成态 AgentBubble 同款 AgentBubbleGlass（Cloudy 真模糊
-        // 材质）—— 流式与完成瞬间切换无容器跳变（同一 shape/同一玻璃档）。
+        // v8 流式玻璃：与完成态 AgentBubble 同款 AgentBubbleGlass（kyant0 Ambient
+        // 材质）—— 流式与完成瞬间切换无容器跳变（同一 shape/同一玻璃档）；
+        // GPU RenderEffect 每帧毫秒级，替代 Cloudy CPU 位图模糊。
         AgentBubbleGlass(
             shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
             accent = MaterialTheme.colorScheme.primary,
@@ -680,7 +680,7 @@ internal fun ThinkingBubble(
         }.value
     } else 0L
 
-    // v7 思考气泡：同款 AgentBubbleGlass（Cloudy 真模糊材质；accent=tertiary
+    // v8 思考气泡：同款 AgentBubbleGlass（kyant0 Ambient 材质；accent=tertiary
     // 与既有思考色系一致）；折叠/展开可点击收在内容层，涟漪经玻璃层裁剪不露角。
     AgentBubbleGlass(
         shape = RoundedCornerShape(12.dp),

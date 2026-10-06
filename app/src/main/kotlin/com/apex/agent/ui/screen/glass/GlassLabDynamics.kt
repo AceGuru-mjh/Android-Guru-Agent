@@ -163,18 +163,18 @@ private fun ConicBorderCard() {
                         layoutDirection = layoutDirection,
                         density = this
                     )
-                    // #323：sweepGradient 无 List<Pair> 重载，色标对走 vararg 展开传参；
-                    // center 用 size.center（CacheDrawScope 无 center 成员，只有
-                    // Size.center 扩展）。
+                    // #323：sweepGradient(vararg colorStops, center = ...) ——色标对
+                    // 走 vararg 展开，center 用命名参数（CacheDrawScope 无 center
+                    // 成员，只有 Size.center 扩展）。
                     val brush = Brush.sweepGradient(
-                        size.center,
                         *arrayOf(
                             0f to Color.Transparent,
                             0.24f to scheme.primary.copy(alpha = 0.90f),
                             0.50f to Color.Transparent,
                             0.74f to scheme.tertiary.copy(alpha = 0.60f),
                             1f to Color.Transparent
-                        )
+                        ),
+                        center = size.center
                     )
                     onDrawWithContent {
                         drawContent()

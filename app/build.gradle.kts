@@ -211,11 +211,10 @@ dependencies {
 
     // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
     implementation(libs.easyfloat)
-    // Liquid Glass UI System 底层引擎 —— 仅 ui/glass 包内部使用，业务层经 Glass 组件 API 访问
-    implementation(libs.haze)
-    // Liquid Glass 自体模糊（Cloudy 0.2.3）—— 仅 ui/glass/CloudyFrost.kt 单点集成：
-    // Frosted 档 Cloudy 变体给聊天气泡真位图模糊材质（Haze 无法覆盖的列表内嵌场景）
-    implementation(libs.cloudy)
+    // Liquid Glass UI System 底层引擎 —— vendored kyant0/AndroidLiquidGlass（backdrop @ 1.0.0，
+    // Apache-2.0）。Maven 版需 Kotlin 2.2+/Compose 1.9+，本仓工具链消费不了故源码内嵌 ——
+    // 仅 ui/glass 包内部使用，业务层经 Glass 组件 API 访问（vendor/backdrop/README.md）。
+    implementation(project(":vendor:backdrop"))
     // Vico 开源图表库（稳定线 1.13.1）—— 任务历史页「近 7 日任务量」柱状图 +
     // 记忆页类型分布；只引 compose 核心（主题色手动映射，不引 m2/m3 主题模块）
     implementation(libs.vico.compose)

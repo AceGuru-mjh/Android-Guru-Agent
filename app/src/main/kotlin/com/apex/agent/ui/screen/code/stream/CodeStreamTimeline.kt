@@ -37,8 +37,8 @@ import com.apex.agent.core.code.stream.StreamEntry
 import com.apex.agent.core.code.stream.StreamEntryGroup
 import com.apex.agent.core.code.stream.StreamToolCall
 import com.apex.agent.core.code.stream.ToolKind
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
 import kotlinx.coroutines.launch
 
 /**
@@ -57,7 +57,7 @@ import kotlinx.coroutines.launch
  *
  * ## v5 玻璃接线
  *
- * - [hazeState]：时间轴 = 玻璃采样源（悬浮输入栏 GlassCard 的 backdrop
+ * - [backdrop]：时间轴 = 玻璃采样源（悬浮输入栏 GlassCard 的 backdrop
  *   来源；null = 不接线，独立预览场景用）；
  * - [bottomInset]：底部悬浮栈（终端尾窗/输入栏等）高度 —— 列表
  *   contentPadding 与 FAB 底部偏移同步补偿，最后一条不被遮挡。
@@ -68,7 +68,7 @@ internal fun CodeStreamTimeline(
     isStreaming: Boolean,
     onToolClick: (StreamToolCall) -> Unit,
     bottomInset: Dp = 0.dp,
-    hazeState: HazeState? = null
+    backdrop: LayerBackdrop? = null
 ) {
     val listState = rememberLazyListState()
     val grouped = remember(snapshot.entries) { groupConsecutive(snapshot.entries) }
@@ -90,7 +90,7 @@ internal fun CodeStreamTimeline(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier),
+                .then(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier),
             // v5：底部悬浮栈（终端尾窗/输入栏）动态补偿 —— 最后一条不被遮挡
             // v6 紧凑化：12 → 8dp（悬浮栈自身已瘦身）
             contentPadding = PaddingValues(bottom = 8.dp + bottomInset)

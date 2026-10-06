@@ -36,7 +36,6 @@
     <string name="glasslab_cd_floating_button">采样验证悬浮球</string>
 
     <!-- ═══ Glass Lab：Cloudy 真模糊材质样本（v7 agent 回复气泡）═══ -->
-    <string name="glasslab_cloudy_title">Cloudy 真模糊磨砂</string>
-    <string name="glasslab_cloudy_hint">聊天气泡材质：光带纹理经原生 CPU 位图模糊扩散（全 API 级别）—— 自体模糊，非背景采样</string>
-    <string name="glasslab_cloudy_note">左：旧渐变霜面（白天平而死白）。右：Cloudy 材质 —— 光带经原生模糊扩散成柔和发光磨砂；白天 = 乳白底 + 柔和受光带，不再是死白。文字永不被模糊：模糊只包裹材质层节点。</string>
+
+
 </resources>

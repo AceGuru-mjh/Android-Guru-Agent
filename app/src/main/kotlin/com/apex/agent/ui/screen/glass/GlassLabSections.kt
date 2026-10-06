@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -41,9 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.apex.agent.R
 import com.apex.agent.ui.glass.AgentBubbleGlass
 import com.apex.agent.ui.glass.GlassBadge
 import com.apex.agent.ui.glass.GlassButton
@@ -54,7 +53,6 @@ import com.apex.agent.ui.glass.GlassStyle
 import com.apex.agent.ui.glass.GlassTier
 import com.apex.agent.ui.glass.GlassToolCard
 import com.apex.agent.ui.glass.GlassToolStatus
-import dev.chrisbanes.haze.HazeState
 
 /**
  * ═══════════════════════════════════════════════════════════════
@@ -224,48 +222,54 @@ private fun HorizontalHairline() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Cloudy 真模糊材质 —— v7 agent 回复气泡样本
+//  Ambient 材质 —— kyant0 时代 agent 回复气泡样本
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * CloudyFrost 材质 A/B 对照样本卡：左 = 旧 Frosted 渐变霜面（GlassCard），
- * 右 = Cloudy 真模糊材质（AgentBubbleGlass，agent 回复气泡 v7 同款）。
- * 两枚同 shape / 同文本 / 同 accent，惟材质不同 —— 验收点：白天右卡应为
- * 「乳白底 + 柔和受光带」（非左卡的平死白），夜间右卡光带呈霓虹光雾；
- * 文字两卡同样清晰（模糊只包裹材质层，永不触及内容）。
- * 跟随实验室主题自动切换。
+ * Ambient 材质 A/B 对照样本卡：左 = kyant0 Ambient 程序化玻璃（AgentBubbleGlass，
+ * agent 回复气泡同款 —— 程序化光带源流经 GPU RenderEffect blur +
+ * AGSL lens 折射的完整玻璃管线），右 = 不透明 M3 ElevatedCard 参照。
+ * 两枚同 shape / 同文本，惟材质不同 —— 验收点：白天左卡应为
+ * 「乳白底 + 柔和受光带 + 轻折射」（非右卡的实心色块），夜间左卡光带呈霓虹光雾；
+ * 文字两卡同样清晰（玻璃只包裹材质层，永不触及内容）。
+ * API < 31 左卡诚实降级 Frosted 霜面渐变。跟随实验室主题自动切换。
+ *
+ * 文案内联说明：res 侧 glasslab_cloudy_* 为旧引擎时代文案（描述 CPU 位图
+ * 自体模糊），已与本实现不符 —— 迁移期先在页内以中文直书，
+ * 待 res 清理后再行收编。
  */
 @Composable
-internal fun CloudyFrostSection() {
+internal fun AmbientMaterialSection() {
     val scheme = MaterialTheme.colorScheme
     val bubbleShape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp)
 
     SectionHeader(
-        title = stringResource(R.string.glasslab_cloudy_title),
-        hint = stringResource(R.string.glasslab_cloudy_hint)
+        title = "Ambient 材质对照",
+        hint = "聊天气泡材质：程序化光带源经 GPU RenderEffect blur + AGSL lens 折射" +
+            "（API 31/33+，低版本 Frosted 霜面降级）—— 程序化材质，非背景采样"
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        GlassCard(
-            modifier = Modifier.weight(1f),
-            style = GlassStyle.Card,
-            shape = bubbleShape,
-            accent = scheme.primary
-        ) {
-            CloudySpecimenBody(tag = "FROSTED·GRADIENT")
-        }
         AgentBubbleGlass(
             modifier = Modifier.weight(1f),
             shape = bubbleShape,
             accent = scheme.primary
         ) {
-            CloudySpecimenBody(tag = "CLOUDY·TRUE-BLUR")
+            AmbientSpecimenBody(tag = "AMBIENT·KYANT0")
+        }
+        ElevatedCard(
+            modifier = Modifier.weight(1f),
+            shape = bubbleShape
+        ) {
+            AmbientSpecimenBody(tag = "M3·ELEVATED")
         }
     }
     Text(
-        text = stringResource(R.string.glasslab_cloudy_note),
+        text = "左：Ambient 玻璃 —— 程序化光带经 GPU blur + lens 折射成柔和发光磨砂，" +
+            "气泡无需背景采样即获统一材质语言；右：不透明 M3 ElevatedCard 实心参照。" +
+            "文字永不被模糊：玻璃只作用于材质层。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -273,7 +277,7 @@ internal fun CloudyFrostSection() {
 
 /** 样本气泡内容：等宽标签 + 两行示例文本（与真实 agent 气泡同排版骨架）。 */
 @Composable
-private fun CloudySpecimenBody(tag: String) {
+private fun AmbientSpecimenBody(tag: String) {
     Column(modifier = Modifier.padding(12.dp)) {
         Text(
             text = tag,
@@ -532,14 +536,14 @@ internal fun InputSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  玻璃对话框 —— HazeDialog 跨窗口采样
+//  玻璃对话框 —— Ambient 材质面板
 // ═══════════════════════════════════════════════════════════════
 
 @Composable
 internal fun DialogSection(onOpen: () -> Unit) {
     SectionHeader(
         title = "玻璃对话框",
-        hint = "HazeDialog 跨窗口采样 —— 面板模糊的是验证区的真实内容"
+        hint = "对话框面板为 Ambient 材质（程序化光带经 GPU blur+lens），跨窗口采样已随 Haze 移除"
     )
     GlassButton(
         text = "打开玻璃对话框",
@@ -550,10 +554,13 @@ internal fun DialogSection(onOpen: () -> Unit) {
 }
 
 @Composable
-internal fun LabGlassDialog(state: HazeState, onDismiss: () -> Unit) {
+internal fun LabGlassDialog(onDismiss: () -> Unit) {
     GlassDialog(
         onDismissRequest = onDismiss,
-        state = state
+        // Dialog 是独立窗口，采不到主窗口的 LayerBackdrop —— 旧引擎的
+        // 跨窗口采样能力已随迁移移除；backdrop = null 走 Ambient 程序化材质，
+        // 诚实降级不冒充（面板 = 程序化光带经 GPU blur + lens）。
+        backdrop = null
     ) {
         Text(
             text = "玻璃对话框",
@@ -563,7 +570,8 @@ internal fun LabGlassDialog(state: HazeState, onDismiss: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "本面板经 HazeDialog 跨窗口采样背后验证区的真实内容：网格、文字与漂移光斑全部进入模糊范围。" +
+            text = "对话框面板为 Ambient 材质（程序化光带经 GPU blur+lens），跨窗口采样已随 Haze 移除：" +
+                "Dialog 独立窗口采不到主窗口内容，面板以程序化材质呈现、不冒充采样。" +
                 "面板内容保持清晰 —— 玻璃只作用于材质本身，不冒充内容模糊。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
@@ -586,22 +594,25 @@ internal fun ChecklistSection(mode: GlassLabMode) {
     val pass = Color(0xFF22C55E)
     val fallback = Color(0xFFF59E0B)
     val fail = scheme.error
-    // Blur 档运行时判定：API 31+ 才有 RenderEffect GPU 模糊（Haze canUseGraphicLayers
-    // 的真实阈值 —— Android 12 即 RenderEffect；旧代码写 32 把 12 代机型误判成降级），
-    // 之下诚实降级 scrim
+    // Blur 档运行时判定：API 31+ 才有 RenderEffect GPU 模糊（Android 12 即
+    // RenderEffect，与 kyant0 effects.blur 的内部阈值同源；旧代码写 32 把 12 代机型
+    // 误判成降级），之下诚实降级 Frosted 霜面
     val blurOn = Build.VERSION.SDK_INT >= 31
+    // Refraction 档运行时判定：AGSL RuntimeShader（lens 折射/色散）API 33+ 才可用，
+    // 之下 lens 静默不生效（仅 blur + tint）—— 如实按档示警，拒绝静态谎言
+    val lensOn = Build.VERSION.SDK_INT >= 33
 
     val items = listOf(
         CheckItem(
             name = "Backdrop",
             status = "PASS",
-            note = "Haze GraphicsLayer 采样背后内容",
+            note = "kyant0 GraphicsLayer 采样背后内容",
             color = pass
         ),
         CheckItem(
             name = "Blur",
             status = if (blurOn) "PASS" else "FALLBACK",
-            note = if (blurOn) "RenderEffect GPU 模糊（API 31+）" else "API < 31: scrim 降级，无 blur",
+            note = if (blurOn) "RenderEffect GPU 模糊（API 31+）" else "API < 31: Frosted 霜面降级，无 blur",
             color = if (blurOn) pass else fallback
         ),
         CheckItem(
@@ -613,26 +624,26 @@ internal fun ChecklistSection(mode: GlassLabMode) {
         CheckItem(
             name = "Edge lighting",
             status = "PASS",
-            note = if (mode == GlassLabMode.NIGHT) "内描边渐变受光" else "冷灰发丝边缘（白底白描边不可见）",
+            note = if (mode == GlassLabMode.NIGHT) "kyant0 Highlight 柔边受光描边" else "乳白霜面明度差 + Highlight 受光立轮廓",
             color = pass
         ),
         CheckItem(
             name = "Depth",
             status = "PASS",
-            note = "双级阴影线索",
+            note = "外层 Compose shadow + InnerShadow 厚度定界",
             color = pass
         ),
         CheckItem(
             name = "Specular",
             status = "PASS",
-            note = "顶部高光扫掠",
+            note = "Ambient 光带 + 霜面顶缘提亮（kyant0 材质内置；扫掠式动画已随迁移移除）",
             color = pass
         ),
         CheckItem(
             name = "Noise",
-            status = "PASS",
-            note = "Haze noiseFactor 玻璃颗粒质感",
-            color = pass
+            status = "REMOVED",
+            note = "噪声通道已随旧引擎移除 —— kyant0 管线无等效物",
+            color = fallback
         ),
         CheckItem(
             name = "Dynamic theme",
@@ -642,8 +653,14 @@ internal fun ChecklistSection(mode: GlassLabMode) {
         ),
         CheckItem(
             name = "Refraction",
+            status = if (lensOn) "PASS" else "FALLBACK",
+            note = if (lensOn) "AGSL lens 折射/色散（API 33+）" else "API < 33: lens 不生效，仅 blur + tint",
+            color = if (lensOn) pass else fallback
+        ),
+        CheckItem(
+            name = "Cross-window",
             status = "NOT IMPLEMENTED",
-            note = "未实现折射位移 —— 拒绝冒充",
+            note = "Dialog 独立窗口采不到主窗口源 —— Ambient 面板降级，拒绝冒充",
             color = fail
         ),
         CheckItem(
@@ -655,13 +672,13 @@ internal fun ChecklistSection(mode: GlassLabMode) {
         CheckItem(
             name = "Performance",
             status = "PASS",
-            note = "静态层与光斑层分离：动画帧仅 2-3 绘制调用，无逐帧 Bitmap 分配",
+            note = "静态层与光斑层分离 + GPU RenderEffect 管线（无 CPU 位图回读），动画帧仅 2-3 绘制调用",
             color = pass
         ),
         CheckItem(
             name = "Fallback",
             status = "PASS",
-            note = "低版本自动 scrim",
+            note = "API < 31 自动 Frosted 霜面（无 RenderEffect 即零管线降级）",
             color = pass
         )
     )

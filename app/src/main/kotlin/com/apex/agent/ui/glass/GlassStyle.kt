@@ -6,185 +6,165 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
 
 /**
  * ═══════════════════════════════════════════════════════════════
- *  Liquid Glass 材质系统 —— GlassStyle
+ *  Liquid Glass 材质系统 —— GlassStyle（kyant0/backdrop 底座）
  * ═══════════════════════════════════════════════════════════════
  *
- * 设计原则（Selective Liquid Glass Spec §1/§4/§18）：
+ * 底层引擎：vendored kyant0/AndroidLiquidGlass（backdrop @ 1.0.0，Apache-2.0，
+ * vendor/backdrop/）。真实能力分层（诚实声明，禁止冒充）：
+ *  - API 33+（T）：AGSL RuntimeShader —— lens 折射/色散（真液态玻璃形变）
+ *    + Default/Ambient 高光着色；
+ *  - API 31+（S）：RenderEffect —— GPU blur 链 + ColorFilter（vibrancy）；
+ *  - API < 31：无 RenderEffect —— GlassSurface 直接走 Frosted 档（霜面 +
+ *    边缘光 + 阴影），不绘制未模糊的 backdrop。
+ *
+ * 设计原则（Selective Liquid Glass Spec §1/§4/§18 延续）：
  *  1. 不同组件不得使用完全相同的玻璃材质 —— 每个档位独立调参；
- *  2. tint / edge / specular 全部从 MaterialTheme 动态派生，
- *     跟随 Light / Dark / Dynamic Color，禁止固定 white alpha 一招走天下；
- *  3. 诚实分层：
- *     - Backdrop 档（state != null）：经 Haze 真实采样背后内容 + GPU RenderEffect 模糊；
- *     - Frosted 档（state == null）：仅主题色薄霜 + 边缘光 + 高光，不冒充 backdrop。
- *
- * 明确未实现：Refraction —— 本系统不声明折射位移能力。
+ *  2. tint / 高光 / 阴影全部从 MaterialTheme 动态派生，跟随 Light/Dark/Dynamic；
+ *  3. 采样源由业务页面显式提供（rememberLayerBackdrop）—— 不再有无中生有的
+ *    「假 backdrop」。
  */
 
-/**
- * Frosted 档（state == null）的材质渲染变体。
- *
- * 诚实声明：两种变体都不采样 backdrop —— 它们只在「无背后内容可采」或
- * 「嵌在 hazeSource 子树内无法采样」的场景里给出高级霜面。
- */
-enum class GlassFrostMaterial {
-    /** 主题色垂直渐变霜面 —— 既有 Frosted 观感（默认，零额外开销）。 */
-    Gradient,
-
-    /**
-     * Cloudy 真模糊光雾材质：材质层自绘斜向光带纹理，经 Cloudy 位图模糊
-     * （全 API 级别原生 NEON/SIMD CPU）扩散成柔和发光磨砂。
-     * 代价：每个组件一次离屏位图 + 一次 CPU 模糊 —— 只用于低数量高价值
-     * 表面（聊天气泡）；详见 CloudyFrost.kt 性能护栏。
-     */
-    Cloudy
-}
-
-/** 玻璃材质档位 —— Spec §4 规定的七档。 */
+/** 玻璃材质档位 —— Spec §4 规定的七档（枚举形状保持稳定）。 */
 enum class GlassTier { Subtle, Control, Card, Navigation, Floating, Dialog, Strong }
 
 /**
- * 玻璃材质参数集。所有字段均为“强度/半径”类参数，
- * 颜色一律在组合期从当前主题解析，保证动态主题适应。
+ * 玻璃材质参数集。字段与 kyant0 效果链的映射：
+ *  - [blurRadius] → `effects { blur() }`（API 31+ GPU RenderEffect）
+ *  - [lensHeight]/[lensAmount] → `effects { lens() }`（API 33+ 折射；0 = 不折射）
+ *  - [tintAlpha] → `onDrawSurface` 霜面染色强度
+ *  - [edgeAlpha]/[specularAlpha] → Highlight 边缘受光（BlurMaskFilter + 着色器）
+ *  - [elevation] → Shadow 投影
+ *  - [scrimAlpha] → Frosted 档（无采样）底色浓度
  */
 @Immutable
 data class GlassStyle(
     val tier: GlassTier,
-    /** Backdrop 模糊半径；Frosted 档作为颗粒感的视觉参照保留 */
+    /** Backdrop 模糊半径（API 31+）*/
     val blurRadius: Dp,
-    /** 材质着色强度 0..1 —— 主体玻璃底色透明度 */
+    /** 材质着色强度 0..1 —— 玻璃霜面底色透明度 */
     val tintAlpha: Float,
-    /** 玻璃颗粒噪声 0..1 */
-    val noiseFactor: Float,
-    /** 边缘高光强度 0..1 —— 内描边渐变的基准亮度 */
+    /** lens 折射带高度（API 33+；0.dp = 关闭折射）*/
+    val lensHeight: Dp,
+    /** lens 折射位移量（API 33+）*/
+    val lensAmount: Dp,
+    /** lens 色散（边缘彩虹分离；对话/卡片档默认关，悬浮件可开）*/
+    val chromaticAberration: Boolean,
+    /** 背景饱和度提升（vibrancy，API 31+ ColorFilter）*/
+    val vibrancy: Float,
+    /** 边缘高光强度 0..1 —— Highlight 受光的基准亮度 */
     val edgeAlpha: Float,
     /** 顶部镜面高光强度 0..1 */
     val specularAlpha: Float,
     /** 外阴影深度 —— 物理深度线索 */
     val elevation: Dp,
-    /** 按压缩放系数 —— pressed 时的形变反馈 */
+    /** 按压缩放系数 —— pressed 时的形变反馈（layerBlock 内实现，backdrop 采样自动反演）*/
     val pressedScale: Float,
-    /** Frosted 档底色浓度 0..1 */
+    /** Frosted 档（state == null 或 API < 31）底色浓度 0..1 */
     val scrimAlpha: Float
 ) {
     companion object {
-        /** 极轻玻璃：小型静态状态组件 */
+        /** 极轻玻璃：小型静态状态组件（徽标）—— 不折射，避免小尺寸形变夸张。 */
         val Subtle = GlassStyle(
-            tier = GlassTier.Subtle, blurRadius = 8.dp, tintAlpha = 0.42f, noiseFactor = 0.06f,
-            edgeAlpha = 0.08f, specularAlpha = 0.03f, elevation = 0.dp,
-            pressedScale = 1f, scrimAlpha = 0.35f
+            tier = GlassTier.Subtle, blurRadius = 8.dp, tintAlpha = 0.30f,
+            lensHeight = 0.dp, lensAmount = 0.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.10f, specularAlpha = 0.05f, elevation = 0.dp,
+            pressedScale = 1f, scrimAlpha = 0.42f
         )
 
-        /** 控制件玻璃：返回按钮 / 图标按钮 / 输入控制器 */
+        /** 控制件玻璃：返回按钮 / 图标按钮 / 输入控制器 —— 轻折射（按压形变）。 */
         val Control = GlassStyle(
-            tier = GlassTier.Control, blurRadius = 10.dp, tintAlpha = 0.50f, noiseFactor = 0.08f,
-            edgeAlpha = 0.16f, specularAlpha = 0.06f, elevation = 1.dp,
-            pressedScale = 0.94f, scrimAlpha = 0.44f
+            tier = GlassTier.Control, blurRadius = 10.dp, tintAlpha = 0.38f,
+            lensHeight = 6.dp, lensAmount = 12.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.16f, specularAlpha = 0.08f, elevation = 1.dp,
+            pressedScale = 0.94f, scrimAlpha = 0.52f
         )
 
-        /** 卡片玻璃：Agent 卡 / Tool 卡 / 状态卡 */
+        /** 卡片玻璃：Agent 卡 / Tool 卡 / 状态卡 / 设置与诊断页卡片。 */
         val Card = GlassStyle(
-            tier = GlassTier.Card, blurRadius = 14.dp, tintAlpha = 0.58f, noiseFactor = 0.10f,
-            edgeAlpha = 0.18f, specularAlpha = 0.08f, elevation = 2.dp,
-            pressedScale = 1f, scrimAlpha = 0.55f
+            tier = GlassTier.Card, blurRadius = 12.dp, tintAlpha = 0.42f,
+            lensHeight = 8.dp, lensAmount = 16.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.18f, specularAlpha = 0.10f, elevation = 2.dp,
+            pressedScale = 1f, scrimAlpha = 0.58f
         )
 
-        /** 导航项玻璃：Drawer 每一项 —— 正常态必须“非常轻” */
+        /** 导航项玻璃：Drawer 每一项 —— 正常态必须「非常轻」。 */
         val Navigation = GlassStyle(
-            tier = GlassTier.Navigation, blurRadius = 12.dp, tintAlpha = 0.46f, noiseFactor = 0.07f,
-            edgeAlpha = 0.13f, specularAlpha = 0.05f, elevation = 0.dp,
-            pressedScale = 0.98f, scrimAlpha = 0.38f
+            tier = GlassTier.Navigation, blurRadius = 10.dp, tintAlpha = 0.34f,
+            lensHeight = 5.dp, lensAmount = 10.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.13f, specularAlpha = 0.06f, elevation = 0.dp,
+            pressedScale = 0.98f, scrimAlpha = 0.46f
         )
 
-        /** 悬浮件玻璃：FAB / 快捷浮动操作 —— 可用比卡片更强的边缘与高光 */
+        /** 悬浮件玻璃：FAB / 输入栏 / 快捷浮动操作 —— 最强折射与高光，色散可辨。 */
         val Floating = GlassStyle(
-            tier = GlassTier.Floating, blurRadius = 18.dp, tintAlpha = 0.62f, noiseFactor = 0.12f,
-            edgeAlpha = 0.24f, specularAlpha = 0.11f, elevation = 6.dp,
-            pressedScale = 0.92f, scrimAlpha = 0.60f
+            tier = GlassTier.Floating, blurRadius = 16.dp, tintAlpha = 0.46f,
+            lensHeight = 10.dp, lensAmount = 20.dp, chromaticAberration = true, vibrancy = 0f,
+            edgeAlpha = 0.24f, specularAlpha = 0.14f, elevation = 6.dp,
+            pressedScale = 0.92f, scrimAlpha = 0.64f
         )
 
-        /** 对话框玻璃：强材质，但内容保持清晰 */
+        /** 对话框玻璃：强材质，但内容保持清晰。 */
         val Dialog = GlassStyle(
-            tier = GlassTier.Dialog, blurRadius = 22.dp, tintAlpha = 0.66f, noiseFactor = 0.12f,
-            edgeAlpha = 0.24f, specularAlpha = 0.10f, elevation = 12.dp,
-            pressedScale = 1f, scrimAlpha = 0.72f
+            tier = GlassTier.Dialog, blurRadius = 20.dp, tintAlpha = 0.52f,
+            lensHeight = 10.dp, lensAmount = 20.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.24f, specularAlpha = 0.12f, elevation = 12.dp,
+            pressedScale = 1f, scrimAlpha = 0.74f
         )
 
-        /** 最强玻璃：低频、高聚焦的特殊场景 */
+        /** 最强玻璃：低频、高聚焦的特殊场景。 */
         val Strong = GlassStyle(
-            tier = GlassTier.Strong, blurRadius = 26.dp, tintAlpha = 0.74f, noiseFactor = 0.14f,
-            edgeAlpha = 0.28f, specularAlpha = 0.13f, elevation = 4.dp,
-            pressedScale = 1f, scrimAlpha = 0.80f
+            tier = GlassTier.Strong, blurRadius = 24.dp, tintAlpha = 0.58f,
+            lensHeight = 12.dp, lensAmount = 24.dp, chromaticAberration = true, vibrancy = 0f,
+            edgeAlpha = 0.28f, specularAlpha = 0.16f, elevation = 4.dp,
+            pressedScale = 1f, scrimAlpha = 0.82f
         )
 
         /**
-         * 聊天气泡玻璃：Agent 回复 / 流式 / 思考三气泡专用（配合
-         * GlassFrostMaterial.Cloudy 真模糊材质）。
+         * 聊天气泡玻璃：Agent 回复 / 流式 / 思考三气泡专用。
          *
-         * 相比 Card 档的差异化调参（设计原则「不同组件不同材质」）：
-         *  - scrim 更透（0.55 → 0.44）：白天乳白霜面更薄，列表背景经
-         *    半透明材质透出 —— 治「一片死白」；
-         *  - blur 加大（14 → 16dp）：光带纹理扩散更柔，磨砂感更细；
-         *  - 镜面/边缘略强：小尺寸表面需要更明确的受光线索立层次。
-         * tier 沿用 Card（档位语义不变，仅参数差异化 —— 七档枚举保持稳定）。
+         * 与 Card 档的差异化调参（「不同组件不同材质」）：
+         *  - 折射更轻（6/12dp）：气泡圆角大（18dp），重折射会让文字边缘形变；
+         *  - tint 更透（0.34）：长文阅读优先，磨砂下透出氛围背景的呼吸感；
+         *  - 不开色散：正文边缘出现彩虹分离会毁掉可读性；
+         *  - 档位语义沿用 Card（七档枚举保持稳定，仅参数差异化）。
          */
         val Bubble = GlassStyle(
-            tier = GlassTier.Card, blurRadius = 16.dp, tintAlpha = 0.50f, noiseFactor = 0.10f,
-            edgeAlpha = 0.20f, specularAlpha = 0.12f, elevation = 2.dp,
-            pressedScale = 1f, scrimAlpha = 0.44f
+            tier = GlassTier.Card, blurRadius = 10.dp, tintAlpha = 0.34f,
+            lensHeight = 6.dp, lensAmount = 12.dp, chromaticAberration = false, vibrancy = 0f,
+            edgeAlpha = 0.20f, specularAlpha = 0.12f, elevation = 1.dp,
+            pressedScale = 1f, scrimAlpha = 0.48f
         )
     }
 }
 
 /**
  * 主题派生颜色集 —— 组合期从 MaterialTheme 解析，Light/Dark 双态。
- * 深色主题玻璃偏“提亮”——近黑基底上的发光材质；
- * 浅色主题玻璃偏“白霜”——白基底上的乳白材质。
+ * 深色主题玻璃偏「提亮」——近黑基底上的发光材质；
+ * 浅色主题玻璃偏「白霜」——白基底上的乳白材质。
  */
 @Immutable
 internal data class GlassPalette(
     val dark: Boolean,
-    /** Haze 采样背景兜底色 —— HazeEffectScope.backgroundColor 必填 */
-    val hazeBackground: Color,
-    /** Backdrop 档材质着色 */
-    val hazeTint: Color,
-    /** API 低于 32 时的 scrim 兜底色 —— 无 blur 时仍可读 */
-    val hazeFallback: Color,
-    /** Frosted 档底色 */
+    /** Backdrop 档霜面染色（onDrawSurface 绘制在模糊采样之上）*/
+    val glassTint: Color,
+    /** Frosted 档底色（无采样的诚实降级底）*/
     val frostBase: Color,
     /** Frosted 档顶部提亮色 */
     val frostLift: Color,
-    /** 边缘高光顶色 —— 光源方向：上方 */
-    val edgeTop: Color,
-    /** 边缘高光底色 */
-    val edgeBottom: Color,
-    /** 镜面高光色 */
-    val specular: Color,
-    /**
-     * 动态扫掠光带色（Pro Dynamics 共享时钟专用）——
-     * 高光层绘制在内容之下，多卡共享同一相位；
-     * 浅色主题用 primary 染色（纯白光带在白霜底上不可见），
-     * 深色主题保持白色高光。 */
-    val sweepColor: Color
+    /** 边缘高光色 —— Highlight 受光 */
+    val edgeColor: Color,
+    /** 外阴影色 */
+    val shadowColor: Color
 )
 
 /**
  * 当前主题下的玻璃调色板。跟随 Dynamic Color。
- *
- * 双态设计意图：
- *  - 深色（保持原样）：近黑基底上的「提亮」玻璃 —— surfaceContainer 系高一层作材质，
- *    白色边缘/高光在暗底上自然受光，主色轻微浸染呼应霓虹主题；
- *  - 浅色（本次重调）：白基底上的「乳白磨砂玻璃」—— 磨砂层改用 surfaceVariant（比纯白
- *    surface 深一档，避免白上白一片死白无层次），上缘白色 rim light 受光、下缘极淡
- *    深色定界，顶部镜面高光加强扫掠；primary 以约 0.05 alpha 只给主题色「倾向」不刷屏。
  */
 @Composable
 internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
@@ -193,72 +173,40 @@ internal fun glassPalette(style: GlassStyle, accent: Color): GlassPalette {
     val base = if (dark) {
         GlassPalette(
             dark = dark,
-            hazeBackground = scheme.background,
-            // 深色：玻璃 = 比基底略亮的青蓝灰材质，主色轻微浸染呼应霓虹主题
-            hazeTint = scheme.surfaceContainerHigh.copy(alpha = style.tintAlpha)
-                .compositeOverNeutral(scheme.primary.copy(alpha = 0.05f + 0.04f * style.tintAlpha)),
-            hazeFallback = scheme.surfaceContainerHigh.copy(alpha = style.scrimAlpha + 0.25f),
+            // 深色：玻璃 = 比基底略亮的材质，主色轻微浸染呼应霓虹主题
+            glassTint = scheme.surfaceContainerHigh.copy(alpha = style.tintAlpha)
+                .compositeOverNeutral(scheme.primary.copy(alpha = 0.06f)),
             frostBase = scheme.surfaceContainerHigh.copy(alpha = style.scrimAlpha),
             frostLift = scheme.surfaceContainerHighest.copy(
                 alpha = style.scrimAlpha * 0.6f + style.specularAlpha * 0.8f
             ),
-            // #269 豁免说明：玻璃体系的白高光（specular/edge/frostLift）是物理语义
-            // —— 光照在玻璃上的镜面反射就是白色，与主题明暗无关（刻意设计，非漏网）。
-            edgeTop = Color.White.copy(alpha = style.edgeAlpha),
-            edgeBottom = Color.White.copy(alpha = style.edgeAlpha * 0.22f),
-            specular = Color.White.copy(alpha = style.specularAlpha),
-            sweepColor = Color.White.copy(alpha = style.specularAlpha * 2.4f + 0.12f)
+            // #269 豁免说明：玻璃体系的白高光是物理语义 —— 光照在玻璃上的
+            // 镜面反射就是白色，与主题明暗无关（刻意设计，非漏网）。
+            edgeColor = Color.White.copy(alpha = style.edgeAlpha),
+            shadowColor = Color.Black.copy(alpha = 0.30f)
         )
     } else {
-        // 浅色玻璃 v4（v1.4.5「白天模式大幅度修复」）：
-        // 圆角裁剪根因修复后，白天玻璃的三层递进终于可见 —— 配套把材质
-        // 从「乳白实底」调向「真透射」：
-        // ① tint 提升量 +0.14 → +0.08：v3 的实底 tint 在矩形露角修复前
-        //    被方角矩形放大成「一块白板」；现在采样层被正确圆角裁剪，
-        //    降低浓度让底衬的模糊内容透出来 —— 白霜玻璃「磨砂但可透」；
-        // ② 采样背景兜底色 background → surfaceContainerLow：纯白兜底让
-        //    模糊边缘（inflate 出来的边带）在白底上发白光，冷一档后与
-        //    卡片表面自然融合；
-        // ③ 霜底 +0.16 → +0.12：Frosted 档同向减实，靠顶光带与中带
-        //    分隔高光立层次（层次来自光影，不来自把底色做实）。
         GlassPalette(
             dark = dark,
-            hazeBackground = scheme.surfaceContainerLow,
-            // 磨砂层叠：surfaceVariant 比 surface 深一档，白底上才叠得出「一层玻璃」；
+            // 浅色：乳白磨砂 —— surfaceVariant 比纯白深一档，白底上叠得出「一层玻璃」；
             // 再薄叠 primary（0.05）给玻璃一点主题色倾向 —— 只给倾向，不刷屏
-            hazeTint = scheme.surfaceVariant.copy(alpha = (style.tintAlpha + 0.08f).coerceAtMost(1f))
+            glassTint = scheme.surfaceVariant.copy(alpha = style.tintAlpha)
                 .compositeOverNeutral(scheme.primary.copy(alpha = 0.05f)),
-            // 低 API 无 blur 的 scrim 兜底：更实的乳白，内容仍可读
-            // （Strong 档相加会 >1f，clamp 防 alpha 越界后 toArgb 打包错位）
-            hazeFallback = scheme.surfaceVariant.copy(
-                alpha = (style.scrimAlpha + 0.24f).coerceAtMost(1f)
-            ),
-            // Frosted 霜底：乳白偏灰但更透 —— 靠顶光带 + 中带分隔高光补层次，
-            // 而不是把底色做实（做实就是「白上贴灰块」，正是被吐槽的观感）
             frostBase = scheme.surfaceVariant.copy(
-                alpha = (style.scrimAlpha + 0.12f).coerceAtMost(1f)
+                alpha = (style.scrimAlpha + 0.10f).coerceAtMost(1f)
             ),
-            // 顶部受光提亮：白色 lift 加宽加亮 —— 霜面上亮下实，正是磨砂玻璃的受光方向
             frostLift = Color.White.copy(alpha = style.specularAlpha * 1.6f + 0.20f),
-            // 上缘 rim light：白玻璃受光边（绘制层会再乘激活 boost，按压更亮）
-            edgeTop = Color.White.copy(alpha = style.edgeAlpha * 1.3f + 0.07f),
-            // 下缘落影：极淡深色定界 —— 给轮廓收边，但不像旧版那样成灰框脏描边
-            edgeBottom = scheme.onSurface.copy(alpha = style.edgeAlpha * 0.10f),
-            // 顶部镜面扫掠：更强的白色高光，在乳白底上仍可辨
-            specular = Color.White.copy(alpha = style.specularAlpha * 1.8f + 0.05f),
-            // 浅色扫掠光带：primary 染色 —— 纯白光带在白霜底上是「白上白」
-            //（被用户实测指出「白做动画」），向主题色混合后白底上可辨且不脏；
-            // 深浅混合比例固定 0.32，只给光带「色倾向」，不刷屏
-            sweepColor = lerp(Color.White, scheme.primary, 0.32f)
-                .copy(alpha = style.specularAlpha * 2.0f + 0.16f)
+            edgeColor = Color.White.copy(alpha = style.edgeAlpha * 1.3f + 0.07f),
+            // 白天投影更淡：白底上重阴影显脏
+            shadowColor = Color.Black.copy(alpha = 0.12f)
         )
     }
     // 状态强调色：工具卡运行态 / 错误态等着色 —— 不用大面积高饱和，保持克制
     return if (accent.alpha > 0f) base.copy(
-        hazeTint = accent.copy(alpha = 0.14f + 0.18f * style.tintAlpha)
-            .compositeOverNeutral(base.hazeTint),
-        edgeTop = accent.copy(alpha = style.edgeAlpha * 1.1f)
-            .compositeOverNeutral(base.edgeTop)
+        glassTint = accent.copy(alpha = 0.10f + 0.14f * style.tintAlpha)
+            .compositeOverNeutral(base.glassTint),
+        edgeColor = accent.copy(alpha = style.edgeAlpha * 1.1f)
+            .compositeOverNeutral(base.edgeColor)
     ) else base
 }
 
@@ -273,16 +221,6 @@ private fun Color.compositeOverNeutral(overlay: Color): Color {
         alpha = alpha
     )
 }
-
-/** Backdrop 档的 HazeStyle —— tint / noise / blurRadius 全量来自玻璃档位与主题。 */
-@Composable
-internal fun GlassStyle.toHazeStyle(palette: GlassPalette): HazeStyle = HazeStyle(
-    backgroundColor = palette.hazeBackground,
-    tints = listOf(HazeTint(palette.hazeTint)),
-    blurRadius = blurRadius,
-    noiseFactor = noiseFactor,
-    fallbackTint = HazeTint(palette.hazeFallback)
-)
 
 /** 应用级玻璃圆角基准 —— 与既有设计令牌对齐：chip 6 / 卡片 12 / 气泡 18。 */
 object GlassShapes {

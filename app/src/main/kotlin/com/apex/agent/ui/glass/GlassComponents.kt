@@ -37,28 +37,27 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import dev.chrisbanes.haze.HazeDialog
-import dev.chrisbanes.haze.HazeState
+import com.kyant.backdrop.Backdrop
 
 /**
  * ═══════════════════════════════════════════════════════════════
- *  Glass Component API —— 业务层唯一入口
+ *  Glass Component API —— 业务层唯一入口（kyant0/backdrop 底座）
  * ═══════════════════════════════════════════════════════════════
  *
  * Spec §3：业务 UI 不允许直接散落第三方玻璃 API。
  * 本文件提供全部玻璃组件；内部细节封装在 GlassSurface / GlassStyle。
  *
  * 用法速查：
- *  - state 传 null = Frosted 档——无 backdrop 采样，诚实降级；
- *  - state 传 HazeState = Backdrop 档——前提：组件悬浮于 hazeSource 之上；
+ *  - backdrop 传 null = Frosted 档——无 backdrop 采样，诚实降级；
+ *  - backdrop 传 LayerBackdrop = Backdrop 档——真实采样 + blur + lens 折射；
  *  - 所有组件支持 Normal / Pressed / Focused / Selected / Disabled。
  */
 
-/** 玻璃卡片 —— Agent 卡 / Tool 卡 / 状态卡 / Plan 卡的统一容器。 */
+/** 玻璃卡片 —— Agent 卡 / Tool 卡 / 状态卡 / Plan 卡 / 设置与诊断页卡片的统一容器。 */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     style: GlassStyle = GlassStyle.Card,
     shape: Shape = GlassShapes.card,
     accent: Color = Color.Unspecified,
@@ -70,7 +69,7 @@ fun GlassCard(
 ) {
     GlassSurface(
         modifier = modifier,
-        state = state,
+        backdrop = backdrop,
         style = style,
         shape = shape,
         accent = accent,
@@ -93,7 +92,7 @@ fun GlassIconButton(
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     style: GlassStyle = GlassStyle.Control,
     size: Dp = 40.dp,
     iconSize: Dp = Dp.Unspecified,
@@ -109,7 +108,7 @@ fun GlassIconButton(
         // 最小触区补偿，视觉直径低于 48 的调用整体抬到 48；icon 仍按原
         // 比例（resolvedIconSize 由调用方 size 派生，不随触区放大）。
         modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).size(size),
-        state = state,
+        backdrop = backdrop,
         style = style,
         shape = CircleShape,
         enabled = enabled,
@@ -137,7 +136,7 @@ fun GlassButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     style: GlassStyle = GlassStyle.Control,
     accent: Color = Color.Unspecified,
     leadingIcon: ImageVector? = null,
@@ -148,7 +147,7 @@ fun GlassButton(
     val labelColor = if (accent.alpha > 0f) accent else scheme.onSurface
     GlassSurface(
         modifier = modifier,
-        state = state,
+        backdrop = backdrop,
         style = style,
         shape = GlassShapes.button,
         accent = accent,
@@ -190,7 +189,7 @@ fun GlassFloatingButton(
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     size: Dp = 48.dp,
     accent: Color = Color.Unspecified,
     tint: Color = Color.Unspecified,
@@ -201,7 +200,7 @@ fun GlassFloatingButton(
         contentDescription = contentDescription,
         onClick = onClick,
         modifier = modifier,
-        state = state,
+        backdrop = backdrop,
         style = GlassStyle.Floating,
         size = size,
         iconSize = size * 0.5f,
@@ -222,7 +221,7 @@ fun GlassNavigationItem(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     enabled: Boolean = true,
     accent: Color = Color.Unspecified,
     trailing: (@Composable () -> Unit)? = null
@@ -238,7 +237,7 @@ fun GlassNavigationItem(
 
     GlassSurface(
         modifier = modifier.fillMaxWidth(),
-        state = state,
+        backdrop = backdrop,
         style = GlassStyle.Navigation,
         shape = GlassShapes.navItem,
         accent = itemAccent,
@@ -299,7 +298,7 @@ enum class GlassToolStatus { RUNNING, COMPLETED, FAILED, WAITING }
 fun GlassToolCard(
     status: GlassToolStatus,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     shape: Shape = GlassShapes.card,
     expanded: Boolean = false,
     accent: Color = Color.Unspecified,
@@ -315,7 +314,7 @@ fun GlassToolCard(
     }
     GlassCard(
         modifier = modifier,
-        state = state,
+        backdrop = backdrop,
         style = GlassStyle.Card,
         shape = shape,
         accent = if (accent.alpha > 0f) accent else statusAccent,
@@ -326,48 +325,33 @@ fun GlassToolCard(
 
 /**
  * 玻璃对话框 —— Spec §9。
- * state != null 时走 HazeDialog：跨窗口采样 Activity 内容做真实 backdrop blur；
- * state == null 时退回普通 Dialog 窗口 + Frosted 面板。
+ * backdrop != null 时面板真实采样源内容（kyant0 GraphicsLayer 采样，
+ * 跨 Dialog 窗口的采样仍受窗口合成限制 —— 主窗口源采不到时自动表现为
+ * Frosted 档语义，不冒充）；backdrop == null 时 Frosted 面板。
  * 对话框内容保持清晰 —— 玻璃只作用于面板材质本身。
  */
 @Composable
 fun GlassDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     style: GlassStyle = GlassStyle.Dialog,
     shape: Shape = GlassShapes.dialog,
     properties: DialogProperties = DialogProperties(),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val panel: @Composable () -> Unit = {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = properties
+    ) {
         GlassSurface(
             modifier = modifier,
-            // v1.4.5 缺陷修复：state 此前只给了 HazeDialog 窗口壳、没传给面板
-            // 本体 —— 对话框玻璃从不采样背景（纯 Frosted），与「跨窗口采样
-            // 背后真实内容」的声明直接矛盾。传 state 后面板挂 hazeEffect，
-            // 经共享 HazeState 采样 Activity 窗口内容（Haze 1.4 GraphicsLayer
-            // 跨窗口保留可采样）。
-            state = state,
+            backdrop = backdrop,
             style = style,
             shape = shape
         ) {
             Column(modifier = Modifier.padding(24.dp)) { content() }
         }
-    }
-    if (state != null) {
-        HazeDialog(
-            hazeState = state,
-            onDismissRequest = onDismissRequest,
-            properties = properties,
-            content = { panel() }
-        )
-    } else {
-        Dialog(
-            onDismissRequest = onDismissRequest,
-            properties = properties,
-            content = { panel() }
-        )
     }
 }
 
@@ -375,13 +359,13 @@ fun GlassDialog(
 @Composable
 fun GlassBadge(
     modifier: Modifier = Modifier,
-    state: HazeState? = null,
+    backdrop: Backdrop? = null,
     accent: Color = Color.Unspecified,
     content: @Composable RowScope.() -> Unit
 ) {
     GlassSurface(
         modifier = modifier,
-        state = state,
+        backdrop = backdrop,
         style = GlassStyle.Subtle,
         shape = RoundedCornerShape(8.dp),
         accent = accent
@@ -392,5 +376,34 @@ fun GlassBadge(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             content = content
         )
+    }
+}
+
+/**
+ * 聊天气泡玻璃 —— Agent 回复 / 流式 / 思考三气泡专用。
+ *
+ * kyant0 时代的能力跃迁（对比 Cloudy 时代）：气泡可接收页面的氛围背景
+ * [backdrop]（屏幕背景源，与气泡不同子树 —— Haze 1.4 的嵌套限制不存在），
+ * 经 GPU blur + 轻折射得到真·液态玻璃材质；backdrop == null 或 API < 31
+ * 时退回 Frosted 档（霜面渐变 + 边缘光，零冒充）。
+ * 流式高频重排场景：GPU RenderEffect 每帧毫秒级，替代 Cloudy 的 CPU
+ * 位图回读 + NEON 迭代模糊 —— 长会话滚动/流式不再有掉帧尖峰。
+ */
+@Composable
+fun AgentBubbleGlass(
+    modifier: Modifier = Modifier,
+    backdrop: Backdrop? = null,
+    shape: Shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
+    accent: Color = Color.Unspecified,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    GlassSurface(
+        modifier = modifier,
+        backdrop = backdrop,
+        style = GlassStyle.Bubble,
+        shape = shape,
+        accent = accent
+    ) {
+        Column { content() }
     }
 }

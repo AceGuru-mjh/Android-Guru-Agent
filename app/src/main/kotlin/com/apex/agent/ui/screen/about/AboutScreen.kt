@@ -91,8 +91,8 @@ import com.apex.agent.BuildConfig
 import com.apex.agent.R
 import com.apex.agent.ui.glass.GlassStyle
 import com.apex.agent.ui.glass.GlassSurface
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
@@ -152,7 +152,7 @@ fun AboutScreen() {
     }
 
     // Hero 可见性门控：页面非 lazy 滚动，滚出视口后无限动画仍在逐帧
-    // invalidate + 重录（含 haze 模糊重采样）——CPU 空转。Hero 滚出
+    // invalidate + 重录（含 backdrop 采样重绘）——CPU 空转。Hero 滚出
     // 视口 1.5 倍高度后切静态降级帧，滚回自动恢复
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
@@ -331,7 +331,7 @@ fun AboutScreen() {
 
 // ═══════════════════════════════════════════════════════════════
 //  玻璃 Hero —— 顶阶动态四件套
-//  ① 极光漂移：三枚 Lissajous 光晕 + 七粒微尘（haze 采样源）
+//  ① 极光漂移：三枚 Lissajous 光晕 + 七粒微尘（layerBackdrop 采样源）
 //  ② 流光边框：绕心旋转的锥形渐变描边（Linear / Vercel 质感）
 //  ③ 镜面扫掠：斜向光带周期性掠过卡面
 //  ④ 呼吸光晕：Logo 后主色光环脉动
@@ -345,7 +345,7 @@ fun AboutScreen() {
 @Composable
 private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
-    val hazeState = remember { HazeState() }
+    val heroBackdrop = rememberLayerBackdrop()
     val heroShape = RoundedCornerShape(22.dp)
 
     val drift: State<Float>
@@ -407,13 +407,13 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
             drift = drift,
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(hazeState)
+                .layerBackdrop(heroBackdrop)
         )
 
         // ② 玻璃卡主体（Backdrop 档：实时采样背后的极光）
         GlassSurface(
             modifier = Modifier.fillMaxSize(),
-            state = hazeState,
+            backdrop = heroBackdrop,
             style = GlassStyle.Card,
             shape = heroShape
         ) {

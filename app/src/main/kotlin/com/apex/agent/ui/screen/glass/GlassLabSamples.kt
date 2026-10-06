@@ -1,5 +1,6 @@
 package com.apex.agent.ui.screen.glass
 
+import android.os.Build
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -65,11 +66,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apex.agent.ui.glass.GlassShapes
 import com.apex.agent.ui.glass.glassClickable
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
 import kotlin.math.roundToInt
 
 /**
@@ -86,11 +88,14 @@ import kotlin.math.roundToInt
  *  - 标本 02 边缘光变：同一 Frosted 基材 × 无边缘/亮线/渐变描边/外发光；
  *  - 标本 03 反射条纹 / 04 按压形变 / 05 采样真伪对照（详见各小节注释）。
  *
- * 技术约定：haze 用法照抄 GlassSurface（hazeEffect(state, style) + HazeStyle），
- * hazeSource 只挂在「样品抽屉」容器上，玻璃样品永远是它的同层兄弟节点（嵌进源
- * 子树会被 zIndex 递归保护排除）；两个抽屉与 BackdropZone **共用同一 HazeState**
- * —— 各区窗口坐标互不重叠，haze 逐区按重叠绘制互不串扰；全部样品只用静态绘制
- * 或单次触发动画，零循环动画（实验室光斑除外）；夜间/白天各自强制主题。
+ * 技术约定（kyant0/backdrop 时代）：材质层直接 drawBackdrop(backdrop) 消费
+ * LayerBackdrop（GPU RenderEffect blur + AGSL lens 轻折射，用法与 GlassSurface
+ * 同源）；layerBackdrop 源只挂在「样品抽屉」容器上，玻璃样品永远是它的
+ * 同层兄弟节点。kyant0 的采样基于 GraphicsLayer 单层录制 —— 一个
+ * LayerBackdrop 只承载一个源区域（旧引擎多区共享同一 state、按窗口重叠
+ * 挑选的语义不存在，跨区共用会让末位录制源污染全部玻璃片），故配方抽屉
+ * 与真伪对照区各自持有独立 LayerBackdrop；全部样品只用静态绘制或单次
+ * 触发动画，零循环动画（实验室光斑除外）；夜间/白天各自强制主题。
  */
 
 // ═══ 陈列尺寸常量 ═══
@@ -128,8 +133,11 @@ private sealed interface EdgeStyle {
 private data class StreakStyle(val degrees: Float = 15f, val color: Color)
 
 /**
- * 单件玻璃样品的完整配方。tint 已含 alpha；state 传 null 即 Frosted 档
- * （诚实降级为主题色薄霜），传 HazeState 即 Backdrop 档（实时采样）。
+ * 单件玻璃样品的完整配方。tint 已含 alpha；state 传 null（或 API < 31）即
+ * Frosted 档（诚实降级为主题色薄霜），传 Backdrop（LayerBackdrop 采样源）
+ * 即 Backdrop 档（GPU blur + 轻折射实时采样）。noise / background /
+ * fallback 为旧引擎时代的配方参数 —— kyant0 管线无噪声通道、无背景兜底
+ * 参数，仅保留字段作配方标签与历史对照，不参与渲染。
  */
 private data class GlassSpec(
     val name: String,
@@ -137,8 +145,8 @@ private data class GlassSpec(
     val blur: Dp = 14.dp,
     val tint: Color,
     val tintTop: Color = Color.Unspecified,     // Frosted 顶部提亮；缺省由 tint 派生
-    val background: Color = Color.Unspecified,  // haze 背景兜底（Backdrop 档必填）
-    val fallback: Color = Color.Unspecified,    // 低 API 无 blur 时的 scrim
+    val background: Color = Color.Unspecified,  // 旧引擎背景兜底参数（kyant0 不消费，仅配方对照）
+    val fallback: Color = Color.Unspecified,    // 旧引擎低 API scrim 参数（kyant0 不消费，仅配方对照）
     val noise: Float = 0.05f,
     val edge: EdgeStyle = EdgeStyle.None,
     val sheen: Float = 0f,                      // 顶部内高光强度 0..1
@@ -150,19 +158,20 @@ private data class GlassSpec(
 //  小节入口 —— GlassLabContent 两个模式各挂载一份
 // ═══════════════════════════════════════════════════════════════
 
-/** 样品陈列馆主体：全部样品跟随当前强制主题（夜间霓虹 / 白天粉彩）。 */
+/** 样品陈列馆主体：全部样品跟随当前强制主题（夜间霓虹 / 白天粉彩）。
+ *  各采样区（配方抽屉 / 真伪对照）自建独立 LayerBackdrop —— 一源一层。 */
 @Composable
-internal fun SamplesSection(state: HazeState, mode: GlassLabMode) {
+internal fun SamplesSection(mode: GlassLabMode) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionHeader(
             title = "样品陈列馆 · Sample Gallery",
             hint = "液态玻璃材质标本陈列 —— 只在玻璃实验室验收，不进入任何正式界面；满意后再提炼为正式组件"
         )
-        RecipeShelf(state = state, mode = mode)
+        RecipeShelf(mode = mode)
         EdgeStudySection(mode = mode)
         StreakStudySection(mode = mode)
         PressMorphSection(mode = mode)
-        LiveVsStaticSection(state = state, mode = mode)
+        LiveVsStaticSection(mode = mode)
     }
 }
 
@@ -186,18 +195,21 @@ private fun StudyHeader(title: String, hint: String) {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * 配方标本抽屉：底衬为第二采样区（与 BackdropZone 共用 HazeState），六种
- * 配方的玻璃片作为同层兄弟节点悬浮其上，逐片实时采样，可按压感受材质。
+ * 配方标本抽屉：底衬为本抽屉专属采样源（独立 LayerBackdrop —— kyant0 一源
+ * 一层，跨区共用会让末位录制源污染全部玻璃片），六种配方的玻璃片作为同层
+ * 兄弟节点悬浮其上，逐片实时采样，可按压感受材质。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RecipeShelf(state: HazeState, mode: GlassLabMode) {
+private fun RecipeShelf(mode: GlassLabMode) {
     val scheme = MaterialTheme.colorScheme
     val specs = recipeSpecs(night = mode == GlassLabMode.NIGHT, scheme = scheme)
+    // 本抽屉专属采样源：底衬内容录制进 GraphicsLayer，玻璃标本悬浮其上消费
+    val shelfBackdrop = rememberLayerBackdrop()
 
     StudyHeader(
         title = "标本 01 · 材质配方",
-        hint = "六种配方 × 实时采样 —— 抽屉底衬为第二采样区（与 BackdropZone 共用 HazeState），按压标本感受材质"
+        hint = "六种配方 × 实时采样 —— 抽屉底衬为专属采样源（独立 LayerBackdrop），按压标本感受材质"
     )
     Box(
         modifier = Modifier
@@ -205,8 +217,9 @@ private fun RecipeShelf(state: HazeState, mode: GlassLabMode) {
             .clip(GlassShapes.card)
             .border(width = 1.dp, color = scheme.outlineVariant.copy(alpha = 0.5f), shape = GlassShapes.card)
     ) {
-        // haze 源：标本抽屉底衬（静态 Canvas，尺寸/主题变化才重绘）
-        Box(modifier = Modifier.fillMaxSize().hazeSource(state)) {
+        // 采样源（layerBackdrop）：标本抽屉底衬录制进 GraphicsLayer
+        // （静态 Canvas，尺寸/主题变化才重绘）
+        Box(modifier = Modifier.fillMaxSize().layerBackdrop(shelfBackdrop)) {
             SpecimenLinerCanvas(modifier = Modifier.fillMaxSize(), mode = mode, dense = false)
         }
         // 标本陈列层：源的同层兄弟节点（悬浮其上），逐片实时采样
@@ -217,8 +230,8 @@ private fun RecipeShelf(state: HazeState, mode: GlassLabMode) {
             maxItemsInEachRow = 3
         ) {
             specs.forEach { spec ->
-                if (spec.laminated) LaminatedUnit(state = state, mode = mode, modifier = Modifier.weight(1f))
-                else SpecimenUnit(spec = spec, state = state, modifier = Modifier.weight(1f))
+                if (spec.laminated) LaminatedUnit(state = shelfBackdrop, mode = mode, modifier = Modifier.weight(1f))
+                else SpecimenUnit(spec = spec, state = shelfBackdrop, modifier = Modifier.weight(1f))
             }
         }
     }
@@ -284,7 +297,7 @@ private fun edgeHairline(night: Boolean, scheme: ColorScheme, nightAlpha: Float,
 
 /** 单件标本卡：玻璃片 + 悬挂式参数标签（实验室标本卡样式）。 */
 @Composable
-private fun SpecimenUnit(spec: GlassSpec, state: HazeState, modifier: Modifier = Modifier) {
+private fun SpecimenUnit(spec: GlassSpec, state: Backdrop, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
         SpecimenGlass(
             spec = spec, state = state,
@@ -296,7 +309,7 @@ private fun SpecimenUnit(spec: GlassSpec, state: HazeState, modifier: Modifier =
 
 /** 双层夹胶标本：后片（左上）+ 前片（右下）错位叠放，展示深度层次。 */
 @Composable
-private fun LaminatedUnit(state: HazeState, mode: GlassLabMode, modifier: Modifier = Modifier) {
+private fun LaminatedUnit(state: Backdrop, mode: GlassLabMode, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     val night = mode == GlassLabMode.NIGHT
     // 后片：轻模糊薄玻璃；前片：重模糊厚玻璃 —— 错位叠出前后景深
@@ -544,17 +557,19 @@ private fun PressMorphSection(mode: GlassLabMode) {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * 真伪对照：左 = haze 实时采样玻璃片（可拖动、双击复位）；右 = 同 tint 参数
+ * 真伪对照：左 = kyant0 backdrop 实时采样玻璃片（可拖动、双击复位）；右 = 同 tint 参数
  * 静态半透明色块 —— 真玻璃把网格糊成柔边漫射、色斑洇开；假色块下网格依旧锐。
  */
 @Composable
-private fun LiveVsStaticSection(state: HazeState, mode: GlassLabMode) {
+private fun LiveVsStaticSection(mode: GlassLabMode) {
     val scheme = MaterialTheme.colorScheme
     var zoneSize by remember { mutableStateOf(IntSize.Zero) }
+    // 本对照区专属采样源（独立 LayerBackdrop —— 与配方抽屉互不串扰）
+    val compareBackdrop = rememberLayerBackdrop()
 
     StudyHeader(
         title = "标本 05 · 采样真伪对照",
-        hint = "左 = haze 实时采样（可拖动 · 双击复位）｜右 = 同参数静态色块 —— 看网格：真玻璃糊，假玻璃锐"
+        hint = "左 = kyant0 实时采样（可拖动 · 双击复位）｜右 = 同参数静态色块 —— 看网格：真玻璃糊，假玻璃锐"
     )
     Box(
         modifier = Modifier
@@ -563,8 +578,8 @@ private fun LiveVsStaticSection(state: HazeState, mode: GlassLabMode) {
             .border(width = 1.dp, color = scheme.outlineVariant.copy(alpha = 0.5f), shape = GlassShapes.card)
             .onSizeChanged { coordinates -> zoneSize = coordinates }
     ) {
-        // haze 源：对照底衬（密集网格 + 文字 + 色斑，让差异一眼可见）
-        Box(modifier = Modifier.fillMaxSize().hazeSource(state)) {
+        // 采样源（layerBackdrop）：对照底衬录制进 GraphicsLayer（密集网格 + 文字 + 色斑，让差异一眼可见）
+        Box(modifier = Modifier.fillMaxSize().layerBackdrop(compareBackdrop)) {
             SpecimenLinerCanvas(modifier = Modifier.fillMaxSize(), mode = mode, dense = true)
         }
 
@@ -613,7 +628,7 @@ private fun LiveVsStaticSection(state: HazeState, mode: GlassLabMode) {
         )
 
         // 左：真玻璃探针（最后绘制压在最上层；可拖动采样）
-        DraggableLiveChip(state = state, mode = mode, zoneSize = zoneSize)
+        DraggableLiveChip(state = compareBackdrop, mode = mode, zoneSize = zoneSize)
     }
 }
 
@@ -622,7 +637,7 @@ private fun LiveVsStaticSection(state: HazeState, mode: GlassLabMode) {
  * 对照区内，双击复位；拖过网格/色斑时玻璃内部采样内容必须实时变化。
  */
 @Composable
-private fun DraggableLiveChip(state: HazeState, mode: GlassLabMode, zoneSize: IntSize) {
+private fun DraggableLiveChip(state: Backdrop, mode: GlassLabMode, zoneSize: IntSize) {
     val scheme = MaterialTheme.colorScheme
     val night = mode == GlassLabMode.NIGHT
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -675,7 +690,7 @@ private fun DraggableLiveChip(state: HazeState, mode: GlassLabMode, zoneSize: In
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  标本抽屉底衬 —— haze 源内容（静态 Canvas）
+//  标本抽屉底衬 —— 采样源内容（静态 Canvas，layerBackdrop 录制进 GraphicsLayer）
 // ═══════════════════════════════════════════════════════════════
 
 /**
@@ -741,19 +756,23 @@ private fun SpecimenLinerCanvas(modifier: Modifier, mode: GlassLabMode, dense: B
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * 标本玻璃：材质层（Backdrop 采样 / Frosted 薄霜）+ 边缘光 + 顶缘内高光 +
+ * 标本玻璃：材质层（kyant0 backdrop 采样 / Frosted 薄霜）+ 边缘光 + 顶缘内高光 +
  * 可选 15° 条纹，全部单次绘制叠加。渲染顺序照抄 GlassSurface：阴影（外
  * 发光档）→ 按压缩放 → 裁剪 → 材质 → 叠加层 → 点击。
+ *
+ * Backdrop 档材质 = drawBackdrop（GPU RenderEffect blur + 6/12dp 轻折射）
+ * + onDrawSurface 的 tint 霜面（绘制在采样之上、内容之下 —— 旧 tint 参数的
+ * kyant0 等价物）。按压缩放保留在 graphicsLayer 块内、不传 layerBlock
+ * （采样不随形变反演 —— 实验室标本可接受的取舍，避免双重缩放）。
  */
 @Composable
 private fun SpecimenGlass(
     spec: GlassSpec,
-    state: HazeState?,
+    state: Backdrop?,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 14.dp,
     content: @Composable () -> Unit = {}
 ) {
-    val scheme = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     // 单次触发动画：按压进入 / 松开回弹（tween 140ms，与 GlassSurface 对齐）
@@ -765,20 +784,34 @@ private fun SpecimenGlass(
     val haptic = LocalHapticFeedback.current
     val shape = RoundedCornerShape(cornerRadius)
 
-    // 材质层：state 非空 = Backdrop 档（hazeEffect 实时采样，用法与
-    // GlassSurface 完全一致）；为空 = Frosted 档（主题色薄霜，诚实降级）
-    val material = if (state != null) {
-        val bg = if (spec.background.isSpecified) spec.background else scheme.background
-        val fb = if (spec.fallback.isSpecified) spec.fallback else scheme.surfaceContainerHigh.copy(alpha = 0.55f)
-        Modifier.hazeEffect(
-            state = state,
-            style = HazeStyle(
-                backgroundColor = bg,
-                tints = listOf(HazeTint(spec.tint)),
-                blurRadius = spec.blur,
-                noiseFactor = spec.noise,
-                fallbackTint = HazeTint(fb)
-            )
+    // ═══ 能力门禁（与 GlassSurface 同款）：RenderEffect 是玻璃管线硬前提 ═══
+    // API < 31 无 blur/lens —— 采样内容会以原清晰度透出（冒充玻璃），
+    // 整档诚实降级 Frosted 霜面渐变。
+    val canRender = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+    // 材质层：state 非空且 API 31+ = Backdrop 档（kyant0 drawBackdrop 实时采样，
+    // 用法与 GlassSurface 同源）；否则 = Frosted 档（主题色薄霜，诚实降级）。
+    // spec.noise / background / fallback 为旧引擎配方参数 —— kyant0 管线无
+    // 等效通道，保留在 GlassSpec 仅供标签对照，不参与渲染。
+    val material = if (state != null && canRender) {
+        Modifier.drawBackdrop(
+            backdrop = state,
+            shape = { shape },
+            effects = {
+                // 标本配方以 blur 为主参（BackdropEffectScope 是 Density，
+                // Dp.toPx() 直接可用）；折射取 Control 档轻量值（6/12dp，
+                // API 33+ AGSL lens 生效；shape 恒为 CornerBasedShape，无 SDF 异常）
+                blur(spec.blur.toPx())
+                lens(refractionHeight = 6.dp.toPx(), refractionAmount = 12.dp.toPx())
+            },
+            // 标本自带 drawBehind 边缘光体系（Hairline/Gradient/Glow）——
+            // kyant0 Highlight 关闭，避免双重描边
+            highlight = null,
+            // 深度由外层 Compose shadow（外发光档彩色 halo）承担；kyant0
+            // Shadow 元素会被裁剪层截断（与 GlassSurface 同判），不启用
+            shadow = { null },
+            // 霜面染色：tint 绘制在模糊采样之上、内容之下
+            onDrawSurface = { drawRect(spec.tint) }
         )
     } else {
         val topLift = if (spec.tintTop.isSpecified) spec.tintTop else spec.tint.copy(alpha = spec.tint.alpha * 0.6f)
@@ -801,9 +834,10 @@ private fun SpecimenGlass(
             )
             // ═══ 层级裁剪 + 按压缩放合并层（矩形露角根因修复 v1.4.5）═══
             // 与 GlassSurface 同源：graphicsLayer { shape; clip = true } 把
-            // 圆角下推到 RenderNode 层 —— Haze 采样层/scrim 层的矩形绘制
-            // 被硬裁剪，白天模式不再露方角（Modifier.clip 在 RenderEffect
-            // 路径上不可靠）。
+            // 圆角下推到 RenderNode 层 —— kyant0 backdrop 采样层 / tint 霜面层
+            // 的矩形绘制被硬裁剪，白天模式不再露方角（Modifier.clip 在
+            // RenderEffect 路径上不可靠）。按压缩放留在本块、不传 layerBlock
+            // —— 采样不反演（实验室可接受，避免双重缩放）。
             .graphicsLayer {
                 val s = 1f - 0.03f * press
                 scaleX = s

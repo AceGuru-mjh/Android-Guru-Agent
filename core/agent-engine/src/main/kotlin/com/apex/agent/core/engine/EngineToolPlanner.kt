@@ -220,6 +220,20 @@ internal object EngineToolPlanner {
      */
     fun isToolsRelatedRejection(e: Throwable): Boolean {
         val msg = (e.message ?: "").lowercase()
+        // 历史配对类 400（诊断包 2026-10-07 crash 复盘）：报错文案形如
+        // "An assistant message with 'tool_calls' must be followed by tool
+        // messages responding to each 'tool_call_id'. (insufficient tool
+        // messages following tool_calls message)" —— 这是**消息历史结构
+        // 错误**，不是 tools 载荷被拒：降级（砍工具清单/去 tool_choice）
+        // 改不了消息序列，重试必然同样失败，只会烧掉两级降级并掩盖真错。
+        // 归为非工具类 → 直接上抛真实错误（修复由 DanglingToolCallRepair
+        // 在构建请求前完成，正常流程不应再见到此报错）。
+        if (msg.contains("must be followed by tool") ||
+            msg.contains("tool messages responding to each") ||
+            msg.contains("insufficient tool messages following")
+        ) {
+            return false
+        }
         val msgHitsToolKeyword = TOOLS_REJECTION_KEYWORDS.any { msg.contains(it) }
         if (e is LlmException.Http) {
             // 413（载荷超限）：报错体常为空 —— 保留「降级探测」语义（去掉最大

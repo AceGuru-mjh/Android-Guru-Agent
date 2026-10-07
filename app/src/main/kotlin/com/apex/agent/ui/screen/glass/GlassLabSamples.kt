@@ -15,8 +15,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -199,7 +197,6 @@ private fun StudyHeader(title: String, hint: String) {
  * 一层，跨区共用会让末位录制源污染全部玻璃片），六种配方的玻璃片作为同层
  * 兄弟节点悬浮其上，逐片实时采样，可按压感受材质。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecipeShelf(mode: GlassLabMode) {
     val scheme = MaterialTheme.colorScheme
@@ -222,16 +219,31 @@ private fun RecipeShelf(mode: GlassLabMode) {
         Box(modifier = Modifier.fillMaxSize().layerBackdrop(shelfBackdrop)) {
             SpecimenLinerCanvas(modifier = Modifier.fillMaxSize(), mode = mode, dense = false)
         }
-        // 标本陈列层：源的同层兄弟节点（悬浮其上），逐片实时采样
-        FlowRow(
+        // 标本陈列层：源的同层兄弟节点（悬浮其上），逐片实时采样。
+        //
+        // ═══ P0 崩溃修复（2026-10-07 诊断包 crash-1791356343034）════════════
+        // 旧实现是 FlowRow + `Modifier.weight(1f)` item：加权 item 走
+        // FlowLayout 的 **intrinsic 测量路径**（measureAndCache →
+        // mainAxisMin(Constraints.Infinity)），无界宽度经 Column→Column
+        // 逐层传给子树里的 Text —— Compose 1.7.6 的 EmptyMeasurePolicy
+        // 默认 intrinsic 实现最终以 layout(2147483647, 2147483647) 收场，
+        // 抛 "Size(2147483647 x 2147483647) is out of range" 直接崩主线程。
+        // 改为「Column + 每行 Row(RowScope.weight)」：常规测量纯算术分宽，
+        // 不触发任何 intrinsic 查询；视觉等价（等宽三分 + 12/10dp 间距）。
+        Column(
             modifier = Modifier.fillMaxSize().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            maxItemsInEachRow = 3
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            specs.forEach { spec ->
-                if (spec.laminated) LaminatedUnit(state = shelfBackdrop, mode = mode, modifier = Modifier.weight(1f))
-                else SpecimenUnit(spec = spec, state = shelfBackdrop, modifier = Modifier.weight(1f))
+            specs.chunked(3).forEach { rowSpecs ->
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    rowSpecs.forEach { spec ->
+                        if (spec.laminated) LaminatedUnit(state = shelfBackdrop, mode = mode, modifier = Modifier.weight(1f))
+                        else SpecimenUnit(spec = spec, state = shelfBackdrop, modifier = Modifier.weight(1f))
+                    }
+                }
             }
         }
     }

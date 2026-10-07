@@ -63,7 +63,10 @@ jobs:
           fi
 
       - name: Verify upstream CI green on new head
-        # 只在有待同步新提交时校验：全部 check-run 完成且无失败才放行。
+        # 只在有待同步新提交时校验：门禁口径同 browser-kit notify-host —— 只统计
+        # 构建健康类 check-run（CI + Guard Rails），显式排除 Dependabot*（长跑
+        # 依赖升级作业）、Gradle dependency graph（数据洞察，continue-on-error）、
+        # 以及 notify-host 自身（repository_dispatch host sync，自引用死锁）。
         # pending / 尚无 check → 跳过本轮（等下轮 cron 或 CI 完成后的补发 dispatch）。
         # 有失败 → fail loud：同步断链必须显性可见。
         if: steps.up.outputs.changed == 'true'
@@ -72,14 +75,16 @@ jobs:
           UP_SHA: ${{ steps.up.outputs.sha }}
         run: |
           set -euo pipefail
+          GATING_FILTER='.name != "Gradle dependency graph" and (.name | startswith("Dependabot") | not) and .name != "repository_dispatch host sync"'
           SUMMARY=$(gh api "repos/AceGuru-mjh/apex-browser-kit/commits/$UP_SHA/check-runs" \
-            --jq '{total: (.total_count // 0),
-                   pending: ([.check_runs[]? | select(.status != "completed")] | length),
-                   failed: ([.check_runs[]? | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] | length)}')
+            --jq "([.check_runs[]? | select($GATING_FILTER)]) as \$gating |
+                   {total: (\$gating | length),
+                    pending: (\$gating | map(select(.status != \"completed\")) | length),
+                    failed: (\$gating | map(select(.conclusion != \"success\" and .conclusion != \"skipped\" and .conclusion != \"neutral\")) | length)}")
           TOTAL=$(echo "$SUMMARY" | jq -r .total)
           PENDING=$(echo "$SUMMARY" | jq -r .pending)
           FAILED=$(echo "$SUMMARY" | jq -r .failed)
-          echo "上游 check-runs：total=$TOTAL pending=$PENDING failed=$FAILED"
+          echo "上游门禁 check-runs：total=$TOTAL pending=$PENDING failed=$FAILED"
           if [ "$TOTAL" = "0" ] || [ "$PENDING" != "0" ]; then
             echo "::notice::上游 CI 未完成或未启动 —— 本轮跳过，等待下轮触发（30 分钟 cron 兜底）"
             echo "green=false" >> "$GITHUB_ENV"

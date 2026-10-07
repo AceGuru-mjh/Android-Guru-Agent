@@ -20,8 +20,12 @@ name: Release (Cross-Repo)
 #             ├─ 发布仓库 Android-Guru-Agent-Release（跨仓库 PAT RELEASE_REPO_TOKEN）：
 #             │     创建 Release + 上传 APK / 补丁 / version.json
 #             │     + 提交 version.json 到 main 分支（App 内检查更新读取）
+#             │       ↑ 关键路径，先于主仓库镜像（v1.4.8 修复：此前镜像
+#             │         排位在前且无容错，一次资产上传竞态 404 连累清单
+#             │         提交被跳过，客户端全体断更 —— 教训入档）
 #             └─ 开发仓库 Android-Guru-Agent（默认 GITHUB_TOKEN）：
 #                   镜像创建同 tag Release —— 软件在本仓库同样可下载
+#                   （展示位，continue-on-error：失败仅告警不阻断发布）
 #
 # 设计要点：
 #   • 全局串行（concurrency release-pipeline）：发布天然互斥，也保证
@@ -113,6 +117,26 @@ jobs:
             "https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json" \
             2>/dev/null | jq -r '.versionCode // 0' || echo 0)
           [ -n "$LAST_VCODE" ] || LAST_VCODE=0
+
+          # ── versionCode 防撞号兜底（v1.4.8 修复）──────────────────────────
+          # main 清单可能滞后于实际发布：某次 run 的「清单提交」步骤失败/被跳过
+          # （2026-10-06 v1.4.7.25 即此情形 —— 清单卡在 v1.4.7.24），下一次
+          # 发布的 resolve 读到旧值，两个版本撞同一 versionCode（.25/.26 双 72），
+          # 先发版本的用户对后发版本永远判「已是最新」。这里对账
+          # releases/latest（publish 步骤 make_latest: true 恒指向最新发布）
+          # 挂载的 version.json 资产，取两者最大值 —— 清单滞后时不再撞号。
+          REL_ASSET_URL=$(gh api "repos/${RELEASE_REPO}/releases/latest" \
+            --jq '.assets[] | select(.name == "version.json") | .browser_download_url' \
+            2>/dev/null || true)
+          if [ -n "$REL_ASSET_URL" ]; then
+            REL_VCODE=$(curl -sfL "$REL_ASSET_URL" 2>/dev/null \
+              | jq -r '.versionCode // 0' 2>/dev/null || echo 0)
+            case "$REL_VCODE" in ''|*[!0-9]*) REL_VCODE=0;; esac
+            if [ "$REL_VCODE" -gt "$LAST_VCODE" ]; then
+              echo "::notice::main 清单（v${LAST_VCODE}）落后于最新 Release 资产（v${REL_VCODE}）—— 以资产为准防撞号"
+              LAST_VCODE="$REL_VCODE"
+            fi
+          fi
 
           # 上一版 commit —— 热更通道 data-only 判定基准（v1.4.7：
           # build 阶段用 compare API 比对 PREV_SHA...HEAD 的变更集，
@@ -883,8 +907,102 @@ jobs:
           make_latest: true
           files: dist/*
 
-      - name: Mirror Release to dev repository (主仓库同步发布，仅 APK)
+      - name: Commit version.json to release repo main branch
         if: needs.resolve.outputs.publishing == 'true'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA8: ${{ needs.resolve.outputs.sha8 }}
+        run: |
+          set -euo pipefail
+          # ── 步骤顺序（v1.4.8 修复）：本步骤必须先于「主仓库镜像」────────────
+          # raw CDN 版本清单是**全体客户端检查更新的固定读取点**，而主仓库镜像
+          # 只是开发仓库的展示位。此前镜像排在前面且失败会连带跳过清单提交 ——
+          # 2026-10-06 v1.4.7.25 即被镜像步骤的资产并发上传竞态（SHA256SUMS.apk
+          # 被 dist/*.apk 通配与显式列表重复携带，二次上传撞 404）连累，清单
+          # 卡在 v1.4.7.24，客户端全部收不到更新。现在清单先行、镜像殿后容错。
+          #
+          # ── 索引幂等合并脚本 ─────────────────────────────────────────────
+          # 补丁索引采用「增量合并」而非盲覆盖：generate 阶段拉取的快照到提交
+          # 时可能已被 hotfix / patch-backfill / 人工恢复提交推进（本次事故里
+          # 恰有此类竞态）。只重放「指向本版 tag」的边（幂等键
+          # variant|fromTag|toTag），既有条目永不清除、永不丢失。
+          cat > /tmp/merge_patches_index.py <<'PYEOF'
+          import json, os
+
+          tag = os.environ["TAG"]
+          try:
+              with open("relrepo/patches.json", encoding="utf-8") as f:
+                  remote = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              remote = {"patches": []}
+          with open("dist/patches.json", encoding="utf-8") as f:
+              ours = json.load(f)
+
+          existing_keys = {
+              (p.get("variant"), p.get("fromTag"), p.get("toTag"))
+              for p in remote.get("patches", [])
+          }
+          merged = [p for p in remote.get("patches", []) if p.get("toTag") != tag]
+          kept = len(merged)
+          for p in ours.get("patches", []):
+              if p.get("toTag") == tag and \
+                      (p["variant"], p["fromTag"], p["toTag"]) not in existing_keys:
+                  merged.append(p)
+
+          out = {
+              "generatedAt": ours.get("generatedAt") or remote.get("generatedAt"),
+              "latestTag": tag,
+              "patches": merged,
+          }
+          with open("relrepo/patches.json", "w", encoding="utf-8") as f:
+              json.dump(out, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          print(f"📦 索引合并：远端保留 {kept} + 本版新增 "
+                f"{len(merged) - kept} = {len(merged)} 条")
+          PYEOF
+
+          # ── 提交（三次重试：push 被拒时重拉远端重放，防 backfill/hotfix 竞态）──
+          pushed=0
+          for ATTEMPT in 1 2 3; do
+            rm -rf relrepo
+            git clone --depth 1 \
+              "https://x-access-token:${RELEASE_TOKEN}@github.com/${RELEASE_REPO}.git" relrepo
+            cp dist/version.json relrepo/version.json
+            if [ -f dist/patches.json ]; then
+              python3 /tmp/merge_patches_index.py
+            fi
+            if (
+              cd relrepo
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add version.json patches.json
+              if git diff --cached --quiet; then
+                echo "ℹ️ 清单无变更（幂等重跑）—— 无需提交"
+              else
+                git commit -m "chore: version.json + patches.json → ${TAG}（dev repo ${SHA8}）"
+                git push origin main
+              fi
+            ); then
+              pushed=1
+              break
+            fi
+            echo "⚠️ 清单提交第 ${ATTEMPT} 次尝试失败 —— 重拉远端重试（可能已被 backfill/hotfix 推进）"
+            sleep $((ATTEMPT * 5))
+          done
+          [ "$pushed" = "1" ] || {
+            echo "::error::清单三次提交失败 —— Release 资产已就位，可手动恢复或重跑本工作流"
+            exit 1
+          }
+          echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json 已更新"
+          echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/patches.json 已更新"
+
+      - name: Mirror Release to dev repository (主仓库同步发布，仅 APK)
+        # 镜像是展示位而非关键路径（App 下载/更新固定读发布仓库）—— 失败只
+        # 警告不阻断（v1.4.8：此前排位在清单提交之前且无容错，一次资产上传
+        # 竞态 404 就让全体客户端断更，教训入档）。
+        if: needs.resolve.outputs.publishing == 'true'
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           # 主仓库镜像发布：不指定 repository / token → 默认本仓库 + GITHUB_TOKEN。
@@ -895,38 +1013,16 @@ jobs:
           # 增量补丁（*.vcdiff）与补丁索引（patches.json）只放发布仓库，
           # App 下载补丁固定走发布仓库直链（version.json/patches.json 的 URL
           # 均指向 RELEASE_REPO）。dist/ 的补丁文件绝不进入主仓库。
+          # ⚠️ v1.4.8 修复：files 不再显式列出 dist/SHA256SUMS.apk —— 它已
+          # 被 dist/*.apk 通配命中，重复携带会让 action 并行上传同名资产两次，
+          # 竞态触发 404 Not Found（update-a-release-asset）打挂整个发布。
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: "Release ${{ needs.resolve.outputs.tag }}"
           body_path: release_body_dev.md
           make_latest: true
           files: |
             dist/*.apk
-            dist/SHA256SUMS.apk
             dist/version.json
-
-      - name: Commit version.json to release repo main branch
-        if: needs.resolve.outputs.publishing == 'true'
-        env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-          SHA8: ${{ needs.resolve.outputs.sha8 }}
-        run: |
-          # raw.githubusercontent.com 版本清单 —— App 内检查更新的固定读取点
-          git clone --depth 1 \
-            "https://x-access-token:${RELEASE_TOKEN}@github.com/${RELEASE_REPO}.git" relrepo
-          cp dist/version.json relrepo/version.json
-          # 补丁全量索引与版本清单同源提交 —— App 跨版本链式增量依赖此文件
-          if [ -f dist/patches.json ]; then
-            cp dist/patches.json relrepo/patches.json
-          fi
-          cd relrepo
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add version.json patches.json
-          git commit -m "chore: version.json + patches.json → ${TAG}（dev repo ${SHA8}）"
-          git push origin main
-          echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/version.json 已更新"
-          echo "✅ https://raw.githubusercontent.com/${RELEASE_REPO}/main/patches.json 已更新"
 
       - name: Summary
         if: always()

@@ -119,6 +119,6 @@ jobs:
             echo "### 🔄 apex-browser-kit 同步"
             echo ""
             echo "- 上游 main：\`${{ steps.up.outputs.sha }}\`"
-            echo "- 本仓锁定：\`${{ steps.up.outputs.current || '（无锁） }}\`"
+            echo "- 本仓锁定：\`${{ steps.up.outputs.current }}\`"
             echo "- 触发方式：\`${{ github.event_name }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -98,8 +98,12 @@ jobs:
           # 提取模式适配 build.gradle.kts 的 CI 注入语法：
           #   versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.2"
           #   versionName：行内最后一个带引号串（源码默认值）；versionCode：= 后首个数字
-          BASE=$(grep -oP 'versionName\s*=.*"\K[^"]+' app/build.gradle.kts)
-          VCODE_GRADLE=$(grep -oP 'versionCode\s*=[^0-9]*\K[0-9]+' app/build.gradle.kts)
+          # v1.4.8 加固：先剥离 // 注释行再提取 —— 注释里出现「versionCode 等号数字」
+          # 字样时 grep 会输出多行，多行值写入 GITHUB_OUTPUT 以 Invalid format
+          # 直接炸掉 resolve（v1.4.8 首跑事故：版本注释与代码行双匹配）。
+          GRADLE_SRC=$(grep -v '^[[:space:]]*//' app/build.gradle.kts)
+          BASE=$(grep -oP 'versionName\s*=.*"\K[^"]+' <<<"$GRADLE_SRC" | head -1)
+          VCODE_GRADLE=$(grep -oP 'versionCode\s*=[^0-9]*\K[0-9]+' <<<"$GRADLE_SRC" | head -1)
           if [ -z "$BASE" ] || [ -z "$VCODE_GRADLE" ]; then
             echo "::error::无法从 app/build.gradle.kts 提取 versionName/versionCode"
             exit 1

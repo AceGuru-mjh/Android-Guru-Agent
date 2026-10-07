@@ -86,8 +86,8 @@ android {
         // v1.4.5：更新体系 v2（多基底补丁单跳直达 / 应用级断点续传 / 非强制浮窗）
         // + 玻璃白天模式根因修复（RenderNode 级圆角裁剪）。
         // v1.4.8 起显式维护版本号（v1.4.7.25 断链教训：versionName 未 bump，
-        // 流水线自动追加序号，版本号与提交内容标注脱节）。versionCode=73：
-        // 71=v1.4.7.24，72 已被孤儿版 v1.4.7.25 烧掉（其 version.json 提交被
+        // 流水线自动追加序号，版本号与提交内容标注脱节）。versionCode 取 73：
+        // 71 是 v1.4.7.24，72 已被孤儿版 v1.4.7.25 烧掉（其 version.json 提交被
         // 镜像故障拖跳过，客户端从未见过该版），73 起单调无碰撞。
         versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 73
         versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.8"

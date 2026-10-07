@@ -89,8 +89,12 @@ android {
         // 流水线自动追加序号，版本号与提交内容标注脱节）。versionCode 取 73：
         // 71 是 v1.4.7.24，72 已被孤儿版 v1.4.7.25 烧掉（其 version.json 提交被
         // 镜像故障拖跳过，客户端从未见过该版），73 起单调无碰撞。
-        versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 73
-        versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.8"
+        // v1.4.9：网页自动化插件分发链路 + browser-kit 自动同步 —— 插件 APK 与
+        // 宿主同 keystore 签名随 Release 分发（修复「市场 → 插件」页永远空的问题）；
+        // gradle/browser-kit.lock 锁定库版本，sync-browser-kit 工作流随库仓库
+        // 新绿提交自动 bump 并触发发布（主仓随库仓更新而更新，全自动）。
+        versionCode = (project.findProperty("apexVersionCode") as String?)?.toInt() ?: 74
+        versionName = (project.findProperty("apexVersionName") as String?) ?: "1.4.9"
 
         ndk {
             // T83: 发布 arm64 纯净包（-PapexAbi=arm64-v8a）—— 内置 rootfs 伪 .so

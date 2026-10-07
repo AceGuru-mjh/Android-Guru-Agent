@@ -1,0 +1,124 @@
+name: Sync apex-browser-kit
+
+# ═════════════════════════════════════════════════════════════════════════════
+# browser-kit → 主仓库 全自动同步链路（v1.4.9）
+#
+#   apex-browser-kit main 出现新绿提交
+#       ├─ 事件路（主通道，即时）：browser-kit 的 notify-host.yml 等自家 CI
+#       │   全绿后 repository_dispatch 本仓库（event: browser-kit-updated）
+#       └─ 定时路（兜底，防丢事件）：本 workflow 每 30 分钟轮询一次
+#   → 本 workflow 校验上游 CI 全绿（红则拒绝同步并报错）
+#   → gradle/browser-kit.lock bump 到新 SHA 并直接提交 push main
+#   → push main 自动点燃 release 流水线 → 新 APK（含新 browser-kit）发布
+#
+#   主仓库的 ci / apk / release 三条流水线均按 lock 锁定版本检出 browser-kit
+#   （composite build pinned checkout）—— 主仓库状态即构建输入，可复现。
+#
+# 设计要点：
+#   • 上游 CI 红时 fail loud（exit 1）：同步断链必须显性可见，绝不静默跟红。
+#   • 上游 CI 未完成（dispatch 早到 / cron 撞上在跑）→ 本轮跳过等下轮，
+#     不算失败。
+#   • 直接 push main（无分支保护；发布流水线天然以 CI/发布结果兜底）。
+#   • concurrency 串行 + 不取消在跑（防止两次 bump 竞态覆盖）。
+# ═════════════════════════════════════════════════════════════════════════════
+
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  repository_dispatch:
+    types: [browser-kit-updated]
+  workflow_dispatch: {}
+
+concurrency:
+  group: sync-browser-kit
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Bump browser-kit pin (green-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve upstream head
+        id: up
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA=$(gh api repos/AceGuru-mjh/apex-browser-kit/commits/main --jq '.sha')
+          CUR=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          if [ -n "$CUR" ] && [ "$SHA" = "$CUR" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 已同步：${SHA:0:10}（触发：${{ github.event_name }}）"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "🔄 待同步：${CUR:-（无锁）} → ${SHA:0:10}"
+          fi
+
+      - name: Verify upstream CI green on new head
+        # 只在有待同步新提交时校验：全部 check-run 完成且无失败才放行。
+        # pending / 尚无 check → 跳过本轮（等下轮 cron 或 CI 完成后的补发 dispatch）。
+        # 有失败 → fail loud：同步断链必须显性可见。
+        if: steps.up.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UP_SHA: ${{ steps.up.outputs.sha }}
+        run: |
+          set -euo pipefail
+          SUMMARY=$(gh api "repos/AceGuru-mjh/apex-browser-kit/commits/$UP_SHA/check-runs" \
+            --jq '{total: (.total_count // 0),
+                   pending: ([.check_runs[]? | select(.status != "completed")] | length),
+                   failed: ([.check_runs[]? | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] | length)}')
+          TOTAL=$(echo "$SUMMARY" | jq -r .total)
+          PENDING=$(echo "$SUMMARY" | jq -r .pending)
+          FAILED=$(echo "$SUMMARY" | jq -r .failed)
+          echo "上游 check-runs：total=$TOTAL pending=$PENDING failed=$FAILED"
+          if [ "$TOTAL" = "0" ] || [ "$PENDING" != "0" ]; then
+            echo "::notice::上游 CI 未完成或未启动 —— 本轮跳过，等待下轮触发（30 分钟 cron 兜底）"
+            echo "green=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ "$FAILED" != "0" ]; then
+            echo "::error::上游 browser-kit CI 有 $FAILED 项失败 —— 拒绝同步（先修复 https://github.com/AceGuru-mjh/apex-browser-kit/actions）"
+            exit 1
+          fi
+          echo "green=true" >> "$GITHUB_ENV"
+          echo "✅ 上游全绿 —— 允许同步"
+
+      - name: Bump lock and push to main
+        # 锁定 bump 直接 push main：release.yml 的 push 触发器自动构建发布
+        # （新 browser-kit 随 APK 交付）—— 全程无人工介入。
+        if: steps.up.outputs.changed == 'true' && env.green == 'true'
+        env:
+          UP_SHA: ${{ steps.up.outputs.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          echo "$UP_SHA" > gradle/browser-kit.lock
+          git config user.name "apex-sync-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle/browser-kit.lock
+          git commit -m "chore(sync): bump apex-browser-kit @ ${UP_SHA:0:10}
+
+          Automated by sync-browser-kit workflow (trigger: $EVENT).
+          链路：browser-kit main 新绿提交 → 锁定 bump → push main →
+          release 流水线自动构建发布（新 browser-kit 随 APK 交付）。"
+          git push origin HEAD:main
+          echo "🚀 已推送锁定 bump —— release 流水线即将自动构建发布"
+
+      - name: Summary
+        run: |
+          {
+            echo "### 🔄 apex-browser-kit 同步"
+            echo ""
+            echo "- 上游 main：\`${{ steps.up.outputs.sha }}\`"
+            echo "- 本仓锁定：\`${{ steps.up.outputs.current || '（无锁） }}\`"
+            echo "- 触发方式：\`${{ github.event_name }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

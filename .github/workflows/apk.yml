@@ -45,10 +45,19 @@ jobs:
       # 本地开发仍是兄弟目录 ../apex-browser-kit，两种布局等价）
       # —— 拆库 E1 迁移期：app 依赖 com.apex.browser:{core,engine,chrome}，
       #    composite build 自动替换为本地构建；远端坐标待 E3 发布后启用。
-      - name: Checkout apex-browser-kit (browser-kit composite build)
+      - name: Read apex-browser-kit pin
+        id: bkitpin
+        # 锁定文件 gradle/browser-kit.lock 由 sync-browser-kit 工作流自动维护。
+        # 缺锁回退 main（防御旧分支/分叉构建）。
+        run: |
+          set -euo pipefail
+          PIN=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
+          echo "sha=${PIN:-main}" >> "$GITHUB_OUTPUT"
+      - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
           repository: AceGuru-mjh/apex-browser-kit
+          ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
       - name: Set up JDK 17
@@ -163,6 +172,12 @@ jobs:
               --stacktrace
             mv app/build/outputs/apk/release/app-release.apk \
                app/build/outputs/apk/app-arm64-release.apk
+            # 网页自动化插件 APK（v1.4.9 分发链路）：与宿主同 keystore 签名，
+            # release 变体一并构建（发布流水线同款产物，验证签名门可用）。
+            ./gradlew ":plugins:plugin-web-automation:assembleRelease" \
+              --no-daemon \
+              -Pkotlin.incremental=false \
+              --stacktrace
           else
             ./gradlew ":app:assemble${VARIANT^}" \
               --no-daemon \
@@ -231,6 +246,17 @@ jobs:
         with:
           name: apex-agent-apk-universal
           path: ${{ steps.artifact.outputs.path_universal }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload plugin APK artifact (web automation)
+        # 网页自动化插件（v1.4.9）：release 变体时一并上传，供手动验证
+        # 「市场 → 插件」签名门/发现链路（与宿主同 keystore）。
+        if: steps.variant.outputs.type == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-web-automation-plugin-apk
+          path: plugins/plugin-web-automation/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
       # 对外发布（Release + APK + version.json + 增量补丁）已移交 release.yml：

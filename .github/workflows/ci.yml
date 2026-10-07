@@ -238,10 +238,20 @@ jobs:
       # 本地开发仍是兄弟目录 ../apex-browser-kit，两种布局等价）
       # —— 拆库 E1 迁移期：app 依赖 com.apex.browser:{core,engine,chrome}，
       #    composite build 自动替换为本地构建；远端坐标待 E3 发布后启用。
-      - name: Checkout apex-browser-kit (browser-kit composite build)
+      - name: Read apex-browser-kit pin
+        id: bkitpin
+        # 锁定文件 gradle/browser-kit.lock 由 sync-browser-kit 工作流自动维护：
+        # browser-kit main 有新绿提交 → 锁文件 bump → 本仓库 push → 全流水线
+        # 以新锁定版本构建。缺锁回退 main（防御旧分支/分叉构建）。
+        run: |
+          set -euo pipefail
+          PIN=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
+          echo "sha=${PIN:-main}" >> "$GITHUB_OUTPUT"
+      - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
           repository: AceGuru-mjh/apex-browser-kit
+          ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
       - name: Set up JDK 17
@@ -536,10 +546,20 @@ jobs:
       # 本地开发仍是兄弟目录 ../apex-browser-kit，两种布局等价）
       # —— 拆库 E1 迁移期：app 依赖 com.apex.browser:{core,engine,chrome}，
       #    composite build 自动替换为本地构建；远端坐标待 E3 发布后启用。
-      - name: Checkout apex-browser-kit (browser-kit composite build)
+      - name: Read apex-browser-kit pin
+        id: bkitpin
+        # 锁定文件 gradle/browser-kit.lock 由 sync-browser-kit 工作流自动维护：
+        # browser-kit main 有新绿提交 → 锁文件 bump → 本仓库 push → 全流水线
+        # 以新锁定版本构建。缺锁回退 main（防御旧分支/分叉构建）。
+        run: |
+          set -euo pipefail
+          PIN=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
+          echo "sha=${PIN:-main}" >> "$GITHUB_OUTPUT"
+      - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
           repository: AceGuru-mjh/apex-browser-kit
+          ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
       - name: Set up JDK 17

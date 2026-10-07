@@ -255,10 +255,20 @@ jobs:
       # 本地开发仍是兄弟目录 ../apex-browser-kit，两种布局等价）
       # —— 拆库 E1 迁移期：app 依赖 com.apex.browser:{core,engine,chrome}，
       #    composite build 自动替换为本地构建；远端坐标待 E3 发布后启用。
-      - name: Checkout apex-browser-kit (browser-kit composite build)
+      - name: Read apex-browser-kit pin
+        id: bkitpin
+        # 锁定文件 gradle/browser-kit.lock 由 sync-browser-kit 工作流自动维护：
+        # browser-kit main 有新绿提交 → 锁文件 bump → 本仓库 push → 发布流水线
+        # 以锁定版本构建（可复现、防供应链漂移）。缺锁回退 main。
+        run: |
+          set -euo pipefail
+          PIN=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
+          echo "sha=${PIN:-main}" >> "$GITHUB_OUTPUT"
+      - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
           repository: AceGuru-mjh/apex-browser-kit
+          ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
       - name: Set up JDK 17
@@ -371,6 +381,17 @@ jobs:
           mv app/build/outputs/apk/release/app-release.apk \
              app/build/outputs/apk/app-arm64-release.apk
 
+          # ── 网页自动化插件 APK（v1.4.9 插件分发链路）────────────────
+          # 与宿主同 keystore 签名（插件 build.gradle.kts 的 signingConfigs.release）
+          # —— PluginManager 签名门比对通过，侧载安装后「市场 → 插件」页
+          # 自动发现并加载 browser_* 工具清单。此前 CI 只构建 :app，插件
+          # 从未产出 → 插件页永远显示「未发现插件」，本次补齐分发链路。
+          ./gradlew ":plugins:plugin-web-automation:assembleRelease" \
+            -PapexVersionName="$FINAL_VERSION" \
+            --no-daemon \
+            -Pkotlin.incremental=false \
+            --stacktrace
+
       - name: Stage artifacts + checksums
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
@@ -381,16 +402,22 @@ jobs:
              "dist/ApexAgent-v${VERSION}-release-arm64-${SHA8}.apk"
           mv app/build/outputs/apk/app-universal-release.apk \
              "dist/ApexAgent-v${VERSION}-release-universal-${SHA8}.apk"
+          # 插件 APK 入产物集（随 files: dist/* 发布仓库 + dist/*.apk 主仓镜像
+          # 自动带走；SHA 清单同批覆盖）
+          PLUGIN_APK=$(ls plugins/plugin-web-automation/build/outputs/apk/release/*.apk | head -1)
+          mv "$PLUGIN_APK" "dist/ApexWebAutomationPlugin-v${VERSION}.apk"
           cd dist
           sha256sum ./*.apk | tee SHA256SUMS.apk
           ARM64_MB=$(du -m *arm64*.apk | cut -f1)
           UNI_MB=$(du -m *universal*.apk | cut -f1)
-          echo "📦 arm64 — ${ARM64_MB} MB | universal — ${UNI_MB} MB"
+          PLUGIN_KB=$(du -k *WebAutomationPlugin*.apk | cut -f1)
+          echo "📦 arm64 — ${ARM64_MB} MB | universal — ${UNI_MB} MB | plugin — ${PLUGIN_KB} KB"
           {
             echo "### 📦 发布产物"
             echo ""
             echo "- arm64: **${ARM64_MB} MB**（arm64-v8a，现代手机首选）"
             echo "- universal: **${UNI_MB} MB**（全 3 ABI：旧设备 / 模拟器）"
+            echo "- plugin: **${PLUGIN_KB} KB**（网页自动化插件，宿主同签名，侧载即被市场页发现）"
             echo ""
             echo '```'
             cat SHA256SUMS.apk
@@ -675,6 +702,16 @@ jobs:
           arm64 = asset(f"ApexAgent-v{version}-release-arm64-{sha8}.apk")
           universal = asset(f"ApexAgent-v{version}-release-universal-{sha8}.apk")
 
+          # 插件 APK 档（v1.4.9）：供未来 App 内插件下载/升级使用；老客户端
+          # ignoreUnknownKeys 自动忽略。dist 缺文件时为 None（热更等极小路径）。
+          plugin_apk = f"ApexWebAutomationPlugin-v{version}.apk"
+          plugin = None
+          if os.path.exists(f"dist/{plugin_apk}"):
+              plugin = {"id": "com.apex.agent.plugin.webautomation",
+                       "name": "网页自动化",
+                       "minHostVersion": 1,
+                       **asset(plugin_apk)}
+
           # 单补丁档只收 primary（上一版 → 本版）——老客户端 schema 兼容；
           # 多基底单跳补丁全部走 patches.json（新客户端按索引直选/短路）。
           patch = None
@@ -703,6 +740,7 @@ jobs:
               "publishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "releasePage": f"https://github.com/{repo}/releases/tag/{tag}",
               "download": {"arm64": arm64, "universal": universal},
+              "plugin": plugin,
               "patch": patch,
           }
 
@@ -766,6 +804,20 @@ jobs:
                   ])
               else:
                   hot_lines = ""
+              # 插件段（v1.4.9）：插件 APK 与宿主同 keystore 签名，侧载安装后
+              # 「市场 → 插件」页自动发现并加载 browser_* 工具。
+              if manifest.get("plugin"):
+                  p = manifest["plugin"]
+                  plugin_lines = "\n".join([
+                      "### 🧩 插件（网页自动化）",
+                      "",
+                      f"- `ApexWebAutomationPlugin-v{version}.apk` — {p['sizeBytes'] // 1024} KB",
+                      "- 与宿主同签名：安装后宿主「市场 → 插件」页自动发现并加载 browser_* 工具（导航/快照/点击/输入等 15 项）",
+                      "- 首次使用侧载安装一次即可；后续版本同签名可无冲突覆盖升级",
+                      "",
+                  ])
+              else:
+                  plugin_lines = ""
               return "\n".join([
                   f"## Apex Agent {tag}",
                   "",
@@ -777,6 +829,7 @@ jobs:
                   f"| `arm64` | 现代手机（arm64-v8a，**首选**） | {mb(arm64):.0f} MB |",
                   f"| `universal` | 旧设备 / 模拟器（全 3 ABI） | {mb(universal):.0f} MB |",
                   "",
+                  plugin_lines,
                   hot_lines,
                   "### 🔧 增量补丁（App 内「关于 → 检查更新」可直选）",
                   patch_lines,

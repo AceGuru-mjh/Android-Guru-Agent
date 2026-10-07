@@ -150,7 +150,9 @@ class MemoryLedgerStoreTest {
 
     @Test
     fun `pending turn queue is bounded and survives restart`() {
-        val store = newStore()
+        // 显式目录：重载实例必须指向同一份 ledger.json
+        val dir = File(tmp.root, "chat_memory")
+        val store = MemoryLedgerStore(dir)
         for (i in 1..15) {
             store.enqueueTurn("用户消息$i", "助手回复$i", t0 + i)
         }
@@ -159,7 +161,6 @@ class MemoryLedgerStoreTest {
         assertEquals("用户消息4", store.peekPendingTurns().first().userText)
 
         // 持久化往返：新实例（同目录）恢复队列
-        val dir = File(tmp.root, "chat_memory")
         val reloaded = MemoryLedgerStore(dir)
         assertEquals(12, reloaded.pendingTurnCount())
         assertEquals("用户消息4", reloaded.peekPendingTurns().first().userText)

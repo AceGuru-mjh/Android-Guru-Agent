@@ -3,8 +3,8 @@ package com.apex.agent.ui.screen.memory
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.apex.agent.R
-import com.apex.agent.mcp.builtin.memory.ChatMemorySchema
-import com.apex.agent.mcp.builtin.memory.KnowledgeGraphStore
+import com.apex.agent.mcp.builtin.memory.MemoryLedgerStore.MemoryKind
+import com.apex.agent.mcp.builtin.memory.MemoryLedgerStore as Ledger
 import com.apex.agent.platform.csmem.model.SemanticNode
 import com.apex.agent.platform.csmem.store.EpisodeSummary
 import com.apex.agent.platform.csmem.store.FSMMacro
@@ -28,10 +28,9 @@ import javax.inject.Inject
  * 只读为主；删除 Episode 为破坏性操作，由 UI 二次确认后调用 [deleteEpisode]。
  * T76 审计补齐：梦境巩固（DreamRenderer.dreamNow）与免疫系统隔离区
  * （MemoryImmuneSystem）能力此前无 UI 入口 —— 本 VM 接线。
- * #219 隐私合规：新增「聊天记忆」分区 —— ChatMemoryPipeline 自动沉淀到
- * [KnowledgeGraphStore]（memory.json）的画像 / 近况 / 里程碑，此前记忆页
- * 完全不可见、只能靠对话里手动调 MCP memory 工具删除，现可查看 / 逐条
- * 删 / 一键清空。
+ * #219 隐私合规：新增「聊天记忆」分区 —— v2 起直读 [Ledger]
+ * （chat_memory/ledger.json，ChatMemoryPipeline 自动沉淀的画像 / 近况 /
+ * 里程碑结构化记录），可查看 / 逐条删 / 一键清空。
  */
 @OptIn(FlowPreview::class)
 @HiltViewModel
@@ -39,10 +38,10 @@ class MemoryViewModel @Inject constructor(
     private val store: MemoryGraphStore,
     private val dreamRenderer: com.apex.agent.platform.csmem.dream.DreamRenderer,
     private val immuneSystem: com.apex.agent.platform.csmem.immune.MemoryImmuneSystem,
-    // #219：聊天画像库 —— 与 memory MCP transport / ChatMemoryPipeline 共享
-    // 同一 Hilt 单例（McpModule.provideKnowledgeGraphStore），删除/清空即对
-    // 下一轮对话的召回立即生效。
-    private val knowledgeGraph: KnowledgeGraphStore,
+    // #219 v2：聊天记忆账本 —— 与 ChatMemoryPipeline 共享同一 Hilt
+    // 单例（McpModule.provideMemoryLedgerStore），删除/清空即对下一轮
+    // 对话的召回立即生效。
+    private val chatLedger: Ledger,
     // 记忆页新文案走资源（en/zh 双语）；VM 层非 Compose 场景按仓库惯例经
     // LanguageManager 取词（SettingsViewModel 同款模式）。
     private val languageManager: LanguageManager
@@ -190,14 +189,14 @@ class MemoryViewModel @Inject constructor(
             .onFailure { _lastMessage.value = "清除隔离区失败：${it.message}" }
     }
 
-    // ═══ 聊天记忆（#219：KnowledgeGraphStore 的画像 / 近况 / 里程碑）═══
+    // ═══ 聊天记忆（#219 v2：MemoryLedgerStore 的画像 / 近况 / 里程碑）═══
 
-    /** 刷新聊天记忆快照（readGraph 为内存快照，删除/清空后的回刷也走这里）。 */
+    /** 刷新聊天记忆快照（账本内存快照，删除/清空后的回刷也走这里）。 */
     private fun refreshChatMemory() {
         viewModelScope.launch {
             runCatching {
                 _chatMemory.value = withContext(Dispatchers.IO) {
-                    knowledgeGraph.readGraph().entities.toChatMemoryEntries()
+                    chatLedger.allRecords().toChatMemoryEntries()
                 }
             }.onFailure { e ->
                 _lastMessage.value = languageManager.getString(
@@ -210,17 +209,15 @@ class MemoryViewModel @Inject constructor(
     /**
      * 删除单条聊天记忆（#219 逐条删除；UI 二次确认后调用）。
      *
-     * @param entityName 观察所属实体（ChatMemorySchema 三者之一）
-     * @param observation 观察原文（精确匹配，来自列表项本身）
+     * v2 起按账本主键删除（比 v1 的内容精确匹配更可靠 —— 同内容不同条
+     * 不会误伤）。
      */
-    fun deleteChatObservation(entityName: String, observation: String) {
+    fun deleteChatMemoryRecord(recordId: String) {
         viewModelScope.launch {
             runCatching {
-                withContext(Dispatchers.IO) {
-                    knowledgeGraph.deleteObservations(entityName, listOf(observation))
-                }
+                withContext(Dispatchers.IO) { chatLedger.removeById(recordId) }
             }.onSuccess { removed ->
-                _lastMessage.value = if (removed > 0) {
+                _lastMessage.value = if (removed) {
                     languageManager.getString(R.string.memory_chat_msg_deleted)
                 } else {
                     // 幂等兜底：条目已被并发删除（如基调替换竞态）
@@ -238,22 +235,17 @@ class MemoryViewModel @Inject constructor(
     /**
      * 一键清空聊天记忆（#219；UI 二次确认后调用）。
      *
-     * 语义边界：只清「画像 / 近况 / 里程碑」三个自动沉淀实体的 observations，
-     * **保留实体壳** —— 本进程内 ChatMemoryPipeline 仍可继续 addObservations，
-     * 不会因实体被整删而静默断写（重启后 init 也会重建空壳）。模型经 MCP
-     * 显式建的主题实体与关系不属于自动聊天记忆，不在此清空范围。
+     * 语义边界：只清自动沉淀的三类记忆（画像 / 近况 / 里程碑）；
+     * memory MCP 图谱里模型显式建的主题实体不属于自动聊天记忆，
+     * 不在此清空范围。
      */
     fun clearChatMemory() {
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val graph = knowledgeGraph.readGraph()
-                    var removed = 0
-                    for (type in ChatMemorySchema.ENTITY_TYPES) {
-                        val entity = graph.entities.firstOrNull { it.entityType == type } ?: continue
-                        removed += knowledgeGraph.deleteObservations(entity.name, entity.observations)
-                    }
-                    removed
+                    chatLedger.clearKinds(
+                        setOf(MemoryKind.PROFILE, MemoryKind.STATE, MemoryKind.MILESTONE)
+                    )
                 }
             }.onSuccess { removed ->
                 _lastMessage.value = if (removed > 0) {

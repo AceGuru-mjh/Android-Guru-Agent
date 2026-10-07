@@ -13,14 +13,15 @@
 > 首轮问候从大段能力介绍收敛为一句话反问。
 > 前置：[tool-system-v4.md](tool-system-v4.md)（工具渐进披露——本篇把同一思想推广到技能层）·
 > [memory-and-workflow-research.md](memory-and-workflow-research.md)（记忆调研——本篇补齐「对话内容」记忆缺口）·
-> [operit-rikkahub-comparison.md](operit-rikkahub-comparison.md)（三方对比——技能生态与记忆的差异化路线）
+> [chat-memory-v2.md](chat-memory-v2.md)（聊天记忆 v2：结构化账本与批量蒸馏——本文 §4 的现行架构）
 
 ---
 
 ## 0. 一句话
 
 把 Tool System v4 的「目录 + 按需装载」推广到技能层（46 个内置领域技能不再全量注入），
-给对话装上「自动记忆管线」（学 operit 图记忆 + 双速捕获 + 主动召回三点创新），
+给对话装上「自动记忆管线」（双速捕获 + 主动召回 + 评分生命周期三点创新，v2 演进为
+结构化账本），
 用提示词双保险驯服首轮问候（你好 → 一句话「需要帮助吗？」），
 并为网页自动化补上「独立条件等待 + 页面类型推断」两块最后拼图。
 
@@ -91,33 +92,42 @@ tags 含 2-3 个高区分度中文短词（「菜谱」「穿搭」「简历」�
 
 ## 4. 聊天自动记忆（ChatMemoryPipeline）
 
-### 4.1 与 operit / Mem0 的差异（创新点）
+> v2 演进说明：本节描述的架构已升级为「结构化账本 + 批量蒸馏 + 评分召回 +
+> 巩固遗忘」——详见 [chat-memory-v2.md](chat-memory-v2.md)。本节保留 v1
+> 设计动机，现行机制摘要如下。
 
-1. **双速捕获**：启发式层零成本同步落盘（自我披露句式匹配：「我叫/我喜欢/我在做…」
-   整句入库，≤ 3 句/轮，内容级去重）；LLM 蒸馏层每 4 轮一次后台跑（SUMMARY 角色
-   路由便宜模型，低温，输出 JSON 事实数组，防御式解析）——operit 全靠模型显式调
-   工具写图，成本高且模型经常忘记调。
+### 4.1 设计要点（v2 现行架构）
+
+1. **双速捕获**：启发式层零成本同步落账（自我披露句式匹配：「我叫/我喜欢/我在做…」
+   整句入账，≤ 3 句/轮，重复即重要性抬升）；LLM 蒸馏层批量异步跑（待蒸馏轮次
+   攒批 ≥ 6 轮开蒸，SUMMARY 角色路由便宜模型，写入门禁 + 结构化 JSON 协议，
+   防御式解析）——不依赖模型主动调工具，成本与漏记双收敏。
 2. **主动召回**：引擎 execute 入口自动检索并注入 `## Remembered About You` 段
-   （画像实体最近 10 条 + 按消息关键词命中的主题实体观察，≤ 900 字符）——
-   不等模型想起调 memory 工具，记忆自己到场。
-3. **存储共生**：与 memory MCP 共享同一个 `KnowledgeGraphStore` @Singleton
-   （`<filesDir>/mcp_memory/memory.json`）——自动沉淀与显式写入同图同源，
-   用户经 `read_graph` / `search_nodes` / MemoryScreen 全部可见、可删、可改。
+   （画像评分 Top-10（重要 × 新近 × 常用）+ 关键词直接命中补充 + 按消息关键词
+   命中的主题实体观察，≤ 900 字符）——不等模型想起调 memory 工具，记忆自己到场；
+   被注入的条目自动打点（访问计数 +1），越用越牢。
+3. **结构化账本**：自动记忆沉淀到独立的 `MemoryLedgerStore`
+   （`<filesDir>/chat_memory/ledger.json`，带重要性/可信度/时间戳/访问计数），
+   与 memory MCP 的知识图谱物理分离（模型显式写入的主题实体仍走图谱）；
+   每批蒸馏后巩固 pass（近重复合并 + 容量淘汰）保证账本收敛不发散；
+   用户经 MemoryScreen「聊天记忆」分区可见、可删、可清空。
 
-### 4.2 接线
+### 4.2 接线（v2）
 
 ```
 ApexAgentEngine.execute()
   ├─ 入口：memoryObserver.recallChatMemory(text) → chatMemoryNote → 系统提示词段
   └─ finally：取本轮最后一条有正文的 Assistant → memoryObserver.onConversationTurn()
                 └─ CsMemSessionObserver（合流点）→ ChatMemoryPipeline
-                       ├─ captureHeuristic（同步，零成本）
-                       └─ distill（每 4 轮，SupervisorJob + IO fire-and-forget）
+                       ├─ captureHeuristic / updateTone / captureMilestones（同步，零成本）
+                       ├─ enqueueTurn（持久化待蒸馏队列，进程被杀不丢）
+                       └─ distillBatch（攒批触发，SupervisorJob + IO fire-and-forget）
+                            └─ 巩固 pass（近重复合并 + 容量淘汰）
 ```
 
 引擎侧扩展是 [ExecutionMemoryObserver] 两个带默认实现的挂点（未注入观察者的
 单测/子代理零改动）；失败语义全部防御式：recall 失败返回 null（段落省略），
-沉淀失败只记日志——记忆子系统绝不阻断主对话。
+沉淀失败只记日志、蒸馏失败队列保留重试——记忆子系统绝不阻断主对话。
 
 ## 5. 首轮问候极简（双保险）
 
@@ -156,9 +166,10 @@ trace 脱敏。
 ## 8. 后续方向
 
 - 技能目录的语义召回（当前字面 tags 匹配；可给技能描述建嵌入索引，跨语言命中）
-- 记忆蒸馏的 ADD/UPDATE/NOOP 决策（当前只增；冲突事实靠内容级去重兜底）
-- `## Remembered About You` 的设置页开关与 MemoryScreen 联动展示（自动记忆目前
-  与显式记忆同图可见，可再加过滤视图）
+- 记忆蒸馏的 ADD/UPDATE/NOOP 决策（~~当前只增；冲突事实靠内容级去重兜底~~
+  v2 已落地：写入门禁 + new/update 结构化提取协议，见 chat-memory-v2.md）
+- `## Remembered About You` 的设置页开关与 MemoryScreen 联动展示
+  （#218 已有总开关；v2 记忆页已按类别分区展示自动记忆）
 
 ## 9. Round 2 增量：共情引擎 × 里程碑记忆 × 安装即装备
 
@@ -192,11 +203,11 @@ trace 脱敏。
 ### 9.3 记忆增强：情绪基调 + 里程碑日历（ChatMemoryPipeline R2）
 
 - **情绪纵览**：每轮与引擎同一套口径判定情绪 → 滚动窗（近 6 个情绪轮）
-  → 「用户近况」实体单条基调（delete+recreate 有界替换）→ 召回注入
+  → 「用户近况」单条基调（有界替换，v2 起落账本 STATE 类）→ 召回注入
   `### 用户近况`——跨对话开头模型就知道用户近来状态；
 - **里程碑日历**：句子级「日期模式（X月X日/周X/明天/节日…）× 人生事件
-  标记（生日/面试/领证/搬家…）」双命中 → 「用户里程碑」实体（≤2 条/轮、
-  30 条封顶压缩）→ 召回注入 `### 里程碑`——时间感知是 operit/Mem0 都没有的；
+  标记（生日/面试/领证/搬家…）」双命中 → 「用户里程碑」（≤2 条/轮，v2 起
+  容量淘汰封顶）→ 召回注入 `### 里程碑`——Agent 的时间感知能力；
 - 创作护栏：帮我写/文案/翻译…里的日子是素材，不入库。
 
 ### 9.4 市场热加载闭环收口：安装即装备

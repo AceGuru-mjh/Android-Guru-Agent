@@ -415,6 +415,11 @@
     <string name="memory_chat_msg_cleared">Cleared %1$d chat memories</string>
     <string name="memory_chat_msg_clear_empty">No chat memories to clear</string>
     <string name="memory_chat_msg_failed">Operation failed: %1$s</string>
+    <!-- Chat memory v2: record metadata line (importance / source / recall count) -->
+    <string name="memory_chat_meta_fmt">Importance %1$d%% · %2$s · recalled %3$d times</string>
+    <string name="memory_chat_source_heuristic">Heuristic</string>
+    <string name="memory_chat_source_distill">Distilled</string>
+    <string name="memory_chat_source_migrated">Migrated</string>
 
     <!-- ═══ Task history (TaskHistoryScreen) ═══ -->
     <string name="tasks_title">Tasks</string>

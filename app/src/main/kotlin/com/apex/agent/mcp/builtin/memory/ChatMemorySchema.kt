@@ -1,20 +1,21 @@
 package com.apex.agent.mcp.builtin.memory
 
 /**
- * # 聊天记忆三类固定实体的命名契约（issue #219 抽出）
+ * # 聊天记忆的类别契约（issue #219 抽出，v2 演进）
  *
- * [ChatMemoryPipeline] 自动沉淀用的是 KnowledgeGraphStore 里三个固定实体；
- * 记忆页「聊天记忆」分区（MemoryViewModel / ChatMemorySection）要读的也是
- * 它们。实体名是落盘 memory.json 的主键、entityType 是筛选键 —— 任何一侧
- * 单独改字符串都会让另一侧静默失明（用户数据被孤儿化），因此把契约收敛到
- * 本对象，双侧引用同一份常量（编译期防漂移）。
+ * v1：[ChatMemoryPipeline] 把自动记忆沉淀为 KnowledgeGraphStore 里
+ * 三个固定实体（实体名 = memory.json 主键，记忆页按 entityType 筛选）。
  *
- * 注意：这三个名字是**用户可见**的持久化数据主键（memory MCP 图共用命名
- * 空间），已存在于用户设备上 —— 改名等于丢弃既有记忆，禁止轻动。
+ * v2：自动记忆迁往 [MemoryLedgerStore]（结构化账本），本对象保留两处
+ * 契约职责：
+ *  1. **类别键**：[MemoryLedgerStore.MemoryKind] ↔ 旧图谱 entityType 的
+ *     映射源（迁移与记忆页分区展示共用，编译期防字符串漂移）；
+ *  2. **迁移契约**：旧版落盘 memory.json 里这三类实体的观察在首次启动
+ *     时导入账本并从图谱移除 —— 字符串保持不变，否则存量用户数据失明。
  */
 object ChatMemorySchema {
 
-    /** 「用户画像」：稳定用户事实（自我披露句式 + LLM 蒸馏产物，追加去重）。 */
+    /** 「用户画像」：稳定用户事实（自我披露句式 + 蒸馏产物，评分注入）。 */
     const val PROFILE_ENTITY = "用户画像"
     const val PROFILE_TYPE = "chat_memory_profile"
 

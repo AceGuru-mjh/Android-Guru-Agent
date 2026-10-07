@@ -48,15 +48,30 @@ object McpModule {
         )
 
     /**
-     * 知识图谱记忆存储单例：memory MCP transport 与 [ChatMemoryPipeline]
-     * （聊天自动记忆）共享同一实例与同一份 `<filesDir>/mcp_memory/memory.json`
-     * —— 自动沉淀与显式写入同图同源，避免双实例互踩落盘。
+     * 知识图谱记忆存储单例：memory MCP transport 的底层存储（模型经
+     * mcp__memory__* 工具显式读写的主题实体），持久化
+     * `<filesDir>/mcp_memory/memory.json`。v2 起聊天自动记忆沉淀到独立的
+     * [provideMemoryLedgerStore] 账本，与图谱物理分离。
      */
     @Provides
     @Singleton
     fun provideKnowledgeGraphStore(@ApplicationContext context: Context): com.apex.agent.mcp.builtin.memory.KnowledgeGraphStore {
         return com.apex.agent.mcp.builtin.memory.KnowledgeGraphStore(
             java.io.File(context.filesDir, "mcp_memory")
+        )
+    }
+
+    /**
+     * 聊天记忆账本单例（v2）：ChatMemoryPipeline 自动沉淀链路的底层
+     * 存储（评分 / 生命周期 / 容量治理），持久化
+     * `<filesDir>/chat_memory/ledger.json`；与 memory MCP 图谱分离，
+     * 记忆页「聊天记忆」分区直读本账本。
+     */
+    @Provides
+    @Singleton
+    fun provideMemoryLedgerStore(@ApplicationContext context: Context): com.apex.agent.mcp.builtin.memory.MemoryLedgerStore {
+        return com.apex.agent.mcp.builtin.memory.MemoryLedgerStore(
+            java.io.File(context.filesDir, "chat_memory")
         )
     }
 

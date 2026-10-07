@@ -45,13 +45,13 @@ import kotlinx.serialization.json.putJsonObject
  * 线程契约：store 内部单锁串行化全部操作，本类无需再加锁；阻塞 IO 落在
  * McpClient 的 Dispatchers.IO 上下文（同 github 内置服务器的线程契约）。
  *
- * ## 共享 store 构造（聊天自动记忆共生）
- *
+ * ## 共享 store 构造（v2 存储分层）
+
  * 主构造接收已存在的 [KnowledgeGraphStore] 实例：DI 侧提供 @Singleton
- * store（目录 `<filesDir>/mcp_memory`），memory MCP 与 [ChatMemoryPipeline]
- * 共用同一实例与同一份 memory.json —— 自动沉淀的记忆与模型显式写的
- * 记忆同图同源，用户经 read_graph / search_nodes 全部可见。旧 File
- * 构造保留（独立自建 store，单测与旧装配兼容）。
+ * store（目录 `<filesDir>/mcp_memory`），本图谱承载**模型显式写入**的
+ * 主题实体（mcp__memory__* 工具产物）。聊天自动记忆（ChatMemoryPipeline）
+ * v2 起沉淀到独立的 [MemoryLedgerStore] 账本，与图谱物理分离；两类存储
+ * 在召回侧合流。旧 File 构造保留（独立自建 store，单测与旧装配兼容）。
  */
 class BuiltinMemoryMcpTransport(
     private val store: KnowledgeGraphStore

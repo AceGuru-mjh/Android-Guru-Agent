@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -50,6 +51,8 @@ import com.apex.agent.core.code.subagent.SubAgentSettings
 import com.apex.agent.core.llm.ModelProfile
 import com.apex.agent.core.llm.ModelRoleConfig
 import com.apex.agent.ui.theme.AccentPalette
+import com.apex.agent.ui.theme.UiStyle
+import com.apex.agent.ui.theme.UiStylePickerExcluded
 import com.apex.agent.ui.theme.accentSwatchColor
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -137,6 +140,10 @@ internal fun VisionSection(
 @Composable
 internal fun AppearanceSection(agent: AgentSettings, onAgent: (AgentSettings) -> Unit) {
     SectionCard(stringResource(R.string.settings_section_appearance), Icons.Outlined.Palette, initiallyExpanded = true) {
+        // 界面风格（极简黑白 / 液态玻璃）—— 与深浅模式正交的全局风格维度，
+        // 默认极简黑白；切换立即生效（CompositionLocal 驱动，无需 recreate）
+        val uiStyle = UiStyle.fromKey(agent.uiStyle)
+        UiStyleRow(selected = uiStyle, onSelect = { onAgent(agent.copy(uiStyle = it.key)) })
         // 语言（system | zh | en；切换后 MainActivity recreate 生效，见 LanguageManager）
         DropdownRow(
             stringResource(R.string.settings_language),
@@ -160,18 +167,166 @@ internal fun AppearanceSection(agent: AgentSettings, onAgent: (AgentSettings) ->
             description = stringResource(R.string.settings_apply_now)) {
             onAgent(agent.copy(themeMode = it))
         }
-        SwitchRow(stringResource(R.string.settings_dynamic_color), agent.dynamicColor,
-            description = stringResource(R.string.settings_dynamic_color_desc)) {
-            onAgent(agent.copy(dynamicColor = it))
+        if (uiStyle == UiStyle.LIQUID_GLASS) {
+            // 液态玻璃风格：Dynamic Color + 预设配色才参与配色合成
+            SwitchRow(stringResource(R.string.settings_dynamic_color), agent.dynamicColor,
+                description = stringResource(R.string.settings_dynamic_color_desc)) {
+                onAgent(agent.copy(dynamicColor = it))
+            }
+            AccentPaletteRow(
+                selected = AccentPalette.fromKey(agent.accentPalette),
+                onSelect = { onAgent(agent.copy(accentPalette = it.key)) }
+            )
+        } else {
+            // 极简黑白：配色体系不参与 —— 提示而非隐藏，让用户知道入口在哪
+            DescriptionText(stringResource(R.string.settings_ui_style_minimal_hint))
         }
-        AccentPaletteRow(
-            selected = AccentPalette.fromKey(agent.accentPalette),
-            onSelect = { onAgent(agent.copy(accentPalette = it.key)) }
-        )
         SliderRow(stringResource(R.string.settings_font_scale), agent.fontScale, 0.8f..1.4f, 12,
             description = stringResource(R.string.settings_font_scale_desc),
             onValueChange = { onAgent(agent.copy(fontScale = it)) },
             fmt = { "${(it * 100).roundToInt()}%" })
+    }
+}
+
+/**
+ * 界面风格选择器：极简黑白 / 液态玻璃 双卡横排。
+ *
+ * 卡片内含风格预览块（非纯色点）：极简 = 半黑半白拼块 + 发丝分割线；
+ * 玻璃 = 主色→ tertiary 对角渐变叠白光带。选中以主色描边环标记，
+ * 与 AccentPaletteRow 同一选择器语言。
+ */
+@Composable
+private fun UiStyleRow(selected: UiStyle, onSelect: (UiStyle) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.settings_ui_style), style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            UiStyleOptionCard(
+                style = UiStyle.MINIMAL,
+                label = stringResource(R.string.settings_ui_style_minimal),
+                description = stringResource(R.string.settings_ui_style_minimal_desc),
+                selected = selected == UiStyle.MINIMAL,
+                onClick = { onSelect(UiStyle.MINIMAL) },
+                modifier = Modifier.weight(1f)
+            )
+            UiStyleOptionCard(
+                style = UiStyle.LIQUID_GLASS,
+                label = stringResource(R.string.settings_ui_style_glass),
+                description = stringResource(R.string.settings_ui_style_glass_desc),
+                selected = selected == UiStyle.LIQUID_GLASS,
+                onClick = { onSelect(UiStyle.LIQUID_GLASS) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        DescriptionText(stringResource(R.string.settings_ui_style_desc))
+    }
+}
+
+/** 单张风格选项卡：预览块 + 标题 + 一句描述。 */
+@Composable
+private fun UiStyleOptionCard(
+    style: UiStyle,
+    label: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor = if (selected) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.outlineVariant
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        // 风格预览块：宽幅色带，直观展示两种材质语言
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .then(
+                    if (style == UiStyle.MINIMAL) {
+                        Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    } else {
+                        Modifier.background(
+                            androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)
+                                )
+                            )
+                        )
+                    }
+                )
+        ) {
+            if (style == UiStyle.MINIMAL) {
+                // 极简预览：左墨右纸拼块 + 中缝发丝线
+                Row(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.onSurface)
+                    )
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surface)
+                    )
+                }
+            } else {
+                // 玻璃预览：白色斜向光带（玻璃受光的标志性语言）
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            androidx.compose.ui.graphics.Brush.linearGradient(
+                                colors = listOf(
+                                    androidx.compose.ui.graphics.Color.Transparent,
+                                    androidx.compose.ui.graphics.Color.White.copy(alpha = 0.35f),
+                                    androidx.compose.ui.graphics.Color.Transparent
+                                )
+                            )
+                        )
+                )
+            }
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = stringResource(R.string.settings_accent_selected),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .size(16.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                            CircleShape
+                        )
+                        .padding(2.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            description,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -192,7 +347,7 @@ private fun AccentPaletteRow(
         Text(stringResource(R.string.settings_accent_palettes), style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.height(6.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(AccentPalette.entries, key = { it.name }) { palette ->
+            items(UiStylePickerExcluded, key = { it.name }) { palette ->
                 val swatch = accentSwatchColor(palette, dark)
                 val isSelected = palette == selected
                 Column(

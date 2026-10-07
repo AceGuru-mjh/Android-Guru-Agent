@@ -191,6 +191,14 @@
     <string name="settings_accent_palettes">预设配色</string>
     <string name="settings_accent_selected">已选配色</string>
     <string name="settings_accent_desc">11 套预设配色，与深浅模式独立组合，立即生效；Dynamic Color 开启时由壁纸取色覆盖。</string>
+    <!-- 界面风格（默认极简黑白 / 液态玻璃） -->
+    <string name="settings_ui_style">界面风格</string>
+    <string name="settings_ui_style_desc">全局视觉语言，与深浅模式独立组合，立即生效；默认为极简黑白。</string>
+    <string name="settings_ui_style_minimal">极简黑白</string>
+    <string name="settings_ui_style_minimal_desc">纯黑白灰配色、扁平表面、零玻璃效果</string>
+    <string name="settings_ui_style_glass">液态玻璃</string>
+    <string name="settings_ui_style_glass_desc">液态玻璃材质，支持多套预设配色</string>
+    <string name="settings_ui_style_minimal_hint">预设配色与 Dynamic Color 仅在「液态玻璃」风格下生效。</string>
 
     <!-- Chat display -->
     <string name="settings_section_chat">对话 · Chat Display</string>
@@ -407,6 +415,11 @@
     <string name="memory_chat_msg_cleared">已清空 %1$d 条聊天记忆</string>
     <string name="memory_chat_msg_clear_empty">没有可清空的聊天记忆</string>
     <string name="memory_chat_msg_failed">操作失败：%1$s</string>
+    <!-- 聊天记忆 v2：记录元数据行（重要度 / 来源 / 召回次数） -->
+    <string name="memory_chat_meta_fmt">重要度 %1$d%% · %2$s · 召回 %3$d 次</string>
+    <string name="memory_chat_source_heuristic">启发式</string>
+    <string name="memory_chat_source_distill">蒸馏</string>
+    <string name="memory_chat_source_migrated">迁移</string>
 
     <!-- ═══ 任务历史（TaskHistoryScreen）═══ -->
     <string name="tasks_title">任务</string>

@@ -3,6 +3,8 @@ package com.apex.agent.ui.glass
 import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -20,6 +22,8 @@ import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import com.apex.agent.ui.theme.LocalUiStyle
+import com.apex.agent.ui.theme.UiStyle
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -89,6 +93,24 @@ fun GlassSurface(
         animationSpec = tween(durationMillis = 140),
         label = "glass_activation"
     )
+
+    // ═══ 极简黑白风格：玻璃管线整体短路为扁平表面 ═══
+    // 风格层的唯一扁平化收敛点（UiStyle Spec：业务组件零感知）—— 实色
+    // 底 + 发丝描边 + 同款激活度/按压缩放，零 blur / 零折射 / 零光带。
+    // 置于激活度计算之后：交互反馈语言在两种风格间保持一致。
+    if (LocalUiStyle.current == UiStyle.MINIMAL) {
+        FlatSurface(
+            modifier = modifier,
+            style = style,
+            shape = shape,
+            selected = selected,
+            enabled = enabled,
+            activationState = activationState,
+            scaleOnPress = scaleOnPress,
+            content = content
+        )
+        return
+    }
 
     val palette = glassPalette(style = style, accent = accent)
 
@@ -205,6 +227,58 @@ fun GlassSurface(
                     }
                 }
             ),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+/**
+ * 极简黑白风格的扁平表面 —— GlassSurface 的风格短路分支。
+ *
+ * 材质语义：实色 surfaceContainer 底 + 发丝描边（outlineVariant）分层；
+ * 选中态描边换主色（墨/纸）加粗，禁用态降透明度，按压沿用同一激活度
+ * 缩放曲线 —— 与玻璃风格共享交互语言，仅材质语言不同。
+ *
+ * 描边经 graphicsLayer 裁剪后可见约一半宽度（1dp 描边 ≈ 0.5dp 发丝线）
+ * —— 刻意的 hairline 观感，与极简风格的克制一致。
+ */
+@Composable
+private fun FlatSurface(
+    modifier: Modifier,
+    style: GlassStyle,
+    shape: Shape,
+    selected: Boolean,
+    enabled: Boolean,
+    activationState: State<Float>,
+    scaleOnPress: Boolean,
+    content: @Composable () -> Unit
+) {
+    val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+    val borderColor = if (selected) scheme.primary else scheme.outlineVariant
+    val borderWidth = if (selected) 1.5.dp else 1.dp
+    Box(
+        modifier = modifier
+            .shadow(
+                elevation = style.elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = scheme.scrim,
+                spotColor = scheme.scrim
+            )
+            .graphicsLayer {
+                this.shape = shape
+                this.clip = true
+                alpha = if (enabled) 1f else 0.55f
+                if (scaleOnPress && style.pressedScale < 1f) {
+                    val activation = activationState.value
+                    val scale = 1f - (1f - style.pressedScale) * activation
+                    scaleX = scale
+                    scaleY = scale
+                }
+            }
+            .background(scheme.surfaceContainer, shape)
+            .border(borderWidth, borderColor, shape),
         contentAlignment = Alignment.Center
     ) {
         content()

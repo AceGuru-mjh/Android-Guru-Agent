@@ -27,8 +27,15 @@ import androidx.compose.ui.graphics.Color
  * 最终经 [accentColorScheme] 在既有基底 ColorScheme 上 copy 出完整方案。
  */
 
-/** 主题配色方案。 */
+/**
+ * 可在设置中心直接选择的预设配色方案。
+ *
+ * [MONO] 是极简黑白风格的专用灰阶方案，不进入选择器（由 UiStyle 驱动，
+ * 见 [UiStylePickerExcluded]）——液态玻璃风格下仍可手动选到它获得
+ * 「灰阶玻璃」观感。
+ */
 enum class AccentPalette(val key: String, val label: String) {
+    MONO("mono", "墨·极简黑白"),
     MINT("mint", "霓虹薄荷"),
     AMBER("amber", "琥珀暖阳"),
     CORAL("coral", "珊瑚暖橘"),
@@ -54,6 +61,12 @@ enum class AccentPalette(val key: String, val label: String) {
             entries.firstOrNull { it.key == key } ?: MINT
     }
 }
+
+/**
+ * 预设配色选择器的可见列表：[AccentPalette.MONO] 由极简风格独占驱动，
+ * 不在液态玻璃的选择器里重复出现（避免两处入口同一语义）。
+ */
+val UiStylePickerExcluded: List<AccentPalette> = AccentPalette.entries.filter { it != AccentPalette.MONO }
 
 /**
  * 一套配色方案的强调色组（primary / secondary / tertiary 全量 12 色）。
@@ -716,8 +729,44 @@ private val PlumLight = AccentSet(
     onTertiaryContainer = Color(0xFF003730)
 )
 
+// ═══════════════════ MONO · 墨·极简黑白（极简风格专用）═══════════════════
+// 纯灰阶强调色组：无色相、无饱和，仅明度分层 —— 深色态主色是「纸白」
+// （近黑底上的反白），浅色态主色是「墨黑」（白底上的正字色）。银灰与
+// 石墨作为 secondary / tertiary 维持层次，不引入任何色彩倾向。
+
+private val MonoDark = AccentSet(
+    primary = Color(0xFFF2F2F2),          // paper white
+    onPrimary = Color(0xFF171717),
+    primaryContainer = Color(0xFF2E2E2E),
+    onPrimaryContainer = Color(0xFFE6E6E6),
+    secondary = Color(0xFFB8B8B8),        // silver
+    onSecondary = Color(0xFF1F1F1F),
+    secondaryContainer = Color(0xFF2A2A2A),
+    onSecondaryContainer = Color(0xFFCCCCCC),
+    tertiary = Color(0xFF8F8F8F),         // graphite
+    onTertiary = Color(0xFF1C1C1C),
+    tertiaryContainer = Color(0xFF262626),
+    onTertiaryContainer = Color(0xFFB3B3B3)
+)
+
+private val MonoLight = AccentSet(
+    primary = Color(0xFF1F1F1F),          // ink black
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE4E4E4),
+    onPrimaryContainer = Color(0xFF2B2B2B),
+    secondary = Color(0xFF5C5C5C),        // mid gray
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFDCDCDC),
+    onSecondaryContainer = Color(0xFF3A3A3A),
+    tertiary = Color(0xFF8A8A8A),         // silver graphite
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFD6D6D6),
+    onTertiaryContainer = Color(0xFF3D3D3D)
+)
+
 /** 配色方案 → 当前深浅态的强调色组。 */
 private fun accentSetFor(palette: AccentPalette, dark: Boolean): AccentSet = when (palette) {
+    AccentPalette.MONO -> if (dark) MonoDark else MonoLight
     AccentPalette.MINT -> if (dark) MintDark else MintLight
     AccentPalette.AMBER -> if (dark) AmberDark else AmberLight
     AccentPalette.CORAL -> if (dark) CoralDark else CoralLight
@@ -766,3 +815,74 @@ fun accentColorScheme(palette: AccentPalette, dark: Boolean): ColorScheme {
  */
 fun accentSwatchColor(palette: AccentPalette, dark: Boolean): Color =
     accentSetFor(palette, dark).primary
+
+// ═══════════════════ 极简黑白中性基底 ═══════════════════
+// 与 DarkNeutralBase / LightNeutralBase 的区别：去掉蓝灰倾向，色温严格
+// 中性（R=G=B），背景更纯粹（纯黑 / 纯白）。仅 [minimalColorScheme] 使用。
+
+private val MinimalDarkBase: ColorScheme = darkColorScheme(
+    background = Color(0xFF000000),       // pure black
+    onBackground = Color(0xFFF2F2F2),
+    surface = Color(0xFF0F0F0F),
+    onSurface = Color(0xFFF2F2F2),
+    surfaceVariant = Color(0xFF1C1C1C),
+    onSurfaceVariant = Color(0xFFA3A3A3),
+    surfaceContainerLowest = Color(0xFF000000),
+    surfaceContainerLow = Color(0xFF0D0D0D),
+    surfaceContainer = Color(0xFF141414),
+    surfaceContainerHigh = Color(0xFF1C1C1C),
+    surfaceContainerHighest = Color(0xFF242424),
+    outline = Color(0xFF333333),
+    outlineVariant = Color(0xFF262626),
+    error = Color(0xFFFF6B9D),
+    onError = Color(0xFF3D0018),
+    errorContainer = Color(0xFF52122E),
+    onErrorContainer = Color(0xFFFFB3CE),
+    scrim = Color(0xFF000000)
+)
+
+private val MinimalLightBase: ColorScheme = lightColorScheme(
+    background = Color(0xFFFFFFFF),       // pure white
+    onBackground = Color(0xFF191919),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF191919),
+    surfaceVariant = Color(0xFFEFEFEF),
+    onSurfaceVariant = Color(0xFF565656),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFAFAFA),
+    surfaceContainer = Color(0xFFF5F5F5),
+    surfaceContainerHigh = Color(0xFFEFEFEF),
+    surfaceContainerHighest = Color(0xFFE8E8E8),
+    outline = Color(0xFFCFCFCF),
+    outlineVariant = Color(0xFFDEDEDE),
+    error = Color(0xFFBA1A4A),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFD9E4),
+    onErrorContainer = Color(0xFF3F0018),
+    scrim = Color(0xFF000000)
+)
+
+/**
+ * 极简黑白风格的完整 ColorScheme：纯灰阶基底 + MONO 强调色组合成。
+ *
+ * 独立于 Dynamic Color / 预设配色 —— 极简风格下两者均不参与（灰阶没有
+ * 取色空间）；语义错误色保留（状态语义优先于风格纯粹性）。
+ */
+fun minimalColorScheme(dark: Boolean): ColorScheme {
+    val base = if (dark) MinimalDarkBase else MinimalLightBase
+    val accents = accentSetFor(AccentPalette.MONO, dark)
+    return base.copy(
+        primary = accents.primary,
+        onPrimary = accents.onPrimary,
+        primaryContainer = accents.primaryContainer,
+        onPrimaryContainer = accents.onPrimaryContainer,
+        secondary = accents.secondary,
+        onSecondary = accents.onSecondary,
+        secondaryContainer = accents.secondaryContainer,
+        onSecondaryContainer = accents.onSecondaryContainer,
+        tertiary = accents.tertiary,
+        onTertiary = accents.onTertiary,
+        tertiaryContainer = accents.tertiaryContainer,
+        onTertiaryContainer = accents.onTertiaryContainer
+    )
+}

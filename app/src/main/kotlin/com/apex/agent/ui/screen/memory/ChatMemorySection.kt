@@ -34,18 +34,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.apex.agent.R
-import com.apex.agent.mcp.builtin.memory.ChatMemorySchema
+import com.apex.agent.mcp.builtin.memory.MemoryLedgerStore.MemoryKind
+import com.apex.agent.mcp.builtin.memory.MemoryLedgerStore.MemoryRecord
+import com.apex.agent.mcp.builtin.memory.MemoryLedgerStore.MemorySource
 
 /**
- * 「聊天记忆」分区（#219 隐私合规）—— 补齐聊天画像库的可见性与管理入口。
+ * 「聊天记忆」分区（#219 隐私合规，v2 账本化）—— 聊天记忆库的可见性与管理入口。
  *
- * 数据源是 KnowledgeGraphStore（memory.json），与 cs-mem 轨迹库完全独立：
- * ChatMemoryPipeline 在对话中自动沉淀三类实体（画像 / 近况 / 里程碑，含
- * 「近期偏低落」这类敏感情绪判断），此前记忆页对其不可见、删除只能靠
- * 用户在对话里手动调 MCP memory 工具。本分区提供：
- *  - 查看：三类实体逐条观察（类型徽章 + 实体名 + 观察列表）；
- *  - 逐条删除：观察级精确删除（二次确认，Episode 删除同款对话框模式）；
- *  - 一键清空：三个自动沉淀实体全量观察（独立二次确认）。
+ * 数据源是 MemoryLedgerStore（chat_memory/ledger.json），与 cs-mem 轨迹库、
+ * memory MCP 图谱完全独立：ChatMemoryPipeline 在对话中自动沉淀三类记忆
+ * （画像 / 近况 / 里程碑，含「近期偏低落」这类敏感情绪判断），本分区提供：
+ *  - 查看：三类记忆逐条呈现（类别徽章 + 内容 + 元数据行：重要度 / 来源 /
+ *    召回次数 —— v2 账本的生命体征）；
+ *  - 逐条删除：主键精确删除（二次确认，Episode 删除同款对话框模式）；
+ *  - 一键清空：三类自动记忆全量（独立二次确认）。
  *
  * 视觉沿用记忆页既有语言：ElevatedCard 条目 / titleSmall 分区标题 /
  * labelSmall 徽章 / error 色破坏性动作。
@@ -53,12 +55,12 @@ import com.apex.agent.mcp.builtin.memory.ChatMemorySchema
 @Composable
 fun ColumnScope.ChatMemorySection(
     entries: List<ChatMemoryEntry>,
-    onDeleteObservation: (entityName: String, observation: String) -> Unit,
+    onDeleteRecord: (recordId: String) -> Unit,
     onClearAll: () -> Unit
 ) {
-    var pendingObservation by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingRecord by remember { mutableStateOf<MemoryRecord?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
-    val observationCount = entries.sumOf { it.observations.size }
+    val recordCount = entries.sumOf { it.records.size }
 
     // 分区头：标题 + 已记条数 + 一键清空（有内容才出现清空入口）
     Row(
@@ -73,16 +75,16 @@ fun ColumnScope.ChatMemorySection(
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary
         )
-        if (observationCount > 0) {
+        if (recordCount > 0) {
             Spacer(Modifier.width(6.dp))
             Text(
-                stringResource(R.string.memory_chat_count_fmt, observationCount),
+                stringResource(R.string.memory_chat_count_fmt, recordCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Spacer(Modifier.weight(1f))
-        if (observationCount > 0) {
+        if (recordCount > 0) {
             TextButton(onClick = { showClearConfirm = true }) {
                 Text(
                     stringResource(R.string.memory_chat_clear),
@@ -104,31 +106,29 @@ fun ColumnScope.ChatMemorySection(
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(entries, key = { it.entityName }) { entry ->
+            items(entries, key = { it.kind.name }) { entry ->
                 ChatMemoryEntryCard(
                     entry = entry,
-                    onDeleteObservation = { observation ->
-                        pendingObservation = entry.entityName to observation
-                    }
+                    onDeleteRecord = { record -> pendingRecord = record }
                 )
             }
         }
     }
 
     // 逐条删除确认（破坏性操作，Episode 删除同款模式）
-    pendingObservation?.let { (entityName, observation) ->
+    pendingRecord?.let { record ->
         AlertDialog(
-            onDismissRequest = { pendingObservation = null },
+            onDismissRequest = { pendingRecord = null },
             title = { Text(stringResource(R.string.memory_chat_delete_title)) },
-            text = { Text(stringResource(R.string.memory_chat_delete_text, observation)) },
+            text = { Text(stringResource(R.string.memory_chat_delete_text, record.content)) },
             confirmButton = {
                 TextButton(onClick = {
-                    onDeleteObservation(entityName, observation)
-                    pendingObservation = null
+                    onDeleteRecord(record.id)
+                    pendingRecord = null
                 }) { Text(stringResource(R.string.memory_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingObservation = null }) {
+                TextButton(onClick = { pendingRecord = null }) {
                     Text(stringResource(R.string.memory_cancel))
                 }
             }
@@ -140,7 +140,7 @@ fun ColumnScope.ChatMemorySection(
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
             title = { Text(stringResource(R.string.memory_chat_clear_title)) },
-            text = { Text(stringResource(R.string.memory_chat_clear_text, observationCount)) },
+            text = { Text(stringResource(R.string.memory_chat_clear_text, recordCount)) },
             confirmButton = {
                 TextButton(onClick = {
                     onClearAll()
@@ -156,21 +156,21 @@ fun ColumnScope.ChatMemorySection(
     }
 }
 
-/** 单个聊天记忆实体的卡片：类型徽章 + 实体名 + 逐条观察（每条可删）。 */
+/** 单个聊天记忆类别的卡片：类别徽章 + 名称 + 逐条记录（含元数据行，每条可删）。 */
 @Composable
 private fun ChatMemoryEntryCard(
     entry: ChatMemoryEntry,
-    onDeleteObservation: (observation: String) -> Unit
+    onDeleteRecord: (record: MemoryRecord) -> Unit
 ) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 4.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ChatMemoryTypeBadge(entry.entityType)
+                ChatMemoryTypeBadge(entry.kind)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    entry.entityName,
+                    entry.kind.displayLabel(),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -178,26 +178,38 @@ private fun ChatMemoryEntryCard(
                     modifier = Modifier.weight(1f)
                 )
             }
-            entry.observations.forEach { observation ->
-                Row(
-                    modifier = Modifier.padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            entry.records.forEach { record ->
+                Column(modifier = Modifier.padding(top = 6.dp)) {
                     Text(
-                        observation,
+                        record.content,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        overflow = TextOverflow.Ellipsis
                     )
-                    IconButton(onClick = { onDeleteObservation(observation) }) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = stringResource(R.string.memory_delete),
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        Text(
+                            stringResource(
+                                R.string.memory_chat_meta_fmt,
+                                (record.importance * 100).toInt(),
+                                record.source.displayLabel(),
+                                record.accessCount
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
                         )
+                        Spacer(Modifier.weight(1f))
+                        IconButton(onClick = { onDeleteRecord(record) }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.memory_delete),
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -205,17 +217,16 @@ private fun ChatMemoryEntryCard(
     }
 }
 
-/** 类型徽章：画像 / 近况 / 里程碑（契约外的类型兜底显示原始 entityType）。 */
+/** 类别徽章：画像 / 近况 / 里程碑。 */
 @Composable
-private fun ChatMemoryTypeBadge(entityType: String) {
-    val (label, color) = when (entityType) {
-        ChatMemorySchema.PROFILE_TYPE ->
+private fun ChatMemoryTypeBadge(kind: MemoryKind) {
+    val (label, color) = when (kind) {
+        MemoryKind.PROFILE ->
             stringResource(R.string.memory_chat_badge_profile) to MaterialTheme.colorScheme.primary
-        ChatMemorySchema.STATE_TYPE ->
+        MemoryKind.STATE ->
             stringResource(R.string.memory_chat_badge_state) to MaterialTheme.colorScheme.tertiary
-        ChatMemorySchema.MILESTONE_TYPE ->
+        MemoryKind.MILESTONE ->
             stringResource(R.string.memory_chat_badge_milestone) to MaterialTheme.colorScheme.secondary
-        else -> entityType to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
         shape = RoundedCornerShape(6.dp),
@@ -228,4 +239,12 @@ private fun ChatMemoryTypeBadge(entityType: String) {
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
     }
+}
+
+/** 来源的用户可读标签（资源化，en/zh 双语）。 */
+@Composable
+private fun MemorySource.displayLabel(): String = when (this) {
+    MemorySource.HEURISTIC -> stringResource(R.string.memory_chat_source_heuristic)
+    MemorySource.DISTILL -> stringResource(R.string.memory_chat_source_distill)
+    MemorySource.MIGRATED -> stringResource(R.string.memory_chat_source_migrated)
 }

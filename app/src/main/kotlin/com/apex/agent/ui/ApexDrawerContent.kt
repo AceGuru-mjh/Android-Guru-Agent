@@ -255,11 +255,20 @@ fun ApexDrawerContent(
  * 抽屉氛围背景 —— 玻璃的真实采样源。
  * 渐变 + 双光晕 + 细网格：终端质感的“可被玻璃折射的环境光”。
  * 静态绘制，无逐帧动画 —— 性能零负担。
+ *
+ * 极简黑白风格下退化为纯色底（零光晕 / 零网格）—— 环境装饰是玻璃
+ * 材质语言的配套件，扁平风格下保留会成为无声噪音。
  */
 @Composable
 private fun DrawerAuroraBackdrop(modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
+    val minimal = com.apex.agent.ui.theme.LocalUiStyle.current ==
+        com.apex.agent.ui.theme.UiStyle.MINIMAL
     val base = scheme.surfaceContainerLow
+    if (minimal) {
+        Canvas(modifier = modifier) { drawRect(base) }
+        return
+    }
     val glowA = scheme.primary.copy(alpha = 0.10f)
     val glowB = scheme.tertiary.copy(alpha = 0.07f)
     val grid = scheme.onSurfaceVariant.copy(alpha = 0.05f)

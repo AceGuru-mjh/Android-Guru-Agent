@@ -1,5 +1,7 @@
 package com.apex.agent.ui.glass
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -48,6 +50,29 @@ fun TerminalGlassSurface(
     content: @Composable () -> Unit
 ) {
     val tier = GlassStyle.Card
+
+    // ═══ 极简黑白风格：终端玻璃短路为扁平深色面板 ═══
+    // 终端语义恒定深色不随主题翻转（本文件不变式）—— 极简分支同样保持
+    // 深底，仅去掉玻璃管线：实色深底 + 发丝描边，与 FlatSurface 同语言。
+    if (com.apex.agent.ui.theme.LocalUiStyle.current ==
+        com.apex.agent.ui.theme.UiStyle.MINIMAL
+    ) {
+        Box(
+            modifier = modifier
+                .shadow(elevation = tier.elevation, shape = shape, clip = false)
+                .graphicsLayer {
+                    this.shape = shape
+                    this.clip = true
+                }
+                .background(TERMINAL_BASE, shape)
+                .border(1.dp, TERMINAL_EDGE, shape),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
+        return
+    }
+
     val canSample = backdrop != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val effectiveBackdrop: Backdrop =
         if (backdrop != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -121,6 +146,9 @@ fun TerminalGlassSurface(
 
 /** 终端基底（与 CodeTerminalPanel 既有恒定深底同源）。 */
 private val TERMINAL_BASE = Color(0xFF101418)
+
+/** 极简分支的发丝描边（深底上一档的冷灰）。 */
+private val TERMINAL_EDGE = Color(0xFF2A323C)
 
 /** 终端霜面顶部提亮（与头行色同源）。 */
 private val TERMINAL_LIFT = Color(0xFF1A2027)

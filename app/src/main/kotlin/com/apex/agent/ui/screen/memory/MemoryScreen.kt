@@ -203,7 +203,7 @@ fun MemoryScreen(
                 // 聊天记忆（#219 隐私合规：画像 / 近况 / 里程碑可见、可删、可清空）
                 ChatMemorySection(
                     entries = chatMemory,
-                    onDeleteObservation = viewModel::deleteChatObservation,
+                    onDeleteRecord = viewModel::deleteChatMemoryRecord,
                     onClearAll = viewModel::clearChatMemory
                 )
 

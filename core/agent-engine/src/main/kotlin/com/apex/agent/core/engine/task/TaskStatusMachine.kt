@@ -7,10 +7,10 @@ package com.apex.agent.core.engine.task
  * 的 `transitionTo` 不校验合法性（审计 §6.1）；本类是**持久层**的迁移守卫，
  * 与 A68 运行时状态机相互独立（两层状态，R-8）。
  *
- * 迁移表（v1）：
+ * 迁移表（v2 —— 崩溃恢复兼容）：
  * ```
- * PENDING     → PLANNING | RUNNING | FAILED | CANCELLED
- * PLANNING    → RUNNING | WAITING_USER | PAUSED | FAILED | CANCELLED
+ * PENDING     → PLANNING | RUNNING | RECOVERING | FAILED | CANCELLED
+ * PLANNING    → RUNNING | WAITING_USER | PAUSED | RECOVERING | FAILED | CANCELLED
  * RUNNING     → PLANNING | WAITING_USER | PAUSED | CANCELLING |
  *               RECOVERING | COMPLETED | FAILED
  * WAITING_USER→ RUNNING | PAUSED | CANCELLING | RECOVERING | FAILED
@@ -22,6 +22,14 @@ package com.apex.agent.core.engine.task
  * COMPLETED   → （终态，无出边）
  * CANCELLED   → （终态，无出边）
  * ```
+ *
+ * v2 修复（秒闪退根因）：crashRecoveryEntry 把 PENDING/PLANNING 映射到
+ * RECOVERING，但 v1 表里这两个状态均无 RECOVERING 出边 —— 磁盘 taskstore
+ * 存在任一 PENDING（任务落盘后未跑即进程死亡）或 PLANNING（plan 确认等待
+ * 中进程被杀）态任务时，启动恢复扫描 discoverRecoverableTasks() 的
+ * transition() 100% 抛 IllegalTaskTransitionException，经 VM init 无保护
+ * 协程直接杀死进程，且每次冷启动重复 → 秒闪退循环。补出边使「进程死亡
+ * 时的活跃态降级到恢复初态」语义在迁移表层面自洽。
  *
  * 设计说明：
  * - **PAUSED ≠ CANCELLED**：PAUSED 有到 RUNNING 的出边（resume），
@@ -47,10 +55,12 @@ object TaskStatusMachine {
     private val TRANSITIONS: Map<TaskStatus, Set<TaskStatus>> = mapOf(
         TaskStatus.PENDING to setOf(
             TaskStatus.PLANNING, TaskStatus.RUNNING,
+            TaskStatus.RECOVERING,   // v2：崩溃恢复降级（crashRecoveryEntry 自洽）
             TaskStatus.FAILED, TaskStatus.CANCELLED
         ),
         TaskStatus.PLANNING to setOf(
             TaskStatus.RUNNING, TaskStatus.WAITING_USER, TaskStatus.PAUSED,
+            TaskStatus.RECOVERING,  // v2：崩溃恢复降级（crashRecoveryEntry 自洽）
             TaskStatus.FAILED, TaskStatus.CANCELLED
         ),
         TaskStatus.RUNNING to setOf(

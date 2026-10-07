@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.apex.agent.service.ApexCoreService
 import com.apex.agent.service.CoreServiceGate
+import com.apex.agent.service.StartupWatchdog
 import com.apex.agent.share.SharedIntake
 import com.apex.agent.ui.ApexRoot
 import com.apex.agent.ui.language.LanguageManager
@@ -121,6 +122,28 @@ class MainActivity : ComponentActivity() {
         val s = settingsRepository.agentSettings.value
         if (s.onboardingCompleted && s.onboardingVersion >= OnboardingFlow.CURRENT_VERSION) {
             maybeRequestBatteryOptimizationExemption()
+        }
+
+        // ═══ v1.4.9：启动看门狗 —— 主路径连续崩溃自愈 ═══
+        // 秒闪退锁死场景：onboardingCompleted 已落盘，主路径（ApexRoot 首帧 /
+        // VM 构造 / init 协程 / 恢复扫描）任一环节确定性崩溃 → 每次冷启动直
+        // 接走主路径再崩，用户被锁死。看门狗按「进程纪元 + 稳定窗口」计数连
+        // 崩次数，达到阈值时在此回滚引导标记：本次启动回到 Onboarding（引导
+        // 页不依赖主路径组件，本身稳定存活），彻底打破循环。梯度自愈详见
+        // StartupWatchdog（连续 2 次：隔离 taskstore 恢复输入；3 次：回滚引导）。
+        if (s.onboardingCompleted &&
+            s.onboardingVersion >= OnboardingFlow.CURRENT_VERSION &&
+            runCatching { StartupWatchdog.noteMainUiAttempt(this) }.getOrDefault(false)
+        ) {
+            runCatching {
+                settingsRepository.updateAgentSettings {
+                    copy(onboardingCompleted = false, onboardingVersion = 0)
+                }
+            }
+            android.util.Log.w(
+                "MainActivity",
+                "watchdog: consecutive main-ui crashes detected — onboarding reset to break crash loop"
+            )
         }
 
         // 语言切换：设置中心 language 与当前已应用语言不同 → recreate 重新走

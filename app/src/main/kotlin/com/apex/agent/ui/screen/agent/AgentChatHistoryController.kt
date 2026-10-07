@@ -26,13 +26,13 @@ import java.util.UUID
 
 /** 安装历史会话自动归档（VM init 调用一次，幂等）。 */
 internal fun AgentChatViewModel.installChatHistoryAutoPersist() {
-    // 会话列表初始加载（IO 读盘）
-    viewModelScope.launch(Dispatchers.IO) {
+    // 会话列表初始加载（IO 读盘）—— launchSafely：JSON/磁盘异常不炸进程
+    launchSafely(Dispatchers.IO, tag = "chatHistoryLoad") {
         _chatSessions.value = chatHistory.loadSessions()
     }
     // 消息流防抖归档：collect 时捕获当时的 sessionId —— 800ms 内切了新会话，
     // 旧快照仍归档进旧会话，不会错挂到新会话头上。
-    viewModelScope.launch {
+    launchSafely(tag = "chatHistoryAutoPersist") {
         uiState.collect { state ->
             historyPersistJob?.cancel()
             val sessionIdAtCollect = currentHistorySessionId
@@ -90,12 +90,22 @@ internal fun AgentChatViewModel.persistChatHistorySnapshot(
         customTitle = customTitle
     )
     viewModelScope.launch(Dispatchers.IO) {
-        // Issue #220：滚动归档不再静默删数据 —— 有会话被移入归档区时给用户
-        // 可见提示（旧实现直接 editor.remove，最旧会话无声消失）。
-        val evicted = chatHistory.saveSession(summary, historyMessages)
-        _chatSessions.value = chatHistory.loadSessions()
-        evicted.firstOrNull()?.let { oldest ->
-            _uiFeedback.tryEmit(strFmt(R.string.chat_history_archived_notice, oldest.title))
+        // v1.4.9 闪退防御：归档链（JSON 编码 / 索引合并 / 磁盘写）任一异常
+        // 只留痕 —— 会话快照丢失可接受，进程存活优先。
+        runCatching {
+            // Issue #220：滚动归档不再静默删数据 —— 有会话被移入归档区时给用户
+            // 可见提示（旧实现直接 editor.remove，最旧会话无声消失）。
+            val evicted = chatHistory.saveSession(summary, historyMessages)
+            _chatSessions.value = chatHistory.loadSessions()
+            evicted.firstOrNull()?.let { oldest ->
+                _uiFeedback.tryEmit(strFmt(R.string.chat_history_archived_notice, oldest.title))
+            }
+        }.onFailure { e ->
+            android.util.Log.e(
+                "AgentChatViewModel",
+                "chat history persist failed (suppressed): ${e.message}",
+                e
+            )
         }
     }
 }

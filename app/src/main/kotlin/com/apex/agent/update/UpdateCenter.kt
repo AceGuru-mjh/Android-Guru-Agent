@@ -188,27 +188,38 @@ object UpdateCenter {
         }
         if (_checkState.value is CheckState.Checking) return
         _checkState.value = CheckState.Checking
+        // v1.4.9 闪退防御：检查链（热更版本口径 / 清单拉取 / 补丁索引）整体
+        // runCatching —— 本中枢自有 scope 无 CoroutineExceptionHandler，任何
+        // 逃逸异常会杀死进程；更新检查是增益路径，失败只留痕并复位状态。
         scope.launch {
-            // 有效版本口径：数据层（已应用热更）与二进制层取大（见 HotUpdatePolicy）
-            val effective = hotStore.effectiveVersionCode()
-            if (effective != currentVersionCode) {
+            runCatching {
+                // 有效版本口径：数据层（已应用热更）与二进制层取大（见 HotUpdatePolicy）
+                val effective = hotStore.effectiveVersionCode()
+                if (effective != currentVersionCode) {
+                    AppLogger.instance.info(
+                        LogCategory.SYSTEM, "UpdateCenter",
+                        "有效版本口径：包 $currentVersionCode + 热更 → $effective"
+                    )
+                }
+                val result = checker.check(effective)
+                if (result is UpdateCheckResult.Available) {
+                    // 有新版才拉补丁全量索引（多基底单跳/跨版链数据源）
+                    _patchIndex.value = checker.fetchPatchIndex()
+                }
+                _checkState.value = CheckState.Done(result)
+                markChecked(context)
+                refreshBannerVisibility()
                 AppLogger.instance.info(
                     LogCategory.SYSTEM, "UpdateCenter",
-                    "有效版本口径：包 $currentVersionCode + 热更 → $effective"
+                    "更新检查完成（$fromTrigger）：${result.javaClass.simpleName}"
+                )
+            }.onFailure { e ->
+                _checkState.value = CheckState.Idle
+                AppLogger.instance.error(
+                    LogCategory.SYSTEM, "UpdateCenter",
+                    "更新检查失败（$fromTrigger，已降级）：${e.message}"
                 )
             }
-            val result = checker.check(effective)
-            if (result is UpdateCheckResult.Available) {
-                // 有新版才拉补丁全量索引（多基底单跳/跨版链数据源）
-                _patchIndex.value = checker.fetchPatchIndex()
-            }
-            _checkState.value = CheckState.Done(result)
-            markChecked(context)
-            refreshBannerVisibility()
-            AppLogger.instance.info(
-                LogCategory.SYSTEM, "UpdateCenter",
-                "更新检查完成（$fromTrigger）：${result.javaClass.simpleName}"
-            )
         }
     }
 

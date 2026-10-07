@@ -576,4 +576,46 @@ class TaskRuntimeTest {
         }
         throw AssertionError("condition not met within ${timeoutMs}ms")
     }
+
+    // ═══ v2 回归：启动恢复扫描不炸进程（秒闪退根因修复验收） ═══
+
+    /**
+     * 磁盘存在 PENDING 态任务（任务落盘后未跑即进程死亡）时，恢复扫描
+     * 必须安静迁移到 RECOVERING —— 旧实现迁移表缺 PENDING→RECOVERING 出边，
+     * transition() 必抛 IllegalTaskTransitionException 并杀死进程。
+     */
+    @Test
+    fun `startup recovery scan tolerates PENDING leftover without throwing`() {
+        store.save(
+            AgentTask(
+                taskId = "task-pending-0001", title = "t", userInput = "u", mode = "BUILD",
+                status = TaskStatus.PENDING, createdAt = 1L
+            )
+        )
+        val engine = newEngine(FakeLlmClient(emptyList()), FakeToolExecutor())
+        val rt = newRuntime(engine, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+        val discovered = rt.discoverRecoverableTasks()
+        assertEquals(1, discovered.size)
+        assertEquals(TaskStatus.RECOVERING, discovered[0].status)
+    }
+
+    /**
+     * PLANNING 态任务（plan 确认等待中进程被杀）同理 —— 旧表同样缺出边必炸。
+     */
+    @Test
+    fun `startup recovery scan tolerates PLANNING leftover without throwing`() {
+        store.save(
+            AgentTask(
+                taskId = "task-planning-0001", title = "t", userInput = "u", mode = "BUILD",
+                status = TaskStatus.PLANNING, createdAt = 1L
+            )
+        )
+        val engine = newEngine(FakeLlmClient(emptyList()), FakeToolExecutor())
+        val rt = newRuntime(engine, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
+        val discovered = rt.discoverRecoverableTasks()
+        assertEquals(1, discovered.size)
+        assertEquals(TaskStatus.RECOVERING, discovered[0].status)
+    }
 }

@@ -39,11 +39,12 @@ class TaskStatusMachineTest {
     fun `full matrix - isLegal matches the documented transition table`() {
         val legal = mapOf(
             TaskStatus.PENDING to setOf(
-                TaskStatus.PLANNING, TaskStatus.RUNNING, TaskStatus.FAILED, TaskStatus.CANCELLED
+                TaskStatus.PLANNING, TaskStatus.RUNNING, TaskStatus.RECOVERING,
+                TaskStatus.FAILED, TaskStatus.CANCELLED
             ),
             TaskStatus.PLANNING to setOf(
                 TaskStatus.RUNNING, TaskStatus.WAITING_USER, TaskStatus.PAUSED,
-                TaskStatus.FAILED, TaskStatus.CANCELLED
+                TaskStatus.RECOVERING, TaskStatus.FAILED, TaskStatus.CANCELLED
             ),
             TaskStatus.RUNNING to setOf(
                 TaskStatus.PLANNING, TaskStatus.WAITING_USER, TaskStatus.PAUSED,
@@ -216,5 +217,42 @@ class TaskStatusMachineTest {
         val empty = newTask(TaskStatus.PENDING)
         assertEquals(-1, empty.currentStepIndex)
         assertTrue(empty.isActive)
+    }
+
+    // ═══ 7. v2 回归：恢复降级迁移必须合法（秒闪退根因） ═══
+
+    /**
+     * 回归测试（v1.4.9 秒闪退修复）：crashRecoveryEntry 对**每个活跃态**
+     * 返回的降级目标，都必须是 from 的合法出边 —— 否则启动恢复扫描
+     * discoverRecoverableTasks() 的 transition() 必抛 IllegalTaskTransitionException，
+     * 经 VM init 无保护协程直接杀死进程（磁盘上存在 PENDING/PLANNING 态任务
+     * 时 100% 复现，每次冷启动重复 = 秒闪退循环）。
+     */
+    @Test
+    fun `every crashRecoveryEntry mapping is a legal transition - startup scan must not throw`() {
+        ALL.filter { it != TaskStatus.COMPLETED && it != TaskStatus.CANCELLED }
+            .forEach { from ->
+                val entry = TaskStatusMachine.crashRecoveryEntry(from)
+                if (entry != null && entry != from) {
+                    assertTrue(
+                        "crashRecoveryEntry($from) = $entry must be a legal transition, " +
+                            "otherwise startup recovery scan kills the process",
+                        TaskStatusMachine.isLegal(from, entry)
+                    )
+                }
+            }
+    }
+
+    /** PENDING/PLANNING 崩溃现场 → 恢复扫描迁移为 RECOVERING（v2 补出边）。 */
+    @Test
+    fun `PENDING and PLANNING crash leftovers migrate to RECOVERING without throwing`() {
+        val pending = newTask(TaskStatus.PENDING)
+        val planning = newTask(TaskStatus.PLANNING)
+
+        val r1 = TaskStatusMachine.transition(pending, TaskStatusMachine.crashRecoveryEntry(TaskStatus.PENDING)!!, T0 + 1)
+        assertEquals(TaskStatus.RECOVERING, r1.status)
+
+        val r2 = TaskStatusMachine.transition(planning, TaskStatusMachine.crashRecoveryEntry(TaskStatus.PLANNING)!!, T0 + 1)
+        assertEquals(TaskStatus.RECOVERING, r2.status)
     }
 }

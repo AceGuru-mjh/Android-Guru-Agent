@@ -101,6 +101,37 @@ class AgentChatViewModel @Inject constructor(
     /** i18n：按当前语言取无参文案（internal —— AgentChatEventApplier 扩展共用）。 */
     internal fun str(@StringRes resId: Int): String = languageManager.getString(resId)
 
+    /**
+     * v1.4.9 闪退防御：VM init 链路协程的统一安全启动器。
+     *
+     * viewModelScope 裸 SupervisorJob 无 CoroutineExceptionHandler —— init
+     * 阶段启动的十余个常驻协程（恢复扫描 / 会话归档 / 引擎热同步 / 循环调度）
+     * 任何一个抛出未捕获异常，都会冒泡到线程默认 UncaughtExceptionHandler
+     * 直接杀死进程 —— 这正是「点击开始使用即闪退 + 此后秒闪退」的放大器。
+     * 此处统一拦截：CancellationException 重抛（结构化取消语义不变），其余
+     * 异常降级为日志留痕（对应功能退化为不生效，App 存活优先）。
+     */
+    internal fun launchSafely(
+        context: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext,
+        tag: String,
+        block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit
+    ) {
+        viewModelScope.launch(context) {
+            try {
+                block()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                android.util.Log.e(
+                    "AgentChatViewModel",
+                    "init coroutine [$tag] failed (suppressed, process kept alive): " +
+                        "${t::class.simpleName}: ${t.message}",
+                    t
+                )
+            }
+        }
+    }
+
     /** i18n：带占位符文案（%1$s/%1$d）在组合外格式化。 */
     internal fun strFmt(@StringRes resId: Int, vararg args: Any): String =
         String.format(languageManager.getString(resId), *args)
@@ -146,7 +177,7 @@ class AgentChatViewModel @Inject constructor(
     internal val _lastAdaptiveDecision = MutableStateFlow<String?>(null)
     val lastAdaptiveDecision: StateFlow<String?> = _lastAdaptiveDecision.asStateFlow()
     init {
-        viewModelScope.launch { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
+        launchSafely(tag = "historyDepth") { _uiState.update { it.copy(historyDepth = withContext(Dispatchers.IO) { runCatching { memory.count() }.getOrDefault(0) }) } }
         // ═══ #197 双工位拆分：Agent 屏模式矫正 ═══
         // 启动快照（AgentModule）可能携带旧档位（build/plan/reflect/...——历史
         // 用户的持久化 defaultMode），而 Agent 屏现在只认 Chat/Agent。
@@ -185,7 +216,7 @@ class AgentChatViewModel @Inject constructor(
         // patchConfig 拍平后的 6 个人设字段 —— 无需重启、下一轮请求即生效
         // （与 setMode/setThinkingLevel 同款运行时通道，P1-1 语义：只改人设
         // 字段，绝不重置其余引擎配置）。
-        viewModelScope.launch {
+        launchSafely(tag = "roleSync") {
             settingsRepository.agentSettings
                 .map { it.activeRole() }
                 .distinctUntilChanged()
@@ -196,7 +227,7 @@ class AgentChatViewModel @Inject constructor(
         // 设置页 RulesSettingsSection 编辑后无需重启：EnginePrompts 的
         // "## Global Rules" 段在下一轮 buildSystemPrompt 即生效（coding
         // 模式走 CodeAgentEngine.rulesProvider 通道，两通道互斥防双注）。
-        viewModelScope.launch {
+        launchSafely(tag = "globalRules") {
             settingsRepository.agentSettings
                 .map { it.globalRules }
                 .distinctUntilChanged()
@@ -208,7 +239,7 @@ class AgentChatViewModel @Inject constructor(
         // 「当前生效指令」（选中预设优先，回退旧单串）拍平进引擎
         // customInstruction——下一轮请求生效，无需重启。无预设无旧串时
         // 置 null（CUSTOM 模式不注入额外指令，语义合法）。
-        viewModelScope.launch {
+        launchSafely(tag = "customInstruction") {
             settingsRepository.agentSettings
                 .map { settingsRepository.effectiveCustomInstruction() }
                 .distinctUntilChanged()
@@ -291,7 +322,9 @@ class AgentChatViewModel @Inject constructor(
     val recoveryCandidates: StateFlow<List<com.apex.agent.core.engine.task.AgentTask>> = _recoveryCandidates.asStateFlow()
 
     init {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        // v1.4.9 闪退防御：崩溃恢复发现（TaskRuntime 迁移/JSON 解析/磁盘 IO 任一
+        // 抽出即进程死亡 —— 「点击开始使用后闪退」的最可疑首帧路径）。
+        launchSafely(kotlinx.coroutines.Dispatchers.IO, tag = "discoverRecoverable") {
             val discovered = taskController.discoverRecoverable()
             if (discovered.isNotEmpty()) {
                 _recoveryCandidates.value = discovered
@@ -375,7 +408,7 @@ class AgentChatViewModel @Inject constructor(
     // 附件条；不自动发送（分享 ≠ 授权发送，用户仍需点发送键）。图片必须在
     // URI 权限窗口内即时拷沙箱，不等用户点发送。
     init {
-        viewModelScope.launch {
+        launchSafely(tag = "sharedIntake") {
             sharedIntake.pending.collect { payload ->
                 if (payload == null) return@collect
                 val textFilled = payload.text?.takeIf { it.isNotBlank() }

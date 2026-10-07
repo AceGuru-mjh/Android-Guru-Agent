@@ -145,19 +145,25 @@ fun GlassSurface(
                 alpha = if (enabled) 1f else 0.55f
             }
             // ═══ kyant0 backdrop 引擎 ═══
+            // v1.4.9 闪退防御：blur/vibrancy/lens 运行在 draw 阶段 —— OEM
+            // RenderEffect/AGSL（RuntimeShader 编译）差异可在首帧直接炸掉
+            // RenderThread 或主线程。效果级 runCatching：单项失败降级为
+            // 无该效果（Frosted 观感），组合树与进程存活优先。
             .drawBackdrop(
                 backdrop = effectiveBackdrop,
                 shape = { shape },
                 effects = {
                     if (canRender) {
-                        if (style.vibrancy > 0f) vibrancy()
-                        blur(style.blurRadius.toPx())
+                        if (style.vibrancy > 0f) runCatching { vibrancy() }
+                        runCatching { blur(style.blurRadius.toPx()) }
                         if (style.lensHeight > 0.dp) {
-                            lens(
-                                refractionHeight = style.lensHeight.toPx(),
-                                refractionAmount = style.lensAmount.toPx(),
-                                chromaticAberration = style.chromaticAberration
-                            )
+                            runCatching {
+                                lens(
+                                    refractionHeight = style.lensHeight.toPx(),
+                                    refractionAmount = style.lensAmount.toPx(),
+                                    chromaticAberration = style.chromaticAberration
+                                )
+                            }
                         }
                     }
                 },

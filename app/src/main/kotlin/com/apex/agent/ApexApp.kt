@@ -22,6 +22,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -98,7 +99,19 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
     lateinit var settingsRepository: com.apex.agent.ui.screen.settings.SettingsRepository
 
     /** 后台启动任务专用 scope（SupervisorJob：单任务失败不殊及兄弟任务）。 */
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val appScope = CoroutineScope(
+        // v1.4.9 闪退防御：追加 CoroutineExceptionHandler —— 旧实现裸 SupervisorJob，
+        // scope 内任何未捕获异常（keepAlive 服务同步 / Ubuntu 预备 / Shizuku 刷新）
+        // 会直接冒泡到线程默认 UncaughtExceptionHandler 杀死进程。后台任务是增益
+        // 路径，失败只留痕，绝不炸宿主。
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, throwable ->
+            Log.e(
+                "ApexAgent",
+                "appScope coroutine failed (suppressed, process kept alive): " +
+                    "${throwable::class.simpleName}: ${throwable.message}"
+            )
+        }
+    )
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -117,6 +130,8 @@ class ApexApp : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         installGlobalCrashHandler()
+        // v1.4.9：进程纪元登记（启动看门狗判定「连续崩溃」的进程身份依据）
+        runCatching { com.apex.agent.service.StartupWatchdog.noteProcessStart(this) }
         // ═══ v1.4.4：启动即初始化（顺序有意为之）═══
         // 前台跟踪最先注册：后续任何路径的 isForeground 判定都可靠；
         // 日志落盘紧随 crash handler —— 启动期日志也能留痕（重启后可查）；

@@ -85,6 +85,8 @@ import com.apex.agent.ui.screen.templates.TemplateStudioScreen
 import com.apex.agent.ui.screen.usage.UsageDashboardScreen
 import com.apex.agent.ui.screen.vault.VaultScreen
 import com.apex.agent.update.UpdateCenter
+import com.apex.agent.service.StartupWatchdog
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -161,12 +163,27 @@ fun ApexRoot() {
     val updateBanner by UpdateCenter.bannerVisible.collectAsStateWithLifecycle()
 
     // ═══ v1.4.5：启动即检查更新（UpdateCenter 内部 6h 节流；进程重建不重复拉）═══
+    // v1.4.9 闪退防御：整体 runCatching —— requireContext 在中枢未就绪时
+    // error() 抛 ISE，裸 LaunchedEffect 协程异常同样杀死进程。
     LaunchedEffect(Unit) {
-        UpdateCenter.checkForUpdate(
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            force = false,
-            fromTrigger = "app-start"
-        )
+        runCatching {
+            UpdateCenter.checkForUpdate(
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                force = false,
+                fromTrigger = "app-start"
+            )
+        }.onFailure {
+            android.util.Log.w("ApexRoot", "startup update check failed: ${it.message}")
+        }
+    }
+
+    // ═══ v1.4.9：启动看门狗稳定窗口 —— 主 UI 存活 20s 即宣告稳定 ═══
+    // ApexRoot 首次组合存活至此，说明首帧/VM 构造/init 协程均已扛过最危险
+    // 窗口；清零看门狗连续崩溃计数（此后崩溃属普通崩溃，不再触发自愈梯度）。
+    val watchdogContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        delay(StartupWatchdog.STABLE_MS)
+        runCatching { StartupWatchdog.noteMainUiStable(watchdogContext) }
     }
 
     // ═══ UX-2 / #224：系统返回键导航链 ═══

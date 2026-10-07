@@ -36,7 +36,8 @@ import kotlinx.coroutines.launch
 internal fun AgentChatViewModel.setupLoopController() {
     // 1) 心跳：start() 幂等 —— 首跳立即执行，之后每 60s 复活一次
     //    （ApexCoreService.onDestroy stop 过调度器后，会话屏还活着就接管驱动）。
-    viewModelScope.launch {
+    //    launchSafely：调度器异常不炸进程（v1.4.9 闪退防御）。
+    launchSafely(tag = "loopHeartbeat") {
         while (isActive) {
             loopScheduler.start()
             delay(HEARTBEAT_MS)
@@ -46,7 +47,7 @@ internal fun AgentChatViewModel.setupLoopController() {
     // 2) activeLoop 状态同步：store 是唯一真源。
     //    - activeLoop 非空：跟随同 id 循环（轮次推进 / 停用 → 清除）；
     //    - activeLoop 为空：按当前会话 tag 回填（App 重启 / 会话恢复自愈）。
-    viewModelScope.launch {
+    launchSafely(tag = "loopStateSync") {
         loopScheduler.schedules.collect { state ->
             val current = _uiState.value.activeLoop
             val next: LoopConfig? = when {
@@ -60,7 +61,7 @@ internal fun AgentChatViewModel.setupLoopController() {
     }
 
     // 3) 到期轮次收集（调度器 persist-then-emit：事件载荷已标记并落盘）。
-    viewModelScope.launch {
+    launchSafely(tag = "loopDueEvents") {
         loopScheduler.dueEvents.collect { config -> onLoopDue(config) }
     }
 }

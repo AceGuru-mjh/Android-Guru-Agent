@@ -68,7 +68,8 @@ internal fun AgentChatViewModel.updateModelParams(temperature: Float, topP: Floa
  * 与角色/规则/预设 collector 同款运行时通道。
  */
 internal fun AgentChatViewModel.installContextWindowSync() {
-    viewModelScope.launch {
+    // launchSafely：profiles 流/引擎 patch 的异常不炸进程（v1.4.9 闪退防御）
+    launchSafely(tag = "contextWindowSync") {
         settingsRepository.profiles
             .map { list ->
                 (list.firstOrNull { it.isDefault } ?: list.firstOrNull())

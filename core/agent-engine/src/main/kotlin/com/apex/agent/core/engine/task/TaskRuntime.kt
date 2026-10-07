@@ -492,17 +492,29 @@ class TaskRuntime(
         val active = store.loadActiveTasks()
         val recovered = mutableListOf<AgentTask>()
         for (task in active) {
-            val entry = TaskStatusMachine.crashRecoveryEntry(task.status)
-            // null = 不参与恢复（终态）；entry == status = 保持原态（PAUSED 语义）
-            if (entry == null || entry == task.status) {
-                recovered.add(task) // PAUSED：保持，等用户显式 resume
-                continue
-            }
-            val migrated = TaskStatusMachine.transition(task, entry, clock())
-            // 恢复扫描即修补悬空历史（R-5）：镜像 memory 修补一次并回写
-            repairDanglingInMemory()
-            persist(migrated, CheckpointBoundary.RECOVERED)
-            recovered.add(migrated)
+            // v2 闪退防御：单任务的恢复迁移/修补/落盘失败（历史脏数据、旧版本
+            // 状态、磁盘异常）只跳过该任务并留痕 —— 不允许炸掉整个恢复扫描
+            // （扫描运行在 VM init 协程里，任何逃逸异常都会杀死进程）。
+            val migratedTask = runCatching {
+                val entry = TaskStatusMachine.crashRecoveryEntry(task.status)
+                // null = 不参与恢复（终态）；entry == status = 保持原态（PAUSED 语义）
+                if (entry == null || entry == task.status) {
+                    task // PAUSED：保持，等用户显式 resume
+                } else {
+                    val migrated = TaskStatusMachine.transition(task, entry, clock())
+                    // 恢复扫描即修补悬空历史（R-5）：镜像 memory 修补一次并回写
+                    repairDanglingInMemory()
+                    persist(migrated, CheckpointBoundary.RECOVERED)
+                    migrated
+                }
+            }.onFailure { e ->
+                AppLogger.instance.error(
+                    LogCategory.ENGINE,
+                    TAG,
+                    "恢复扫描跳过任务 ${task.taskId}（状态 ${task.status}）：${e.message}"
+                )
+            }.getOrNull() ?: continue
+            recovered.add(migratedTask)
         }
         _activeTask.value = recovered.maxByOrNull { it.updatedAt }
         return recovered

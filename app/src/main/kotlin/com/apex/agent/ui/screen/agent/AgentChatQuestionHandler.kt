@@ -96,7 +96,8 @@ internal fun AgentChatViewModel.deliverUserInputOrNotice(answer: String) {
  * 「工具神秘失效」。无订阅场景发射自动丢弃（SharedFlow fire-and-forget）。
  */
 internal fun AgentChatViewModel.installQuestionExpiredNotice() {
-    viewModelScope.launch {
+    // launchSafely：桥接流异常不炸进程（v1.4.9 闪退防御）
+    launchSafely(tag = "questionExpiredNotice") {
         userQuestionBridge.questionExpired.collect {
             _uiState.update { state ->
                 state.copy(

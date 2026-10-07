@@ -816,25 +816,45 @@ jobs:
           set -euo pipefail
           # 拉取现有索引（首版 / 历史缺失时从空开始）—— 跨版本链式增量的数据底座：
           # App 由此把「本地版本 → 最新版本」解析成补丁链逐段应用
-          export EXISTING_JSON=""
-          if EXISTING_RAW=$(gh api "repos/${RELEASE_REPO}/contents/patches.json?ref=main" \
-              --jq '.content' 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null); then
-            export EXISTING_JSON="$EXISTING_RAW"
-            echo "📥 已拉取现有补丁索引（$(echo "$EXISTING_RAW" | jq '.patches | length') 条）"
-          else
-            echo "🆕 无现有 patches.json —— 从零构建"
+          #
+          # ⚠️ 索引走文件而非环境变量（v1.4.8.1 run 37553524502 事故）：
+          # patches.json 随版本累积已过 131072 字节（MAX_ARG_STRLEN 单串上限），
+          # 旧写法 export EXISTING_JSON 会让本步骤之后的所有 exec（jq / python3）
+          # 一律 E2BIG「Argument list too long」直接炸步 —— 索引只增不减，
+          # 该缺陷属「定时炸弹」：v1.4.8 在 357 条侥幸通过，377 条必炸。
+          # 环境变量只携带文件路径，内容一律落盘。
+          EXISTING_FILE=/tmp/existing_patches.json
+          FETCH_OK=0
+          if gh api "repos/${RELEASE_REPO}/contents/patches.json?ref=main" \
+              --jq '.content' 2>/dev/null | tr -d '\n' | base64 -d 2>/dev/null \
+              > "$EXISTING_FILE" && [ -s "$EXISTING_FILE" ]; then
+            FETCH_OK=1
           fi
+          if [ "$FETCH_OK" != "1" ]; then
+            # 区分「索引文件不存在」（404 → 从零构建合法）与「拉取异常」
+            #（拒绝静默从零重建 —— 那会丢光既有索引边，制造大面积断链）
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${RELEASE_REPO}/contents/patches.json?ref=main")
+            if [ "$CODE" = "200" ]; then
+              echo "::error::补丁索引拉取异常（HTTP 200 但解码/校验失败）—— 拒绝从零重建（防丢洞），请重跑本工作流"
+              exit 1
+            fi
+            echo "🆕 无现有 patches.json（HTTP $CODE）—— 从零构建"
+            echo '{"patches": []}' > "$EXISTING_FILE"
+          elif ! python3 -c "import json; json.load(open('$EXISTING_FILE'))" 2>/dev/null; then
+            echo "::error::现有索引 JSON 解析失败（截断/损坏）—— 拒绝从零重建（防丢洞），请重跑本工作流"
+            exit 1
+          else
+            echo "📥 已拉取现有补丁索引（$(jq '.patches | length' "$EXISTING_FILE") 条）"
+          fi
+          export EXISTING_PATCHES_FILE="$EXISTING_FILE"
           python3 - <<'PYEOF'
-          import base64, datetime, hashlib, json, os
+          import datetime, hashlib, json, os
 
           tag, repo = os.environ["TAG"], os.environ["RELEASE_REPO"]
-          existing = os.environ.get("EXISTING_JSON", "")
-          patches = []
-          if existing:
-              try:
-                  patches = json.loads(existing).get("patches", [])
-              except Exception:
-                  patches = []
+          with open(os.environ["EXISTING_PATCHES_FILE"], encoding="utf-8") as f:
+              patches = json.load(f).get("patches", [])
 
           base = f"https://github.com/{repo}/releases/download/{tag}"
 

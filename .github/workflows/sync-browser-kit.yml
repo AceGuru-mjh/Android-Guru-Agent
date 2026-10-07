@@ -116,15 +116,22 @@ jobs:
             exit 1
           fi
           echo "$UP_SHA" > gradle/browser-kit.lock
+          # 提交者身份避开 github-actions[bot]（bot 身份的提交与 GITHUB_TOKEN
+          # 推送同属事件抑制面 —— 即便 PAT 认证也可能被 GitHub 视为机器事件）
           git config user.name "apex-sync-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "sync-bot@apex-agent.local"
           git add gradle/browser-kit.lock
           git commit -m "chore(sync): bump apex-browser-kit @ ${UP_SHA:0:10}
 
           Automated by sync-browser-kit workflow (trigger: $EVENT).
           链路：browser-kit main 新绿提交 → 锁定 bump → push main →
           release 流水线自动构建发布（新 browser-kit 随 APK 交付）。"
-          git push "https://x-access-token:${SYNC_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+          # 关键：清掉 actions/checkout 持久化的 GITHUB_TOKEN extraheader ——
+          # 否则它会覆盖 URL 内嵌的 PAT 凭据，推送仍以 Actions App 身份认证
+          # （事件被防递归抑制，bump 落地但不触发任何 workflow）。命令级
+          # -c 覆盖本地配置，本条 push 恢复 URL 凭据（PAT）认证。
+          git -c "http.https://github.com/.extraheader=" \
+            push "https://x-access-token:${SYNC_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
           echo "🚀 已推送锁定 bump —— release 流水线即将自动构建发布"
 
       - name: Summary

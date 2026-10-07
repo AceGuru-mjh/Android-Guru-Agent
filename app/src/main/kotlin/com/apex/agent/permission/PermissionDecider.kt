@@ -20,9 +20,18 @@ package com.apex.agent.permission
  *     ASK 映射 [PermissionDecision.Ask]、DENY 映射 [PermissionDecision.Deny]；
  *  4. ACCEPT_EDITS 模式默认 → 只读 AllowExplicit；编辑写类
  *     （见 [EDIT_LIKE_PREFIXES]）AllowExplicit；其余 Ask；
- *  5. DEFAULT 模式默认 → 只读 [PermissionDecision.AllowDefault]；
- *     其余（含破坏性 / 敏感操作）一律 Ask——即「DEFAULT 下非只读
- *     一律询问，显式规则才可越级放行」的业界标准语义。
+ *  5. DEFAULT 模式默认 → 基础工具自动放行
+ *     [PermissionDecision.AllowDefault]：只读、普通编辑写、以及
+ *     「破坏但可幂等重放」的工具（整文件覆写类，见下）都不再打扰；
+ *     仅**真正不可逆的删除类**（destructive 且非幂等——delete /
+ *     uninstall / force-stop 族）与敏感动作（sensitiveAction）
+ *     才 Ask。用户反馈「每个工具都要确认太烦」——基础工具的
+ *     静默放行 + 高危单点拦截才是默认该有的手感。
+ *
+ *     「删除类」判定口径 = destructiveHint && !idempotentHint：
+ *     一次性不可逆动作（删完即没了，重放只会再删一次空气）；
+ *     而 write_file 等覆写写虽然 destructiveHint=true，但幂等
+ *     （重放收敛），可由再次写入恢复，不算删除类。
  */
 /**
  * 一次待决工具调用的上下文快照。
@@ -34,12 +43,16 @@ package com.apex.agent.permission
  * @param destructiveHint 工具注解：成功时效果是否破坏性 / 不可逆。
  * @param sensitiveAction 工具注解：是否需要用户逐次明示同意的敏感动作
  *   （如读取通知）——敏感但未必破坏性，同样值得一次询问。
+ * @param idempotentHint 工具注解：同一调用重复执行环境状态不变。
+ *   与 [destructiveHint] 组合出「删除类」判定（破坏且非幂等 = 真不可逆）
+ *   ——整文件覆写类工具（write_file 等）虽破坏但幂等，不算删除类。
  */
 data class PermissionContext(
     val toolId: String,
     val readOnlyHint: Boolean,
     val destructiveHint: Boolean,
-    val sensitiveAction: Boolean
+    val sensitiveAction: Boolean,
+    val idempotentHint: Boolean = false
 )
 
 /**
@@ -103,6 +116,14 @@ object PermissionDecider {
         EDIT_LIKE_PREFIXES.any { toolId.startsWith(it) }
 
     /**
+     * 删除类判定（DEFAULT 模式询问口径的单一事实源）：破坏且非幂等
+     * ——delete / uninstall / force-stop / signal 族的一次性不可逆动作。
+     * 幂等的覆写写（write_file 等破坏但可重放恢复）不算删除类。
+     */
+    private fun isDeleteLike(ctx: PermissionContext): Boolean =
+        ctx.destructiveHint && !ctx.idempotentHint
+
+    /**
      * 决策主入口：模式 + 规则 + 上下文 → 四态决策。
      *
      * 求值顺序见文件头决策表；BYPASS 与 PLAN 在规则之前短路，
@@ -151,12 +172,13 @@ object PermissionDecider {
                 else -> PermissionDecision.Ask
             }
 
-            // DEFAULT：非只读一律 Ask（destructive / sensitive 只是同一决策的
-            // 两个注解视角，决策表仍显式列出以便与规格逐行对照）
+            // DEFAULT：基础工具自动放行（只读 / 普通编辑写 / 幂等覆写），
+            // 仅删除类（破坏且非幂等）与敏感动作 Ask——用户意志默认
+            // 信任 Agent 的常规操作，把确认预算留给真正危险的动作
             PermissionMode.DEFAULT -> when {
                 ctx.readOnlyHint -> PermissionDecision.AllowDefault
-                ctx.destructiveHint || ctx.sensitiveAction -> PermissionDecision.Ask
-                else -> PermissionDecision.Ask
+                isDeleteLike(ctx) || ctx.sensitiveAction -> PermissionDecision.Ask
+                else -> PermissionDecision.AllowDefault
             }
 
             // 理论不可达：BYPASS / PLAN 已在 decide 外层处理

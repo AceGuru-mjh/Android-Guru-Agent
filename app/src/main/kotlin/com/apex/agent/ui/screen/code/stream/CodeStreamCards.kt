@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -122,7 +123,15 @@ private fun AssistantBubble(text: String, isStreaming: Boolean) {
 private fun ThinkingCard(text: String, isStreaming: Boolean) {
     // 注意 key：不能用 text.isEmpty() 这类派生值——空思考卡点开后首个
     // token 到达（isEmpty 翻转）会重置展开态，吞掉用户的点击
-    var expanded by remember { mutableStateOf(false) }
+    //
+    // 胶囊化展开态（用户需求：「思考时展示全部思考内容，思考完自动折叠
+    // 成胶囊」）：流式期间默认展开跟随全文；流式收束（isStreaming 翻转）
+    // 自动折叠 —— 用户手动点过则尊重手动状态，不再自动干预。
+    var expanded by remember { mutableStateOf(isStreaming) }
+    var userToggled by remember { mutableStateOf(false) }
+    LaunchedEffect(isStreaming) {
+        if (!userToggled) expanded = isStreaming
+    }
     // v5 流式玻璃：思考卡 Surface → GlassCard Frosted（accent=secondary
     // 与思考色系一致）；折叠/展开点击收在内容层，涟漪经玻璃层裁剪。
     GlassCard(
@@ -136,7 +145,10 @@ private fun ThinkingCard(text: String, isStreaming: Boolean) {
         Column(
             modifier = Modifier
                 .padding(horizontal = 10.dp, vertical = 7.dp)
-                .clickable { expanded = !expanded }
+                .clickable {
+                    userToggled = true
+                    expanded = !expanded
+                }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(

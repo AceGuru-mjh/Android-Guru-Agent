@@ -58,31 +58,42 @@ class PermissionDeciderTest {
     }
 
     @Test
-    fun `DEFAULT 模式只读工具默认放行且仍交后续门`() {
-        val decision = PermissionDecider.decide(
+    fun `DEFAULT 模式基础工具自动放行（只读、普通写、幂等覆写）`() {
+        val readOnly = PermissionDecider.decide(
             PermissionMode.DEFAULT, emptyList(), readCtx("code_read")
         )
-        assertTrue(decision is PermissionDecision.AllowDefault)
+        // 普通编辑写（非破坏非幂等）：可恢复操作，静默放行
+        val plainWrite = PermissionDecider.decide(
+            PermissionMode.DEFAULT, emptyList(), writeCtx("code_edit_file")
+        )
+        // 幂等覆写（破坏但可重放恢复，如 write_file）：不算删除类，放行
+        val idempotentOverwrite = PermissionDecider.decide(
+            PermissionMode.DEFAULT, emptyList(),
+            PermissionContext(
+                "write_file", readOnlyHint = false,
+                destructiveHint = true, sensitiveAction = false, idempotentHint = true
+            )
+        )
+        assertTrue(readOnly is PermissionDecision.AllowDefault)
+        assertTrue(plainWrite is PermissionDecision.AllowDefault)
+        assertTrue(idempotentOverwrite is PermissionDecision.AllowDefault)
     }
 
     @Test
-    fun `DEFAULT 模式非只读工具一律询问（普通、破坏性、敏感三类同判）`() {
-        val plain = PermissionDecider.decide(
-            PermissionMode.DEFAULT, emptyList(), writeCtx("code_edit_file")
-        )
-        val destructive = PermissionDecider.decide(
+    fun `DEFAULT 模式删除类与敏感动作仍询问`() {
+        // 删除类 = 破坏且非幂等（delete / uninstall / force-stop 族）
+        val deleteLike = PermissionDecider.decide(
             PermissionMode.DEFAULT, emptyList(),
             PermissionContext("delete_file", readOnlyHint = false, destructiveHint = true, sensitiveAction = false)
         )
+        assertTrue(deleteLike is PermissionDecision.Ask)
+        // 敏感动作（如读取通知）即使只读也值得一次询问——但只读判定在前，
+        // 敏感读（readOnlyHint=true）走 AllowDefault 交后续风险门把关
         val sensitiveWrite = PermissionDecider.decide(
             PermissionMode.DEFAULT, emptyList(),
             PermissionContext("sensitive_write", readOnlyHint = false, destructiveHint = false, sensitiveAction = true)
         )
-        assertTrue(plain is PermissionDecision.Ask)
-        assertTrue(destructive is PermissionDecision.Ask)
         assertTrue(sensitiveWrite is PermissionDecision.Ask)
-        // 顺序边界：readOnlyHint 先于 sensitiveAction 判定——只读但敏感的工具
-        // （如 notification_read）得到 AllowDefault，仍交后续风险门把关
         val sensitiveRead = PermissionDecider.decide(
             PermissionMode.DEFAULT, emptyList(),
             PermissionContext("notification_read", readOnlyHint = true, destructiveHint = false, sensitiveAction = true)
@@ -248,20 +259,20 @@ class PermissionDeciderTest {
             { PermissionSnapshot(PermissionMode.DEFAULT) },
             clock = { 42L }
         )
-        val tool = mutatingTool()
+        val tool = deleteLikeTool()
 
         assertTrue(gate.check(tool, "{}") is GateDecision.Allow)
         assertTrue(gate.check(tool, "{}") is GateDecision.Allow)
 
         assertEquals(1, gateway.questions.size)
-        assertEquals(mapOf("code_edit_file" to 42L), gate.sessionAllowedSnapshot())
+        assertEquals(mapOf("delete_file" to 42L), gate.sessionAllowedSnapshot())
     }
 
     @Test
     fun `allow_once 不记忆下次再问`() = runTest {
         val gateway = FakeGateway { q -> AgentAnswer(questionId = q.id, selectedOptionId = "allow_once") }
         val gate = PermissionModeGate(gateway, { PermissionSnapshot(PermissionMode.DEFAULT) })
-        val tool = mutatingTool()
+        val tool = deleteLikeTool()
 
         assertTrue(gate.check(tool, "{}") is GateDecision.Allow)
         assertTrue(gate.check(tool, "{}") is GateDecision.Allow)
@@ -275,11 +286,11 @@ class PermissionDeciderTest {
         val gateway = FakeGateway { q -> AgentAnswer(questionId = q.id, selectedOptionId = "deny") }
         val gate = PermissionModeGate(gateway, { PermissionSnapshot(PermissionMode.DEFAULT) })
 
-        val decision = gate.check(mutatingTool(), "{}")
+        val decision = gate.check(deleteLikeTool(), "{}")
 
         val deny = decision as GateDecision.Deny
         assertTrue(deny.reason.contains("用户拒绝"))
-        assertTrue(deny.reason.contains("code_edit_file"))
+        assertTrue(deny.reason.contains("delete_file"))
     }
 
     @Test
@@ -287,7 +298,7 @@ class PermissionDeciderTest {
         val gateway = FakeGateway { _ -> throw IllegalStateException("boom") }
         val gate = PermissionModeGate(gateway, { PermissionSnapshot(PermissionMode.DEFAULT) })
 
-        val decision = gate.check(mutatingTool(), "{}")
+        val decision = gate.check(deleteLikeTool(), "{}")
 
         val deny = decision as GateDecision.Deny
         assertTrue(deny.reason.contains("异常"))
@@ -299,7 +310,7 @@ class PermissionDeciderTest {
         val gate = PermissionModeGate(bridge, { PermissionSnapshot(PermissionMode.DEFAULT) })
         var result: GateDecision? = null
 
-        val job = launch { result = gate.check(mutatingTool(), "{}") }
+        val job = launch { result = gate.check(deleteLikeTool(), "{}") }
         advanceUntilIdle()                       // ask 挂起等待回答
         advanceTimeBy(5 * 60 * 1000L + 1_000L)   // 虚拟时间越过 5 分钟超时线
         advanceUntilIdle()
@@ -315,7 +326,7 @@ class PermissionDeciderTest {
         val gate = PermissionModeGate(bridge, { PermissionSnapshot(PermissionMode.DEFAULT) })
         var result: GateDecision? = null
 
-        val job = launch { result = gate.check(mutatingTool(), "{}") }
+        val job = launch { result = gate.check(deleteLikeTool(), "{}") }
         advanceUntilIdle()
         bridge.cancelCurrentQuestion()            // skipped 形态回答
         advanceUntilIdle()
@@ -329,7 +340,7 @@ class PermissionDeciderTest {
     fun `resetSession 清空会话授权记忆`() = runTest {
         val gateway = FakeGateway { q -> AgentAnswer(questionId = q.id, selectedOptionId = "allow_session") }
         val gate = PermissionModeGate(gateway, { PermissionSnapshot(PermissionMode.DEFAULT) })
-        val tool = mutatingTool()
+        val tool = deleteLikeTool()
 
         assertTrue(gate.check(tool, "{}") is GateDecision.Allow)
         assertEquals(1, gateway.questions.size)
@@ -346,7 +357,7 @@ class PermissionDeciderTest {
     fun `check 与 checkDetailed 两入口语义一致`() = runTest {
         val gateway = FakeGateway { q -> AgentAnswer(questionId = q.id, selectedOptionId = "deny") }
         val gate = PermissionModeGate(gateway, { PermissionSnapshot(PermissionMode.DEFAULT) })
-        val tool = mutatingTool()
+        val tool = deleteLikeTool()
 
         val viaCheck = gate.check(tool, "{}")
         val viaDetailed = gate.checkDetailed(tool, "{}")
@@ -398,14 +409,14 @@ class PermissionDeciderTest {
                 {
                     PermissionSnapshot(
                         PermissionMode.DEFAULT,
-                        listOf(PermissionRule("code_edit_file", PermissionEffect.ALLOW))
+                        listOf(PermissionRule("delete_file", PermissionEffect.ALLOW))
                     )
                 }
             ),
             fallback
         )
 
-        val decision = gate.check(mutatingTool(), "{}")
+        val decision = gate.check(deleteLikeTool(), "{}")
 
         assertTrue(decision is GateDecision.Allow)
         assertTrue(fallback.checkedToolIds.isEmpty())
@@ -440,7 +451,7 @@ class PermissionDeciderTest {
             fallback
         )
 
-        val decision = gate.check(mutatingTool(), "{}")
+        val decision = gate.check(deleteLikeTool(), "{}")
 
         assertTrue(decision is GateDecision.Deny)
         assertTrue(fallback.checkedToolIds.isEmpty())
@@ -452,7 +463,7 @@ class PermissionDeciderTest {
     private fun readCtx(toolId: String) =
         PermissionContext(toolId, readOnlyHint = true, destructiveHint = false, sensitiveAction = false)
 
-    /** 普通写上下文（非只读、非破坏、非敏感）。 */
+    /** 普通写上下文（非只读、非破坏、非敏感、非幂等——如 edit_file）。 */
     private fun writeCtx(toolId: String = "code_edit_file") =
         PermissionContext(toolId, readOnlyHint = false, destructiveHint = false, sensitiveAction = false)
 
@@ -477,8 +488,12 @@ class PermissionDeciderTest {
     private fun readonlyTool(id: String = "code_read") =
         FakeTool(id, ToolAnnotations.readOnly())
 
-    private fun mutatingTool(id: String = "code_edit_file") =
-        FakeTool(id, ToolAnnotations.mutating())
+    /**
+     * 删除类假工具（破坏且非幂等）：DEFAULT 模式下唯一会触发询问的
+     * 非敏感类别 —— 门交互闭环测试的问答载体。
+     */
+    private fun deleteLikeTool(id: String = "delete_file") =
+        FakeTool(id, ToolAnnotations.destructive())
 
     /** 脚本化问答网关：记录全部问题，按脚本回放答案（可抛异常模拟通道故障）。 */
     private class FakeGateway(

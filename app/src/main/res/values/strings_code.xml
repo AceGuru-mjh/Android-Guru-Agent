@@ -46,12 +46,12 @@
     <string name="code_perm_section_title">Tool permissions</string>
     <string name="code_perm_section_subtitle">standard permission mode and rules</string>
     <string name="code_perm_mode_label">Permission mode</string>
-    <string name="code_perm_mode_bypass">Bypass</string>
-    <string name="code_perm_mode_default">Default</string>
+    <string name="code_perm_mode_bypass">Full Auto</string>
+    <string name="code_perm_mode_default">Default (Recommended)</string>
     <string name="code_perm_mode_accept_edits">Accept Edits</string>
     <string name="code_perm_mode_plan">Plan</string>
-    <string name="code_perm_mode_bypass_desc">All tools run without asking (use with care)</string>
-    <string name="code_perm_mode_default_desc">Read-only tools are allowed; everything else asks first</string>
+    <string name="code_perm_mode_bypass_desc">No confirmation at all: every tool runs silently (trusted scenarios only)</string>
+    <string name="code_perm_mode_default_desc">Basic tools run automatically; only delete-like high-risk actions ask first</string>
     <string name="code_perm_mode_accept_edits_desc">File edits and git commits are allowed; everything else asks first</string>
     <string name="code_perm_mode_plan_desc">Read-only planning: any tool that mutates the environment is denied</string>
     <string name="code_perm_rules_title">Tool permission rules (first match wins)</string>

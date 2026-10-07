@@ -68,6 +68,7 @@ import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.GateDialogStrings
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.tools.ToolAuditLogger
+import com.apex.agent.permission.PermissionMode
 import com.apex.agent.permission.PermissionModeGate
 import com.apex.agent.permission.PermissionAwareToolGate
 import com.apex.agent.permission.PermissionSnapshot
@@ -500,6 +501,7 @@ object ToolModule {
         // 工具检索技能+MCP 双 hub 目录。
         hubSource: HubSource,
         // v3 子代理预算接线（设置 → 子代理）：SubAgentRunner 每次运行读快照。
+        // 全自动模式（BYPASS）短路命令级确认门的设置源（实时读取，改设置即生效）。
         settingsRepository: SettingsRepository
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
@@ -530,7 +532,12 @@ object ToolModule {
         // 的 schema 声明了 timeout 参数但旧链路从不透传，PrivilegeDetector 固定
         // 30s 默认值，长命令（编译/安装/构建）全部误判失败。
         val shellExecResult: suspend (String, Long) -> ShellExecResult = { cmd, timeoutMs ->
-            if (!commandPermissionGate.ensureAllowed(cmd)) {
+            // 全自动模式（BYPASS）：跳过命令级确认门 —— 「完全不用用户确认」
+            // 的承诺必须覆盖 shell 高危命令，否则全放行只放了一半。实时读
+            // 设置（非构造期快照），用户切回其他模式后立即恢复拦截。
+            val bypassCommandGate = settingsRepository.agentSettings.value.permissionMode ==
+                PermissionMode.BYPASS
+            if (!bypassCommandGate && !commandPermissionGate.ensureAllowed(cmd)) {
                 // #F-⑯：工具层审计（拒绝也留痕）；结构化结果见下方 T92 注释。
                 toolAuditLogger.log(ToolAuditLogger.Event(
                     tool = "shell_execute", decision = "denied_by_user", command = cmd,
@@ -647,10 +654,16 @@ object ToolModule {
                 gitHubTokenProvider = { githubTokenManager.getToken() }
             )),
             approvalGate = { cmd ->
-                if (commandPermissionGate.ensureAllowed(cmd)) {
+                // 全自动模式（BYPASS）与 shell_execute 同口径：跳过命令级确认门。
+                val bypassCommandGate = settingsRepository.agentSettings.value.permissionMode ==
+                    PermissionMode.BYPASS
+                if (bypassCommandGate || commandPermissionGate.ensureAllowed(cmd)) {
                     toolAuditLogger.log(ToolAuditLogger.Event(
-                        tool = "terminal.exec", decision = "approved", command = cmd,
-                        detail = "CommandPermissionGate allowed"
+                        tool = "terminal.exec",
+                        decision = "approved",
+                        command = cmd,
+                        detail = if (bypassCommandGate) "BYPASS mode auto-allowed"
+                        else "CommandPermissionGate allowed"
                     ))
                     null
                 } else {

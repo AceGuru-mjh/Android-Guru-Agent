@@ -309,9 +309,17 @@ class CodeStreamSessionTest {
             "轮内思考条目必须原位保留",
             snap.entries.any { it is StreamEntry.ThinkingEntry && (it as StreamEntry.ThinkingEntry).text == "思考怎么修" }
         )
+        // 迭代声明不再产生状态行（用户反馈：迭代字样无意义、纯噪音）——
+        // 轮次信息只在 Complete 收尾行汇总。
         assertTrue(
-            "轮内迭代状态行必须原位保留",
-            snap.entries.any { it is StreamEntry.StatusEntry && (it as StreamEntry.StatusEntry).text.contains("第 2 轮") }
+            "迭代声明不得再产生「第 N 轮迭代」状态行",
+            snap.entries.none {
+                it is StreamEntry.StatusEntry && (it as StreamEntry.StatusEntry).text.contains("轮迭代")
+            }
+        )
+        assertTrue(
+            "Complete 收尾状态行仍保留",
+            snap.entries.any { it is StreamEntry.StatusEntry && (it as StreamEntry.StatusEntry).text.contains("完成") }
         )
     }
 

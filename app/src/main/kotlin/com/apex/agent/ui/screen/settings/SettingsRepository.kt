@@ -430,8 +430,8 @@ class SettingsRepository @Inject constructor(
  *  - loopDetection / planning / replanning / backgroundExecution / keepAlive /
  *    autoRetry 等 → Agent 引擎后续接入（UI 已逐项暴露）；
  *  - visionEnabled / screenshotQuality / maxScreenshots → 视觉管线后续接入；
- *  - themeMode / dynamicColor / fontScale / showTimestamps → 界面/主题层消费
- *    （fontScale / showTimestamps 设计为立即生效）。
+ *  - themeMode / dynamicColor / fontScale / showTimestamps / uiStyle /
+ *    accentPalette → 界面/主题层消费（后四者设计为立即生效）。
  */
 @kotlinx.serialization.Serializable
 data class AgentSettings(
@@ -552,6 +552,14 @@ data class AgentSettings(
     // matcha | peach | plum）；Dynamic Color 开启时被壁纸取色覆盖。
     // 见 ui/theme/ThemePalettes.kt。
     val accentPalette: String = "mint",
+    /**
+     * 全局界面风格（minimal | liquid_glass）—— 与深浅模式正交的外观维度：
+     *  - minimal（默认）：极简黑白 —— 纯灰阶配色 + 扁平表面（玻璃体系
+     *    整体短路），Dynamic Color / accentPalette 不参与；
+     *  - liquid_glass：液态玻璃 —— 完整玻璃材质管线 + 18 套预设强调色。
+     * 见 ui/theme/UiStyle.kt；设置中心「外观」分区切换，立即生效。
+     */
+    val uiStyle: String = "minimal",
     val fontScale: Float = 1.0f,              // 0.8..1.4
     val showTimestamps: Boolean = true,
 

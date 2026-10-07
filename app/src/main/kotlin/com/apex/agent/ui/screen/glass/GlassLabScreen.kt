@@ -148,10 +148,19 @@ fun GlassLabScreen() {
         LabModeSwitcher(mode = mode, onSelect = { mode = it })
 
         when (mode) {
-            GlassLabMode.NIGHT -> ApexTheme(darkTheme = true) {
+            // 玻璃实验室是液态玻璃体系的验证屏 —— 无论全局风格设置如何，
+            // 在此强制液态玻璃风格（极简模式会把玻璃短路成扁平表面，
+            // 验证屏将失去验证对象）。
+            GlassLabMode.NIGHT -> ApexTheme(
+                darkTheme = true,
+                uiStyle = com.apex.agent.ui.theme.UiStyle.LIQUID_GLASS
+            ) {
                 GlassLabContent(mode = GlassLabMode.NIGHT)
             }
-            GlassLabMode.DAY -> ApexTheme(darkTheme = false) {
+            GlassLabMode.DAY -> ApexTheme(
+                darkTheme = false,
+                uiStyle = com.apex.agent.ui.theme.UiStyle.LIQUID_GLASS
+            ) {
                 GlassLabContent(mode = GlassLabMode.DAY)
             }
         }

@@ -16,6 +16,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -345,6 +346,11 @@ fun AboutScreen() {
 @Composable
 private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
     val scheme = MaterialTheme.colorScheme
+    // 极简黑白风格：装饰动画层（极光 / 流光边框 / 镜面扫掠 / 呼吸光晕）
+    // 整体停用 —— 静音克制是风格语义的一部分；Hero 卡本身由 GlassSurface
+    // 的风格短路分支自动扁平化。
+    val minimal = com.apex.agent.ui.theme.LocalUiStyle.current ==
+        com.apex.agent.ui.theme.UiStyle.MINIMAL
     val heroBackdrop = rememberLayerBackdrop()
     val heroShape = RoundedCornerShape(22.dp)
 
@@ -352,7 +358,7 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
     val borderAngle: State<Float>
     val breath: State<Float>
     val sheen: State<Float>
-    if (animated) {
+    if (animated && !minimal) {
         val transition = rememberInfiniteTransition(label = "about_hero")
         drift = transition.animateFloat(
             initialValue = 0f,
@@ -402,13 +408,22 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
     }
 
     Box(modifier = modifier.fillMaxWidth().height(252.dp)) {
-        // ① 极光氛围层 —— 同时是 Hero 卡的 backdrop 采样源（API 32+ 真实折射）
-        AuroraCanvas(
-            drift = drift,
-            modifier = Modifier
-                .fillMaxSize()
-                .layerBackdrop(heroBackdrop)
-        )
+        // ① 极光氛围层 —— 同时是 Hero 卡的 backdrop 采样源（API 32+ 真实折射）；
+        //    极简风格下退化为纯色底（装饰是玻璃材质语言的配套件）
+        if (minimal) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(scheme.background)
+            )
+        } else {
+            AuroraCanvas(
+                drift = drift,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .layerBackdrop(heroBackdrop)
+            )
+        }
 
         // ② 玻璃卡主体（Backdrop 档：实时采样背后的极光）
         GlassSurface(
@@ -425,20 +440,22 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
                 verticalArrangement = Arrangement.Center
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    // ④ 呼吸光晕
-                    Box(
-                        Modifier
-                            .size(96.dp)
-                            .drawBehind {
-                                val b = breath.value
-                                val r = size.minDimension * (0.55f + 0.12f * b)
-                                drawCircle(
-                                    brush = breathBrush,
-                                    radius = r,
-                                    center = center
-                                )
-                            }
-                    )
+                    // ④ 呼吸光晕（极简风格下不绘制 —— 装饰性光环）
+                    if (!minimal) {
+                        Box(
+                            Modifier
+                                .size(96.dp)
+                                .drawBehind {
+                                    val b = breath.value
+                                    val r = size.minDimension * (0.55f + 0.12f * b)
+                                    drawCircle(
+                                        brush = breathBrush,
+                                        radius = r,
+                                        center = center
+                                    )
+                                }
+                        )
+                    }
                     Surface(
                         modifier = Modifier.size(64.dp),
                         shape = CircleShape,
@@ -476,17 +493,18 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
             }
         }
 
-        // ③ 顶阶动态覆盖层：旋转流光边框 + 对角镜面扫掠
+        // ③ 顶阶动态覆盖层：旋转流光边框 + 对角镜面扫掠（极简风格下整体省略）
         //    #262：drawWithCache —— Outline / 锥形描边 Brush / 光带 Brush
         //    均只在尺寸变化时构建一次；动画相位（borderAngle / sheen）在
         //    onDrawWithContent 里读取，属 draw 阶段读 State —— 只触发重绘，
         //    不重建缓存、不触发重组（旧实现每帧三连分配）。
         //    光带的移动改为 translate 平移固定 Brush（几何只依赖 bandX 的
         //    水平位移，与旧实现逐帧重建 linearGradient 几何等价）。
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithCache {
+        if (!minimal) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithCache {
                     val outline = heroShape.createOutline(
                         size = size,
                         layoutDirection = layoutDirection,
@@ -530,7 +548,8 @@ private fun AboutHero(modifier: Modifier = Modifier, animated: Boolean = true) {
                         }
                     }
                 }
-        )
+            )
+        }
     }
 }
 

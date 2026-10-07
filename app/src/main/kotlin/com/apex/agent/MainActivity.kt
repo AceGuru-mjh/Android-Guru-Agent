@@ -35,6 +35,7 @@ import com.apex.agent.ui.screen.settings.SettingsRepository
 import com.apex.agent.ui.theme.AccentPalette
 import com.apex.agent.ui.theme.ApexTheme
 import com.apex.agent.ui.theme.LocalShowTimestamps
+import com.apex.agent.ui.theme.UiStyle
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -168,7 +169,8 @@ class MainActivity : ComponentActivity() {
             ApexTheme(
                 darkTheme = darkTheme,
                 dynamicColor = settings.dynamicColor,
-                accentPalette = AccentPalette.fromKey(settings.accentPalette)
+                accentPalette = AccentPalette.fromKey(settings.accentPalette),
+                uiStyle = UiStyle.fromKey(settings.uiStyle)
             ) {
                 // 全局字体缩放：在系统 fontScale 基础上叠加设置中心的缩放系数
                 val density = LocalDensity.current

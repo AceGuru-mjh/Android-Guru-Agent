@@ -204,10 +204,12 @@ class PermissionDeciderTest {
     fun `空模式规则不匹配任何工具`() {
         assertFalse(PermissionRuleMatcher.matches("", "code_edit"))
         assertFalse(PermissionRuleMatcher.matches("   ", "code_edit"))
+        // 规则不生效 → 落到模式默认；删除类上下文（destructive 且非幂等）
+        // 在 DEFAULT 下按模式默认询问，断言意图不变：空规则既不放行也不拒绝
         val decision = PermissionDecider.decide(
             PermissionMode.DEFAULT,
             listOf(PermissionRule("", PermissionEffect.ALLOW)),
-            writeCtx()
+            PermissionContext("delete_file", readOnlyHint = false, destructiveHint = true, sensitiveAction = false)
         )
         assertTrue(decision is PermissionDecision.Ask)
     }

@@ -885,6 +885,11 @@ jobs:
 
       - name: Mirror Release to dev repository (主仓库同步发布，仅 APK)
         if: needs.resolve.outputs.publishing == 'true'
+        # v1.4.8 断链修复：镜像是「锦上添花」，version.json 提交才是 App 检查
+        # 更新的真相源 —— 镜像偶发故障绝不能把后续 version.json 提交拖死
+        # （v1.4.7.25 断链事故：镜像 404 → 后续步骤整段跳过 → 发布仓库有版、
+        # 客户端永远看不到新版）。失败保留红标记，流水线继续走完关键步骤。
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           # 主仓库镜像发布：不指定 repository / token → 默认本仓库 + GITHUB_TOKEN。
@@ -899,9 +904,12 @@ jobs:
           name: "Release ${{ needs.resolve.outputs.tag }}"
           body_path: release_body_dev.md
           make_latest: true
+          # v1.4.8 断链修复（根因）：dist/*.apk 通配已覆盖 SHA256SUMS.apk，再
+          # 显式列一次会让 action 并发上传同名资产两份 —— 第二份在资产更新
+          # API（update-a-release-asset）上撞 404：v1.4.7.24 侥幸自愈、
+          # v1.4.7.25 致命失败。每个文件只允许出现一次，勿再补列 SHA256SUMS.apk。
           files: |
             dist/*.apk
-            dist/SHA256SUMS.apk
             dist/version.json
 
       - name: Commit version.json to release repo main branch

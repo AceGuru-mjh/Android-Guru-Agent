@@ -19,9 +19,11 @@ import kotlinx.serialization.Serializable
  *
  * ── 权限模式（业界标准语义）──
  *
- * - [PermissionMode.BYPASS]：全放行——不做任何询问与拦截（危险，仅供信任场景）；
- * - [PermissionMode.DEFAULT]：规则 + 按需询问——只读工具默认放行（仍交后续
- *   风险门把关），其余一律先问用户；显式 ALLOW 规则可越级放行；
+ * - [PermissionMode.BYPASS]：全放行——不做任何询问与拦截（危险，仅供信任场景；
+ *   即设置页的「全自动」模式）；
+ * - [PermissionMode.DEFAULT]：规则 + 按需询问——基础工具（只读 / 普通编辑写 /
+ *   幂等覆写）默认放行（仍交后续风险门把关），仅删除类（破坏且非幂等）与
+ *   敏感动作先问用户；显式 ALLOW 规则可越级放行；
  * - [PermissionMode.ACCEPT_EDITS]：编辑类自动放行——文件编辑 / git 提交等
  *   写操作不再询问，其余非只读工具仍先问；
  * - [PermissionMode.PLAN]：只读模式——只读工具默认放行，任何会修改环境的

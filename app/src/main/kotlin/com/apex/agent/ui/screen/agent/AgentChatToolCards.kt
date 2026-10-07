@@ -830,10 +830,11 @@ fun RunningToolCallCard(toolCall: AgentToolCallUi) {
     val kindStyle = toolKindStyle(toolCall.kind)
     val accent = kindStyle.color
 
-    // ═══ v2 小胶囊折叠态：运行中的工具默认也只占一行 ~26dp（用户反馈
-    // 「调用工具缩小成小胶囊，点击才放大」），点击展开完整运行卡（时间线/
-    // 进度/输出）。展开态内容与 v1 完全一致。═══
-    var expanded by remember(toolCall.id) { mutableStateOf(false) }
+    // ═══ 运行态默认展开（用户需求：「正在使用工具时详细展示工具输出，
+    // 使用完之后折叠成胶囊」）：运行卡初始即展开（时间线/进度/输出流式
+    // 可见），用户可手动点收；完成后运行卡移除、落地的 ToolCallCard 以
+    // 小胶囊形态入场 —— 运行中看细节、结束后留一行。═══
+    var expanded by remember(toolCall.id) { mutableStateOf(true) }
 
     // 实时耗时计时：立即显示真实已用时长（而非从 0 起跳），此后每秒刷新；
     // ≥60s 后切换为 2m05s 形式，长任务可读性更好。

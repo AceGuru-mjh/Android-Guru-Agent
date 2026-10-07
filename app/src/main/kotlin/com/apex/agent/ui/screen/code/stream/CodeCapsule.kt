@@ -52,16 +52,18 @@ import com.apex.agent.core.code.stream.ToolKind
 import com.apex.agent.ui.theme.LocalExtendedColors
 
 /**
- * # Code Capsule \u2014 工具调用胶囊（规格书【2】胶囊层）
+ * # Code Capsule — 工具调用胶囊（规格书【2】胶囊层）
  *
  * 结构：左（ToolKind 着色图标）+ 中（名称 + target 可点击）+
- * 右（状态徽标 + 耗时 + hunk 进度）+ 副标题（动态文案 / 完成摘要 \u226424 字）。
+ * 右（状态徽标 + 耗时 + hunk 进度）+ 副标题（动态文案 / 完成摘要 ≤24 字）。
  *
- * - 点击区 \u226548dp（内容垂直 padding 8dp + 双行主体保证可触面积）；
- * - 点击行为按族路由（onOpen 回调携带意图：BASH\u2192终端面板、
- *   EDIT/WRITE\u2192文件 Diff、GREP\u2192结果列表、TEST\u2192失败用例）；
+ * - 点击区 ≥48dp（内容垂直 padding 8dp + 双行主体保证可触面积）；
+ * - 点击行为按族路由（onOpen 回调携带意图：BASH→终端面板、
+ *   EDIT/WRITE→文件 Diff、GREP→结果列表、TEST→失败用例）；
  * - 着色语义：读灰 / 写蓝 / 命令紫 / lint 黄 / 测试绿 / 错误红
- *   （深浅主题取 MaterialTheme 动态色打底，族色用固定色相保证跨主题一致）。
+ *   （深浅主题取 MaterialTheme 动态色打底，族色用固定色相保证跨主题一致）；
+ * - 运行态内嵌实时输出尾窗（「使用中详细展示、完成后折叠成胶囊」）：
+ *   RUNNING 时在胶囊行下方流式展示 [StreamToolCall.logTail]，终态自动收起。
  */
 @Composable
 internal fun CodeCapsule(
@@ -97,97 +99,124 @@ internal fun CodeCapsule(
             .clickable(role = Role.Button) { onClick(call) }
             .semantics { contentDescription = "${call.displayName} ${call.target}, $statusDesc" }
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 5.dp)
-        ) {
-            // 左：族图标（着色底，紧凑井 20dp）
-            Surface(
-                shape = RoundedCornerShape(7.dp),
-                color = style.color.copy(alpha = 0.14f)
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
             ) {
-                Icon(
-                    imageVector = style.icon,
-                    contentDescription = null,
-                    tint = style.color,
-                    modifier = Modifier
-                        .padding(3.dp)
-                        .size(14.dp)
-                )
-            }
-            Spacer(Modifier.width(6.dp))
-
-            // \u2500\u2500 中：名称 + target（可点击主体）\u2500\u2500
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = call.displayName,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = call.target,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
+                // 左：族图标（着色底，紧凑井 20dp）
+                Surface(
+                    shape = RoundedCornerShape(7.dp),
+                    color = style.color.copy(alpha = 0.14f)
+                ) {
+                    Icon(
+                        imageVector = style.icon,
+                        contentDescription = null,
+                        tint = style.color,
+                        modifier = Modifier
+                            .padding(3.dp)
+                            .size(14.dp)
                     )
                 }
-                // 副标题：运行中 = 进度文案/参数摘要；终态 = 完成摘要
-                val subtitle = call.summary
-                    ?: call.progressMessage
-                    ?: call.argsSummary.ifBlank { call.target }
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                Spacer(Modifier.width(6.dp))
+
+                // ── 中：名称 + target（可点击主体）──
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = call.displayName,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = call.target,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+                    // 副标题：运行中 = 进度文案/参数摘要；终态 = 完成摘要
+                    val subtitle = call.summary
+                        ?: call.progressMessage
+                        ?: call.argsSummary.ifBlank { call.target }
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // ── 右：hunk 进度 + exit code + 耗时 + 状态徽标 ──
+                if (call.hunksTotal > 0) {
+                    Text(
+                        text = "${call.hunksApplied}/${call.hunksTotal}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (call.status == ToolCallStatus.FAILED)
+                            MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                call.exitCode?.let { code ->
+                    Text(
+                        text = stringResource(R.string.code_stream_exit_code_fmt, code),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (code == 0) successColor else MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                val shownDuration = call.displayDuration(System.currentTimeMillis())
+                if (shownDuration > 0) {
+                    Text(
+                        text = formatCapsuleDuration(shownDuration),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Icon(
+                    imageVector = statusIcon(call.status),
+                    contentDescription = statusDesc,
+                    tint = statusColor,
+                    modifier = Modifier.size(14.dp)
                 )
             }
 
-            // \u2500\u2500 右：hunk 进度 + exit code + 耗时 + 状态徽标 \u2500\u2500
-            if (call.hunksTotal > 0) {
-                Text(
-                    text = "${call.hunksApplied}/${call.hunksTotal}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (call.status == ToolCallStatus.FAILED)
-                        MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.tertiary
-                )
-                Spacer(Modifier.width(6.dp))
+            // ── 运行中内嵌实时输出尾窗（与 Agent 聊天屏 RunningToolCallCard 同口径）──
+            // RUNNING 态在胶囊行下方流式展示 logTail（6 行限高防长输出撑爆时间轴），
+            // 完成后自动收起 —— 胶囊回到单行摘要形态（使用中详细、完成即折叠）。
+            if (call.status == ToolCallStatus.RUNNING && call.logTail.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 34.dp, end = 10.dp, bottom = 8.dp)
+                ) {
+                    Text(
+                        text = call.logTail,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = LIVE_TAIL_MAX_LINES,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    )
+                }
             }
-            call.exitCode?.let { code ->
-                Text(
-                    text = stringResource(R.string.code_stream_exit_code_fmt, code),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (code == 0) successColor else MaterialTheme.colorScheme.error
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            val shownDuration = call.displayDuration(System.currentTimeMillis())
-            if (shownDuration > 0) {
-                Text(
-                    text = formatCapsuleDuration(shownDuration),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.width(6.dp))
-            }
-            Icon(
-                imageVector = statusIcon(call.status),
-                contentDescription = statusDesc,
-                tint = statusColor,
-                modifier = Modifier.size(14.dp)
-            )
         }
     }
 }
@@ -248,9 +277,12 @@ internal fun CodeCapsuleGroupRow(
     }
 }
 
-// \u2550\u2550\u2550 内部：样式与文案 \u2550\u2550\u2550
+// ═══ 内部：样式与文案 ═══
 
 internal data class CapsuleStyle(val icon: ImageVector, val color: Color)
+
+/** 运行中实时尾窗的最大行数（限高防长输出撑爆时间轴）。 */
+private const val LIVE_TAIL_MAX_LINES = 6
 
 /** 族样式：读灰 / 写改蓝 / 命令紫 / lint 黄 / 测试绿 / git 品牌灰。 */
 @Composable
@@ -302,7 +334,7 @@ internal fun statusIcon(status: ToolCallStatus): ImageVector = when (status) {
     ToolCallStatus.PARTIAL -> Icons.Default.ErrorOutline
 }
 
-/** 毫秒 \u2192 紧凑时长（850ms / 3.4s / 2m05s）。 */
+/** 毫秒 → 紧凑时长（850ms / 3.4s / 2m05s）。 */
 internal fun formatCapsuleDuration(ms: Long): String = when {
     ms < 0 -> "0s"
     ms < 1_000 -> "${ms}ms"

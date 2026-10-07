@@ -105,7 +105,7 @@ class PermissionModeGate(
      *
      * 每次调用都现取 [PermissionSnapshot]（设置热生效）；工具上下文从
      * tool.metadata.annotations 读取（readOnlyHint / destructiveHint /
-     * sensitiveAction 三个决策注解）。
+     * idempotentHint / sensitiveAction 四个决策注解）。
      */
     suspend fun checkDetailed(tool: AgentTool, arguments: String): DetailedDecision {
         val snapshot = settingsProvider()
@@ -114,7 +114,8 @@ class PermissionModeGate(
             toolId = tool.id,
             readOnlyHint = annotations.readOnlyHint,
             destructiveHint = annotations.destructiveHint,
-            sensitiveAction = annotations.sensitiveAction
+            sensitiveAction = annotations.sensitiveAction,
+            idempotentHint = annotations.idempotentHint
         )
         return when (val decision = PermissionDecider.decide(snapshot.mode, snapshot.rules, ctx)) {
             is PermissionDecision.AllowExplicit -> DetailedDecision.ExplicitAllow
@@ -231,6 +232,14 @@ class PermissionModeGate(
 
     /** 会话授权记忆快照（调试 / 设置界面展示用）。 */
     fun sessionAllowedSnapshot(): Map<String, Long> = sessionAllowed.toMap()
+
+    /** 模式短名（授权对话框文案用，中文）。 */
+    private fun modeLabel(mode: PermissionMode): String = when (mode) {
+        PermissionMode.BYPASS -> "全自动（BYPASS）"
+        PermissionMode.DEFAULT -> "默认（DEFAULT）"
+        PermissionMode.ACCEPT_EDITS -> "接受编辑（ACCEPT_EDITS）"
+        PermissionMode.PLAN -> "只读规划（PLAN）"
+    }
 
     private companion object {
         /** 授权询问超时：对齐 RiskAwareToolGate 的 5 分钟。 */

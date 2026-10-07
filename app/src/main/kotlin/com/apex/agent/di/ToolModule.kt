@@ -68,6 +68,7 @@ import com.apex.agent.tools.AskUserTool
 import com.apex.agent.tools.GateDialogStrings
 import com.apex.agent.tools.RiskAwareToolGate
 import com.apex.agent.tools.ToolAuditLogger
+import com.apex.agent.permission.PermissionMode
 import com.apex.agent.permission.PermissionModeGate
 import com.apex.agent.permission.PermissionAwareToolGate
 import com.apex.agent.permission.PermissionSnapshot
@@ -210,9 +211,7 @@ object ToolModule {
     fun provideBrowserTracer(): BrowserTracer = BrowserTracer(capacity = 100)
 
     // ═══ #167 加密剪切板金库：仓库单例 + 全局脱敏器单例 ═══
-    // 存储层 EncryptedPrefsVaultStore（EncryptedSharedPreferences，失败退化普通 SP）；
-    // SecretRedactor 与仓库登记表同源（save/delete 后全量重建），供
-    // SecretRedactingExecutor 兜底擦洗所有工具输出。
+    // EncryptedPrefsVaultStore（失败退化普通 SP）；SecretRedactor 与登记表同源重建，兜底擦洗工具输出。
 
     @Provides
     @Singleton
@@ -500,16 +499,14 @@ object ToolModule {
         // 工具检索技能+MCP 双 hub 目录。
         hubSource: HubSource,
         // v3 子代理预算接线（设置 → 子代理）：SubAgentRunner 每次运行读快照。
+        // 全自动模式（BYPASS）短路命令级确认门的设置源（实时读取，改设置即生效）。
         settingsRepository: SettingsRepository
     ): ToolRegistry {
         val registry = DefaultToolRegistry()
 
-        // P83 (T5) Workspace 统一：文件工具的沙箱根从扁平 `<filesDir>/workspace` 迁移到
-        // LinuxWorkspaceManager 的 default workspace（`<filesDir>/linux/workspaces/default`，
-        // bind 到 Ubuntu 会话的 guest /workspace）。这样 Agent 的 read_file/write_file 与
-        // terminal 会话看到同一份文件，终结“双轨互不可见”。旧目录内容一次性搬入
-        //（default 非空则跳过，旧目录保留供人工 salvage）；解析失败时诚实降级到旧路径
-        //（工具仍可用，只是未统一）。
+        // P83 (T5) Workspace 统一：文件沙箱根迁移到 LinuxWorkspaceManager 的 default
+        // workspace（bind Ubuntu guest /workspace）—— read_file/write_file 与 terminal 看到同一份
+        // 文件；旧目录内容一次性搬入，解析失败诚实降级旧路径（工具仍可用，只是未统一）。
         val flatLegacyDir = File(context.filesDir, "workspace")
         val workspaceDir = runCatching {
             workspaceManager.migrateFlatSandboxIfNeeded(flatLegacyDir)
@@ -523,14 +520,15 @@ object ToolModule {
         // 命令以纯 cd <dir> 结尾且执行成功 → 记录新目录，后续命令以它为起始目录。
         val shellWorkDir = com.apex.agent.tools.ShellWorkDirTracker()
 
-        // 门禁 + 执行的统一出口（T92 / #255 权限链审计）：返回带 via 通道真相的
-        // ShellExecResult。via 为 VIA_GATE_DENIED / VIA_EXCEPTION 时 output 已是
-        // 面向模型的最终错误文案（与旧版逐字节一致）。
-        // P1 修复（timeout 死参数）：闭包签名增加 timeoutMs —— ShellExecuteTool
-        // 的 schema 声明了 timeout 参数但旧链路从不透传，PrivilegeDetector 固定
-        // 30s 默认值，长命令（编译/安装/构建）全部误判失败。
+        // 门禁+执行统一出口（T92 / #255 审计）：via 为 VIA_GATE_DENIED / VIA_EXCEPTION 时
+        // output 已是面向模型的最终错误文案。P1：签名带 timeoutMs —— 旧链路从不透传
+        // schema 的 timeout 参数（固定 30s 默认），长命令（编译/安装/构建）全误判失败。
         val shellExecResult: suspend (String, Long) -> ShellExecResult = { cmd, timeoutMs ->
-            if (!commandPermissionGate.ensureAllowed(cmd)) {
+            // 全自动（BYPASS）：跳过命令级确认门 ——「完全不用确认」必须覆盖 shell 高危
+            // 命令。实时读设置（非构造期快照），切回其他模式立即恢复拦截。
+            val bypassCommandGate = settingsRepository.agentSettings.value.permissionMode ==
+                PermissionMode.BYPASS
+            if (!bypassCommandGate && !commandPermissionGate.ensureAllowed(cmd)) {
                 // #F-⑯：工具层审计（拒绝也留痕）；结构化结果见下方 T92 注释。
                 toolAuditLogger.log(ToolAuditLogger.Event(
                     tool = "shell_execute", decision = "denied_by_user", command = cmd,
@@ -620,19 +618,13 @@ object ToolModule {
         registry.register(SafeAgentTool(ShellExecuteTool(shellExecAudited)))
 
         // ═══ 1b. terminal.exec —— 一次性结构化命令执行（stdout/stderr/exit_code/duration_ms/truncated）═══
-        // 与 shell_execute 共享同一门禁（commandPermissionGate）与同一 cd 工作目录记忆
-        //（shellWorkDir）：Agent 换工具不换语义。通道选择 Root > Shizuku > app-shell
-        //（PrivilegedCommandSpawner），pipe 形态分离采集两流 + 真实 waitpid 退出码。
-        //
-        // 必须经 TerminalToolAdapter：TerminalExecTool 实现的是 platform:terminal 的
-        // TerminalTool（模块边界不允许它依赖 core:tool-registry 的 AgentTool），
-        // 直接塞进 SafeAgentTool(AgentTool) 无法编译。
-        //
-        // P0 修复：ExecEngine 接入 ProotCommandSpawner —— rootfs 就绪且非 Android
-        // 专有命令时路由进 PRoot Ubuntu（channel="proot-ubuntu"），python3/gcc/
-        // apt/git/npm 等工具链命令不再 "not found"；未就绪/Android 命令诚实回落
-        // su > Shizuku > local-sh（行为与旧版一致）。cwd 映射与 bind 语义见
-        // ProotCommandSpawner KDoc。
+        // 与 shell_execute 共享门禁（commandPermissionGate）与 cd 工作目录记忆（shellWorkDir）；
+        // 通道 Root > Shizuku > app-shell（PrivilegedCommandSpawner），双流分离采集 + waitpid 退出码。
+        // 必须经 TerminalToolAdapter：TerminalExecTool 实现的是 platform:terminal 的 TerminalTool
+        //（模块边界禁依赖 core:tool-registry 的 AgentTool），直塞 SafeAgentTool(AgentTool) 无法编译。
+        // P0：ExecEngine 接入 ProotCommandSpawner —— rootfs 就绪且非 Android 专有命令时路由进
+        // PRoot Ubuntu（python3/gcc/apt/git/npm 不再 not found）；未就绪/Android 命令回落 su >
+        // Shizuku > local-sh（与旧版一致）。cwd 映射与 bind 语义见 ProotCommandSpawner KDoc。
         registry.register(SafeAgentTool(TerminalToolAdapter(TerminalExecTool(
             engine = ExecEngine(ProotCommandSpawner(
                 hostEnvironment = hostEnvironment,
@@ -647,10 +639,16 @@ object ToolModule {
                 gitHubTokenProvider = { githubTokenManager.getToken() }
             )),
             approvalGate = { cmd ->
-                if (commandPermissionGate.ensureAllowed(cmd)) {
+                // 全自动模式（BYPASS）与 shell_execute 同口径：跳过命令级确认门。
+                val bypassCommandGate = settingsRepository.agentSettings.value.permissionMode ==
+                    PermissionMode.BYPASS
+                if (bypassCommandGate || commandPermissionGate.ensureAllowed(cmd)) {
                     toolAuditLogger.log(ToolAuditLogger.Event(
-                        tool = "terminal.exec", decision = "approved", command = cmd,
-                        detail = "CommandPermissionGate allowed"
+                        tool = "terminal.exec",
+                        decision = "approved",
+                        command = cmd,
+                        detail = if (bypassCommandGate) "BYPASS mode auto-allowed"
+                        else "CommandPermissionGate allowed"
                     ))
                     null
                 } else {

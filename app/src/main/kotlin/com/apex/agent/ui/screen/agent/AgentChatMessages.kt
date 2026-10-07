@@ -59,7 +59,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.apex.agent.ui.component.MarkdownText
@@ -668,7 +667,10 @@ internal fun ThinkingBubble(
     durationMs: Long = 0,
     liveStartElapsed: Long = 0
 ) {
-    var expanded by remember { mutableStateOf(finished) }
+    // 胶囊化展开态（用户需求：「思考时展示全部思考内容，思考完自动折叠
+    // 成胶囊」）：流式中默认展开（全文可见）；完成态是新的列表项（新 key
+    // 新组合实例），默认折叠为单行胶囊 —— 两个状态互不共享 remember。
+    var expanded by remember { mutableStateOf(!finished) }
 
     // 流式思考中：实时秒数计时器（每 200ms 刷新，低于重组节流频率，几乎无开销）。
     val liveSeconds = if (!finished && liveStartElapsed > 0) {
@@ -745,22 +747,16 @@ internal fun ThinkingBubble(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
-                // 流式思考中（未展开）默认单行：思考链是上下文不是主角，头部行
-                //（THINK 徽标 + 实时秒数）已提供“正在思考”的全部关键信息；
-                // 点击气泡展开全文（expanded 持久，不随文本更新重置）。
-                maxLines = when {
-                    expanded -> Int.MAX_VALUE
-                    finished -> 5
-                    else -> 1
-                },
-                overflow = TextOverflow.Ellipsis
-            )
+            // 展开态才渲染正文；折叠态 = 单行胶囊（THINK 徽标 + 状态标签 +
+            // 秒数 + 箭头），不再占五行预览 —— 与工具胶囊同口径的降噪。
+            if (expanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                )
+            }
         }
     }
 }

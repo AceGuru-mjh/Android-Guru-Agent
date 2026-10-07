@@ -20,15 +20,13 @@ import com.apex.agent.core.tools.ToolRisk
  *
  * - HIGH 风险工具首次调用 → 经 [UserQuestionGateway]（复用 ask_user_choice
  *   的既有对话框）向用户弹窗：仅允许一次 / 本会话允许 / 拒绝；
- * - **#230（P1 security）**：MEDIUM 级**文件改写类**工具（write_file /
- *   edit_file 及 Coding 模式的 code_write / code_edit）同样纳入确认链 ——
- *   旧实现 MEDIUM 一律静默放行，Agent 可无声覆写用户文件，与「三级权限链
- *   是核心卖点」的安全叙事直接冲突。弹窗文案区分风险档（「写入确认」vs「高风险
- *   确认」）；会话记忆复用同一状态机（本会话允许后不再骚扰）。
- *   纵深防御说明：业界标准式 PermissionModeGate 在 DEFAULT 模式下已对
- *   非只读工具弹 Ask（PermissionAwareToolGate 的 ExplicitAllow 短路保证
- *   不双弹窗）；本层兜底的是 BYPASS/ACCEPT_EDITS 之外的**其他宿主与直连
- *   风险门的执行器**（测试 / headless / 未来的批量管线）。
+ * - **基础工具不拦截（2026-10 用户反馈）**：旧实现 MEDIUM 级文件改写类
+ *   （write_file / edit_file 族）也纳入确认链——实际使用中每个编辑动作
+ *   都要确认，打断感远大于安全感。现在本门只对 HIGH 兜底：写入 / 编辑
+ *   类属于可恢复操作，交由上游 PermissionModeGate 的模式语义把关
+ *   （DEFAULT 下按删除类口径判定，删除类才询问）；shell_execute 的高危
+ *   命令仍由 CommandPermissionGate 在命令级拦截。本层兜底的是**其他宿主
+ *   与直连风险门的执行器**（测试 / headless / 未来的批量管线）。
  * - "仅允许一次" → 本次放行但不记录（下次再问）；
  * - "本会话允许" → 状态机记 ALLOWED_SESSION，之后静默放行；
  * - 拒绝（用户显式点击，或弹窗被主动取消）→ 状态机记 DENIED_SESSION，
@@ -61,12 +59,17 @@ class RiskAwareToolGate(
         if (tool.id in manager.selfGatedToolIds) return GateDecision.Allow
 
         val metadata = tool.metadata
-        // #230：HIGH 必弹；MEDIUM 仅文件改写类弹（沙箱内其他 MEDIUM —— 终端
-        // 命令 / UI 查询类 —— 仍是可恢复操作，维持不弹）。
+        // 兜底口径收敛（2026-10 用户反馈）：写入 / 编辑类（MEDIUM）是可恢复
+        // 操作，静默放行——逐次确认的打断成本已由 PermissionModeGate 的删除类
+        // 口径重新分配（只问真正不可逆的动作）。保留两类弹窗：
+        // ① HIGH（删除/卸载/force-stop 族）；② **第三方动态来源**的 MEDIUM
+        //（mcp_ / plugin 前缀——能力未经本仓库审计，首次调用仍应过目一次，
+        // 会话记忆保证同一工具只问一次）。shell_execute 的高危命令仍由
+        // CommandPermissionGate 在命令级拦截。
         val requiresPrompt = when {
             metadata.risk == ToolRisk.HIGH -> true
-            metadata.risk == ToolRisk.MEDIUM && tool.id in FILE_MUTATING_TOOLS -> true
-            else -> false // LOW 及其余 MEDIUM: 沙箱内的可恢复操作，不弹窗
+            metadata.risk == ToolRisk.MEDIUM && isThirdPartyDynamic(tool.id) -> true
+            else -> false
         }
         if (!requiresPrompt) return GateDecision.Allow
 
@@ -145,19 +148,17 @@ class RiskAwareToolGate(
     }
 
     private fun buildQuestion(metadata: ToolMetadata, arguments: String): AgentQuestion {
-        // #230：MEDIUM 文件改写类的标题不再谎称「高风险」—— 按实际档位区分，
-        // 避免用户对风险标签脱敏。#208：文案经 [strings] 取词，不再硬编码中文。
-        val title = if (metadata.risk == ToolRisk.MEDIUM) {
-            strings.fileWriteTitle(metadata.id)
-        } else {
-            strings.riskTitle(metadata.id)
+        val riskHint = when (metadata.risk) {
+            ToolRisk.HIGH -> "高风险：破坏性或不可逆操作"
+            ToolRisk.MEDIUM -> "中风险：会修改数据或状态"
+            ToolRisk.LOW -> "低风险"
         }
         return AgentQuestion(
-            title = title,
-            description = strings.riskLine(
-                riskHintIsHigh = metadata.risk != ToolRisk.MEDIUM,
-                category = metadata.category
-            ) + "\n" + strings.argsLine(arguments),
+            // 标题按来源区分：HIGH = 高风险；第三方动态 MEDIUM = 未审计能力首次过目
+            title = if (metadata.risk == ToolRisk.HIGH) "高风险工具需要确认：${metadata.id}"
+            else "第三方工具需要确认：${metadata.id}",
+            description = "$riskHint（${categoryLabel(metadata.category)}）\n" +
+                "参数摘要：${arguments.take(200).replace('\n', ' ')}",
             options = listOf(
                 AgentQuestionOption(
                     id = "allow_session",
@@ -200,17 +201,15 @@ class RiskAwareToolGate(
     private companion object {
         const val ASK_TIMEOUT_MS = 5 * 60 * 1000L
 
-        /** #230：MEDIUM 级也需要确认的**文件改写类**工具 id 集合。
-         * （delete_file 已是 HIGH —— inferRisk 黑名单；此处覆盖写/编两类。）
-         * Issue #230 收尾：补 coding 模式等价面（code_write/code_edit ——
-         * StandardToolSurface 把 write_file/edit_file 映射过去，同一底层行为
-         * 必须同一确认语义；file_write/file_edit 是历史别名防漏。）
-         * #273：github_write_file 是远程真实 commit（其自身 description 已标
-         * ⚠️HIGH-RISK，但 inferRisk 按 github_ 前缀只推到 MEDIUM）—— 远程写
-         * 与本地写同一确认语义，且私有仓还有工具内第二道硬门。 */
-        val FILE_MUTATING_TOOLS = setOf(
-            "write_file", "edit_file", "file_write", "file_edit",
-            "code_write", "code_edit", "github_write_file"
-        )
+        /**
+         * 第三方动态来源工具 id 前缀（MEDIUM 中仍需首次确认的子集）：
+         * MCP 服务器与插件运行期注册，能力不经过本仓库审计——与
+         * 内置 MEDIUM（write_file / ui_* 等已审计族）区分对待。
+         */
+        val THIRD_PARTY_PREFIXES = listOf("mcp_", "plugin")
+
+        /** 判断工具 id 是否属于第三方动态注册族（mcp__server__tool / plugin*）。 */
+        fun isThirdPartyDynamic(toolId: String): Boolean =
+            THIRD_PARTY_PREFIXES.any { toolId.startsWith(it) }
     }
 }

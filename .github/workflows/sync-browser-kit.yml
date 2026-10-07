@@ -100,12 +100,21 @@ jobs:
       - name: Bump lock and push to main
         # 锁定 bump 直接 push main：release.yml 的 push 触发器自动构建发布
         # （新 browser-kit 随 APK 交付）—— 全程无人工介入。
+        # ⚠️ 必须用 PAT 推送（secrets.SYNC_PUSH_TOKEN）：GITHUB_TOKEN 产生的
+        # push 事件不会触发新的 workflow run（GitHub 防递归设计）—— 用默认
+        # 凭据推的 bump 会静默「落地但不发布」。PAT push 的 commit 事件正常
+        # 点燃 release 流水线；同 commit 重推由 resolve 阶段去重。
         if: steps.up.outputs.changed == 'true' && env.green == 'true'
         env:
           UP_SHA: ${{ steps.up.outputs.sha }}
           EVENT: ${{ github.event_name }}
+          SYNC_PUSH_TOKEN: ${{ secrets.SYNC_PUSH_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "$SYNC_PUSH_TOKEN" ]; then
+            echo "::error::缺少 secrets.SYNC_PUSH_TOKEN（对本仓库有 repo 权限的 PAT）—— bump 无法触发发布流水线，请在仓库 Settings → Secrets 配置"
+            exit 1
+          fi
           echo "$UP_SHA" > gradle/browser-kit.lock
           git config user.name "apex-sync-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -115,7 +124,7 @@ jobs:
           Automated by sync-browser-kit workflow (trigger: $EVENT).
           链路：browser-kit main 新绿提交 → 锁定 bump → push main →
           release 流水线自动构建发布（新 browser-kit 随 APK 交付）。"
-          git push origin HEAD:main
+          git push "https://x-access-token:${SYNC_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
           echo "🚀 已推送锁定 bump —— release 流水线即将自动构建发布"
 
       - name: Summary

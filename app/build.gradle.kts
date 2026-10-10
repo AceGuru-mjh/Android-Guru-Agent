@@ -228,7 +228,8 @@ dependencies {
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons)
     // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
-    // 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
+    // 暂留 1.1.0（2.x 需 Kotlin 2.2 —— 本仓已升 2.2.21 解锁，但 2.x 图标 API 有更名/重组，
+    // 需单独验证后升级，见 gradle/libs.versions.toml 同款注释）。
     implementation(libs.lucide.icons)
     debugImplementation(libs.compose.ui.tooling)
 

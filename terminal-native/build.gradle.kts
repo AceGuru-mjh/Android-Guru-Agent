@@ -7,6 +7,11 @@ android {
     namespace = "com.apex.agent.vtnative"
     compileSdk = 35
 
+    // 显式钉住 NDK（Kotlin/AGP 8.13.2 toolchain 升级）：未声明时 AGP 用自身默认 NDK
+    //（8.7.3 → 27.0.12077973，8.13.2 → 28.x），CI（ci.yml/apk.yml/release.yml）按
+    // 27.0.12077973 预装 —— 显式钉住保持 NDK 行为不变，升级 NDK 走独立评估。
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         minSdk = 26
 

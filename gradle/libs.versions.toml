@@ -1,13 +1,18 @@
 [versions]
-kotlin = "2.0.21"
-agp = "8.7.3"
+# Kotlin 2.2.21（K2 稳定线，2025-12 发布）：与 KSP 2.2.21-2.0.5 / AGP 8.13.x / Gradle 8.14
+# 构成配套矩阵（KGP 2.2.x 官方测试上限 Gradle 8.14，AGP 上限 8.13）。升级详见 PR 讨论。
+kotlin = "2.2.21"
+agp = "8.13.2"
 compose-bom = "2024.12.01"
 activity-compose = "1.9.3"
 lifecycle = "2.8.7"
-hilt = "2.53.1"
-hilt-nav-compose = "1.2.0"
-coroutines = "1.9.0"
-serialization = "1.7.3"
+# Hilt 2.59.x：Dagger 2.57+ 完全适配 KSP2 与 Kotlin 2.2（KSP 2.x 已移除 KSP1 兼容层）
+hilt = "2.59.2"
+# androidx.hilt 1.3.0：hilt-compiler 修复 KSP2 兼容（1.2.0 的 KSP1 API 在 KSP2 下不可用）
+hilt-nav-compose = "1.3.0"
+coroutines = "1.10.2"
+# serialization 1.9.0：以 Kotlin 2.1.21 构建（语言版本 2.1），Kotlin 2.2.21 消费端完全兼容
+serialization = "1.9.0"
 okhttp = "4.12.0"
 # XZ for Java —— 增量更新的 VCDIFF LZMA 二级压缩解码（纯 Java，无传递依赖，公有领域）
 xz = "1.9"
@@ -15,17 +20,21 @@ shizuku = "13.1.5"
 core-ktx = "1.15.0"
 navigation = "2.8.5"
 work = "2.10.0"
-ksp = "2.0.21-1.0.28"
+# KSP 2.x（KSP2）：版本号格式 <kotlin>-<ksp>，KSP1 已在 2.x 移除，处理器必须为 KSP2 兼容版
+# （Hilt 2.57+ / Room 2.7+ / androidx.hilt 1.3.0 均已适配）
+ksp = "2.2.21-2.0.5"
 coil = "2.6.0"
 security-crypto = "1.1.0-alpha06"
 junit = "4.13.2"
-room = "2.6.1"
+# Room 2.8.x：2.7.0 起支持 KSP2（2.6.1 的 processor 基于 KSP1 API，KSP 2.x 下不可用）
+room = "2.8.5"
 # 赛博霓虹悬浮球（JitPack；仅允许该 group 走 jitpack 仓库，版本固定避免动态解析）
 easyfloat = "2.0.4"
 # Liquid Glass 底层：vendored kyant0/AndroidLiquidGlass（vendor/backdrop 模块内嵌，
 # 无 Maven 坐标）。原 Haze / Cloudy 已随液态玻璃统一迁移移除 —— 见 vendor/backdrop/README.md。
 # Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标。
-# 固定 1.1.0：2.x 由 Kotlin 2.2 构建，与本项目 Kotlin 2.0.21 toolchain 元数据不兼容。
+# 暂留 1.1.0：2.x 由 Kotlin 2.2 构建 —— Kotlin 升 2.2.21 后已解锁，但 2.x 图标 API
+# 有更名/重组，需单独验证后升级（保持本 PR 聚焦 toolchain，见 PR 描述）。
 lucide-icons = "1.1.0"
 # 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
 dynamicanimation = "1.0.0"
@@ -65,8 +74,8 @@ navigation-compose = { group = "androidx.navigation", name = "navigation-compose
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hilt-nav-compose" }
-hilt-work = { group = "androidx.hilt", name = "hilt-work", version = "1.2.0" }
-hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version = "1.2.0" }
+hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hilt-nav-compose" }
+hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hilt-nav-compose" }
 
 # Coroutines
 coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

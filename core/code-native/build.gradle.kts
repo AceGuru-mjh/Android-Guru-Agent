@@ -7,6 +7,10 @@ android {
     namespace = "com.apex.agent.codenative"
     compileSdk = 35
 
+    // 显式钉住 NDK（Kotlin/AGP 8.13.2 toolchain 升级）：与 :terminal-native 同款理由，
+    // CI 按 27.0.12077973 预装，避免 AGP 默认 NDK 漂移。
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         minSdk = 26
 

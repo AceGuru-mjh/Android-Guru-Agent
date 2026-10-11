@@ -227,9 +227,9 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
     implementation(libs.compose.material.icons)
-    // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标更精致
-    // 暂留 1.1.0（2.x 需 Kotlin 2.2 —— 本仓已升 2.2.21 解锁，但 2.x 图标 API 有更名/重组，
-    // 需单独验证后升级，见 gradle/libs.versions.toml 同款注释）。
+    // Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标预留。
+    // 2.2.1（Kotlin 2.2.21 + foundation 1.9.3 构建）—— 与本仓工具链配套；
+    // 当前代码零处使用 IconsLucide（预留位，见 libs.versions.toml 注释）。
     implementation(libs.lucide.icons)
     debugImplementation(libs.compose.ui.tooling)
 
@@ -274,10 +274,12 @@ dependencies {
 
     // 赛博霓虹悬浮球：全局低侵入 WindowManager 管理（JitPack，已做仓库过滤+版本锁定）
     implementation(libs.easyfloat)
-    // Liquid Glass UI System 底层引擎 —— vendored kyant0/AndroidLiquidGlass（backdrop @ 1.0.0，
-    // Apache-2.0）。Maven 版需 Kotlin 2.2+/Compose 1.9+，本仓工具链消费不了故源码内嵌 ——
-    // 仅 ui/glass 包内部使用，业务层经 Glass 组件 API 访问（vendor/backdrop/README.md）。
-    implementation(project(":vendor:backdrop"))
+    // Liquid Glass UI System 底层引擎 —— io.github.kyant0:backdrop 1.0.1（Maven Central，
+    // Apache-2.0；上游 Kyant0/AndroidLiquidGlass）。POM 以 kotlin-stdlib 2.2.21 +
+    // Compose 1.9.5 构建发布，与本仓工具链精确配套 —— 原 vendored vendor/backdrop
+    //（上游 tag 1.0.0）已整体移除，包名 com.kyant.backdrop 与公共 API 源兼容，
+    // 消费层仅 ui/glass 包（业务层经 Glass 组件 API 访问）。
+    implementation(libs.backdrop)
     // Vico 开源图表库（稳定线 1.13.1）—— 任务历史页「近 7 日任务量」柱状图 +
     // 记忆页类型分布；只引 compose 核心（主题色手动映射，不引 m2/m3 主题模块）
     implementation(libs.vico.compose)

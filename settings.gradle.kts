@@ -58,11 +58,6 @@ when {
 // 主APK
 include(":app")
 
-// Liquid Glass 底层引擎 —— vendored kyant0/AndroidLiquidGlass（backdrop @ 1.0.0，
-// Apache-2.0）。Maven 版需 Kotlin 2.2+/Compose 1.9+，本仓工具链消费不了 ——
-// 源码内嵌，仅 ui/glass 包单点消费，详见 vendor/backdrop/README.md。
-include(":vendor:backdrop")
-
 // 核心引擎（纯Kotlin JVM，零Android依赖）
 include(":core:agent-engine")
 include(":core:llm-adapter")

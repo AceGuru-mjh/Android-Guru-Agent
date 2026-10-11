@@ -3,7 +3,11 @@
 # 构成配套矩阵（KGP 2.2.x 官方测试上限 Gradle 8.14，AGP 上限 8.13）。升级详见 PR 讨论。
 kotlin = "2.2.21"
 agp = "8.13.2"
-compose-bom = "2024.12.01"
+# Compose BOM 2025.11.01（Compose 1.9.5 / material3 1.4.0）：与 backdrop 1.0.1 的
+# POM 声明（kotlin-stdlib 2.2.21 + Compose 1.9.5）精确配套 —— 1.9.x 是 Kotlin 2.2.21
+# 工具链下的最新稳定线（ui-android 1.9.5 依赖 lifecycle 2.8.7 与本仓 pin 一致；
+# 1.10.x 走 BOM 2025.12.01 + backdrop 1.0.2，留作后续独立评估）。
+compose-bom = "2025.11.01"
 activity-compose = "1.9.3"
 lifecycle = "2.8.7"
 # Hilt 2.59.x：Dagger 2.57+ 完全适配 KSP2 与 Kotlin 2.2（KSP 2.x 已移除 KSP1 兼容层）
@@ -30,23 +34,30 @@ junit = "4.13.2"
 room = "2.8.5"
 # 赛博霓虹悬浮球（JitPack；仅允许该 group 走 jitpack 仓库，版本固定避免动态解析）
 easyfloat = "2.0.4"
-# Liquid Glass 底层：vendored kyant0/AndroidLiquidGlass（vendor/backdrop 模块内嵌，
-# 无 Maven 坐标）。原 Haze / Cloudy 已随液态玻璃统一迁移移除 —— 见 vendor/backdrop/README.md。
-# Lucide 图标集（composablehorizons/compose-icons, MIT）：斜杠菜单分类图标。
-# 暂留 1.1.0：2.x 由 Kotlin 2.2 构建 —— Kotlin 升 2.2.21 后已解锁，但 2.x 图标 API
-# 有更名/重组，需单独验证后升级（保持本 PR 聚焦 toolchain，见 PR 描述）。
-lucide-icons = "1.1.0"
+# Liquid Glass 底层：Maven Central 坐标 io.github.kyant0:backdrop（上游
+# Kyant0/AndroidLiquidGlass，Apache-2.0）。1.0.1 的 POM 以 kotlin-stdlib 2.2.21 +
+# Compose 1.9.5 构建发布 —— 与本仓 Kotlin 2.2.21 / BOM 2025.11.01 精确配套，
+# 原 vendored vendor/backdrop 模块（上游 tag 1.0.0 + 两处机械适配）已整体移除；
+# 包名 com.kyant.backdrop 与公共 API 逐项源兼容（1.0.0→1.0.1 仅 internal
+# 实现：context parameters 化 + Compose 1.9 GraphicsLayer blendMode/colorFilter）。
+# 注意：1.0.2+ 需 Compose 1.10、1.0.3+ 需 Kotlin 2.3、2.x 需 Kotlin 2.4 —— 升级前
+# 先核 POM 依赖矩阵。
+backdrop = "1.0.1"
+# Lucide 图标集（composablehorizons/compose-icons, MIT）。2.2.1 以 Kotlin 2.2.21 +
+# foundation 1.9.3 构建 —— 与本仓工具链配套；当前仓库代码零处使用 IconsLucide
+# （仅 McpSoSource 抓取的网页 CSS class 字符串撞名），升 2.x 无 API 迁移面。
+lucide-icons = "2.2.1"
 # 物理弹力手势（SpringAnimation 按压挤压形变 / 吸附）
 dynamicanimation = "1.0.0"
 # apex-browser-kit（拆库 E1 迁移期；兄弟目录 includeBuild 时坐标被本地构建替换）
 browser-kit = "1.1.0"
-# material-icons 显式 pin：1.7.8 高于 BOM 2024.12.01 映射的 1.7.6，
-# 保持既有解析结果（Gradle 取高版本）不变 —— 升 BOM 前先复核此 pin。
+# material-icons 显式 pin 1.7.8：官方已停止演进（BOM 2025.11.01 仍映射 1.7.8，
+# 解析结果不变）。长期迁移 material-symbols 待 BOM 后续大版本时评估。
 compose-material-icons = "1.7.8"
 # Vico —— 开源图表库（Maven Central，稳定线 1.13.1）：任务历史/记忆统计可视化。
-# 选型 1.13.1（稳定版，非 2.x beta）：依赖 Compose 1.5+（本项目 1.7.6 向后兼容），
-# Kotlin 1.9 编译产物对 2.0.21 消费端零影响；仅引 compose 核心（不引 m2/m3 主题模块，
-# 避免与本项目 Material3 主题冲突）。
+# 选型 1.13.1（稳定版，非 2.x beta）：依赖 Compose 1.5+（Compose 向后二进制兼容，
+# 1.9.5 消费端可用）；仅引 compose 核心（不引 m2/m3 主题模块，避免与本项目
+# Material3 主题冲突）。
 vico = "1.13.1"
 
 [libraries]
@@ -108,10 +119,11 @@ security-crypto = { group = "androidx.security", name = "security-crypto", versi
 
 # 赛博霓虹悬浮球（JitPack 发布，坐标 group 为 com.github.princekin-f）
 easyfloat = { group = "com.github.princekin-f", name = "EasyFloat", version.ref = "easyfloat" }
-# Liquid Glass 底层引擎：vendored kyant0/AndroidLiquidGlass（vendor/backdrop 模块，
-# Maven 版 io.github.kyant0:backdrop 需 Kotlin 2.2+/Compose 1.9+，本仓工具链消费不了）。
-# 原 Haze（dev.chrisbanes.haze）与 Cloudy（com.github.skydoves）已在液态玻璃统一
-# 迁移中移除 —— 全仓玻璃渲染统一走 kyant0 backdrop（blur/lens/vibrancy）。
+
+# Liquid Glass 底层引擎（Maven Central）—— 全仓玻璃渲染统一走 kyant0 backdrop
+#（blur / lens 折射 / vibrancy；原 Haze 与 Cloudy 已在液态玻璃统一迁移中移除）。
+# 唯一消费层：app 的 ui/glass 包（GlassSurface / TerminalGlass 单点集成）。
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 
 # Lucide 图标集（Maven Central，com.composables）—— 斜杠菜单分类图标
 lucide-icons = { group = "com.composables", name = "icons-lucide-android", version.ref = "lucide-icons" }

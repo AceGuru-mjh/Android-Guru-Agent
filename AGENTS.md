@@ -8,7 +8,8 @@
 ## 构建与验证
 
 - **模块**：多模块 Gradle（app / core×6 / platform×5 / 终端双模块），
-  Kotlin 2.0.21 + AGP 8.7.3 + JDK 17 + Compose BOM 2024.12.01；
+  Kotlin 2.2.21 + AGP 8.13.2 + Gradle 8.14 + JDK 17 + Compose BOM 2025.11.01
+  （KSP2 2.2.21-2.0.5 / Hilt 2.59.2 / Room 2.8.5 配套矩阵，详见 gradle/libs.versions.toml 注释）；
 - **浏览器库（拆库后）**：BrowserEngine / chrome UI / DOM 解析已抽出为
   [apex-browser-kit](https://github.com/AceGuru-mjh/apex-browser-kit)
   （坐标 `com.apex.browser:{core,engine,chrome}`）。本地构建把库克隆成

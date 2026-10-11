@@ -280,7 +280,8 @@ jobs:
       - name: Configure pre-installed Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          # AGP 8.7.3 默认需要 NDK 27.0.12077973。sdkmanager 偶发半截安装
+          # NDK 27.0.12077973 由 :terminal-native / :core:code-native 显式 ndkVersion 钉版
+          #（AGP 8.13.2 时代防默认 NDK 漂移到 28.x）。sdkmanager 偶发半截安装
           #（目录在、source.properties 缺失 → CXX1101 硬失败，2026-10-05 run
           # 37327280591 实测：pull_request run 翻车而同 SHA 的 push run 通过，
           # 纯 runner 环境差异）。三重防线（与 apk.yml / #330 对齐）：
@@ -323,10 +324,10 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10'
+          gradle-version: '8.14'
 
       - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.10
+        run: gradle wrapper --gradle-version 8.14
 
       - name: Stage bundled Ubuntu rootfs (T83 内置交付)
         run: |

@@ -207,11 +207,11 @@ class HubSource(
         "无法连接官方${if (kind == "mcp") " MCP " else " "}仓库（网络不可用或超时）"
 
     companion object {
-        /** 官方技能仓库（AceGuru-mjh/apex-skill-hub）。 */
-        const val SKILL_HUB_REPO = "AceGuru-mjh/apex-skill-hub"
+        /** 官方技能仓库（Ultra-Guru/apex-skill-hub，原 AceGuru-mjh 名下已转移至组织）。 */
+        const val SKILL_HUB_REPO = "Ultra-Guru/apex-skill-hub"
 
-        /** 官方 MCP 仓库（AceGuru-mjh/apex-mcp-hub）。 */
-        const val MCP_HUB_REPO = "AceGuru-mjh/apex-mcp-hub"
+        /** 官方 MCP 仓库（Ultra-Guru/apex-mcp-hub，原 AceGuru-mjh 名下已转移至组织）。 */
+        const val MCP_HUB_REPO = "Ultra-Guru/apex-mcp-hub"
 
         private const val SKILL_HUB_RAW_BASE =
             "https://raw.githubusercontent.com/$SKILL_HUB_REPO/main"

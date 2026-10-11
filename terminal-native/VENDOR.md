@@ -2,7 +2,7 @@
 
 ## Upstream
 
-- Repository: https://github.com/AceGuru-mjh/apex-vt-native
+- Repository: https://github.com/Ultra-Guru/apex-vt-native
 - Vendored commit: `19e8fb592875e0f3b4a165bdc107db7095e50a4d` (v0.2 foundation — upstream PR #1, CI green: host tests + 3×NDK)
 - License: MIT (upstream LICENSE applies to the vendored sources)
 

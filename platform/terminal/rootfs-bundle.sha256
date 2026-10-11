@@ -5,7 +5,7 @@
 # 数据来源（rootfs.yml CI 构建，run #10，2026-09-19 实测；builder 为
 # scripts/build_full_rootfs.sh：官方 ubuntu-base 24.04.4 骨架 + 58 包完整 CLI 环境，
 # 真实 chroot + binfmt qemu-user-static 构建）：
-#   https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full
+#   https://github.com/Ultra-Guru/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full
 #   （同 Release 附 rootfs-digests.txt：sha256 / size / unpacked 三字段真值表）
 # 拉取与暂存：scripts/fetch_rootfs.sh（构建期执行；这些大档案不入库）。
 # 完整环境体积：压缩 ~282-310MB/架构，解压 ~0.93-1.1GB。

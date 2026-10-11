@@ -114,7 +114,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
          * 固定 SHA-256。下载只是测试夹具的获取手段（生产链路已是内置离线解包，零网络）。
          */
         private fun downloadFixtureArchive(): java.io.File? = try {
-            val url = "https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz"
+            val url = "https://github.com/Ultra-Guru/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz"
             val expectedSha = "57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228"
             val tmp = java.io.File.createTempFile("t84-e2e-archive", ".tar.gz")
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -135,7 +135,7 @@ class UbuntuRootfsEndToEndIntegrationTest {
         }
 
         private fun networkReachable(): Boolean = try {
-            val conn = URL("https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full")
+            val conn = URL("https://github.com/Ultra-Guru/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full")
                 .openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000

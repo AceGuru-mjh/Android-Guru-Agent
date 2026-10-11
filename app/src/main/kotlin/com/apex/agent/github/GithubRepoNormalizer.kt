@@ -23,7 +23,7 @@ package com.apex.agent.github
  * ## 输入 → 期望输出示例表（单测口径，全库唯一真源）
  * | # | 输入 | normalize | canonical |
  * |---|-----|-----------|-----------|
- * | 1 | `https://github.com/AceGuru-mjh/Android-Guru-Agent` | (AceGuru-mjh, Android-Guru-Agent) | `AceGuru-mjh/Android-Guru-Agent` |
+ * | 1 | `https://github.com/Ultra-Guru/Android-Guru-Agent` | (Ultra-Guru, Android-Guru-Agent) | `Ultra-Guru/Android-Guru-Agent` |
  * | 2 | `http://github.com/owner/repo.git` | (owner, repo) | `owner/repo` |
  * | 3 | `github.com/owner/repo/` | (owner, repo) | `owner/repo` |
  * | 4 | `git@github.com:owner/repo.git` | (owner, repo) | `owner/repo` |
@@ -115,7 +115,7 @@ object GithubRepoNormalizer {
 
     /**
      * [RepoRef] → 人读描述（中文，供日志/提示词等非 UI 场景）：
-     * 「用户 AceGuru-mjh」/「仓库 AceGuru-mjh/Android-Guru-Agent」。
+     * 「用户 Ultra-Guru」/「仓库 Ultra-Guru/Android-Guru-Agent」。
      * UI 侧文案走 strings_github_v3 资源（可随语言切换），本函数不用于 UI。
      */
     fun describe(ref: RepoRef): String =

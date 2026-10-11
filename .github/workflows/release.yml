@@ -46,8 +46,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_REPO: AceGuru-mjh/Android-Guru-Agent-Release
-  DEV_REPO: AceGuru-mjh/Android-Guru-Agent
+  RELEASE_REPO: Ultra-Guru/Android-Guru-Agent-Release
+  DEV_REPO: Ultra-Guru/Android-Guru-Agent
 
 jobs:
   # ── 阶段一：版本决策（约 40s）──────────────────────────────────────────────
@@ -267,7 +267,7 @@ jobs:
       - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
-          repository: AceGuru-mjh/apex-browser-kit
+          repository: Ultra-Guru/apex-browser-kit
           ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
@@ -849,7 +849,7 @@ jobs:
 
           body = release_body(
               "> 开发仓库合并 PR / 打 tag 自动构建，跨仓库 PAT 自动发布 —— 本仓库只存产物，\n"
-              f"> 源码见 https://github.com/AceGuru-mjh/Android-Guru-Agent/tree/{tag}")
+              f"> 源码见 https://github.com/Ultra-Guru/Android-Guru-Agent/tree/{tag}")
           body_dev = release_body(
               "> 本 Release 由流水线自动构建发布（PR 合并 / 打 tag 触发）。\n"
               f"> 产物与增量补丁的主存放处：https://github.com/{repo} —— App 内更新检查固定读取发布仓库。")

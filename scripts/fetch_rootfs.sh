@@ -35,7 +35,7 @@ MANIFEST="$MODULE_DIR/rootfs-bundle.sha256"
 STAGE_BASE="$MODULE_DIR/src/main/jniLibs"
 POINT_VERSION="24.04.4"
 # T84 完整 rootfs 托管源（本仓 Release；builder 见 rootfs.yml / build_full_rootfs.sh）
-BASE_URL="https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full"
+BASE_URL="https://github.com/Ultra-Guru/Android-Guru-Agent/releases/download/ubuntu-rootfs-24.04.4-full"
 
 # T84：--arch <abi> 只处理该 ABI（PR CI 的 build-apk job 只验证 arm64 打包链，
 # 拉全 3 份是 tag 发布（universal）才需要的）。缺省 = 全部。

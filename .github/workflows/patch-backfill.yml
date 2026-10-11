@@ -52,8 +52,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_REPO: AceGuru-mjh/Android-Guru-Agent-Release
-  DEV_REPO: AceGuru-mjh/Android-Guru-Agent
+  RELEASE_REPO: Ultra-Guru/Android-Guru-Agent-Release
+  DEV_REPO: Ultra-Guru/Android-Guru-Agent
 
 permissions:
   contents: read

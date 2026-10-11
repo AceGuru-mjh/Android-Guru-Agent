@@ -51,7 +51,7 @@ class BundledRootfsSource(
      * （BundledRootfsSourceTest 交叉校验，防两处漂移）。
      *
      * 数据来源（rootfs.yml CI 构建，run #10，2026-09-19 实测，写死保证可复现交付）：
-     *   https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full
+     *   https://github.com/Ultra-Guru/Android-Guru-Agent/releases/tag/ubuntu-rootfs-24.04.4-full
      *   （builder：scripts/build_full_rootfs.sh —— 官方 ubuntu-base 24.04.4 + 58 包完整
      *   CLI 环境；同 Release 附 rootfs-digests.txt 三字段真值表）
      *

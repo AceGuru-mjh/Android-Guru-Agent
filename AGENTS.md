@@ -11,7 +11,7 @@
   Kotlin 2.2.21 + AGP 8.13.2 + Gradle 8.14 + JDK 17 + Compose BOM 2025.11.01
   （KSP2 2.2.21-2.0.5 / Hilt 2.59.2 / Room 2.8.5 配套矩阵，详见 gradle/libs.versions.toml 注释）；
 - **浏览器库（拆库后）**：BrowserEngine / chrome UI / DOM 解析已抽出为
-  [apex-browser-kit](https://github.com/AceGuru-mjh/apex-browser-kit)
+  [apex-browser-kit](https://github.com/Ultra-Guru/apex-browser-kit)
   （坐标 `com.apex.browser:{core,engine,chrome}`）。本地构建把库克隆成
   **兄弟目录** `../apex-browser-kit` 即自动 composite build（settings
   条件 includeBuild）；CI 由 workflow 检出兄弟目录。改浏览器行为去库仓库

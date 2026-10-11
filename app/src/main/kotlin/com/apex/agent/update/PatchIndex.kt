@@ -37,7 +37,7 @@ object PatchIndex {
 
     /** 发布仓库 main 分支上的补丁索引固定地址（CI 自动维护）。 */
     const val PATCH_INDEX_URL =
-        "https://raw.githubusercontent.com/AceGuru-mjh/Android-Guru-Agent-Release/main/patches.json"
+        "https://raw.githubusercontent.com/Ultra-Guru/Android-Guru-Agent-Release/main/patches.json"
 
     /** 链上补丁数量上限 —— 防御环形索引（CI bug / 被篡改）导致死循环。 */
     private const val MAX_CHAIN_LENGTH = 64

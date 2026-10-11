@@ -47,7 +47,7 @@ HubSource 解析本来就 `ignoreUnknownKeys`，hub 新增的 `category`/`envSch
 | --- | --- | --- |
 | 「Coding 的 skill 与 Agent 的 skill 要分开，市场分两级」 | 59/75 内置技能 scope 缺省 `all`，双工位市场都出现 | 生活技能全部 scope=agent 且迁出 APK；市场按 Agent/Coding 分级过滤（scope 口径贯通斜杠与注入） |
 | 「生活相关技能全部删除，只内置几个功能强大的」 | 75 个全内置 = APK 膨胀 + 档案污染 | 保留 13 核心（8 coding + 3 agent + 2 all），62 个迁官方仓库 |
-| 「新建一个仓库，市场直接下载里面的技能」 | 无自有分发渠道（ClawHub/魔搭是第三方） | 新建 `AceGuru-mjh/apex-skill-hub`（62 技能）+ `apex-mcp-hub`（8 台 MCP），市场「官方仓库」源直装 |
+| 「新建一个仓库，市场直接下载里面的技能」 | 无自有分发渠道（ClawHub/魔搭是第三方） | 新建 `Ultra-Guru/apex-skill-hub`（62 技能）+ `apex-mcp-hub`（8 台 MCP），市场「官方仓库」源直装 |
 | 「MCP 同样处理，但要内置几个必要的（如 GitHub MCP）」 | 沙箱预置随启动自动写入 | 保留 5 台进程内 BUILTIN（github/search/fs/memory/thinking）；3 台 npx 沙箱预置迁仓库目录，不再自动写入 |
 | 「软件中的 MCP 所有的都没有配置按钮」 | BUILTIN 行无 Edit（旧设计认为"无用户可配字段"） | 所有 MCP 行（含 BUILTIN）都有「配置」：BUILTIN 配置对话框（作用域/启停/连接/GitHub Token），自建复用 EditMcpDialog |
 | 「MCP 本地运行需要启动；没安装/没启动的不能在斜杠里选」 | 斜杠菜单列 enabled 配置（离线也列出）；未连接的 `/mcp:x` 仍发空转提示词 | 菜单只列 connected；路由器对未运行的 MCP 拦截（空 agentPrompt + 引导语）；市场内完成安装→配置→启动 |
@@ -65,7 +65,7 @@ skills/<id>.json      # apex-skill-v1 完整 manifest（promptInjection 正文�
 - `index.json` 只放元数据（id/name/version/description/category/tags/scope/
   author/file）——小体积一次拉全，市场按工位分级过滤；
 - 技能正文按需单文件下载
-  （`raw.githubusercontent.com/AceGuru-mjh/apex-skill-hub/main/<file>`）；
+  （`raw.githubusercontent.com/Ultra-Guru/apex-skill-hub/main/<file>`）；
 - 全部条目 `scope=agent`（生活/通用技能归 Agent 工位）。
 
 ### apex-mcp-hub（MCP 服务器）

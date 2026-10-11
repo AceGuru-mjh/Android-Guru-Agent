@@ -205,7 +205,7 @@ class UpdateChecker(
 
 /** 发布仓库 main 分支上版本清单的固定地址（由开发仓库 CI 自动维护）。 */
 const val UPDATE_MANIFEST_URL =
-    "https://raw.githubusercontent.com/AceGuru-mjh/Android-Guru-Agent-Release/main/version.json"
+    "https://raw.githubusercontent.com/Ultra-Guru/Android-Guru-Agent-Release/main/version.json"
 
 /** 发布仓库 main 分支上补丁全量索引的固定地址（跨版本链式增量）。 */
 const val PATCH_INDEX_URL = PatchIndex.PATCH_INDEX_URL

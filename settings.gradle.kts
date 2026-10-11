@@ -86,7 +86,7 @@ include(":platform:mcp-host")
 include(":terminal-emulator")
 
 // Terminal native hot path — vendored apex-vt-native C++17 VT engine (JNI)
-// 上游：AceGuru-mjh/apex-vt-native（129 项奇偶校验测试 + NDK CI）
+// 上游：Ultra-Guru/apex-vt-native（129 项奇偶校验测试 + NDK CI）
 include(":terminal-native")
 
 // Terminal view — T88 Termux 级自定义 View 渲染层（Canvas 网格 / 滚动 / 选择 / IME）

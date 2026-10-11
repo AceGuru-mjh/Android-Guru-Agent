@@ -160,7 +160,7 @@ object McpModule {
         BuiltinThinkingMcpBootstrap.ensureAndConnect(manager)
         // Hub 生态重构：沙箱预置（fs-sandbox / memory-sandbox / everything-sandbox）
         // 不再随启动自动写入 —— 三台 npx 沙箱服务器全部迁往官方 MCP 仓库
-        // （AceGuru-mjh/apex-mcp-hub，见 HubSource），用户在市场里按需
+        // （Ultra-Guru/apex-mcp-hub，见 HubSource），用户在市场里按需
         // 「安装 → 配置 → 启动」。既有设备上已写入的配置不受影响（只是
         // 不再被预置逻辑刷新定义）。内置仅保留五台进程内 BUILTIN 服务器
         // （github / search / fs / memory / thinking —— 能力在二进制里，

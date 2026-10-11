@@ -33,7 +33,7 @@ T84 起交付物为**完整环境档**（58 包 CLI：gcc/python3-dev/nodejs/npm
 | ubuntu-24.04.4-amd64 | `.../ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-amd64.tar.gz` | `57fb03f916cae40202134594a6ad063167174714e1ad36a50f0575b015b87228` | 324,010,830 / 1,159,856,128 |
 | ubuntu-24.04.4-armhf | `.../ubuntu-rootfs-24.04.4-full/apex-ubuntu-full-24.04.4-armhf.tar.gz` | `fe4e1a0ccd8d73c376c8ed7281a0ccc60041dfba71d735b163a2e657558e250a` | 294,939,555 / 974,282,752 |
 
-URL 前缀 = `https://github.com/AceGuru-mjh/Android-Guru-Agent/releases/download/`。
+URL 前缀 = `https://github.com/Ultra-Guru/Android-Guru-Agent/releases/download/`。
 历史（T83 骨架时代）：`cdimage.ubuntu.com` 官方 SHA256SUMS（29-30MB/档）。
 
 版本策略：**锁 point release + 锁构建产物指纹**。重跑构建（档案内容变）= 显式

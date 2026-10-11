@@ -2,7 +2,7 @@
 
 > **v2 演进说明（Hub 生态）**：本文的「70 技能全内置」是 v1 形态。
 > 当前 APK 内置已收敛为 13 个核心技能，其余 62 个生活/通用技能迁往官方
-> 仓库 [apex-skill-hub](https://github.com/AceGuru-mjh/apex-skill-hub)
+> 仓库 [apex-skill-hub](https://github.com/Ultra-Guru/apex-skill-hub)
 > （市场「官方仓库」源直装），斜杠菜单只放行已安装且已启用的技能。
 > 渐进披露 / 自动装备 / 聊天记忆等机制不变。详见
 > [hub-ecosystem.md](hub-ecosystem.md)。

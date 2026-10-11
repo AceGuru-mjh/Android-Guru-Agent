@@ -18,8 +18,8 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **CI · 质量门禁 · 贡献**
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/quality-gate.yml"><img src="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/quality-gate.yml/badge.svg?branch=main" alt="Quality Gate"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://github.com/Ultra-Guru/Android-Guru-Agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/actions/workflows/quality-gate.yml"><img src="https://github.com/Ultra-Guru/Android-Guru-Agent/actions/workflows/quality-gate.yml/badge.svg?branch=main" alt="Quality Gate"/></a>
 <a href="#contributing"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?logo=github" alt="PRs Welcome"/></a>
 <img src="https://img.shields.io/badge/Gradle-8.10-02303A?logo=gradle&logoColor=white" alt="Gradle"/>
 <img src="https://img.shields.io/badge/JDK-17-orange?logo=openjdk&logoColor=white" alt="JDK 17"/>
@@ -45,16 +45,16 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **仓库动态**
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/stargazers"><img src="https://img.shields.io/github/stars/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=yellow" alt="Stars"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/network/members"><img src="https://img.shields.io/github/forks/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=blue" alt="Forks"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/issues"><img src="https://img.shields.io/github/issues/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=orange" alt="Issues"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/pulls"><img src="https://img.shields.io/github/issues-pr/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=brightgreen" alt="PRs"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/graphs/contributors"><img src="https://img.shields.io/github/contributors/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=purple" alt="Contributors"/></a>
-<img src="https://img.shields.io/github/last-commit/AceGuru-mjh/Android-Guru-Agent?style=flat-square&label=last%20commit" alt="Last Commit"/>
-<img src="https://img.shields.io/github/commit-activity/y/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=blueviolet" alt="Commit Activity"/>
-<img src="https://img.shields.io/github/repo-size/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=teal" alt="Repo Size"/>
-<img src="https://img.shields.io/github/languages/code-size/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=9cf" alt="Code Size"/>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/search?l=kotlin"><img src="https://img.shields.io/github/languages/top/AceGuru-mjh/Android-Guru-Agent?style=flat-square&color=7F52FF" alt="Top Language"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/stargazers"><img src="https://img.shields.io/github/stars/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=yellow" alt="Stars"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/network/members"><img src="https://img.shields.io/github/forks/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=blue" alt="Forks"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/issues"><img src="https://img.shields.io/github/issues/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=orange" alt="Issues"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/pulls"><img src="https://img.shields.io/github/issues-pr/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=brightgreen" alt="PRs"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/graphs/contributors"><img src="https://img.shields.io/github/contributors/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=purple" alt="Contributors"/></a>
+<img src="https://img.shields.io/github/last-commit/Ultra-Guru/Android-Guru-Agent?style=flat-square&label=last%20commit" alt="Last Commit"/>
+<img src="https://img.shields.io/github/commit-activity/y/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=blueviolet" alt="Commit Activity"/>
+<img src="https://img.shields.io/github/repo-size/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=teal" alt="Repo Size"/>
+<img src="https://img.shields.io/github/languages/code-size/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=9cf" alt="Code Size"/>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/search?l=kotlin"><img src="https://img.shields.io/github/languages/top/Ultra-Guru/Android-Guru-Agent?style=flat-square&color=7F52FF" alt="Top Language"/></a>
 
 **项目事实**
 
@@ -72,8 +72,8 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **快速跳转**
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest"><img src="https://img.shields.io/badge/📦_下载_APK-发布仓库-2ea44f?logo=github&logoColor=white" alt="Download APK from Release Repo"/></a>
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/🧪_CI_artifacts-debug_构建-2088FF?logo=githubactions&logoColor=white" alt="Get debug APK from CI"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent-Release/releases/latest"><img src="https://img.shields.io/badge/📦_下载_APK-发布仓库-2ea44f?logo=github&logoColor=white" alt="Download APK from Release Repo"/></a>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/🧪_CI_artifacts-debug_构建-2088FF?logo=githubactions&logoColor=white" alt="Get debug APK from CI"/></a>
 <a href="#quickstart"><img src="https://img.shields.io/badge/🚀_quick_start-5_分钟-1F6FEB" alt="Quick Start"/></a>
 <a href="#docs-index"><img src="https://img.shields.io/badge/📚_docs-deep_dives-0077B5" alt="Docs"/></a>
 <a href="#faq"><img src="https://img.shields.io/badge/❓_FAQ-6_问答-8B5CF6" alt="FAQ"/></a>
@@ -81,9 +81,9 @@ FSM 旁路回放 → 梦境巩固）、Root/Shizuku/无障碍三级权限链、�
 
 **分享与交流**
 
-<a href="https://twitter.com/intent/tweet?text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%B7%91%E5%9C%A8%E6%89%8B%E6%9C%BA%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93%EF%BC%88111%20%E5%B7%A5%E5%85%B7%20%C2%B7%20Ubuntu%20%E7%BB%88%E7%AB%AF%20%C2%B7%20cs-mem%20%E8%AE%B0%E5%BF%86%EF%BC%89&url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent"><img src="https://img.shields.io/badge/分享-Twitter-1DA1F2?logo=x&logoColor=white" alt="Share on Twitter"/></a>
-<a href="https://t.me/share/url?url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent&text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%AE%BE%E5%A4%87%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93"><img src="https://img.shields.io/badge/分享-Telegram-26A5E4?logo=telegram&logoColor=white" alt="Share on Telegram"/></a>
-<a href="https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FAceGuru-mjh%2FAndroid-Guru-Agent&title=Android%20Guru%20Agent%20%E2%80%94%20Autonomous%20AI%20agent%20on-device"><img src="https://img.shields.io/badge/分享-Reddit-FF4500?logo=reddit&logoColor=white" alt="Share on Reddit"/></a>
+<a href="https://twitter.com/intent/tweet?text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%B7%91%E5%9C%A8%E6%89%8B%E6%9C%BA%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93%EF%BC%88111%20%E5%B7%A5%E5%85%B7%20%C2%B7%20Ubuntu%20%E7%BB%88%E7%AB%AF%20%C2%B7%20cs-mem%20%E8%AE%B0%E5%BF%86%EF%BC%89&url=https%3A%2F%2Fgithub.com%2FUltra-Guru%2FAndroid-Guru-Agent"><img src="https://img.shields.io/badge/分享-Twitter-1DA1F2?logo=x&logoColor=white" alt="Share on Twitter"/></a>
+<a href="https://t.me/share/url?url=https%3A%2F%2Fgithub.com%2FUltra-Guru%2FAndroid-Guru-Agent&text=%F0%9F%A4%96%20Android%20Guru%20Agent%20%E2%80%94%20%E8%AE%BE%E5%A4%87%E4%B8%8A%E7%9A%84%E8%87%AA%E4%B8%BB%E6%99%BA%E8%83%BD%E4%BD%93"><img src="https://img.shields.io/badge/分享-Telegram-26A5E4?logo=telegram&logoColor=white" alt="Share on Telegram"/></a>
+<a href="https://www.reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FUltra-Guru%2FAndroid-Guru-Agent&title=Android%20Guru%20Agent%20%E2%80%94%20Autonomous%20AI%20agent%20on-device"><img src="https://img.shields.io/badge/分享-Reddit-FF4500?logo=reddit&logoColor=white" alt="Share on Reddit"/></a>
 <a href="https://github.com/AceGuru-mjh?tab=followers"><img src="https://img.shields.io/github/followers/AceGuru-mjh?label=Follow&style=flat-square&logo=github" alt="Follow"/></a>
 
 </div>
@@ -753,10 +753,10 @@ linux_bootstrap / linux_status / linux_packages / linux_network / ubuntu_install
 
 APK 内置技能只保留 **13 个核心**（8 个 coding 强技能 + 3 个 agent 通用 +
 2 个双工位文档技能），其余 **62 个生活/通用技能全部迁往官方技能仓库**
-[apex-skill-hub](https://github.com/AceGuru-mjh/apex-skill-hub)；MCP 同理
+[apex-skill-hub](https://github.com/Ultra-Guru/apex-skill-hub)；MCP 同理
 ——内置仅保留 5 台进程内必要服务器（github / search / fs / memory /
 thinking），沙箱与远端 MCP 目录迁往
-[apex-mcp-hub](https://github.com/AceGuru-mjh/apex-mcp-hub)。市场里
+[apex-mcp-hub](https://github.com/Ultra-Guru/apex-mcp-hub)。市场里
 「官方仓库」源直连 raw.githubusercontent.com 拉取 `index.json` 注册表
 （学习业界标准 CLI 编码智能体的远程注册表模式：元数据小体积索引 + 技能正文按需单文件
 下载），一键安装，装完与本地技能同权管理。升级用户由
@@ -873,7 +873,7 @@ GitHub Token）。
 ### 构建
 
 ```bash
-git clone https://github.com/AceGuru-mjh/Android-Guru-Agent.git
+git clone https://github.com/Ultra-Guru/Android-Guru-Agent.git
 cd Android-Guru-Agent
 
 # 仓库未锁定 wrapper——用本机 Gradle 8.10 现场生成（仅首次）：
@@ -884,12 +884,12 @@ chmod +x gradlew
 ```
 
 > [!TIP]
-> 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest)
+> 不想自己构建？**直接下载正式版**：[发布仓库 Releases](https://github.com/Ultra-Guru/Android-Guru-Agent-Release/releases/latest)
 > （arm64 / universal 两个变体；**PR 合并进 main 即自动构建发布**，无需打 tag）。
 > 已装用户可在 App「设置 → 关于 → 检查更新」直接升级 —— 支持增量补丁
 > （~14MB vs 全量 300MB+）与高速节点/镜像加速下载；补丁下载后**应用内自动
 > 合成新版本并拉起安装**（纯 Kotlin VCDIFF 解码器，零命令行），跨十个
-> 小版本内自动按 [patches.json](https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/blob/main/patches.json)
+> 小版本内自动按 [patches.json](https://github.com/Ultra-Guru/Android-Guru-Agent-Release/blob/main/patches.json)
 > 直达补丁一步升级，更早版本链式逐段升级。
 > 也可以用 CI 的 `app-debug-apk` 工件（debug 构建，保留 14 天）；或参考
 > `.github/workflows/ci.yml` 的 `Configure pre-installed Android SDK` 步骤配置环境。
@@ -1232,10 +1232,10 @@ debug APK 工件（每次构建保留 14 天），零环境开箱体验。
 
 <div align="center">
 
-<a href="https://star-history.com/#AceGuru-mjh/Android-Guru-Agent&Date">
+<a href="https://star-history.com/#Ultra-Guru/Android-Guru-Agent&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=AceGuru-mjh/Android-Guru-Agent&type=Date&theme=dark" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=AceGuru-mjh/Android-Guru-Agent&type=Date" width="720" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Ultra-Guru/Android-Guru-Agent&type=Date&theme=dark" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Ultra-Guru/Android-Guru-Agent&type=Date" width="720" />
   </picture>
 </a>
 
@@ -1244,8 +1244,8 @@ debug APK 工件（每次构建保留 14 天），零环境开箱体验。
 <a id="contributors"></a>
 ## 👥 贡献者
 
-<a href="https://github.com/AceGuru-mjh/Android-Guru-Agent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=AceGuru-mjh/Android-Guru-Agent" alt="Contributors"/>
+<a href="https://github.com/Ultra-Guru/Android-Guru-Agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Ultra-Guru/Android-Guru-Agent" alt="Contributors"/>
 </a>
 
 ---
@@ -1267,7 +1267,7 @@ debug APK 工件（每次构建保留 14 天），零环境开箱体验。
 
 Made with ❤️ and a lot of ☕ · Kotlin · Compose · PRoot · Room
 
-**Android Guru Agent** · [报告问题](https://github.com/AceGuru-mjh/Android-Guru-Agent/issues) · [发起 PR](https://github.com/AceGuru-mjh/Android-Guru-Agent/pulls) · [回到顶部](#readme-top)
+**Android Guru Agent** · [报告问题](https://github.com/Ultra-Guru/Android-Guru-Agent/issues) · [发起 PR](https://github.com/Ultra-Guru/Android-Guru-Agent/pulls) · [回到顶部](#readme-top)
 
 </div>
 

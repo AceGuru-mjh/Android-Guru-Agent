@@ -250,7 +250,7 @@ jobs:
       - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
-          repository: AceGuru-mjh/apex-browser-kit
+          repository: Ultra-Guru/apex-browser-kit
           ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 
@@ -559,7 +559,7 @@ jobs:
       - name: Checkout apex-browser-kit (browser-kit composite build, pinned)
         uses: actions/checkout@v4
         with:
-          repository: AceGuru-mjh/apex-browser-kit
+          repository: Ultra-Guru/apex-browser-kit
           ref: ${{ steps.bkitpin.outputs.sha }}
           path: apex-browser-kit
 

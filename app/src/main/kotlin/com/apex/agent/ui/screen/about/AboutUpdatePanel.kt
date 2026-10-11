@@ -996,7 +996,7 @@ internal fun UpdatePanel() {
             val result = (updateState as? UpdateUiState.Done)?.result
             val manifest = (result as? UpdateCheckResult.Available)?.latest
             val probeUrl = manifest?.let { checker.preferredAsset(it)?.url }
-                ?: "https://github.com/AceGuru-mjh/Android-Guru-Agent-Release/releases/latest"
+                ?: "https://github.com/Ultra-Guru/Android-Guru-Agent-Release/releases/latest"
             probing = true
             speeds = probe.probeAll(probeUrl)
             probing = false

@@ -170,7 +170,7 @@ class CapabilityToolsTest {
         assertTrue(
             out.contains(
                 "skill_install({\"source\":\"url\",\"url\":\"" +
-                    "https://raw.githubusercontent.com/AceGuru-mjh/apex-skill-hub/main/skills/youtube-dl.json\"})"
+                    "https://raw.githubusercontent.com/Ultra-Guru/apex-skill-hub/main/skills/youtube-dl.json\"})"
             )
         )
         // 未命中条目不出现

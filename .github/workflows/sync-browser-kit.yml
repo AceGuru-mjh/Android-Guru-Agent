@@ -50,7 +50,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          SHA=$(gh api repos/AceGuru-mjh/apex-browser-kit/commits/main --jq '.sha')
+          SHA=$(gh api repos/Ultra-Guru/apex-browser-kit/commits/main --jq '.sha')
           CUR=$(head -n 1 gradle/browser-kit.lock 2>/dev/null || true)
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "current=$CUR" >> "$GITHUB_OUTPUT"
@@ -76,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           GATING_FILTER='.name != "Gradle dependency graph" and (.name | startswith("Dependabot") | not) and .name != "repository_dispatch host sync"'
-          SUMMARY=$(gh api "repos/AceGuru-mjh/apex-browser-kit/commits/$UP_SHA/check-runs" \
+          SUMMARY=$(gh api "repos/Ultra-Guru/apex-browser-kit/commits/$UP_SHA/check-runs" \
             --jq "([.check_runs[]? | select($GATING_FILTER)]) as \$gating |
                    {total: (\$gating | length),
                     pending: (\$gating | map(select(.status != \"completed\")) | length),
@@ -91,7 +91,7 @@ jobs:
             exit 0
           fi
           if [ "$FAILED" != "0" ]; then
-            echo "::error::上游 browser-kit CI 有 $FAILED 项失败 —— 拒绝同步（先修复 https://github.com/AceGuru-mjh/apex-browser-kit/actions）"
+            echo "::error::上游 browser-kit CI 有 $FAILED 项失败 —— 拒绝同步（先修复 https://github.com/Ultra-Guru/apex-browser-kit/actions）"
             exit 1
           fi
           echo "green=true" >> "$GITHUB_ENV"
